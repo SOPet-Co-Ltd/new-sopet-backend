@@ -1,0 +1,38 @@
+export const DEV_PRODUCT_CATALOG = [
+  {
+    name: 'Premium Dog Food 5kg',
+    slug: 'premium-dog-food-5kg',
+    description: 'High-protein dry food for adult dogs.',
+    basePrice: 890,
+    category: 'food',
+    sku: 'DOG-FOOD-5KG',
+    imageUrl: 'https://images.unsplash.com/photo-1589924691995-400dc9ecc2e9?w=600',
+  },
+  {
+    name: 'Cat Litter 10L',
+    slug: 'cat-litter-10l',
+    description: 'Low-dust clumping cat litter.',
+    basePrice: 320,
+    category: 'hygiene',
+    sku: 'CAT-LITTER-10L',
+    imageUrl: 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?w=600',
+  },
+  {
+    name: 'Chew Toy Bone',
+    slug: 'chew-toy-bone',
+    description: 'Durable rubber chew toy for medium dogs.',
+    basePrice: 199,
+    category: 'toys',
+    sku: 'TOY-BONE-M',
+    imageUrl: 'https://images.unsplash.com/photo-1535930891776-0c2dfb7fda1a?w=600',
+  },
+  {
+    name: 'Pet Shampoo 500ml',
+    slug: 'pet-shampoo-500ml',
+    description: 'Gentle oatmeal shampoo for dogs and cats.',
+    basePrice: 250,
+    category: 'grooming',
+    sku: 'SHAMPOO-500',
+    imageUrl: 'https://images.unsplash.com/photo-1601758228041-f3b2795255f1?w=600',
+  },
+];

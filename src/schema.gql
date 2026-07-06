@@ -1,0 +1,1352 @@
+# ------------------------------------------------------
+# THIS FILE WAS AUTOMATICALLY GENERATED (DO NOT MODIFY)
+# ------------------------------------------------------
+
+input AcceptVendorInvitationInput {
+  fullName: String!
+  password: String!
+  token: String!
+}
+
+input AddPaymentMethodInput {
+  brand: String!
+  expiryMonth: Int!
+  expiryYear: Int!
+  isDefault: Boolean
+  lastFour: String!
+  omiseCardToken: String!
+}
+
+input AddProductImageInput {
+  altText: String
+  isThumbnail: Boolean
+  sortOrder: Int
+  url: String!
+}
+
+input AddToCartInput {
+  quantity: Int!
+  sessionId: String
+  variantId: String!
+}
+
+type AdminCustomerConnection {
+  items: [AdminCustomerType!]!
+  pagination: PaginationMeta!
+}
+
+type AdminCustomerType {
+  createdAt: DateTime!
+  dateOfBirth: String
+  email: String
+  fullName: String
+  id: String!
+  isActive: Boolean!
+  isVerified: Boolean!
+  lastLoginAt: DateTime
+  phone: String!
+  updatedAt: DateTime!
+}
+
+type AdminInvitationType {
+  email: String!
+  expiresAt: String!
+  id: String!
+  status: String!
+}
+
+type AdminStoreType {
+  address: String
+  bankAccountName: String
+  bankAccountNumber: String
+  bankName: String
+  bannerUrl: String
+  contactEmail: String
+  contactPhone: String
+  createdAt: DateTime!
+  description: String
+  id: String!
+  logoUrl: String
+  name: String!
+  ownerEmail: String
+  ownerFullName: String
+  ownerId: String!
+  payoutSchedule: String!
+  payoutSchedulePaused: Boolean!
+  slug: String!
+  status: String!
+  updatedAt: DateTime!
+}
+
+type AdminTeamMemberType {
+  createdAt: DateTime!
+  email: String!
+  fullName: String!
+  id: String!
+  isActive: Boolean!
+}
+
+type AdminVendorStoreType {
+  id: String!
+  name: String!
+  slug: String!
+  status: String!
+}
+
+type AdminVendorType {
+  createdAt: DateTime!
+  email: String!
+  fullName: String!
+  id: String!
+  isActive: Boolean!
+  lastLoginAt: DateTime
+  role: String!
+  stores: [AdminVendorStoreType!]!
+}
+
+input ApproveStoreInput {
+  storeId: String!
+}
+
+type AuthTokens {
+  accessToken: String!
+  refreshToken: String!
+}
+
+type CartItemType {
+  id: String!
+  productVariant: ProductVariantType
+  quantity: Int!
+  variantId: String!
+}
+
+type CartType {
+  customerId: String
+  id: String!
+  items: [CartItemType!]!
+  sessionId: String
+}
+
+type CategoryType {
+  approvalStatus: String!
+  createdAt: DateTime!
+  createdBy: String!
+  id: String!
+  name: String!
+  slug: String!
+  updatedAt: DateTime!
+}
+
+input ChangePasswordInput {
+  currentPassword: String!
+  newPassword: String!
+}
+
+input CreateAddressInput {
+  addressLine1: String!
+  addressLine2: String
+  amphoe: String!
+  city: String
+  isDefault: Boolean
+  label: String!
+  postalCode: String!
+  province: String!
+  recipientName: String!
+  recipientPhone: String!
+  tumbon: String
+}
+
+input CreateCategoryInput {
+  name: String!
+}
+
+input CreateDisputeInput {
+  issueType: String!
+  orderId: String!
+  reason: String!
+}
+
+input CreateOrderInput {
+  guestEmail: String
+  guestName: String
+  guestPhone: String
+  items: [OrderItemInput!]!
+  notes: String
+  paymentMethod: String!
+  platformPromotionCode: String
+  promotionCode: String
+  savedAddressId: String
+  shippingAddress: ShippingAddressInput
+  storePromotionCodes: [String!]
+  storeShipping: [StoreShippingSelectionInput!]
+}
+
+input CreatePaymentInput {
+  amount: Float!
+  currency: String! = "THB"
+  omiseToken: String
+  orderId: String!
+  paymentMethod: String!
+  savedPaymentMethodId: String
+}
+
+input CreatePayoutInput {
+  amount: Float!
+  storeId: String!
+}
+
+input CreatePlatformAdInput {
+  endsAt: DateTime
+  imageUrl: String!
+  isActive: Boolean
+  linkUrl: String
+  startsAt: DateTime
+  title: String!
+}
+
+input CreatePlatformBannerInput {
+  endsAt: DateTime
+  imageUrl: String!
+  isActive: Boolean
+  linkUrl: String
+  sortOrder: Int
+  startsAt: DateTime
+  title: String!
+}
+
+input CreatePlatformSponsorInput {
+  endsAt: DateTime
+  imageUrl: String!
+  isActive: Boolean
+  linkUrl: String
+  name: String!
+  sortOrder: Int
+  startsAt: DateTime
+}
+
+input CreateProductInput {
+  basePrice: Float!
+  category: String
+  categoryId: String
+  compareAtPrice: Float
+  description: String
+  expiryDate: String
+  name: String!
+  tagIds: [String!]
+  tags: [String!]
+  warning: String
+}
+
+input CreateProductVariantInput {
+  """JSON object of variant attributes (e.g. {"size":"M","color":"Red"})"""
+  attributes: String
+  name: String!
+  priceModifier: Float
+  sku: String!
+  stockQuantity: Int!
+}
+
+input CreatePromotionInput {
+  autoApply: Boolean
+  code: String!
+  conditions: String
+  description: String
+  discountValue: Float!
+  expiresAt: DateTime
+  isActive: Boolean
+  maxDiscountAmount: Float
+  minPurchaseAmount: Float
+  name: String!
+  priority: Int
+  startsAt: DateTime
+  storeId: String
+  type: String!
+  usageLimit: Int
+  usagePerCustomer: Int
+}
+
+input CreateReviewInput {
+  comment: String
+  orderId: String!
+  productId: String!
+  rating: Int!
+}
+
+input CreateShippingOptionInput {
+  description: String
+  isActive: Boolean
+  name: String!
+  price: Float!
+  providerId: String
+  sortOrder: Int
+}
+
+input CreateShippingProviderInput {
+  name: String!
+}
+
+type CreateStoreApiKeyPayload {
+  apiKey: StoreApiKeyType!
+  secret: String!
+}
+
+input CreateStoreAsAdminInput {
+  address: String
+  bannerUrl: String
+  contactEmail: String
+  contactPhone: String
+  description: String
+  logoUrl: String
+  name: String!
+  ownerUserId: String!
+}
+
+input CreateTagInput {
+  name: String!
+}
+
+type CustomerAuthPayload {
+  customer: CustomerProfile
+  pendingDeletion: Boolean
+  reactivationToken: String
+  tokens: AuthTokens
+}
+
+type CustomerProfile {
+  email: String
+  fullName: String
+  id: String!
+  phone: String!
+}
+
+"""
+A date-time string at UTC, such as 2019-12-03T09:54:33Z, compliant with the date-time format.
+"""
+scalar DateTime
+
+type DisputeType {
+  id: String!
+  issueType: String!
+  orderId: String!
+  reason: String!
+  status: String!
+}
+
+input FavoriteProductInput {
+  productId: String!
+}
+
+type FavoriteType {
+  id: String!
+  product: ProductType
+  productId: String!
+}
+
+type HealthStatus {
+  api: String!
+  status: String!
+  timestamp: String!
+}
+
+input InviteAdminInput {
+  email: String!
+}
+
+input InviteStoreMemberInput {
+  email: String!
+  role: String!
+}
+
+input InviteVendorInput {
+  email: String!
+}
+
+type MeResult {
+  customer: CustomerProfile
+  user: UserProfile
+}
+
+type MessagePayload {
+  message: String!
+}
+
+type Mutation {
+  acceptStoreInvitation(token: String!): StoreMemberType!
+  acceptVendorInvitation(input: AcceptVendorInvitationInput!): VendorAuthPayload!
+  addFavorite(input: FavoriteProductInput!): FavoriteType!
+  addPaymentMethod(input: AddPaymentMethodInput!): SavedPaymentMethodType!
+  addProductImage(input: AddProductImageInput!, productId: String!): ProductImageType!
+  addToCart(input: AddToCartInput!): CartType!
+  adminCreateStoreShippingOption(input: CreateShippingOptionInput!, storeId: String!): StoreShippingOptionType!
+  adminDeleteStoreShippingOption(id: String!): Boolean!
+  adminLogin(input: VendorLoginInput!): VendorAuthPayload!
+  adminTriggerVendorPasswordReset(vendorId: String!): MessagePayload!
+  adminUpdateStoreShippingOption(id: String!, input: UpdateShippingOptionInput!): StoreShippingOptionType!
+  approveCategory(id: String!): CategoryType!
+  approveStore(input: ApproveStoreInput!): StoreType!
+  approveStoreReactivationRequest(id: String!): StoreReactivationRequestType!
+  approveStoreRequest(id: String!): StoreRequestType!
+  approveTag(id: String!): TagType!
+  changePassword(input: ChangePasswordInput!): MessagePayload!
+  createAddress(input: CreateAddressInput!): SavedAddressType!
+  createCategory(input: CreateCategoryInput!): CategoryType!
+  createDispute(input: CreateDisputeInput!): DisputeType!
+  createOrder(input: CreateOrderInput!): OrderType!
+  createPayment(input: CreatePaymentInput!): PaymentType!
+  createPayout(input: CreatePayoutInput!): PayoutType!
+  createPlatformAd(input: CreatePlatformAdInput!): PlatformAdType!
+  createPlatformBanner(input: CreatePlatformBannerInput!): PlatformBannerType!
+  createPlatformSponsor(input: CreatePlatformSponsorInput!): PlatformSponsorType!
+  createProduct(input: CreateProductInput!): ProductType!
+  createProductVariant(input: CreateProductVariantInput!, productId: String!): ProductVariantType!
+  createPromotion(input: CreatePromotionInput!): PromotionType!
+  createReview(input: CreateReviewInput!): ReviewType!
+  createShippingOption(input: CreateShippingOptionInput!): StoreShippingOptionType!
+  createShippingProvider(input: CreateShippingProviderInput!): ShippingProviderType!
+  createStoreApiKey(name: String!, storeId: String!): CreateStoreApiKeyPayload!
+  createStoreAsAdmin(input: CreateStoreAsAdminInput!): AdminStoreType!
+  createTag(input: CreateTagInput!): TagType!
+  declineStoreInvitation(token: String!): Boolean!
+  deleteAddress(id: String!): Boolean!
+  deletePaymentMethod(id: String!): Boolean!
+  deletePlatformAd(id: String!): Boolean!
+  deletePlatformBanner(id: String!): Boolean!
+  deletePlatformSponsor(id: String!): Boolean!
+  deleteProduct(id: String!): Boolean!
+  deleteProductImage(imageId: String!): Boolean!
+  deleteProductVariant(variantId: String!): Boolean!
+  deletePromotion(id: String!): Boolean!
+  deleteShippingOption(id: String!): Boolean!
+  deleteShippingProvider(id: String!): Boolean!
+  inviteAdmin(input: InviteAdminInput!): AdminInvitationType!
+  inviteStoreMember(input: InviteStoreMemberInput!): StoreMemberInvitationType!
+  inviteVendor(input: InviteVendorInput!): VendorInvitationType!
+  markAllNotificationsRead: Boolean!
+  markNotificationRead(id: String!): Boolean!
+  mergeCart(sessionId: String!): CartType!
+  publishProduct(id: String!): ProductType!
+  reactivateAccount(input: ReactivateAccountInput!): CustomerAuthPayload!
+  refreshToken(input: RefreshTokenInput!): AuthTokens!
+  refundPayment(paymentId: String!): PaymentType!
+  registerStore(input: RegisterStoreInput!): VendorAuthPayload!
+  registerVendor(input: RegisterVendorInput!): VendorAuthPayload!
+  rejectCategory(id: String!): CategoryType!
+  rejectStore(input: RejectStoreInput!): StoreType!
+  rejectStoreReactivationRequest(input: RejectStoreReactivationRequestInput!): StoreReactivationRequestType!
+  rejectStoreRequest(input: RejectStoreRequestInput!): StoreRequestType!
+  rejectTag(id: String!): TagType!
+  removeCartItem(input: RemoveCartItemInput!): CartType!
+  removeFavorite(input: FavoriteProductInput!): Boolean!
+  removeStoreMember(memberId: String!): Boolean!
+  reorderPlatformBanners(ids: [ID!]!): [PlatformBannerType!]!
+  reorderPlatformSponsors(ids: [ID!]!): [PlatformSponsorType!]!
+  reorderProductImages(imageIds: [ID!]!, productId: String!): [ProductImageType!]!
+  requestAccountDeletion: Boolean!
+  requestPasswordReset(input: RequestPasswordResetInput!): MessagePayload!
+  resetPassword(input: ResetPasswordInput!): MessagePayload!
+  revokeAdminInvitation(invitationId: String!): AdminInvitationType!
+  revokeStoreApiKey(id: String!, storeId: String!): Boolean!
+  revokeStoreInvitation(invitationId: String!): StoreMemberInvitationType!
+  sendCustomerOtp(input: SendCustomerOtpInput!): MessagePayload!
+  setAdminActive(isActive: Boolean!, userId: String!): AdminTeamMemberType!
+  setCustomerActive(id: String!, isActive: Boolean!): AdminCustomerType!
+  setDefaultAddress(id: String!): SavedAddressType!
+  setDefaultPaymentMethod(id: String!): SavedPaymentMethodType!
+  setProductThumbnail(imageId: String!, productId: String!): ProductImageType!
+  submitStoreReactivationRequest(input: SubmitStoreReactivationRequestInput!): StoreReactivationRequestType!
+  submitStoreRequest(input: SubmitStoreRequestInput!): StoreRequestType!
+  switchStore(input: SwitchStoreInput!): VendorAuthPayload!
+  syncProductVariants(productId: String!, variants: [SyncProductVariantItemInput!]!): [ProductVariantType!]!
+  togglePromotion(id: String!, isActive: Boolean!): PromotionType!
+  updateAddress(id: String!, input: UpdateAddressInput!): SavedAddressType!
+  updateCartItem(input: UpdateCartItemInput!): CartType!
+  updateCustomerAsAdmin(input: UpdateCustomerAsAdminInput!): AdminCustomerType!
+  updateOrderStatus(input: UpdateOrderStatusInput!): OrderType!
+  updatePlatformAd(input: UpdatePlatformAdInput!): PlatformAdType!
+  updatePlatformBanner(input: UpdatePlatformBannerInput!): PlatformBannerType!
+  updatePlatformSponsor(input: UpdatePlatformSponsorInput!): PlatformSponsorType!
+  updateProduct(id: String!, input: UpdateProductInput!): ProductType!
+  updateProductImage(imageId: String!, input: UpdateProductImageInput!): ProductImageType!
+  updateProductVariant(input: UpdateProductVariantInput!, variantId: String!): ProductVariantType!
+  updateProfile(input: UpdateProfileInput!): CustomerProfile!
+  updatePromotion(id: String!, input: UpdatePromotionInput!): PromotionType!
+  updateShippingOption(id: String!, input: UpdateShippingOptionInput!): StoreShippingOptionType!
+  updateShippingProvider(id: String!, input: UpdateShippingProviderInput!): ShippingProviderType!
+  updateStore(input: UpdateStoreSettingsInput!): MyStoreType!
+  updateStoreAsAdmin(input: UpdateStoreAsAdminInput!): AdminStoreType!
+  updateStoreMemberRole(input: UpdateStoreMemberRoleInput!): StoreMemberType!
+  updateStorePayout(input: UpdateStorePayoutInput!): MyStoreType!
+  updateUserProfile(input: UpdateUserProfileInput!): UserProfile!
+  updateVendorAsAdmin(input: UpdateVendorAsAdminInput!): AdminVendorType!
+  uploadImage(base64: String!, folder: String): UploadResultType!
+  vendorLogin(input: VendorLoginInput!): VendorAuthPayload!
+  verifyCustomerOtp(input: VerifyCustomerOtpInput!): CustomerAuthPayload!
+}
+
+type MyStoreType {
+  address: String
+  bankAccountName: String
+  bankAccountNumber: String
+  bankCode: String
+  bankName: String
+  bannerUrl: String
+  contactEmail: String
+  contactPhone: String
+  description: String
+  id: String!
+  logoUrl: String
+  name: String!
+  omiseRecipientFailureMessage: String
+  omiseRecipientId: String
+  omiseRecipientStatus: String!
+  slug: String!
+  status: String!
+}
+
+type NotificationType {
+  createdAt: DateTime!
+  id: String!
+  isRead: Boolean!
+  message: String!
+  metadata: String
+  title: String
+  type: String!
+}
+
+input OrderItemInput {
+  price: Float!
+  productId: String!
+  quantity: Int!
+  variantId: String
+}
+
+type OrderItemType {
+  fulfillmentStatus: String!
+  id: String!
+  productName: String!
+  quantity: Int!
+  storeId: String!
+  subtotal: Float!
+  unitPrice: Float!
+}
+
+type OrderShippingAddressType {
+  addressLine1: String!
+  addressLine2: String
+  amphoe: String!
+  fullName: String!
+  phone: String!
+  postalCode: String!
+  province: String!
+  tumbon: String
+}
+
+type OrderType {
+  discountAmount: Float!
+  guestEmail: String
+  guestName: String
+  guestPhone: String
+  id: String!
+  items: [OrderItemType!]!
+  orderNumber: String!
+  paymentMethod: String!
+  shippingAddress: OrderShippingAddressType
+  shippingFee: Float!
+  status: String!
+  subtotal: Float!
+  total: Float!
+}
+
+type PaginationMeta {
+  limit: Int!
+  page: Int!
+  total: Int!
+  totalPages: Int!
+}
+
+type PaymentType {
+  amount: Float!
+  authorizeUri: String
+  currency: String!
+  id: String!
+  orderId: String!
+  paymentMethod: String!
+  qrCodeUrl: String
+  status: String!
+}
+
+type PayoutType {
+  amount: Float!
+  id: String!
+  netAmount: Float!
+  status: String!
+  storeId: String!
+}
+
+type PlatformAdType {
+  endsAt: DateTime
+  id: String!
+  imageUrl: String!
+  isActive: Boolean!
+  linkUrl: String
+  sortOrder: Int!
+  startsAt: DateTime
+  title: String!
+}
+
+type PlatformAnalyticsType {
+  averageOrderValue: Float!
+  openDisputes: Int!
+  pendingStores: Int!
+  totalCustomers: Int!
+  totalOrders: Int!
+  totalRevenue: Float!
+  totalStores: Int!
+}
+
+type PlatformBannerType {
+  endsAt: DateTime
+  id: String!
+  imageUrl: String!
+  isActive: Boolean!
+  linkUrl: String
+  sortOrder: Int!
+  startsAt: DateTime
+  title: String!
+}
+
+type PlatformSettingsType {
+  currency: String!
+  storefrontUrl: String!
+  supportEmail: String!
+}
+
+type PlatformSponsorType {
+  endsAt: DateTime
+  id: String!
+  imageUrl: String!
+  isActive: Boolean!
+  linkUrl: String
+  name: String!
+  sortOrder: Int!
+  startsAt: DateTime
+}
+
+type ProductConnection {
+  items: [ProductType!]!
+  pagination: PaginationMeta!
+}
+
+type ProductImageType {
+  id: String!
+  imageUrl: String!
+  isThumbnail: Boolean!
+  sortOrder: Int!
+}
+
+type ProductPublishChecklistItemType {
+  complete: Boolean!
+  key: String!
+}
+
+type ProductPublishChecklistType {
+  canPublish: Boolean!
+  items: [ProductPublishChecklistItemType!]!
+  missingKeys: [String!]!
+}
+
+type ProductReviewBreakdownType {
+  averageRating: Float!
+  productId: String!
+  productName: String!
+  reviewCount: Int!
+}
+
+type ProductType {
+  averageRating: Float!
+  basePrice: Float!
+  category: String
+  categoryId: String
+  compareAtPrice: Float
+  description: String
+  expiryDate: String
+  id: String!
+  images: [ProductImageType!]
+  name: String!
+  reviewCount: Int!
+  slug: String!
+  soldCount: Int!
+  status: String!
+  store: StoreType
+  storeId: String!
+  tagIds: [String!]
+  tags: [String!]!
+  thumbnailUrl: String
+  variants: [ProductVariantType!]
+  warning: String
+}
+
+type ProductVariantType {
+  id: String!
+  optionsJson: String
+  price: Float!
+  sku: String!
+  stockQuantity: Int!
+}
+
+type PromotionType {
+  autoApply: Boolean!
+  code: String!
+  conditions: String
+  createdAt: DateTime!
+  description: String
+  discountValue: Float!
+  expiresAt: DateTime
+  id: String!
+  isActive: Boolean!
+  maxDiscountAmount: Float
+  minPurchaseAmount: Float
+  name: String!
+  priority: Int!
+  scope: String!
+  startsAt: DateTime
+  storeId: String
+  type: String!
+  updatedAt: DateTime!
+  usageCount: Int!
+  usageLimit: Int
+  usagePerCustomer: Int!
+}
+
+type PromotionValidationResult {
+  code: String!
+  discountAmount: Float!
+  name: String!
+}
+
+type Query {
+  addresses: [SavedAddressType!]!
+  adminCustomer(id: String!): AdminCustomerType!
+  adminCustomers(limit: Int! = 20, page: Int! = 1, search: String): AdminCustomerConnection!
+  adminStore(id: String!): AdminStoreType!
+  adminStoreReactivationRequests(status: String): [StoreReactivationRequestType!]!
+  adminStoreShippingOptions(storeId: String!): [StoreShippingOptionType!]!
+  adminStores: [AdminStoreType!]!
+  adminTeamMembers: [AdminTeamMemberType!]!
+  adminVendor(id: String!): AdminVendorType!
+  adminVendors(search: String): [AdminVendorType!]!
+  allPlatformAds: [PlatformAdType!]!
+  allPlatformBanners: [PlatformBannerType!]!
+  allPlatformSponsors: [PlatformSponsorType!]!
+  approvedCategories: [CategoryType!]!
+  approvedTags: [TagType!]!
+  cart(sessionId: String): CartType!
+  favorites: [FavoriteType!]!
+  guestOrders(guestPhone: String!): [OrderType!]!
+
+  """GraphQL API health check"""
+  health: HealthStatus!
+  latestPurchaseProduct: ProductType
+  latestPurchaseProducts(limit: Int = 10): [ProductType!]!
+  me: MeResult!
+  myCategoryProposals: [CategoryType!]!
+  myDisputes: [DisputeType!]!
+  myStore: MyStoreType!
+  myStoreRequests: [StoreRequestType!]!
+  myStoreShippingOptions: [StoreShippingOptionType!]!
+  myStores: [VendorStoreType!]!
+  myTagProposals: [TagType!]!
+  notifications(unreadOnly: Boolean): [NotificationType!]!
+  openDisputes: [DisputeType!]!
+  order(id: String!): OrderType!
+  orders: [OrderType!]!
+  paymentMethods: [SavedPaymentMethodType!]!
+  pendingAdminInvitations: [AdminInvitationType!]!
+  pendingCategories: [CategoryType!]!
+  pendingStoreRequests: [StoreRequestType!]!
+  pendingStores: [StoreType!]!
+  pendingTags: [TagType!]!
+  pendingVendorInvitations: [VendorInvitationType!]!
+  platformAds: [PlatformAdType!]!
+  platformAnalytics(fromDate: String, toDate: String): PlatformAnalyticsType!
+  platformBanners: [PlatformBannerType!]!
+  platformPromotions: [PromotionType!]!
+  platformSalesByCategory(fromDate: String, limit: Int, toDate: String): [SalesBreakdownItemType!]!
+  platformSalesByPaymentMethod(fromDate: String, toDate: String): [SalesBreakdownItemType!]!
+  platformSalesOverTime(fromDate: String, toDate: String): [SalesTimePointType!]!
+  platformSettings: PlatformSettingsType!
+  platformSponsors: [PlatformSponsorType!]!
+  platformTopProducts(limit: Int): [TopProductType!]!
+  platformTopStores(limit: Int): [TopStoreType!]!
+  product(id: String!): ProductType!
+  productBySlug(slug: String!, storeId: String!): ProductType!
+  productPublishChecklist(productId: String!): ProductPublishChecklistType!
+  productReviews(productId: String!): [ReviewType!]!
+  products(category: String, limit: Int = 20, page: Int = 1, search: String, storeId: String, tag: String): ProductConnection!
+  recommendedProducts(limit: Int = 50): [ProductType!]!
+  shippingProviders(includeInactive: Boolean): [ShippingProviderType!]!
+  store(id: String!): StoreType!
+  storeAnalytics(fromDate: String, storeId: String!, toDate: String): StoreAnalyticsType!
+  storeApiKeys(storeId: String!): [StoreApiKeyType!]!
+  storeBySlug(slug: String!): StoreType!
+  storeInvitations: [StoreMemberInvitationType!]!
+  storeMembers: [StoreMemberType!]!
+  storePayouts: [PayoutType!]!
+  storeProductReviews(storeId: String!): [StoreProductReviewType!]!
+  storePromotions(storeId: String!): [PromotionType!]!
+  storeReactivationRequests(storeId: String!): [StoreReactivationRequestType!]!
+  storeReviewSummary(storeId: String!): StoreReviewSummaryType!
+  storeShippingOptions(storeId: String!): [StoreShippingOptionType!]!
+  stores: [StoreType!]!
+  topProducts(limit: Int, storeId: String!): [TopProductType!]!
+  unreadNotificationsCount: Int!
+  validatePromotion(input: ValidatePromotionInput!): PromotionValidationResult!
+  vendorCustomer(id: String!): VendorCustomerType!
+  vendorCustomers(limit: Int! = 20, page: Int! = 1, search: String): VendorCustomerConnection!
+  vendorOrders: [OrderType!]!
+  vendorProduct(id: String!): ProductType!
+  vendorProducts(category: String, limit: Int = 20, page: Int = 1, search: String): ProductConnection!
+}
+
+input ReactivateAccountInput {
+  reactivationToken: String!
+}
+
+input RefreshTokenInput {
+  refreshToken: String!
+}
+
+input RegisterStoreInput {
+  address: String
+  bankAccountName: String
+  bankAccountNumber: String
+  bankName: String
+  contactEmail: String
+  contactPhone: String
+  description: String
+  name: String!
+  ownerEmail: String!
+  ownerFullName: String!
+  ownerPassword: String!
+}
+
+input RegisterVendorInput {
+  email: String!
+  fullName: String!
+  password: String!
+}
+
+input RejectStoreInput {
+  rejectionReason: String
+  storeId: String!
+}
+
+input RejectStoreReactivationRequestInput {
+  id: String!
+  reviewNote: String
+}
+
+input RejectStoreRequestInput {
+  id: String!
+  reason: String!
+}
+
+input RemoveCartItemInput {
+  itemId: String!
+  sessionId: String
+}
+
+input RequestPasswordResetInput {
+  email: String!
+}
+
+input ResetPasswordInput {
+  newPassword: String!
+  token: String!
+}
+
+type ReviewImageType {
+  id: String!
+  url: String!
+}
+
+type ReviewType {
+  comment: String
+  createdAt: DateTime!
+  customerName: String!
+  id: String!
+  images: [ReviewImageType!]!
+  productId: String!
+  rating: Int!
+  status: String!
+}
+
+type SalesBreakdownItemType {
+  label: String!
+  orderCount: Int!
+  revenue: Float!
+}
+
+type SalesTimePointType {
+  date: String!
+  orderCount: Int!
+  revenue: Float!
+}
+
+type SavedAddressType {
+  addressLine1: String!
+  addressLine2: String
+  amphoe: String!
+  fullName: String!
+  id: String!
+  isDefault: Boolean!
+  label: String
+  phone: String!
+  postalCode: String!
+  province: String!
+  tumbon: String
+}
+
+type SavedPaymentMethodType {
+  brand: String!
+  expiryMonth: Int!
+  expiryYear: Int!
+  id: String!
+  isDefault: Boolean!
+  lastFour: String!
+  type: String!
+}
+
+input SendCustomerOtpInput {
+  phone: String!
+}
+
+input ShippingAddressInput {
+  addressLine1: String!
+  addressLine2: String
+  amphoe: String!
+  city: String
+  postalCode: String!
+  province: String!
+  recipientName: String!
+  recipientPhone: String!
+  tumbon: String
+}
+
+type ShippingProviderType {
+  createdAt: DateTime!
+  id: String!
+  isActive: Boolean!
+  name: String!
+  updatedAt: DateTime!
+}
+
+type StoreAnalyticsType {
+  pendingOrders: Int!
+  recentOrders: Int!
+  totalOrders: Int!
+  totalProducts: Int!
+  totalRevenue: Float!
+}
+
+type StoreApiKeyType {
+  createdAt: DateTime!
+  id: String!
+  keyPrefix: String!
+  lastUsedAt: DateTime
+  name: String!
+  revokedAt: DateTime
+}
+
+type StoreMemberInvitationType {
+  email: String!
+  expiresAt: String!
+  id: String!
+  role: String!
+  status: String!
+  storeId: String!
+}
+
+type StoreMemberType {
+  email: String
+  fullName: String
+  id: String!
+  role: String!
+  storeId: String!
+  userId: String!
+}
+
+type StoreProductReviewType {
+  comment: String
+  createdAt: DateTime!
+  customerName: String!
+  id: String!
+  productId: String!
+  productName: String!
+  rating: Int!
+}
+
+type StoreReactivationRequestImageType {
+  id: String!
+  imageUrl: String!
+  sortOrder: Int!
+}
+
+type StoreReactivationRequestType {
+  content: String!
+  createdAt: DateTime!
+  id: String!
+  images: [StoreReactivationRequestImageType!]!
+  reviewNote: String
+  reviewedAt: DateTime
+  status: String!
+  storeId: String!
+  storeName: String!
+  submittedByEmail: String
+  submittedByFullName: String
+  submittedByUserId: String!
+  title: String!
+  updatedAt: DateTime!
+}
+
+type StoreRequestType {
+  address: String
+  contactEmail: String
+  contactPhone: String
+  createdAt: DateTime!
+  createdStoreId: String
+  description: String
+  id: String!
+  logoUrl: String
+  rejectionReason: String
+  status: String!
+  storeName: String!
+  updatedAt: DateTime!
+  vendorUserId: String!
+}
+
+type StoreReviewSummaryType {
+  averageRating: Float!
+  productBreakdown: [ProductReviewBreakdownType!]!
+  totalCount: Int!
+}
+
+type StoreShippingOptionType {
+  description: String
+  id: String!
+  isActive: Boolean!
+  name: String!
+  price: Float!
+  providerId: String
+  sortOrder: Int!
+  storeId: String!
+}
+
+input StoreShippingSelectionInput {
+  shippingOptionId: String!
+  storeId: String!
+}
+
+type StoreType {
+  bannerUrl: String
+  description: String
+  id: String!
+  logoUrl: String
+  name: String!
+  slug: String!
+  status: String!
+}
+
+input SubmitStoreReactivationRequestInput {
+  content: String!
+  mediaUrls: [String!]
+  storeId: String!
+  title: String!
+}
+
+input SubmitStoreRequestInput {
+  address: String
+  contactEmail: String
+  contactPhone: String
+  description: String
+  logoUrl: String
+  storeName: String!
+}
+
+input SwitchStoreInput {
+  storeId: String!
+}
+
+input SyncProductVariantItemInput {
+  """JSON object of variant options (e.g. {"color":"red","size":"M"})"""
+  attributes: String!
+  id: String
+  priceModifier: Float
+  sku: String!
+  stockQuantity: Int!
+}
+
+type TagType {
+  approvalStatus: String!
+  createdAt: DateTime!
+  createdBy: String!
+  id: String!
+  name: String!
+  slug: String!
+  updatedAt: DateTime!
+}
+
+type TopProductType {
+  name: String!
+  productId: String!
+  revenue: Float!
+  unitsSold: Int!
+}
+
+type TopStoreType {
+  orderCount: Int!
+  revenue: Float!
+  storeId: String!
+  storeName: String!
+}
+
+input UpdateAddressInput {
+  addressLine1: String
+  addressLine2: String
+  amphoe: String
+  city: String
+  isDefault: Boolean
+  label: String
+  postalCode: String
+  province: String
+  recipientName: String
+  recipientPhone: String
+  tumbon: String
+}
+
+input UpdateCartItemInput {
+  itemId: String!
+  quantity: Int!
+  sessionId: String
+}
+
+input UpdateCustomerAsAdminInput {
+  dateOfBirth: String
+  email: String
+  fullName: String
+  id: String!
+  phone: String
+}
+
+input UpdateOrderStatusInput {
+  orderId: String!
+  status: String!
+}
+
+input UpdatePlatformAdInput {
+  endsAt: DateTime
+  id: String!
+  imageUrl: String
+  isActive: Boolean
+  linkUrl: String
+  startsAt: DateTime
+  title: String
+}
+
+input UpdatePlatformBannerInput {
+  endsAt: DateTime
+  id: String!
+  imageUrl: String
+  isActive: Boolean
+  linkUrl: String
+  sortOrder: Int
+  startsAt: DateTime
+  title: String
+}
+
+input UpdatePlatformSponsorInput {
+  endsAt: DateTime
+  id: String!
+  imageUrl: String
+  isActive: Boolean
+  linkUrl: String
+  name: String
+  sortOrder: Int
+  startsAt: DateTime
+}
+
+input UpdateProductImageInput {
+  altText: String
+  isThumbnail: Boolean
+  sortOrder: Int
+}
+
+input UpdateProductInput {
+  basePrice: Float
+  category: String
+  categoryId: String
+  compareAtPrice: Float
+  description: String
+  expiryDate: String
+  name: String
+  status: String
+  tagIds: [String!]
+  tags: [String!]
+  warning: String
+}
+
+input UpdateProductVariantInput {
+  """JSON object of variant attributes (e.g. {"size":"M","color":"Red"})"""
+  attributes: String
+  name: String
+  priceModifier: Float
+  sku: String
+  stockQuantity: Int
+}
+
+input UpdateProfileInput {
+  email: String
+  fullName: String
+}
+
+input UpdatePromotionInput {
+  autoApply: Boolean
+  code: String
+  conditions: String
+  description: String
+  discountValue: Float
+  expiresAt: DateTime
+  isActive: Boolean
+  maxDiscountAmount: Float
+  minPurchaseAmount: Float
+  name: String
+  priority: Int
+  startsAt: DateTime
+  type: String
+  usageLimit: Int
+  usagePerCustomer: Int
+}
+
+input UpdateShippingOptionInput {
+  description: String
+  isActive: Boolean
+  name: String
+  price: Float
+  providerId: String
+  sortOrder: Int
+}
+
+input UpdateShippingProviderInput {
+  isActive: Boolean
+  name: String
+}
+
+input UpdateStoreAsAdminInput {
+  address: String
+  bannerUrl: String
+  contactEmail: String
+  contactPhone: String
+  description: String
+  id: String!
+  logoUrl: String
+  name: String
+  ownerId: String
+  slug: String
+  status: String
+}
+
+input UpdateStoreMemberRoleInput {
+  memberId: String!
+  role: String!
+}
+
+input UpdateStorePayoutInput {
+  bankAccountName: String
+  bankAccountNumber: String
+  bankCode: String
+  bankName: String
+}
+
+input UpdateStoreSettingsInput {
+  address: String
+  bannerUrl: String
+  contactEmail: String
+  contactPhone: String
+  description: String
+  logoUrl: String
+  name: String
+}
+
+input UpdateUserProfileInput {
+  fullName: String
+}
+
+input UpdateVendorAsAdminInput {
+  email: String
+  fullName: String
+  id: String!
+  isActive: Boolean
+}
+
+type UploadResultType {
+  key: String!
+  url: String!
+}
+
+type UserProfile {
+  email: String!
+  fullName: String!
+  id: String!
+  role: String!
+  storeId: String
+}
+
+input ValidatePromotionInput {
+  code: String!
+  storeId: String
+  subtotal: Float!
+}
+
+type VendorAuthPayload {
+  tokens: AuthTokens!
+  user: UserProfile!
+}
+
+type VendorCustomerConnection {
+  items: [VendorCustomerType!]!
+  pagination: PaginationMeta!
+}
+
+type VendorCustomerType {
+  createdAt: DateTime!
+  email: String
+  fullName: String
+  id: String!
+  isVerified: Boolean!
+  lastLoginAt: DateTime
+  phone: String!
+}
+
+type VendorInvitationType {
+  email: String!
+  expiresAt: String!
+  id: String!
+  status: String!
+  token: String!
+}
+
+input VendorLoginInput {
+  email: String!
+  password: String!
+}
+
+type VendorStoreType {
+  membershipRole: String!
+  store: StoreType!
+}
+
+input VerifyCustomerOtpInput {
+  code: String!
+  phone: String!
+  sessionId: String
+}

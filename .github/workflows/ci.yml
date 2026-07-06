@@ -1,0 +1,46 @@
+# SOPET Backend CI
+# Triggers on pull request open, update, and reopen.
+# Runs: yarn build → yarn test (unit) → yarn test:e2e
+# E2E tests use mocked repositories/services — no PostgreSQL, Redis, or MinIO required.
+
+name: CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    env:
+      NODE_ENV: test
+      JWT_SECRET: ci-dummy-jwt-secret-not-for-production
+      OMISE_SECRET_KEY: skey_test_ci_dummy
+      OMISE_PUBLIC_KEY: pkey_test_ci_dummy
+      OMISE_WEBHOOK_SECRET: whsec_ci_dummy
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Format check
+        run: yarn format:check
+
+      - name: Build
+        run: yarn build
+
+      - name: Unit tests
+        run: yarn test
+
+      - name: E2E tests
+        run: yarn test:e2e

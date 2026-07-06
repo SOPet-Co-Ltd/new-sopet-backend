@@ -1,0 +1,22 @@
+import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { AnalyticsModule } from '../analytics/analytics.module';
+import { StoresModule } from '../stores/stores.module';
+import { TaxonomyModule } from '../taxonomy/taxonomy.module';
+import { ProductsService } from './products.service';
+import { Product } from '../../database/entities/product.entity';
+import { ProductVariant } from '../../database/entities/product-variant.entity';
+import { ProductImage } from '../../database/entities/product-image.entity';
+import { ProductsResolver } from './products.resolver';
+
+@Module({
+  imports: [
+    AnalyticsModule,
+    StoresModule,
+    TaxonomyModule,
+    TypeOrmModule.forFeature([Product, ProductVariant, ProductImage]),
+  ],
+  providers: [ProductsService, ProductsResolver],
+  exports: [ProductsService],
+})
+export class ProductsModule {}
