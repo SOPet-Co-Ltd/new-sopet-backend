@@ -690,6 +690,7 @@ type ProductVariantType {
   id: String!
   optionsJson: String
   price: Float!
+  product: ProductType
   sku: String!
   stockQuantity: Int!
 }

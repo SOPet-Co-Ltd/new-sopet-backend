@@ -27,7 +27,13 @@ export class CartService {
     const where = customerId ? { customerId } : { sessionId };
     let cart = await this.cartRepository.findOne({
       where,
-      relations: ['items', 'items.productVariant', 'items.productVariant.product'],
+      relations: [
+        'items',
+        'items.productVariant',
+        'items.productVariant.product',
+        'items.productVariant.product.store',
+        'items.productVariant.product.images',
+      ],
     });
 
     if (!cart) {

@@ -160,6 +160,9 @@ export class ProductVariantType {
 
   @Field(() => String, { nullable: true })
   optionsJson?: string | null;
+
+  @Field(() => ProductType, { nullable: true })
+  product?: ProductType | null;
 }
 
 @ObjectType()

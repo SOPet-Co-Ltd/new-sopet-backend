@@ -173,12 +173,43 @@ function formatExpiryDate(expiryDate: string | Date | null | undefined): string 
 }
 
 export function mapVariant(variant: ProductVariant, basePrice = 0): ProductVariantType {
-  return {
+  const mapped: ProductVariantType = {
     id: variant.id,
     sku: variant.sku,
     price: Number(basePrice) + Number(variant.priceAdjustment ?? 0),
     stockQuantity: variant.stockQuantity,
     optionsJson: variant.options ? JSON.stringify(variant.options) : null,
+  };
+
+  if (variant.product) {
+    mapped.product = mapCartProduct(variant.product);
+  }
+
+  return mapped;
+}
+
+function mapCartProduct(product: Product): ProductType {
+  const basePrice = Number(product.basePrice);
+
+  return {
+    id: product.id,
+    storeId: product.storeId,
+    name: product.name,
+    slug: product.slug,
+    description: product.description ?? null,
+    basePrice,
+    compareAtPrice: product.compareAtPrice != null ? Number(product.compareAtPrice) : null,
+    status: product.status,
+    category: product.category ?? product.categoryRelation?.name ?? null,
+    categoryId: product.categoryId ?? product.categoryRelation?.id ?? null,
+    tags: product.tags ?? [],
+    tagIds: null,
+    averageRating: Number(product.averageRating ?? 0),
+    reviewCount: product.reviewCount ?? 0,
+    warning: product.warning ?? null,
+    expiryDate: formatExpiryDate(product.expiryDate),
+    thumbnailUrl: resolveThumbnailUrl(product.images),
+    store: product.store ? mapStore(product.store) : null,
   };
 }
 
