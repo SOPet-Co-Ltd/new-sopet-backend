@@ -1,4 +1,4 @@
-import { Args, Mutation, Resolver } from '@nestjs/graphql';
+import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { UseGuards } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import { PaymentType } from '../../graphql/models/types';
@@ -10,6 +10,50 @@ import { CreatePaymentInput } from './payments.inputs';
 @Resolver()
 export class PaymentsResolver {
   constructor(private readonly paymentsService: PaymentsService) {}
+
+  private mapPayment(payment: {
+    id: string;
+    orderId: string;
+    amount: number;
+    currency: string;
+    status: string;
+    paymentMethod: string;
+  }): PaymentType {
+    return {
+      id: payment.id,
+      orderId: payment.orderId,
+      amount: Number(payment.amount),
+      currency: payment.currency,
+      status: payment.status,
+      paymentMethod: payment.paymentMethod,
+      authorizeUri: null,
+      qrCodeUrl: null,
+    };
+  }
+
+  @Query(() => PaymentType)
+  @Public()
+  async payment(
+    @Args('id') id: string,
+    @CurrentUser('id') customerId?: string,
+    @CurrentUser('role') role?: string,
+  ): Promise<PaymentType> {
+    const effectiveCustomerId = role === 'customer' ? customerId : undefined;
+    const payment = await this.paymentsService.findById(id, effectiveCustomerId);
+    return this.mapPayment(payment);
+  }
+
+  @Query(() => PaymentType)
+  @Public()
+  async paymentByOrderId(
+    @Args('orderId') orderId: string,
+    @CurrentUser('id') customerId?: string,
+    @CurrentUser('role') role?: string,
+  ): Promise<PaymentType> {
+    const effectiveCustomerId = role === 'customer' ? customerId : undefined;
+    const payment = await this.paymentsService.findLatestByOrderId(orderId, effectiveCustomerId);
+    return this.mapPayment(payment);
+  }
 
   @Mutation(() => PaymentType)
   @Public()

@@ -1,4 +1,10 @@
-import { Injectable, Logger, BadRequestException, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -78,6 +84,36 @@ export class PaymentsService {
     }
 
     return order;
+  }
+
+  async findById(id: string, customerId?: string): Promise<Payment> {
+    const payment = await this.paymentRepository.findOne({ where: { id } });
+    if (!payment) {
+      throw new NotFoundException({
+        code: 'PAYMENT_NOT_FOUND',
+        message: 'Payment not found',
+      });
+    }
+
+    await this.assertCanPayForOrder(payment.orderId, customerId);
+    return payment;
+  }
+
+  async findLatestByOrderId(orderId: string, customerId?: string): Promise<Payment> {
+    await this.assertCanPayForOrder(orderId, customerId);
+
+    const payment = await this.paymentRepository.findOne({
+      where: { orderId },
+      order: { createdAt: 'DESC' },
+    });
+    if (!payment) {
+      throw new NotFoundException({
+        code: 'PAYMENT_NOT_FOUND',
+        message: 'Payment not found for this order',
+      });
+    }
+
+    return payment;
   }
 
   async createCharge(createChargeDto: CreateChargeDto): Promise<{

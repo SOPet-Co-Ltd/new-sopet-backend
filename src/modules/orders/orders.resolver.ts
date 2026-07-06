@@ -10,7 +10,6 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { CreateOrderInput, UpdateOrderStatusInput } from './orders.inputs';
 import { Order, OrderStatus } from '../../database/entities/order.entity';
-import { OrderItem } from '../../database/entities/order-item.entity';
 
 function mapOrder(order: Order): OrderType {
   return {
@@ -25,10 +24,18 @@ function mapOrder(order: Order): OrderType {
     guestPhone: order.guestPhone ?? null,
     guestName: order.guestName ?? null,
     guestEmail: order.guestEmail ?? null,
+    createdAt: order.createdAt,
+    storeShippings:
+      order.storeShippings?.map((shipping) => ({
+        storeId: shipping.storeId,
+        optionName: shipping.optionName,
+        shippingFee: Number(shipping.shippingFee),
+      })) ?? [],
     items:
       order.items?.map((item) => ({
         id: item.id,
         storeId: item.storeId,
+        variantId: item.variantId,
         productName: item.productName,
         unitPrice: Number(item.unitPrice),
         quantity: item.quantity,

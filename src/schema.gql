@@ -528,6 +528,7 @@ type OrderItemType {
   storeId: String!
   subtotal: Float!
   unitPrice: Float!
+  variantId: String!
 }
 
 type OrderShippingAddressType {
@@ -541,7 +542,14 @@ type OrderShippingAddressType {
   tumbon: String
 }
 
+type OrderStoreShippingType {
+  optionName: String!
+  shippingFee: Float!
+  storeId: String!
+}
+
 type OrderType {
+  createdAt: DateTime!
   discountAmount: Float!
   guestEmail: String
   guestName: String
@@ -553,6 +561,7 @@ type OrderType {
   shippingAddress: OrderShippingAddressType
   shippingFee: Float!
   status: String!
+  storeShippings: [OrderStoreShippingType!]!
   subtotal: Float!
   total: Float!
 }
@@ -761,6 +770,8 @@ type Query {
   openDisputes: [DisputeType!]!
   order(id: String!): OrderType!
   orders: [OrderType!]!
+  payment(id: String!): PaymentType!
+  paymentByOrderId(orderId: String!): PaymentType!
   paymentMethods: [SavedPaymentMethodType!]!
   pendingAdminInvitations: [AdminInvitationType!]!
   pendingCategories: [CategoryType!]!

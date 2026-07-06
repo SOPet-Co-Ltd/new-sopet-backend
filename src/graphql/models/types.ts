@@ -352,12 +352,27 @@ export class OrderShippingAddressType {
 }
 
 @ObjectType()
+export class OrderStoreShippingType {
+  @Field()
+  storeId: string;
+
+  @Field()
+  optionName: string;
+
+  @Field(() => Float)
+  shippingFee: number;
+}
+
+@ObjectType()
 export class OrderItemType {
   @Field()
   id: string;
 
   @Field()
   storeId: string;
+
+  @Field()
+  variantId: string;
 
   @Field()
   productName: string;
@@ -412,6 +427,12 @@ export class OrderType {
 
   @Field(() => [OrderItemType])
   items: OrderItemType[];
+
+  @Field()
+  createdAt: Date;
+
+  @Field(() => [OrderStoreShippingType])
+  storeShippings: OrderStoreShippingType[];
 
   @Field(() => OrderShippingAddressType, { nullable: true })
   shippingAddress?: OrderShippingAddressType | null;
