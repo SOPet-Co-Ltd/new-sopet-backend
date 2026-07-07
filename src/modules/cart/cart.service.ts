@@ -66,7 +66,7 @@ export class CartService {
     await this.variantRepository.manager.transaction(async (trx) => {
       const variant = await trx.findOne(ProductVariant, {
         where: { id: variantId },
-        lock: { mode: 'optimistic', version: 1 },
+        lock: { mode: 'pessimistic_write' },
       });
 
       if (!variant) {
