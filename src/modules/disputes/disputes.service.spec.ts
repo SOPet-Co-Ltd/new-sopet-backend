@@ -79,6 +79,7 @@ describe('DisputesService', () => {
 
       expect(disputeRepo.find).toHaveBeenCalledWith({
         where: { customerId: 'cust-1' },
+        relations: { messages: true, images: true },
         order: { createdAt: 'DESC' },
       });
       expect(result).toEqual(disputes);
@@ -94,6 +95,7 @@ describe('DisputesService', () => {
 
       expect(disputeRepo.find).toHaveBeenCalledWith({
         where: { status: DisputeStatus.OPEN },
+        relations: { messages: true, images: true },
         order: { createdAt: 'DESC' },
       });
       expect(result).toEqual(disputes);

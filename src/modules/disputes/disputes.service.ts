@@ -39,6 +39,7 @@ export class DisputesService {
   async findByCustomer(customerId: string): Promise<Dispute[]> {
     return this.disputeRepository.find({
       where: { customerId },
+      relations: { messages: true, images: true },
       order: { createdAt: 'DESC' },
     });
   }
@@ -46,7 +47,15 @@ export class DisputesService {
   async findOpen(): Promise<Dispute[]> {
     return this.disputeRepository.find({
       where: { status: DisputeStatus.OPEN },
+      relations: { messages: true, images: true },
       order: { createdAt: 'DESC' },
+    });
+  }
+
+  async findById(id: string): Promise<Dispute | null> {
+    return this.disputeRepository.findOne({
+      where: { id },
+      relations: { messages: true, images: true },
     });
   }
 }
