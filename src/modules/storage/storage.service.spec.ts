@@ -1,4 +1,5 @@
 import { Test } from '@nestjs/testing';
+import { BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import sharp from 'sharp';
 import { StorageService } from './storage.service';
@@ -183,5 +184,71 @@ describe('StorageService', () => {
         service.validateImageUpload(buffer, 'image/png', 'ads'),
       ).resolves.toBeUndefined();
     });
+
+    it('accepts categories folder uploads with default rules', async () => {
+      const buffer = Buffer.from(pngBase64, 'base64');
+      await expect(
+        service.validateImageUpload(buffer, 'image/png', 'categories'),
+      ).resolves.toBeUndefined();
+    });
+  });
+
+  describe('assertFolderImageUrl', () => {
+    it('rejects URLs without categories/ prefix', () => {
+      expect(() =>
+        service.assertFolderImageUrl(
+          'https://cdn.example.com/products/a1b2c3d4-e5f6-7890-abcd-ef1234567890.webp',
+          'categories',
+        ),
+      ).toThrow(BadRequestException);
+
+      try {
+        service.assertFolderImageUrl(
+          'https://cdn.example.com/products/a1b2c3d4-e5f6-7890-abcd-ef1234567890.webp',
+          'categories',
+        );
+      } catch (error) {
+        expect(error).toMatchObject({
+          response: { code: 'INVALID_CATEGORY_IMAGE_URL' },
+        });
+      }
+    });
+
+    it('rejects empty or invalid URLs', () => {
+      for (const url of ['', 'not-a-url']) {
+        expect(() => service.assertFolderImageUrl(url, 'categories')).toThrow(BadRequestException);
+        try {
+          service.assertFolderImageUrl(url, 'categories');
+        } catch (error) {
+          expect(error).toMatchObject({
+            response: { code: 'INVALID_CATEGORY_IMAGE_URL' },
+          });
+        }
+      }
+    });
+
+    it('accepts MinIO-style public URL with categories/ prefix', () => {
+      expect(() =>
+        service.assertFolderImageUrl(
+          'http://localhost:9000/sopet-ecommerce-files/categories/a1b2c3d4-e5f6-7890-abcd-ef1234567890.webp',
+          'categories',
+        ),
+      ).not.toThrow();
+    });
+
+    it('accepts CDN-style URL with categories/ prefix', async () => {
+      const cdnService = await createService(buildConfigGet());
+      expect(() =>
+        cdnService.assertFolderImageUrl(
+          'https://cdn.example.com/categories/a1b2c3d4-e5f6-7890-abcd-ef1234567890.webp',
+          'categories',
+        ),
+      ).not.toThrow();
+    });
+  });
+
+  it('builds object keys under categories folder', () => {
+    const key = service.buildObjectKey('categories', 'image/webp');
+    expect(key).toMatch(/^categories\/[0-9a-f-]+\.webp$/);
   });
 });

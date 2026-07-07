@@ -1,7 +1,12 @@
 import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { UseGuards } from '@nestjs/common';
 import { TaxonomyService } from './taxonomy.service';
-import { CreateCategoryInput, CreateTagInput } from './taxonomy.inputs';
+import {
+  CreateCategoryInput,
+  CreateTagInput,
+  SetCategoryImageInput,
+  UpdateCategoryInput,
+} from './taxonomy.inputs';
 import { CategoryType, TagType } from '../../graphql/models/types';
 import { mapCategory, mapTag } from '../../graphql/models/mappers';
 import { CurrentUser, Public, Roles } from '../../common/decorators';
@@ -66,7 +71,28 @@ export class TaxonomyResolver {
     @CurrentUser('role') role: string,
     @Args('input') input: CreateCategoryInput,
   ): Promise<CategoryType> {
-    const category = await this.taxonomyService.createCategory(input.name, userId, role);
+    const category = await this.taxonomyService.createCategory(
+      input.name,
+      userId,
+      role,
+      input.imageUrl,
+    );
+    return mapCategory(category);
+  }
+
+  @Mutation(() => CategoryType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async updateCategory(@Args('input') input: UpdateCategoryInput): Promise<CategoryType> {
+    const category = await this.taxonomyService.updateCategory(input.categoryId, input.name);
+    return mapCategory(category);
+  }
+
+  @Mutation(() => CategoryType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async setCategoryImage(@Args('input') input: SetCategoryImageInput): Promise<CategoryType> {
+    const category = await this.taxonomyService.setCategoryImage(input.categoryId, input.imageUrl);
     return mapCategory(category);
   }
 

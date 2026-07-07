@@ -3,6 +3,11 @@ import { QueryFailedError } from 'typeorm';
 import { TaxonomyService } from './taxonomy.service';
 import { TaxonomyApprovalStatus } from '../../database/entities/enums/taxonomy.enums';
 import { UserRole } from '../../database/entities/user.entity';
+import { StorageService } from '../storage/storage.service';
+
+const CATEGORY_IMAGE_REQUIRED_MESSAGE = 'ต้องอัปโหลดรูปภาพหมวดหมู่ก่อนอนุมัติ';
+const VALID_CATEGORY_IMAGE_URL =
+  'https://cdn.example.com/categories/a1b2c3d4-e5f6-7890-abcd-ef1234567890.webp';
 
 describe('TaxonomyService', () => {
   let service: TaxonomyService;
@@ -18,6 +23,9 @@ describe('TaxonomyService', () => {
     create: jest.Mock;
     save: jest.Mock;
   };
+  let storageService: {
+    assertFolderImageUrl: jest.Mock;
+  };
 
   beforeEach(() => {
     categoryRepository = {
@@ -32,16 +40,24 @@ describe('TaxonomyService', () => {
       create: jest.fn((data) => data),
       save: jest.fn(async (data) => ({ ...data, id: data.id ?? 'tag-1' })),
     };
+    storageService = {
+      assertFolderImageUrl: jest.fn(),
+    };
 
-    service = new TaxonomyService(categoryRepository as never, tagRepository as never);
+    service = new TaxonomyService(
+      categoryRepository as never,
+      tagRepository as never,
+      storageService as unknown as StorageService,
+    );
   });
 
-  it('creates approved category for admin', async () => {
+  it('creates pending category for admin', async () => {
     categoryRepository.findOne.mockResolvedValue(null);
 
     const category = await service.createCategory('Cat Food', 'admin-1', UserRole.ADMIN);
 
-    expect(category.approvalStatus).toBe(TaxonomyApprovalStatus.APPROVED);
+    expect(category.approvalStatus).toBe(TaxonomyApprovalStatus.PENDING);
+    expect(category.imageUrl ?? null).toBeNull();
     expect(category.slug).toBe('cat-food');
     expect(categoryRepository.save).toHaveBeenCalled();
   });
@@ -52,6 +68,14 @@ describe('TaxonomyService', () => {
     const category = await service.createCategory('Dog Treats', 'vendor-1', UserRole.VENDOR);
 
     expect(category.approvalStatus).toBe(TaxonomyApprovalStatus.PENDING);
+  });
+
+  it('creates approved tag for admin', async () => {
+    tagRepository.findOne.mockResolvedValue(null);
+
+    const tag = await service.createTag('Puppy', 'admin-1', UserRole.ADMIN);
+
+    expect(tag.approvalStatus).toBe(TaxonomyApprovalStatus.APPROVED);
   });
 
   it('rejects duplicate category name (case-insensitive) with a conflict', async () => {
@@ -85,15 +109,59 @@ describe('TaxonomyService', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
-  it('approves category', async () => {
+  it('rejects approveCategory when imageUrl is missing', async () => {
     categoryRepository.findOne.mockResolvedValue({
       id: 'cat-1',
       approvalStatus: TaxonomyApprovalStatus.PENDING,
+      imageUrl: null,
+    });
+
+    await expect(service.approveCategory('cat-1')).rejects.toMatchObject({
+      response: {
+        code: 'CATEGORY_IMAGE_REQUIRED',
+        message: CATEGORY_IMAGE_REQUIRED_MESSAGE,
+      },
+    });
+    expect(categoryRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('approves category when imageUrl is set', async () => {
+    categoryRepository.findOne.mockResolvedValue({
+      id: 'cat-1',
+      approvalStatus: TaxonomyApprovalStatus.PENDING,
+      imageUrl: VALID_CATEGORY_IMAGE_URL,
     });
 
     const category = await service.approveCategory('cat-1');
 
     expect(category.approvalStatus).toBe(TaxonomyApprovalStatus.APPROVED);
+  });
+
+  it('persists imageUrl via setCategoryImage and allows approval', async () => {
+    categoryRepository.findOne.mockResolvedValue({
+      id: 'cat-1',
+      approvalStatus: TaxonomyApprovalStatus.PENDING,
+      imageUrl: null,
+    });
+    categoryRepository.save.mockImplementation(async (data) => data);
+
+    const updated = await service.setCategoryImage('cat-1', VALID_CATEGORY_IMAGE_URL);
+
+    expect(storageService.assertFolderImageUrl).toHaveBeenCalledWith(
+      VALID_CATEGORY_IMAGE_URL,
+      'categories',
+    );
+    expect(updated.imageUrl).toBe(VALID_CATEGORY_IMAGE_URL);
+
+    categoryRepository.findOne.mockResolvedValue({
+      id: 'cat-1',
+      approvalStatus: TaxonomyApprovalStatus.PENDING,
+      imageUrl: VALID_CATEGORY_IMAGE_URL,
+    });
+
+    const approved = await service.approveCategory('cat-1');
+
+    expect(approved.approvalStatus).toBe(TaxonomyApprovalStatus.APPROVED);
   });
 
   it('rejects unapproved tags for product assignment', async () => {

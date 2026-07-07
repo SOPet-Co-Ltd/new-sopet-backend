@@ -11,6 +11,7 @@ import { Tag } from '../../database/entities/tag.entity';
 import { TaxonomyApprovalStatus } from '../../database/entities/enums/taxonomy.enums';
 import { UserRole } from '../../database/entities/user.entity';
 import { generateSlug } from '../../common/utils/slug.util';
+import { StorageService } from '../storage/storage.service';
 
 @Injectable()
 export class TaxonomyService {
@@ -19,6 +20,7 @@ export class TaxonomyService {
     private readonly categoryRepository: Repository<Category>,
     @InjectRepository(Tag)
     private readonly tagRepository: Repository<Tag>,
+    private readonly storageService: StorageService,
   ) {}
 
   private async ensureUniqueSlug(
@@ -124,16 +126,27 @@ export class TaxonomyService {
     });
   }
 
-  async createCategory(name: string, createdBy: string, role: string): Promise<Category> {
+  async createCategory(
+    name: string,
+    createdBy: string,
+    role: string,
+    imageUrl?: string | null,
+  ): Promise<Category> {
     await this.assertUniqueName(this.categoryRepository, name, 'หมวดหมู่');
 
     const slug = await this.ensureUniqueSlug(this.categoryRepository, name, 'category');
+
+    const trimmedImageUrl = imageUrl?.trim() || null;
+    if (trimmedImageUrl) {
+      this.storageService.assertFolderImageUrl(trimmedImageUrl, 'categories');
+    }
 
     const category = this.categoryRepository.create({
       name: name.trim(),
       slug,
       createdBy,
-      approvalStatus: this.resolveApprovalStatus(role),
+      approvalStatus: TaxonomyApprovalStatus.PENDING,
+      imageUrl: trimmedImageUrl,
     });
 
     try {
@@ -168,7 +181,105 @@ export class TaxonomyService {
     }
   }
 
+  async updateCategory(categoryId: string, name: string): Promise<Category> {
+    const category = await this.categoryRepository.findOne({ where: { id: categoryId } });
+
+    if (!category) {
+      throw new NotFoundException({
+        code: 'CATEGORY_NOT_FOUND',
+        message: 'Category not found',
+      });
+    }
+
+    const trimmedName = name.trim();
+    if (trimmedName === category.name) {
+      return category;
+    }
+
+    const duplicate = await this.categoryRepository.findOne({
+      where: {
+        name: ILike(trimmedName),
+        approvalStatus: Not(TaxonomyApprovalStatus.REJECTED),
+      },
+    });
+
+    if (duplicate && duplicate.id !== categoryId) {
+      throw this.duplicateNameError('หมวดหมู่');
+    }
+
+    const slug = await this.ensureUniqueSlugForEntity(
+      this.categoryRepository,
+      trimmedName,
+      'category',
+      categoryId,
+    );
+
+    category.name = trimmedName;
+    category.slug = slug;
+
+    try {
+      return await this.categoryRepository.save(category);
+    } catch (error) {
+      if (this.isUniqueViolation(error)) {
+        throw this.duplicateNameError('หมวดหมู่');
+      }
+      throw error;
+    }
+  }
+
+  private async ensureUniqueSlugForEntity(
+    repository: Repository<Category | Tag>,
+    name: string,
+    fallback: string,
+    excludeId: string,
+  ): Promise<string> {
+    let slug = generateSlug(name, fallback);
+    let exists = await repository.findOne({ where: { slug } });
+    let counter = 1;
+
+    while (exists && exists.id !== excludeId) {
+      slug = `${generateSlug(name, fallback)}-${counter}`;
+      exists = await repository.findOne({ where: { slug } });
+      counter++;
+    }
+
+    return slug;
+  }
+
+  async setCategoryImage(categoryId: string, imageUrl: string): Promise<Category> {
+    const category = await this.categoryRepository.findOne({ where: { id: categoryId } });
+
+    if (!category) {
+      throw new NotFoundException({
+        code: 'CATEGORY_NOT_FOUND',
+        message: 'Category not found',
+      });
+    }
+
+    const trimmedImageUrl = imageUrl.trim();
+    this.storageService.assertFolderImageUrl(trimmedImageUrl, 'categories');
+    category.imageUrl = trimmedImageUrl;
+
+    return this.categoryRepository.save(category);
+  }
+
   async approveCategory(id: string): Promise<Category> {
+    const category = await this.categoryRepository.findOne({ where: { id } });
+
+    if (!category) {
+      throw new NotFoundException({
+        code: 'CATEGORY_NOT_FOUND',
+        message: 'Category not found',
+      });
+    }
+
+    if (!category.imageUrl?.trim()) {
+      throw new BadRequestException({
+        code: 'CATEGORY_IMAGE_REQUIRED',
+        message: 'ต้องอัปโหลดรูปภาพหมวดหมู่ก่อนอนุมัติ',
+      });
+    }
+
     return this.setCategoryStatus(id, TaxonomyApprovalStatus.APPROVED);
   }
 

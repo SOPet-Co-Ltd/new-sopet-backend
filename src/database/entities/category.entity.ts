@@ -43,6 +43,9 @@ export class Category {
   @IsEnum(TaxonomyApprovalStatus)
   approvalStatus: TaxonomyApprovalStatus;
 
+  @Column({ name: 'image_url', type: 'varchar', length: 500, nullable: true })
+  imageUrl?: string | null;
+
   @Column({ name: 'created_by', type: 'uuid' })
   @IsNotEmpty()
   createdBy: string;

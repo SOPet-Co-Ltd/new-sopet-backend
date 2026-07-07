@@ -132,6 +132,85 @@ export class StorageService {
     };
   }
 
+  assertFolderImageUrl(url: string, folder: UploadFolder): void {
+    const trimmed = url?.trim();
+    if (!trimmed) {
+      throw this.invalidCategoryImageUrlError();
+    }
+
+    let parsed: URL;
+    try {
+      parsed = new URL(trimmed);
+    } catch {
+      throw this.invalidCategoryImageUrlError();
+    }
+
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw this.invalidCategoryImageUrlError();
+    }
+
+    const objectKey = this.extractObjectKeyFromUrl(trimmed, folder);
+    if (!objectKey.startsWith(`${folder}/`)) {
+      throw this.invalidCategoryImageUrlError();
+    }
+  }
+
+  private invalidCategoryImageUrlError(): BadRequestException {
+    return new BadRequestException({
+      code: 'INVALID_CATEGORY_IMAGE_URL',
+      message: 'URL รูปภาพไม่ถูกต้อง',
+    });
+  }
+
+  private getPublicUrlPrefixes(): string[] {
+    const provider = this.configService.get<string>('storage.provider') || 's3';
+    const prefixes: string[] = [];
+
+    if (provider === 'r2') {
+      const cdnUrl = this.configService.get<string>('storage.cdnUrl');
+      if (cdnUrl) {
+        prefixes.push(cdnUrl.replace(/\/$/, ''));
+      }
+    } else {
+      const s3 = this.configService.get<{
+        publicUrl?: string;
+        endpoint?: string;
+        bucket?: string;
+      }>('storage.s3');
+
+      if (s3?.publicUrl) {
+        prefixes.push(s3.publicUrl.replace(/\/$/, ''));
+      }
+
+      if (s3?.endpoint && s3?.bucket) {
+        prefixes.push(`${s3.endpoint.replace(/\/$/, '')}/${s3.bucket}`);
+      }
+    }
+
+    return prefixes;
+  }
+
+  private extractObjectKeyFromUrl(url: string, folder: string): string {
+    const normalizedUrl = url.trim();
+
+    for (const prefix of this.getPublicUrlPrefixes()) {
+      if (normalizedUrl.startsWith(`${prefix}/`)) {
+        return decodeURIComponent(normalizedUrl.slice(prefix.length + 1));
+      }
+    }
+
+    const parsed = new URL(normalizedUrl);
+    const pathname = decodeURIComponent(parsed.pathname.replace(/^\//, ''));
+    const marker = `${folder}/`;
+    const markerIndex = pathname.indexOf(marker);
+
+    if (markerIndex !== -1) {
+      return pathname.slice(markerIndex);
+    }
+
+    return pathname;
+  }
+
   private getSettings(): ResolvedStorageSettings {
     if (this.settings) {
       return this.settings;

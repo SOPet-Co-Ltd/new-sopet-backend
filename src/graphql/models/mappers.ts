@@ -222,6 +222,7 @@ export function mapCategory(category: Category): CategoryType {
     createdBy: category.createdBy,
     createdAt: category.createdAt,
     updatedAt: category.updatedAt,
+    imageUrl: category.imageUrl ?? null,
   };
 }
 

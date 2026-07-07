@@ -9,6 +9,7 @@ export const UPLOAD_FOLDERS = [
   'banners',
   'sponsors',
   'ads',
+  'categories',
 ] as const;
 export type UploadFolder = (typeof UPLOAD_FOLDERS)[number];
 

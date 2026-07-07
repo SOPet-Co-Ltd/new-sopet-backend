@@ -817,6 +817,9 @@ export class CategoryType {
 
   @Field()
   updatedAt: Date;
+
+  @Field(() => String, { nullable: true })
+  imageUrl?: string | null;
 }
 
 @ObjectType()

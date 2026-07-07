@@ -132,6 +132,7 @@ type CategoryType {
   createdAt: DateTime!
   createdBy: String!
   id: String!
+  imageUrl: String
   name: String!
   slug: String!
   updatedAt: DateTime!
@@ -157,6 +158,7 @@ input CreateAddressInput {
 }
 
 input CreateCategoryInput {
+  imageUrl: String
   name: String!
 }
 
@@ -467,6 +469,7 @@ type Mutation {
   revokeStoreInvitation(invitationId: String!): StoreMemberInvitationType!
   sendCustomerOtp(input: SendCustomerOtpInput!): MessagePayload!
   setAdminActive(isActive: Boolean!, userId: String!): AdminTeamMemberType!
+  setCategoryImage(input: SetCategoryImageInput!): CategoryType!
   setCustomerActive(id: String!, isActive: Boolean!): AdminCustomerType!
   setDefaultAddress(id: String!): SavedAddressType!
   setDefaultPaymentMethod(id: String!): SavedPaymentMethodType!
@@ -478,6 +481,7 @@ type Mutation {
   togglePromotion(id: String!, isActive: Boolean!): PromotionType!
   updateAddress(id: String!, input: UpdateAddressInput!): SavedAddressType!
   updateCartItem(input: UpdateCartItemInput!): CartType!
+  updateCategory(input: UpdateCategoryInput!): CategoryType!
   updateCustomerAsAdmin(input: UpdateCustomerAsAdminInput!): AdminCustomerType!
   updateOrderStatus(input: UpdateOrderStatusInput!): OrderType!
   updatePlatformAd(input: UpdatePlatformAdInput!): PlatformAdType!
@@ -951,6 +955,11 @@ input SendCustomerOtpInput {
   phone: String!
 }
 
+input SetCategoryImageInput {
+  categoryId: String!
+  imageUrl: String!
+}
+
 input ShippingAddressInput {
   addressLine1: String!
   addressLine2: String
@@ -1158,6 +1167,11 @@ input UpdateCartItemInput {
   itemId: String!
   quantity: Int!
   sessionId: String
+}
+
+input UpdateCategoryInput {
+  categoryId: String!
+  name: String!
 }
 
 input UpdateCustomerAsAdminInput {
