@@ -211,6 +211,7 @@ input CreatePlatformBannerInput {
   imageUrl: String!
   isActive: Boolean
   linkUrl: String
+  mobileImageUrl: String
   sortOrder: Int
   startsAt: DateTime
   title: String!
@@ -641,6 +642,7 @@ type PlatformBannerType {
   imageUrl: String!
   isActive: Boolean!
   linkUrl: String
+  mobileImageUrl: String
   sortOrder: Int!
   startsAt: DateTime
   title: String!
@@ -1203,6 +1205,7 @@ input UpdatePlatformBannerInput {
   imageUrl: String
   isActive: Boolean
   linkUrl: String
+  mobileImageUrl: String
   sortOrder: Int
   startsAt: DateTime
   title: String

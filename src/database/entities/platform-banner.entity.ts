@@ -24,6 +24,10 @@ export class PlatformBanner {
   @IsNotEmpty()
   imageUrl: string;
 
+  @Column({ name: 'mobile_image_url', type: 'varchar', length: 500, nullable: true })
+  @IsOptional()
+  mobileImageUrl: string | null;
+
   @Column({ name: 'link_url', type: 'varchar', length: 500, nullable: true })
   @IsOptional()
   linkUrl: string | null;

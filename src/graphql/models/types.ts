@@ -576,6 +576,9 @@ export class PlatformBannerType {
   imageUrl: string;
 
   @Field(() => String, { nullable: true })
+  mobileImageUrl?: string | null;
+
+  @Field(() => String, { nullable: true })
   linkUrl?: string | null;
 
   @Field(() => Int)

@@ -40,6 +40,11 @@ export class CreatePlatformBannerInput {
   @Field(() => String, { nullable: true })
   @IsOptional()
   @IsString()
+  mobileImageUrl?: string | null;
+
+  @Field(() => String, { nullable: true })
+  @IsOptional()
+  @IsString()
   linkUrl?: string | null;
 
   @Field(() => Int, { nullable: true })
@@ -77,6 +82,11 @@ export class UpdatePlatformBannerInput {
   @IsOptional()
   @IsString()
   imageUrl?: string;
+
+  @Field(() => String, { nullable: true })
+  @IsOptional()
+  @IsString()
+  mobileImageUrl?: string | null;
 
   @Field(() => String, { nullable: true })
   @IsOptional()
@@ -409,6 +419,7 @@ function mapBanner(banner: PlatformBanner): PlatformBannerType {
     id: banner.id,
     title: banner.title,
     imageUrl: banner.imageUrl,
+    mobileImageUrl: banner.mobileImageUrl,
     linkUrl: banner.linkUrl,
     sortOrder: banner.sortOrder,
     isActive: banner.isActive,
