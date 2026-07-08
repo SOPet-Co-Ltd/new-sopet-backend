@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
 import { OrderItem } from '../../database/entities/order-item.entity';
 import { OrderShippingAddress } from '../../database/entities/order-shipping-address.entity';
@@ -20,6 +20,8 @@ import { CreateOrderDto, ShippingAddressDto } from './dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PromotionsService } from '../promotions/promotions.service';
 import { Store } from '../../database/entities/store.entity';
+import { normalizeCheckoutPaymentMethod } from '../../common/utils/checkout-payment.util';
+import { guestPhoneLookupValues, normalizeThaiPhoneToLocal } from '../../common/utils/phone.util';
 
 export interface StoreShippingSelection {
   storeId: string;
@@ -181,7 +183,10 @@ export class OrdersService {
       guestEmail,
     } = createOrderDto;
 
-    if (!customerId && !guestPhone) {
+    const normalizedGuestPhone = guestPhone ? normalizeThaiPhoneToLocal(guestPhone) : undefined;
+    const normalizedPaymentMethod = normalizeCheckoutPaymentMethod(paymentMethod);
+
+    if (!customerId && !normalizedGuestPhone) {
       throw new BadRequestException({
         code: 'GUEST_PHONE_REQUIRED',
         message: 'Guest checkout requires guestPhone',
@@ -241,7 +246,7 @@ export class OrdersService {
       const order = manager.create(Order, {
         orderNumber: this.generateOrderNumber(),
         customerId: customerId ?? null,
-        guestPhone: guestPhone ?? null,
+        guestPhone: normalizedGuestPhone ?? null,
         guestName: guestName ?? null,
         guestEmail: guestEmail ?? null,
         status: OrderStatus.PENDING_PAYMENT,
@@ -250,7 +255,7 @@ export class OrdersService {
         discountAmount,
         total,
         notes,
-        paymentMethod: paymentMethod as PaymentMethod,
+        paymentMethod: normalizedPaymentMethod as PaymentMethod,
       });
 
       const savedOrder = await manager.save(order);
@@ -442,8 +447,10 @@ export class OrdersService {
   }
 
   async findByGuestPhone(guestPhone: string): Promise<Order[]> {
+    const lookupValues = guestPhoneLookupValues(guestPhone);
+
     return this.orderRepository.find({
-      where: { guestPhone },
+      where: { guestPhone: In(lookupValues) },
       relations: ['items', 'shippingAddress', 'storeShippings'],
       order: { createdAt: 'DESC' },
     });

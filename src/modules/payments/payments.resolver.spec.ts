@@ -16,6 +16,8 @@ describe('PaymentsResolver payment queries', () => {
     currency: 'THB',
     status: 'pending',
     paymentMethod: 'promptpay',
+    authorizeUri: 'https://example.com/authorize',
+    qrCodeUrl: 'https://example.com/qr.png',
   };
 
   beforeEach(() => {
@@ -49,8 +51,8 @@ describe('PaymentsResolver payment queries', () => {
         currency: 'THB',
         status: 'pending',
         paymentMethod: 'promptpay',
-        authorizeUri: null,
-        qrCodeUrl: null,
+        authorizeUri: 'https://example.com/authorize',
+        qrCodeUrl: 'https://example.com/qr.png',
       });
     });
 

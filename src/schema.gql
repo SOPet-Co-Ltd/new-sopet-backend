@@ -759,6 +759,8 @@ type PromotionValidationResult {
 }
 
 type Query {
+  activePlatformPromotions: [PromotionType!]!
+  activeStorePromotions(storeId: String!): [PromotionType!]!
   addresses: [SavedAddressType!]!
   adminCustomer(id: String!): AdminCustomerType!
   adminCustomers(limit: Int! = 20, page: Int! = 1, search: String): AdminCustomerConnection!

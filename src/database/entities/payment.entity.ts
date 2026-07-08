@@ -42,6 +42,12 @@ export class Payment {
   @Column({ name: 'status', type: 'varchar', length: 20, default: 'pending' })
   status: PaymentStatus;
 
+  @Column({ name: 'authorize_uri', type: 'varchar', length: 2048, nullable: true })
+  authorizeUri: string | null;
+
+  @Column({ name: 'qr_code_url', type: 'varchar', length: 2048, nullable: true })
+  qrCodeUrl: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
   createdAt: Date;
 

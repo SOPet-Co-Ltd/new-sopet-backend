@@ -14,6 +14,7 @@ import { SavedPaymentMethod } from '../../database/entities/saved-payment-method
 import { CreateChargeDto } from './dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { verifyOmiseWebhookSignature } from './omise-webhook.util';
+import { normalizeCheckoutPaymentMethod } from '../../common/utils/checkout-payment.util';
 
 interface OmiseCharge {
   id: string;
@@ -128,14 +129,33 @@ export class PaymentsService {
     const {
       orderId,
       amount,
-      paymentMethod,
+      paymentMethod: rawPaymentMethod,
       currency,
       omiseToken,
       savedPaymentMethodId,
       customerId,
     } = createChargeDto;
+    const paymentMethod = normalizeCheckoutPaymentMethod(rawPaymentMethod);
 
     const order = await this.assertCanPayForOrder(orderId, customerId);
+
+    if (paymentMethod === 'cod') {
+      const payment = this.paymentRepository.create({
+        orderId,
+        amount,
+        currency,
+        paymentMethod: paymentMethod as Payment['paymentMethod'],
+        status: 'pending',
+      });
+      await this.paymentRepository.save(payment);
+      return {
+        paymentId: payment.id,
+        status: 'pending',
+        amount,
+        currency,
+        paymentMethod,
+      };
+    }
 
     if (!this.omiseSecretKey) {
       throw new BadRequestException({
@@ -161,6 +181,8 @@ export class PaymentsService {
         amount,
         currency,
         paymentMethod,
+        authorizeUri: existingPayment.authorizeUri ?? undefined,
+        qrCodeUrl: existingPayment.qrCodeUrl ?? undefined,
       };
     }
 
@@ -210,19 +232,12 @@ export class PaymentsService {
       }
 
       chargeBody.card = cardToken;
-    } else if (paymentMethod === 'cod') {
-      payment.status = 'pending';
-      await this.paymentRepository.save(payment);
-      return {
-        paymentId: payment.id,
-        status: 'pending',
-        amount,
-        currency,
-        paymentMethod,
-      };
     }
 
     const charge = await this.omiseRequest<OmiseCharge>('/charges', chargeBody);
+
+    const authorizeUri = charge.authorize_uri ?? null;
+    const qrCodeUrl = charge.source?.scannable_code?.image?.download_uri ?? null;
 
     order.paymentReference = charge.id;
     await this.orderRepository.save(order);
@@ -231,6 +246,8 @@ export class PaymentsService {
       await this.markOrderPaid(order, payment, charge.id);
     } else {
       payment.status = charge.status === 'failed' ? 'failed' : 'pending';
+      payment.authorizeUri = authorizeUri;
+      payment.qrCodeUrl = qrCodeUrl;
       await this.paymentRepository.save(payment);
     }
 
@@ -240,8 +257,8 @@ export class PaymentsService {
       amount,
       currency,
       paymentMethod,
-      authorizeUri: charge.authorize_uri,
-      qrCodeUrl: charge.source?.scannable_code?.image?.download_uri,
+      authorizeUri: authorizeUri ?? undefined,
+      qrCodeUrl: qrCodeUrl ?? undefined,
     };
   }
 

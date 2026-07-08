@@ -24,9 +24,11 @@ export class SmsService {
     const tbKey = this.configService.get<string>('thaibulksms.apiKey');
     const tbSecret = this.configService.get<string>('thaibulksms.apiSecret');
     const tbSender = this.configService.get<string>('thaibulksms.sender') || 'SOPet';
+    const tbForce = this.configService.get<string>('thaibulksms.force') || 'corporate';
+    const tbShortenUrl = this.configService.get<boolean>('thaibulksms.shortenUrl') ?? false;
 
     if (tbKey && tbSecret) {
-      await this.sendThaiBulkSms(phone, message, tbKey, tbSecret, tbSender);
+      await this.sendThaiBulkSms(phone, message, tbKey, tbSecret, tbSender, tbForce, tbShortenUrl);
       return;
     }
 
@@ -60,6 +62,8 @@ export class SmsService {
     apiKey: string,
     apiSecret: string,
     sender: string,
+    force: string,
+    shortenUrl: boolean,
   ): Promise<void> {
     const msisdn = phone.replace(/^\+66/, '0').replace(/\D/g, '');
     const response = await fetch('https://api-v2.thaibulksms.com/sms', {
@@ -68,7 +72,13 @@ export class SmsService {
         Authorization: `Basic ${Buffer.from(`${apiKey}:${apiSecret}`).toString('base64')}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ msisdn, message, sender }),
+      body: JSON.stringify({
+        msisdn,
+        message,
+        sender,
+        force,
+        shorten_url: shortenUrl ? 'true' : 'false',
+      }),
     });
 
     if (!response.ok) {

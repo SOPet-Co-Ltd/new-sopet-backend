@@ -38,3 +38,16 @@ export function normalizeThaiPhoneToLocal(value: string | null | undefined): str
 
   return trimmed;
 }
+
+/** Accepted lookup values for legacy rows stored as E.164. */
+export function guestPhoneLookupValues(value: string): string[] {
+  const trimmed = value.trim();
+  const local = normalizeThaiPhoneToLocal(trimmed);
+  const variants = new Set<string>([local, trimmed].filter(Boolean));
+
+  if (local.startsWith('0') && local.length === 10) {
+    variants.add(`+66${local.slice(1)}`);
+  }
+
+  return [...variants];
+}

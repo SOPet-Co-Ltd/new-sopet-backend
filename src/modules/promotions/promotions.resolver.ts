@@ -51,6 +51,20 @@ export class PromotionsResolver {
   }
 
   @Query(() => [PromotionGraphqlType])
+  @Public()
+  async activeStorePromotions(@Args('storeId') storeId: string): Promise<PromotionGraphqlType[]> {
+    const promotions = await this.promotionsService.findActiveForStore(storeId);
+    return promotions.map(mapPromotion);
+  }
+
+  @Query(() => [PromotionGraphqlType])
+  @Public()
+  async activePlatformPromotions(): Promise<PromotionGraphqlType[]> {
+    const promotions = await this.promotionsService.findActive();
+    return promotions.map(mapPromotion);
+  }
+
+  @Query(() => [PromotionGraphqlType])
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('vendor')
   async storePromotions(

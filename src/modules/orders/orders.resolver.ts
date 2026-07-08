@@ -10,6 +10,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { CreateOrderInput, UpdateOrderStatusInput } from './orders.inputs';
 import { Order, OrderStatus } from '../../database/entities/order.entity';
+import { normalizeCheckoutPaymentMethod } from '../../common/utils/checkout-payment.util';
 
 function mapOrder(order: Order): OrderType {
   return {
@@ -175,7 +176,7 @@ export class OrdersResolver {
         guestName: input.guestName,
         guestEmail: input.guestEmail,
         notes: input.notes,
-        paymentMethod: input.paymentMethod as 'promptpay' | 'credit_card' | 'cod',
+        paymentMethod: normalizeCheckoutPaymentMethod(input.paymentMethod),
       },
       effectiveCustomerId,
     );

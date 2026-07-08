@@ -44,6 +44,22 @@ export class PromotionsService {
     });
   }
 
+  async findActiveForStore(storeId: string): Promise<Promotion[]> {
+    const now = new Date();
+
+    return this.promotionRepository
+      .createQueryBuilder('promotion')
+      .where('promotion.is_active = true')
+      .andWhere('promotion.deleted_at IS NULL')
+      .andWhere('promotion.scope = :store', { store: PromotionScope.STORE })
+      .andWhere('promotion.store_id = :storeId', { storeId })
+      .andWhere('(promotion.starts_at IS NULL OR promotion.starts_at <= :now)', { now })
+      .andWhere('(promotion.expires_at IS NULL OR promotion.expires_at >= :now)', { now })
+      .orderBy('promotion.priority', 'DESC')
+      .addOrderBy('promotion.created_at', 'DESC')
+      .getMany();
+  }
+
   async findPlatform(): Promise<Promotion[]> {
     return this.promotionRepository.find({
       where: { scope: PromotionScope.PLATFORM, deletedAt: IsNull() },

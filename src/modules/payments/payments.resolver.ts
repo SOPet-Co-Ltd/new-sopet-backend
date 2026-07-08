@@ -6,6 +6,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { CurrentUser, Public, Roles } from '../../common/decorators';
 import { CreatePaymentInput } from './payments.inputs';
+import { normalizeCheckoutPaymentMethod } from '../../common/utils/checkout-payment.util';
 
 @Resolver()
 export class PaymentsResolver {
@@ -18,6 +19,8 @@ export class PaymentsResolver {
     currency: string;
     status: string;
     paymentMethod: string;
+    authorizeUri?: string | null;
+    qrCodeUrl?: string | null;
   }): PaymentType {
     return {
       id: payment.id,
@@ -26,8 +29,8 @@ export class PaymentsResolver {
       currency: payment.currency,
       status: payment.status,
       paymentMethod: payment.paymentMethod,
-      authorizeUri: null,
-      qrCodeUrl: null,
+      authorizeUri: payment.authorizeUri ?? null,
+      qrCodeUrl: payment.qrCodeUrl ?? null,
     };
   }
 
@@ -68,7 +71,7 @@ export class PaymentsResolver {
       orderId: input.orderId,
       amount: input.amount,
       currency: input.currency,
-      paymentMethod: input.paymentMethod as 'promptpay' | 'credit_card' | 'cod',
+      paymentMethod: normalizeCheckoutPaymentMethod(input.paymentMethod),
       omiseToken: input.omiseToken,
       savedPaymentMethodId: input.savedPaymentMethodId,
       customerId: effectiveCustomerId,
@@ -80,7 +83,7 @@ export class PaymentsResolver {
       amount: input.amount,
       currency: input.currency,
       status: result.status,
-      paymentMethod: input.paymentMethod,
+      paymentMethod: normalizeCheckoutPaymentMethod(input.paymentMethod),
       authorizeUri: result.authorizeUri ?? null,
       qrCodeUrl: result.qrCodeUrl ?? null,
     };
