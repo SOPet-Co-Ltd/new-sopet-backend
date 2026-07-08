@@ -14,9 +14,11 @@ import { OtpCode } from '../../database/entities/otp-code.entity';
 import { Store } from '../../database/entities/store.entity';
 import { StoreMember } from '../../database/entities/store-member.entity';
 import { PasswordResetToken } from '../../database/entities/password-reset-token.entity';
+import { CustomerRepository } from '../../database/repositories/customer.repository';
 import { EmailModule } from '../email/email.module';
 import { SmsModule } from '../sms/sms.module';
 import { CartModule } from '../cart/cart.module';
+import { GuestOrderLinkModule } from '../orders/guest-order-link.module';
 import { RedisModule } from '../redis/redis.module';
 import { AuthRateLimitGuard } from './guards/auth-rate-limit.guard';
 
@@ -26,6 +28,7 @@ import { AuthRateLimitGuard } from './guards/auth-rate-limit.guard';
     EmailModule,
     SmsModule,
     CartModule,
+    GuestOrderLinkModule,
     RedisModule,
     PassportModule,
     JwtModule.registerAsync({
@@ -39,7 +42,15 @@ import { AuthRateLimitGuard } from './guards/auth-rate-limit.guard';
       inject: [ConfigService],
     }),
   ],
-  providers: [AuthService, JwtStrategy, JwtAuthGuard, RolesGuard, AuthRateLimitGuard, AuthResolver],
+  providers: [
+    AuthService,
+    JwtStrategy,
+    JwtAuthGuard,
+    RolesGuard,
+    AuthRateLimitGuard,
+    AuthResolver,
+    CustomerRepository,
+  ],
   exports: [AuthService, JwtAuthGuard, RolesGuard, AuthRateLimitGuard, JwtModule],
 })
 export class AuthModule {}

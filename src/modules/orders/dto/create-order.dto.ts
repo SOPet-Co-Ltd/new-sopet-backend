@@ -56,7 +56,7 @@ export class ShippingAddressDto {
   @IsString()
   recipientName: string;
 
-  @ApiProperty({ description: 'Recipient phone number', example: '+66812345678' })
+  @ApiProperty({ description: 'Recipient phone number (local format)', example: '0812345678' })
   @IsNotEmpty()
   @IsString()
   recipientPhone: string;
@@ -173,7 +173,10 @@ export class CreateOrderDto {
   @Type(() => StoreShippingSelectionDto)
   storeShipping?: StoreShippingSelectionDto[];
 
-  @ApiPropertyOptional({ description: 'Guest phone (required for guest checkout)' })
+  @ApiPropertyOptional({
+    description: 'Guest phone in local format (required for guest checkout)',
+    example: '0812345678',
+  })
   @IsOptional()
   @IsString()
   guestPhone?: string;

@@ -11,8 +11,10 @@ import { OtpCode } from '../../database/entities/otp-code.entity';
 import { Store, StoreStatus } from '../../database/entities/store.entity';
 import { StoreMember } from '../../database/entities/store-member.entity';
 import { PasswordResetToken } from '../../database/entities/password-reset-token.entity';
+import { CustomerRepository } from '../../database/repositories/customer.repository';
 import { SmsService } from '../sms/sms.service';
 import { CartService } from '../cart/cart.service';
+import { GuestOrderLinkService } from '../orders/guest-order-link.service';
 import { EmailDeliveryService } from '../email/email-delivery.service';
 
 describe('AuthService', () => {
@@ -43,6 +45,8 @@ describe('AuthService', () => {
   };
   const smsService = { sendOtp: jest.fn() };
   const cartService = { mergeGuestCart: jest.fn() };
+  const guestOrderLinkService = { mergeGuestOrders: jest.fn() };
+  const customerRepoWrapper = { findActiveByPhone: jest.fn() };
   const storeRepo = {
     findOne: jest.fn().mockResolvedValue({ id: 'store-1' }),
     find: jest.fn().mockResolvedValue([]),
@@ -58,6 +62,7 @@ describe('AuthService', () => {
       providers: [
         AuthService,
         { provide: getRepositoryToken(Customer), useValue: customerRepo },
+        { provide: CustomerRepository, useValue: customerRepoWrapper },
         { provide: getRepositoryToken(User), useValue: userRepo },
         { provide: getRepositoryToken(OtpCode), useValue: otpRepo },
         { provide: getRepositoryToken(Store), useValue: storeRepo },
@@ -67,6 +72,7 @@ describe('AuthService', () => {
         { provide: ConfigService, useValue: configService },
         { provide: SmsService, useValue: smsService },
         { provide: CartService, useValue: cartService },
+        { provide: GuestOrderLinkService, useValue: guestOrderLinkService },
         { provide: EmailDeliveryService, useValue: { sendPasswordReset: jest.fn() } },
       ],
     }).compile();
@@ -94,7 +100,7 @@ describe('AuthService', () => {
   it('verifies OTP and returns tokens', async () => {
     const otp = { phone: '+66812345678', code: '123456', isUsed: false };
     otpRepo.findOne.mockResolvedValue(otp);
-    customerRepo.findOne.mockResolvedValue({
+    customerRepoWrapper.findActiveByPhone.mockResolvedValue({
       id: 'cust-1',
       phone: '+66812345678',
       fullName: 'Test',
@@ -111,6 +117,7 @@ describe('AuthService', () => {
     expect(result.accessToken).toBe('token-access');
     expect(result.refreshToken).toBe('token-refresh');
     expect(cartService.mergeGuestCart).toHaveBeenCalledWith('cust-1', 'session-1');
+    expect(guestOrderLinkService.mergeGuestOrders).toHaveBeenCalledWith('cust-1', '0812345678');
   });
 
   it('rejects invalid OTP', async () => {
@@ -127,7 +134,7 @@ describe('AuthService', () => {
       code: '123456',
       isUsed: false,
     });
-    customerRepo.findOne.mockResolvedValue({
+    customerRepoWrapper.findActiveByPhone.mockResolvedValue({
       id: 'cust-1',
       phone: '+66812345678',
       isActive: false,
@@ -146,7 +153,7 @@ describe('AuthService', () => {
       code: '123456',
       isUsed: false,
     });
-    customerRepo.findOne.mockResolvedValue({
+    customerRepoWrapper.findActiveByPhone.mockResolvedValue({
       id: 'cust-1',
       phone: '+66812345678',
       fullName: 'Test',
@@ -170,7 +177,7 @@ describe('AuthService', () => {
       code: '123456',
       isUsed: false,
     });
-    customerRepo.findOne.mockResolvedValue({
+    customerRepoWrapper.findActiveByPhone.mockResolvedValue({
       id: 'cust-1',
       phone: '+66812345678',
       isActive: false,
@@ -278,7 +285,7 @@ describe('AuthService', () => {
 
   it('creates customer on first OTP verify with local-format phone', async () => {
     otpRepo.findOne.mockResolvedValue({ phone: '0811112222', code: '111111', isUsed: false });
-    customerRepo.findOne.mockResolvedValue(null);
+    customerRepoWrapper.findActiveByPhone.mockResolvedValue(null);
 
     const result = await service.verifyOtp({ phone: '0811112222', code: '111111' });
 
@@ -288,7 +295,7 @@ describe('AuthService', () => {
 
   it('normalizes +66 phone to local format on OTP verify', async () => {
     otpRepo.findOne.mockResolvedValue({ phone: '0811112222', code: '111111', isUsed: false });
-    customerRepo.findOne.mockResolvedValue(null);
+    customerRepoWrapper.findActiveByPhone.mockResolvedValue(null);
 
     const result = await service.verifyOtp({ phone: '+66811112222', code: '111111' });
 

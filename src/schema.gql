@@ -138,6 +138,11 @@ type CategoryType {
   updatedAt: DateTime!
 }
 
+input ChangeCustomerPhoneInput {
+  code: String!
+  phone: String!
+}
+
 input ChangePasswordInput {
   currentPassword: String!
   newPassword: String!
@@ -408,6 +413,7 @@ type Mutation {
   approveStoreReactivationRequest(id: String!): StoreReactivationRequestType!
   approveStoreRequest(id: String!): StoreRequestType!
   approveTag(id: String!): TagType!
+  changeCustomerPhone(input: ChangeCustomerPhoneInput!): CustomerAuthPayload!
   changePassword(input: ChangePasswordInput!): MessagePayload!
   createAddress(input: CreateAddressInput!): SavedAddressType!
   createCategory(input: CreateCategoryInput!): CategoryType!

@@ -3,9 +3,10 @@ import {
   NotFoundException,
   BadRequestException,
   UnauthorizedException,
+  ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, MoreThan } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { Customer } from '../../database/entities/customer.entity';
@@ -15,6 +16,9 @@ import {
   PaymentMethodType,
 } from '../../database/entities/saved-payment-method.entity';
 import { CustomerRepository } from '../../database/repositories/customer.repository';
+import { OtpCode } from '../../database/entities/otp-code.entity';
+import { OrdersService } from '../orders/orders.service';
+import { normalizeThaiPhoneToLocal } from '../../common/utils/phone.util';
 import { UpdateProfileDto, CreateAddressDto, UpdateAddressDto } from './dto';
 import { JwtPayload } from '../../common/interfaces';
 import { isPendingDeletion, isDeletionRetentionExpired } from '../customers/customer-deletion.util';
@@ -33,7 +37,10 @@ export class UsersService {
     private addressRepository: Repository<SavedAddress>,
     @InjectRepository(SavedPaymentMethod)
     private paymentMethodRepository: Repository<SavedPaymentMethod>,
+    @InjectRepository(OtpCode)
+    private otpRepository: Repository<OtpCode>,
     private readonly customerRepo: CustomerRepository,
+    private readonly ordersService: OrdersService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
   ) {}
@@ -72,6 +79,78 @@ export class UsersService {
     return this.customerRepository.save(customer);
   }
 
+  async changeCustomerPhone(
+    customerId: string,
+    newPhone: string,
+    code: string,
+  ): Promise<{
+    accessToken: string;
+    refreshToken: string;
+    customer: Customer;
+  }> {
+    const normalizedNewPhone = normalizeThaiPhoneToLocal(newPhone);
+
+    const customer = await this.customerRepository.findOne({
+      where: { id: customerId },
+    });
+
+    if (!customer) {
+      throw new NotFoundException({
+        code: 'CUSTOMER_NOT_FOUND',
+        message: 'Customer not found',
+      });
+    }
+
+    if (normalizedNewPhone === normalizeThaiPhoneToLocal(customer.phone)) {
+      throw new BadRequestException({
+        code: 'PHONE_UNCHANGED',
+        message: 'New phone number is the same as the current phone number',
+      });
+    }
+
+    const existing = await this.customerRepo.findOtherActiveByPhone(normalizedNewPhone, customerId);
+    if (existing) {
+      throw new ConflictException({
+        code: 'PHONE_ALREADY_EXISTS',
+        message: 'Phone number is already in use',
+      });
+    }
+
+    const otp = await this.otpRepository.findOne({
+      where: {
+        phone: normalizedNewPhone,
+        code,
+        isUsed: false,
+        expiresAt: MoreThan(new Date()),
+      },
+    });
+
+    if (!otp) {
+      throw new UnauthorizedException({
+        code: 'INVALID_OTP',
+        message: 'Invalid or expired OTP code',
+      });
+    }
+
+    otp.isUsed = true;
+    await this.otpRepository.save(otp);
+
+    const oldPhone = customer.phone;
+    customer.phone = normalizedNewPhone;
+    await this.customerRepository.save(customer);
+
+    await this.ordersService.mergeGuestOrders(customerId, oldPhone);
+    await this.ordersService.mergeGuestOrders(customerId, normalizedNewPhone);
+
+    const { accessToken, refreshToken } = await this.generateTokens({
+      sub: customer.id,
+      phone: customer.phone,
+      role: 'customer',
+    });
+
+    return { accessToken, refreshToken, customer };
+  }
+
   // Get all saved addresses
   async getAddresses(customerId: string): Promise<SavedAddress[]> {
     return this.addressRepository.find({
@@ -102,7 +181,7 @@ export class UsersService {
       customerId,
       label: createAddressDto.label,
       fullName: createAddressDto.recipientName,
-      phone: createAddressDto.recipientPhone,
+      phone: normalizeThaiPhoneToLocal(createAddressDto.recipientPhone),
       addressLine1: createAddressDto.addressLine1,
       addressLine2: createAddressDto.addressLine2 ?? null,
       tumbon: createAddressDto.tumbon ?? null,
@@ -143,7 +222,9 @@ export class UsersService {
     Object.assign(address, {
       ...updateAddressDto,
       fullName: updateAddressDto.recipientName ?? address.fullName,
-      phone: updateAddressDto.recipientPhone ?? address.phone,
+      phone: updateAddressDto.recipientPhone
+        ? normalizeThaiPhoneToLocal(updateAddressDto.recipientPhone)
+        : address.phone,
       addressLine1: updateAddressDto.addressLine1 ?? address.addressLine1,
       addressLine2:
         updateAddressDto.addressLine2 !== undefined

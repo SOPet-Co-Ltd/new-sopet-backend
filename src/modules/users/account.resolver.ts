@@ -18,6 +18,7 @@ import {
   UpdateAddressInput,
   UpdateProfileInput,
   AddPaymentMethodInput,
+  ChangeCustomerPhoneInput,
 } from './account.inputs';
 import { ReactivateAccountInput } from '../auth/auth.inputs';
 import { Field, InputType } from '@nestjs/graphql';
@@ -80,6 +81,30 @@ export class AccountResolver {
       phone: customer.phone,
       fullName: customer.fullName,
       email: customer.email,
+    };
+  }
+
+  @Mutation(() => CustomerAuthPayload)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('customer')
+  async changeCustomerPhone(
+    @CurrentUser('id') customerId: string,
+    @Args('input') input: ChangeCustomerPhoneInput,
+  ): Promise<CustomerAuthPayload> {
+    const result = await this.usersService.changeCustomerPhone(customerId, input.phone, input.code);
+
+    return {
+      tokens: {
+        accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
+      },
+      customer: {
+        id: result.customer.id,
+        phone: result.customer.phone,
+        fullName: result.customer.fullName,
+        email: result.customer.email,
+      },
+      pendingDeletion: false,
     };
   }
 

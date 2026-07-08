@@ -4,13 +4,14 @@ import { OrderStatus } from '../../database/entities/order.entity';
 
 describe('OrdersService', () => {
   let service: OrdersService;
-  let orderRepository: { findOne: jest.Mock; find: jest.Mock };
+  let orderRepository: { findOne: jest.Mock; find: jest.Mock; update: jest.Mock };
   let savedAddressRepository: { findOne: jest.Mock };
   let variantRepository: { findOne: jest.Mock };
   let shippingOptionRepository: { findOne: jest.Mock };
   let dataSource: { transaction: jest.Mock };
   let notificationsService: { notifyOrderStatusChanged: jest.Mock };
   let promotionsService: { applyStackedPromotions: jest.Mock };
+  let guestOrderLinkService: { mergeGuestOrders: jest.Mock };
   let mockManager: {
     create: jest.Mock;
     save: jest.Mock;
@@ -37,7 +38,7 @@ describe('OrdersService', () => {
   };
 
   beforeEach(() => {
-    orderRepository = { findOne: jest.fn(), find: jest.fn() };
+    orderRepository = { findOne: jest.fn(), find: jest.fn(), update: jest.fn() };
     savedAddressRepository = { findOne: jest.fn() };
     variantRepository = { findOne: jest.fn() };
     shippingOptionRepository = { findOne: jest.fn() };
@@ -46,6 +47,7 @@ describe('OrdersService', () => {
       notifyVendorAboutNewOrder: jest.fn().mockResolvedValue(undefined),
     };
     promotionsService = { applyStackedPromotions: jest.fn() };
+    guestOrderLinkService = { mergeGuestOrders: jest.fn() };
 
     mockManager = {
       create: jest.fn((_entity, data) => ({ ...data })),
@@ -73,6 +75,7 @@ describe('OrdersService', () => {
       dataSource as never,
       notificationsService as never,
       promotionsService as never,
+      guestOrderLinkService as never,
     );
   });
 
@@ -189,6 +192,15 @@ describe('OrdersService', () => {
 
     const orders = await service.findByCustomer('cust-1');
     expect(orders).toHaveLength(1);
+  });
+
+  it('links guest orders to customer by phone', async () => {
+    guestOrderLinkService.mergeGuestOrders.mockResolvedValue(2);
+
+    const linked = await service.mergeGuestOrders('cust-1', '+66812345678');
+
+    expect(linked).toBe(2);
+    expect(guestOrderLinkService.mergeGuestOrders).toHaveBeenCalledWith('cust-1', '+66812345678');
   });
 
   it('updates order status and notifies', async () => {

@@ -19,6 +19,7 @@ import {
 import { CreateOrderDto, ShippingAddressDto } from './dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PromotionsService } from '../promotions/promotions.service';
+import { GuestOrderLinkService } from './guest-order-link.service';
 import { Store } from '../../database/entities/store.entity';
 import { normalizeCheckoutPaymentMethod } from '../../common/utils/checkout-payment.util';
 import { guestPhoneLookupValues, normalizeThaiPhoneToLocal } from '../../common/utils/phone.util';
@@ -46,6 +47,7 @@ export class OrdersService {
     private dataSource: DataSource,
     private notificationsService: NotificationsService,
     private promotionsService: PromotionsService,
+    private guestOrderLinkService: GuestOrderLinkService,
     @InjectRepository(Store)
     private storeRepository: Repository<Store>,
   ) {}
@@ -116,7 +118,7 @@ export class OrdersService {
     return {
       savedAddressId: null,
       fullName: shippingAddress!.recipientName,
-      phone: shippingAddress!.recipientPhone,
+      phone: normalizeThaiPhoneToLocal(shippingAddress!.recipientPhone),
       addressLine1: shippingAddress!.addressLine1,
       addressLine2: shippingAddress!.addressLine2 ?? null,
       tumbon: shippingAddress!.tumbon ?? null,
@@ -454,6 +456,10 @@ export class OrdersService {
       relations: ['items', 'shippingAddress', 'storeShippings'],
       order: { createdAt: 'DESC' },
     });
+  }
+
+  async mergeGuestOrders(customerId: string, phone: string): Promise<number> {
+    return this.guestOrderLinkService.mergeGuestOrders(customerId, phone);
   }
 
   async findByStore(storeId: string): Promise<Order[]> {

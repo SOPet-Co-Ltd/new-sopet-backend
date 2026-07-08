@@ -181,3 +181,17 @@ export class AddPaymentMethodInput {
   @IsBoolean()
   isDefault?: boolean;
 }
+
+@InputType()
+export class ChangeCustomerPhoneInput {
+  @Field()
+  @IsNotEmpty()
+  @IsString()
+  phone: string;
+
+  @Field()
+  @IsNotEmpty()
+  @IsString()
+  @Length(6, 6)
+  code: string;
+}

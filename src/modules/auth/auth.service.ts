@@ -19,11 +19,13 @@ import { StoreMember } from '../../database/entities/store-member.entity';
 import { pickDefaultAccessibleStoreId } from '../stores/store-selection.util';
 import { OtpCode } from '../../database/entities/otp-code.entity';
 import { PasswordResetToken } from '../../database/entities/password-reset-token.entity';
+import { CustomerRepository } from '../../database/repositories/customer.repository';
 import { SendOtpDto, VerifyOtpDto, LoginDto } from './dto';
 import { JwtPayload } from '../../common/interfaces';
 import { normalizeThaiPhoneToLocal } from '../../common/utils/phone.util';
 import { SmsService } from '../sms/sms.service';
 import { CartService } from '../cart/cart.service';
+import { GuestOrderLinkService } from '../orders/guest-order-link.service';
 import { EmailDeliveryService } from '../email/email-delivery.service';
 import {
   finalizeCustomerDeletion,
@@ -44,6 +46,7 @@ export class AuthService {
   constructor(
     @InjectRepository(Customer)
     private customerRepository: Repository<Customer>,
+    private readonly customerRepo: CustomerRepository,
     @InjectRepository(User)
     private userRepository: Repository<User>,
     @InjectRepository(OtpCode)
@@ -58,6 +61,7 @@ export class AuthService {
     private configService: ConfigService,
     private smsService: SmsService,
     private cartService: CartService,
+    private guestOrderLinkService: GuestOrderLinkService,
     private emailDeliveryService: EmailDeliveryService,
   ) {}
 
@@ -137,7 +141,7 @@ export class AuthService {
     await this.otpRepository.save(otp);
 
     // Find or create customer
-    let customer = await this.customerRepository.findOne({ where: { phone } });
+    let customer = await this.customerRepo.findActiveByPhone(phone);
 
     if (customer) {
       if (!customer.isActive) {
@@ -193,6 +197,8 @@ export class AuthService {
     if (sessionId) {
       await this.cartService.mergeGuestCart(customer.id, sessionId);
     }
+
+    await this.guestOrderLinkService.mergeGuestOrders(customer.id, phone);
 
     return {
       accessToken,

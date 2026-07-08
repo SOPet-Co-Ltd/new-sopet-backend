@@ -1,8 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, IsNull } from 'typeorm';
+import { Repository, IsNull, In } from 'typeorm';
 import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import { Customer } from '../entities/customer.entity';
+import { guestPhoneLookupValues, normalizeThaiPhoneToLocal } from '../../common/utils/phone.util';
 
 @Injectable()
 export class CustomerRepository {
@@ -11,10 +12,30 @@ export class CustomerRepository {
     private readonly repository: Repository<Customer>,
   ) {}
 
-  async findByPhone(phone: string): Promise<Customer | null> {
+  async findActiveByPhone(phone: string): Promise<Customer | null> {
+    const lookupValues = guestPhoneLookupValues(normalizeThaiPhoneToLocal(phone));
+    if (lookupValues.length === 0) {
+      return null;
+    }
+
     return this.repository.findOne({
-      where: { phone, deletedAt: IsNull() },
+      where: {
+        phone: In(lookupValues),
+        deletedAt: IsNull(),
+      },
     });
+  }
+
+  async findOtherActiveByPhone(phone: string, excludeCustomerId: string): Promise<Customer | null> {
+    const existing = await this.findActiveByPhone(phone);
+    if (!existing || existing.id === excludeCustomerId) {
+      return null;
+    }
+    return existing;
+  }
+
+  async findByPhone(phone: string): Promise<Customer | null> {
+    return this.findActiveByPhone(phone);
   }
 
   async findById(id: string): Promise<Customer | null> {
@@ -38,7 +59,8 @@ export class CustomerRepository {
   }
 
   async createOrUpdate(phone: string, data: Partial<Customer>): Promise<Customer> {
-    const existing = await this.findByPhone(phone);
+    const normalizedPhone = normalizeThaiPhoneToLocal(phone);
+    const existing = await this.findActiveByPhone(normalizedPhone);
 
     if (existing) {
       await this.repository.update(existing.id, data as QueryDeepPartialEntity<Customer>);
@@ -47,7 +69,7 @@ export class CustomerRepository {
     }
 
     const customer = this.repository.create({
-      phone,
+      phone: normalizedPhone,
       ...data,
     });
 

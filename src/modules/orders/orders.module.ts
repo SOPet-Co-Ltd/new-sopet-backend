@@ -19,10 +19,12 @@ import { Store } from '../../database/entities/store.entity';
 import { StoreMember } from '../../database/entities/store-member.entity';
 import { User } from '../../database/entities/user.entity';
 import { OrdersResolver } from './orders.resolver';
+import { GuestOrderLinkModule } from './guest-order-link.module';
 
 @Module({
   imports: [
     AuthModule,
+    GuestOrderLinkModule,
     ProductsModule,
     PromotionsModule,
     NotificationsModule,

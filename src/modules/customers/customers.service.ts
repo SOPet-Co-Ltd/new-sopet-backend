@@ -10,6 +10,9 @@ import { Customer } from '../../database/entities/customer.entity';
 import { OrderItem } from '../../database/entities/order-item.entity';
 import { PaginatedResponse } from '../../common/interfaces';
 import { UpdateCustomerAsAdminInput } from './customers.inputs';
+import { OrdersService } from '../orders/orders.service';
+import { CustomerRepository } from '../../database/repositories/customer.repository';
+import { normalizeThaiPhoneToLocal } from '../../common/utils/phone.util';
 
 @Injectable()
 export class CustomersService {
@@ -18,6 +21,8 @@ export class CustomersService {
     private readonly customerRepository: Repository<Customer>,
     @InjectRepository(OrderItem)
     private readonly orderItemRepository: Repository<OrderItem>,
+    private readonly ordersService: OrdersService,
+    private readonly customerRepo: CustomerRepository,
   ) {}
 
   async findAllForAdmin(
@@ -69,18 +74,25 @@ export class CustomersService {
 
   async updateAsAdmin(input: UpdateCustomerAsAdminInput): Promise<Customer> {
     const customer = await this.findByIdForAdmin(input.id);
+    const oldPhone = customer.phone;
+    let phoneChanged = false;
 
-    if (input.phone !== undefined && input.phone !== customer.phone) {
-      const existing = await this.customerRepository.findOne({
-        where: { phone: input.phone },
-      });
-      if (existing && existing.id !== customer.id) {
-        throw new ConflictException({
-          code: 'PHONE_ALREADY_EXISTS',
-          message: 'Phone number is already in use',
-        });
+    if (input.phone !== undefined) {
+      const normalizedPhone = normalizeThaiPhoneToLocal(input.phone);
+      if (normalizedPhone !== normalizeThaiPhoneToLocal(customer.phone)) {
+        const existing = await this.customerRepo.findOtherActiveByPhone(
+          normalizedPhone,
+          customer.id,
+        );
+        if (existing) {
+          throw new ConflictException({
+            code: 'PHONE_ALREADY_EXISTS',
+            message: 'Phone number is already in use',
+          });
+        }
+        customer.phone = normalizedPhone;
+        phoneChanged = true;
       }
-      customer.phone = input.phone;
     }
 
     if (input.fullName !== undefined) {
@@ -93,7 +105,14 @@ export class CustomersService {
       customer.dateOfBirth = input.dateOfBirth;
     }
 
-    return this.customerRepository.save(customer);
+    const saved = await this.customerRepository.save(customer);
+
+    if (phoneChanged) {
+      await this.ordersService.mergeGuestOrders(saved.id, oldPhone);
+      await this.ordersService.mergeGuestOrders(saved.id, saved.phone);
+    }
+
+    return saved;
   }
 
   async setActive(id: string, isActive: boolean): Promise<Customer> {

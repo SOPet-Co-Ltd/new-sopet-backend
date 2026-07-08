@@ -1,10 +1,12 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
+import { OrdersModule } from '../orders/orders.module';
 import { UsersService } from './users.service';
 import { Customer } from '../../database/entities/customer.entity';
 import { SavedAddress } from '../../database/entities/saved-address.entity';
 import { SavedPaymentMethod } from '../../database/entities/saved-payment-method.entity';
+import { OtpCode } from '../../database/entities/otp-code.entity';
 import { Favorite } from '../../database/entities/favorite.entity';
 import { Product } from '../../database/entities/product.entity';
 import { FavoritesService } from './favorites.service';
@@ -14,7 +16,15 @@ import { CustomerRepository } from '../../database/repositories/customer.reposit
 @Module({
   imports: [
     AuthModule,
-    TypeOrmModule.forFeature([Customer, SavedAddress, SavedPaymentMethod, Favorite, Product]),
+    OrdersModule,
+    TypeOrmModule.forFeature([
+      Customer,
+      SavedAddress,
+      SavedPaymentMethod,
+      Favorite,
+      Product,
+      OtpCode,
+    ]),
   ],
   providers: [UsersService, FavoritesService, AccountResolver, CustomerRepository],
   exports: [UsersService, FavoritesService],

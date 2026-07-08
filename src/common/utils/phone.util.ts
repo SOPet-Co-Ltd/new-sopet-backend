@@ -20,8 +20,8 @@ function getThaiSubscriber(value: string): string {
 }
 
 /**
- * Normalize a Thai phone number to local `0`-leading format (e.g. `+66812345678` -> `0812345678`).
- * Non-Thai or unrecognizable values are returned trimmed and unchanged.
+ * Normalize a Thai phone number to local `0`-leading format (e.g. `0812345678`).
+ * Accepts common input variants (+66, 66, dashes) but always returns local format.
  */
 export function normalizeThaiPhoneToLocal(value: string | null | undefined): string {
   const trimmed = String(value ?? '').trim();
@@ -39,12 +39,13 @@ export function normalizeThaiPhoneToLocal(value: string | null | undefined): str
   return trimmed;
 }
 
-/** Accepted lookup values for legacy rows stored as E.164. */
+/** Lookup values for phone fields. Returns local format; includes legacy +66 rows when present. */
 export function guestPhoneLookupValues(value: string): string[] {
   const trimmed = value.trim();
   const local = normalizeThaiPhoneToLocal(trimmed);
-  const variants = new Set<string>([local, trimmed].filter(Boolean));
+  const variants = new Set<string>([local].filter(Boolean));
 
+  // Match legacy rows stored as E.164 before local-only normalization.
   if (local.startsWith('0') && local.length === 10) {
     variants.add(`+66${local.slice(1)}`);
   }

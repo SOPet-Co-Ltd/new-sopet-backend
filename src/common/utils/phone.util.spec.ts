@@ -28,9 +28,13 @@ describe('normalizeThaiPhoneToLocal', () => {
 });
 
 describe('guestPhoneLookupValues', () => {
-  it('includes local and legacy E.164 variants for Thai numbers', () => {
+  it('returns local format and legacy E.164 variant for database lookups', () => {
     expect(guestPhoneLookupValues('0812345678')).toEqual(
       expect.arrayContaining(['0812345678', '+66812345678']),
     );
+  });
+
+  it('does not include raw non-local input when different from normalized local', () => {
+    expect(guestPhoneLookupValues('+66812345678')).toEqual(['0812345678', '+66812345678']);
   });
 });
