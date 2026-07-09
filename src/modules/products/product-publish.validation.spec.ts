@@ -8,6 +8,7 @@ function buildProduct(overrides: Record<string, unknown> = {}) {
     basePrice: 299,
     status: ProductStatus.DRAFT,
     categoryId: 'cat-1',
+    petTypeId: 'pet-1',
     images: [{ id: 'img-1', url: 'https://example.com/a.jpg' }],
     variants: [
       {
@@ -33,6 +34,7 @@ describe('getProductPublishChecklist', () => {
       buildProduct({
         name: '  ',
         categoryId: null,
+        petTypeId: null,
         images: [],
         variants: [],
         basePrice: 0,
@@ -41,7 +43,15 @@ describe('getProductPublishChecklist', () => {
 
     expect(checklist.canPublish).toBe(false);
     expect(checklist.missingKeys).toEqual(
-      expect.arrayContaining(['name', 'media', 'category', 'variants', 'price', 'stock']),
+      expect.arrayContaining([
+        'name',
+        'media',
+        'category',
+        'petType',
+        'variants',
+        'price',
+        'stock',
+      ]),
     );
   });
 

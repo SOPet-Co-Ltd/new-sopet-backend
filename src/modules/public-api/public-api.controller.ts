@@ -26,6 +26,8 @@ export class PublicApiController {
       expiryDate: dto.expiryDate,
       category: dto.category,
       tags: dto.tags,
+      petType: dto.petType,
+      brand: dto.brand,
       variants: dto.variants.map((group) => ({
         name: group.name,
         values: group.values,

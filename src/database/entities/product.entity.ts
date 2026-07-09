@@ -20,6 +20,8 @@ import { Review } from './review.entity';
 import { Favorite } from './favorite.entity';
 import { Category } from './category.entity';
 import { Tag } from './tag.entity';
+import { PetType } from './pet-type.entity';
+import { Brand } from './brand.entity';
 
 export enum ProductStatus {
   DRAFT = 'draft',
@@ -83,6 +85,14 @@ export class Product {
   @Column({ name: 'category_id', type: 'uuid', nullable: true })
   @IsOptional()
   categoryId: string | null;
+
+  @Column({ name: 'pet_type_id', type: 'uuid', nullable: true })
+  @IsOptional()
+  petTypeId: string | null;
+
+  @Column({ name: 'brand_id', type: 'uuid', nullable: true })
+  @IsOptional()
+  brandId: string | null;
 
   /** Legacy category label kept for backward compatibility. */
   @Column({ name: 'category', type: 'varchar', length: 100, nullable: true })
@@ -149,6 +159,14 @@ export class Product {
   @ManyToOne(() => Category, (category) => category.products, { nullable: true })
   @JoinColumn({ name: 'category_id' })
   categoryRelation: Category | null;
+
+  @ManyToOne(() => PetType, (petType) => petType.products, { nullable: true })
+  @JoinColumn({ name: 'pet_type_id' })
+  petTypeRelation: PetType | null;
+
+  @ManyToOne(() => Brand, (brand) => brand.products, { nullable: true })
+  @JoinColumn({ name: 'brand_id' })
+  brandRelation: Brand | null;
 
   @ManyToMany(() => Tag, (tag) => tag.products)
   @JoinTable({

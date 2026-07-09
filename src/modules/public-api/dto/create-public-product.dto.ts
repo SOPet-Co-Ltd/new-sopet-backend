@@ -153,6 +153,30 @@ export class CreatePublicProductDto {
   @IsString({ each: true })
   tags?: string[];
 
+  @ApiPropertyOptional({
+    description:
+      'Pet type name (ชื่อประเภทสัตว์เลี้ยง). Must already exist and be approved; matched case-insensitively.',
+    example: 'แมว',
+    minLength: 1,
+    maxLength: 100,
+  })
+  @IsOptional()
+  @IsString()
+  @Length(1, 100)
+  petType?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Brand name (ชื่อแบรนด์). Must already exist and be approved; matched case-insensitively.',
+    example: 'Royal Canin',
+    minLength: 1,
+    maxLength: 100,
+  })
+  @IsOptional()
+  @IsString()
+  @Length(1, 100)
+  brand?: string;
+
   @ApiProperty({
     description:
       'Variant option groups (parent variants). At least one is required. Each declares a dimension and its values, not sku/stock/price.',

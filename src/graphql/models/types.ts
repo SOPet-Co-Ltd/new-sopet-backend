@@ -197,6 +197,12 @@ export class ProductType {
   @Field(() => String, { nullable: true })
   categoryId?: string | null;
 
+  @Field(() => String, { nullable: true })
+  petTypeId?: string | null;
+
+  @Field(() => String, { nullable: true })
+  brandId?: string | null;
+
   @Field(() => [String])
   tags: string[];
 
@@ -847,6 +853,93 @@ export class TagType {
 
   @Field()
   updatedAt: Date;
+}
+
+@ObjectType()
+export class PetTypeType {
+  @Field()
+  id: string;
+
+  @Field()
+  name: string;
+
+  @Field()
+  slug: string;
+
+  @Field()
+  approvalStatus: string;
+
+  @Field()
+  createdBy: string;
+
+  @Field()
+  createdAt: Date;
+
+  @Field()
+  updatedAt: Date;
+
+  @Field(() => String, { nullable: true })
+  imageUrl?: string | null;
+}
+
+@ObjectType()
+export class BrandType {
+  @Field()
+  id: string;
+
+  @Field()
+  name: string;
+
+  @Field()
+  slug: string;
+
+  @Field()
+  approvalStatus: string;
+
+  @Field()
+  createdBy: string;
+
+  @Field()
+  createdAt: Date;
+
+  @Field()
+  updatedAt: Date;
+}
+
+@ObjectType()
+export class TaxonomyDeleteImpactProductType {
+  @Field()
+  id: string;
+
+  @Field()
+  name: string;
+
+  @Field()
+  slug: string;
+}
+
+@ObjectType()
+export class TaxonomyDeleteImpactType {
+  @Field(() => Int)
+  productCount: number;
+
+  @Field(() => [TaxonomyDeleteImpactProductType])
+  products: TaxonomyDeleteImpactProductType[];
+}
+
+@ObjectType()
+export class DeleteTaxonomyResultType {
+  @Field()
+  success: boolean;
+
+  @Field()
+  deletedId: string;
+
+  @Field(() => Int)
+  detachedProductCount: number;
+
+  @Field(() => Int)
+  notifiedStoreCount: number;
 }
 
 @ObjectType()

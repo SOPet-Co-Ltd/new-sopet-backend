@@ -1,7 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { EmailService } from '../email/email.service';
 import { Order } from '../../database/entities/order.entity';
 import { Customer } from '../../database/entities/customer.entity';
@@ -252,5 +252,52 @@ export class NotificationsService {
       success,
       ...metadata,
     });
+  }
+
+  /**
+   * Notify store owners whose products were unbound after a taxonomy item was deleted.
+   */
+  async notifyVendorsAboutTaxonomyDeleted(
+    storeIds: string[],
+    kind: 'category' | 'tag' | 'pet_type' | 'brand',
+    name: string,
+  ): Promise<number> {
+    if (!storeIds.length) {
+      return 0;
+    }
+
+    const labels: Record<typeof kind, string> = {
+      category: 'หมวดหมู่',
+      tag: 'แท็ก',
+      pet_type: 'ประเภทสัตว์เลี้ยง',
+      brand: 'แบรนด์',
+    };
+
+    const stores = await this.storeRepository.find({
+      where: { id: In(storeIds) },
+      relations: ['owner'],
+    });
+
+    let notified = 0;
+    for (const store of stores) {
+      if (!store.owner) {
+        continue;
+      }
+
+      await this.createUserNotification(
+        store.owner.id,
+        'taxonomy_deleted',
+        `${labels[kind]} "${name}" ถูกลบออกจากระบบ — สินค้าของร้าน "${store.name}" ที่เชื่อมกับรายการนี้ถูกยกเลิกการเชื่อมแล้ว กรุณาตรวจสอบและอัปเดตสินค้า`,
+        {
+          storeId: store.id,
+          storeName: store.name,
+          taxonomyKind: kind,
+          taxonomyName: name,
+        },
+      );
+      notified++;
+    }
+
+    return notified;
   }
 }

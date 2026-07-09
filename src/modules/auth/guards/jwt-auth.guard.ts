@@ -11,15 +11,8 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
   }
 
   canActivate(context: ExecutionContext) {
-    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
-
-    if (isPublic) {
-      return true;
-    }
-
+    // Always run JWT validation so @CurrentUser is populated on @Public() routes
+    // when a bearer token is present (e.g. cart/checkout for logged-in customers).
     return super.canActivate(context);
   }
 
@@ -32,7 +25,16 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     return context.switchToHttp().getRequest();
   }
 
-  handleRequest(err: any, user: any, info: any) {
+  handleRequest(err: any, user: any, info: any, context: ExecutionContext) {
+    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+
+    if (isPublic) {
+      return user ?? null;
+    }
+
     if (err || !user) {
       throw err || new UnauthorizedException('Invalid or expired token');
     }

@@ -4,6 +4,8 @@ import { ProductVariant } from '../../database/entities/product-variant.entity';
 import { Store } from '../../database/entities/store.entity';
 import { Category } from '../../database/entities/category.entity';
 import { Tag } from '../../database/entities/tag.entity';
+import { PetType } from '../../database/entities/pet-type.entity';
+import { Brand } from '../../database/entities/brand.entity';
 import { Promotion } from '../../database/entities/promotion.entity';
 import { StoreRequest } from '../../database/entities/store-request.entity';
 import { StoreReactivationRequest } from '../../database/entities/store-reactivation-request.entity';
@@ -16,6 +18,8 @@ import {
   ProductImageType,
   CategoryType,
   TagType,
+  PetTypeType,
+  BrandType,
   PromotionType,
   StoreRequestType,
   StoreReactivationRequestType,
@@ -238,6 +242,31 @@ export function mapTag(tag: Tag): TagType {
   };
 }
 
+export function mapPetType(petType: PetType): PetTypeType {
+  return {
+    id: petType.id,
+    name: petType.name,
+    slug: petType.slug,
+    approvalStatus: petType.approvalStatus,
+    createdBy: petType.createdBy,
+    createdAt: petType.createdAt,
+    updatedAt: petType.updatedAt,
+    imageUrl: petType.imageUrl ?? null,
+  };
+}
+
+export function mapBrand(brand: Brand): BrandType {
+  return {
+    id: brand.id,
+    name: brand.name,
+    slug: brand.slug,
+    approvalStatus: brand.approvalStatus,
+    createdBy: brand.createdBy,
+    createdAt: brand.createdAt,
+    updatedAt: brand.updatedAt,
+  };
+}
+
 export function mapProduct(product: Product): ProductType {
   const basePrice = Number(product.basePrice);
   const category = product.category ?? product.categoryRelation?.name ?? null;
@@ -257,6 +286,8 @@ export function mapProduct(product: Product): ProductType {
     status: product.status,
     category,
     categoryId: product.categoryId ?? product.categoryRelation?.id ?? null,
+    petTypeId: product.petTypeId ?? product.petTypeRelation?.id ?? null,
+    brandId: product.brandId ?? product.brandRelation?.id ?? null,
     tags,
     tagIds,
     averageRating: Number(product.averageRating),

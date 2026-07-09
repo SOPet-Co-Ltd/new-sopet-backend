@@ -90,6 +90,22 @@ export class UpdateProductDto {
   tagIds?: string[];
 
   @ApiPropertyOptional({
+    description: 'Approved global pet type ID',
+    format: 'uuid',
+  })
+  @IsOptional()
+  @IsString()
+  petTypeId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Approved global brand ID',
+    format: 'uuid',
+  })
+  @IsOptional()
+  @IsString()
+  brandId?: string;
+
+  @ApiPropertyOptional({
     description: 'Arbitrary key/value metadata',
     example: { weight: '2kg', brand: 'PurrFect' },
     type: 'object',

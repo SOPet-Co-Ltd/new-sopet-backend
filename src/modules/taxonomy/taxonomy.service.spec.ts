@@ -26,6 +26,28 @@ describe('TaxonomyService', () => {
   let storageService: {
     assertFolderImageUrl: jest.Mock;
   };
+  let petTypeRepository: {
+    find: jest.Mock;
+    findOne: jest.Mock;
+    create: jest.Mock;
+    save: jest.Mock;
+  };
+  let brandRepository: {
+    find: jest.Mock;
+    findOne: jest.Mock;
+    create: jest.Mock;
+    save: jest.Mock;
+  };
+  let productRepository: {
+    find: jest.Mock;
+    findOne: jest.Mock;
+  };
+  let dataSource: {
+    transaction: jest.Mock;
+  };
+  let notificationsService: {
+    notifyTaxonomyApproval: jest.Mock;
+  };
 
   beforeEach(() => {
     categoryRepository = {
@@ -43,11 +65,38 @@ describe('TaxonomyService', () => {
     storageService = {
       assertFolderImageUrl: jest.fn(),
     };
+    petTypeRepository = {
+      find: jest.fn(),
+      findOne: jest.fn(),
+      create: jest.fn((data) => data),
+      save: jest.fn(async (data) => ({ ...data, id: data.id ?? 'pet-1' })),
+    };
+    brandRepository = {
+      find: jest.fn(),
+      findOne: jest.fn(),
+      create: jest.fn((data) => data),
+      save: jest.fn(async (data) => ({ ...data, id: data.id ?? 'brand-1' })),
+    };
+    productRepository = {
+      find: jest.fn(),
+      findOne: jest.fn(),
+    };
+    dataSource = {
+      transaction: jest.fn(async (callback) => callback()),
+    };
+    notificationsService = {
+      notifyTaxonomyApproval: jest.fn(),
+    };
 
     service = new TaxonomyService(
       categoryRepository as never,
       tagRepository as never,
+      petTypeRepository as never,
+      brandRepository as never,
+      productRepository as never,
+      dataSource as never,
       storageService as unknown as StorageService,
+      notificationsService as never,
     );
   });
 

@@ -4,11 +4,24 @@ import { TaxonomyService } from './taxonomy.service';
 import {
   CreateCategoryInput,
   CreateTagInput,
+  CreatePetTypeInput,
+  CreateBrandInput,
+  DeleteTaxonomyInput,
   SetCategoryImageInput,
+  SetPetTypeImageInput,
   UpdateCategoryInput,
+  UpdatePetTypeInput,
 } from './taxonomy.inputs';
-import { CategoryType, TagType } from '../../graphql/models/types';
-import { mapCategory, mapTag } from '../../graphql/models/mappers';
+import {
+  CategoryType,
+  TagType,
+  PetTypeType,
+  BrandType,
+  TaxonomyDeleteImpactType,
+  DeleteTaxonomyResultType,
+} from '../../graphql/models/types';
+import { mapCategory, mapTag, mapPetType, mapBrand } from '../../graphql/models/mappers';
+import { DeleteTaxonomyResult, TaxonomyDeleteImpact } from './taxonomy-delete.types';
 import { CurrentUser, Public, Roles } from '../../common/decorators';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -16,6 +29,14 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 @Resolver()
 export class TaxonomyResolver {
   constructor(private readonly taxonomyService: TaxonomyService) {}
+
+  private mapDeleteImpact(impact: TaxonomyDeleteImpact): TaxonomyDeleteImpactType {
+    return impact;
+  }
+
+  private mapDeleteResult(result: DeleteTaxonomyResult): DeleteTaxonomyResultType {
+    return result;
+  }
 
   @Query(() => [CategoryType])
   @Public()
@@ -138,5 +159,186 @@ export class TaxonomyResolver {
   async rejectTag(@Args('id') id: string): Promise<TagType> {
     const tag = await this.taxonomyService.rejectTag(id);
     return mapTag(tag);
+  }
+
+  @Query(() => [PetTypeType])
+  @Public()
+  async approvedPetTypes(): Promise<PetTypeType[]> {
+    const petTypes = await this.taxonomyService.findApprovedPetTypes();
+    return petTypes.map(mapPetType);
+  }
+
+  @Query(() => [BrandType])
+  @Public()
+  async approvedBrands(): Promise<BrandType[]> {
+    const brands = await this.taxonomyService.findApprovedBrands();
+    return brands.map(mapBrand);
+  }
+
+  @Query(() => [PetTypeType])
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async pendingPetTypes(): Promise<PetTypeType[]> {
+    const petTypes = await this.taxonomyService.findPendingPetTypes();
+    return petTypes.map(mapPetType);
+  }
+
+  @Query(() => [BrandType])
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async pendingBrands(): Promise<BrandType[]> {
+    const brands = await this.taxonomyService.findPendingBrands();
+    return brands.map(mapBrand);
+  }
+
+  @Query(() => [PetTypeType])
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('vendor', 'admin')
+  async myPetTypeProposals(@CurrentUser('id') userId: string): Promise<PetTypeType[]> {
+    const petTypes = await this.taxonomyService.findPetTypesByCreator(userId);
+    return petTypes.map(mapPetType);
+  }
+
+  @Query(() => [BrandType])
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('vendor', 'admin')
+  async myBrandProposals(@CurrentUser('id') userId: string): Promise<BrandType[]> {
+    const brands = await this.taxonomyService.findBrandsByCreator(userId);
+    return brands.map(mapBrand);
+  }
+
+  @Mutation(() => PetTypeType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('vendor', 'admin')
+  async createPetType(
+    @CurrentUser('id') userId: string,
+    @Args('input') input: CreatePetTypeInput,
+  ): Promise<PetTypeType> {
+    const petType = await this.taxonomyService.createPetType(input.name, userId, input.imageUrl);
+    return mapPetType(petType);
+  }
+
+  @Mutation(() => PetTypeType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async updatePetType(@Args('input') input: UpdatePetTypeInput): Promise<PetTypeType> {
+    const petType = await this.taxonomyService.updatePetType(input.petTypeId, input.name);
+    return mapPetType(petType);
+  }
+
+  @Mutation(() => PetTypeType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async setPetTypeImage(@Args('input') input: SetPetTypeImageInput): Promise<PetTypeType> {
+    const petType = await this.taxonomyService.setPetTypeImage(input.petTypeId, input.imageUrl);
+    return mapPetType(petType);
+  }
+
+  @Mutation(() => BrandType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('vendor', 'admin')
+  async createBrand(
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
+    @Args('input') input: CreateBrandInput,
+  ): Promise<BrandType> {
+    const brand = await this.taxonomyService.createBrand(input.name, userId, role);
+    return mapBrand(brand);
+  }
+
+  @Mutation(() => PetTypeType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async approvePetType(@Args('id') id: string): Promise<PetTypeType> {
+    const petType = await this.taxonomyService.approvePetType(id);
+    return mapPetType(petType);
+  }
+
+  @Mutation(() => PetTypeType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async rejectPetType(@Args('id') id: string): Promise<PetTypeType> {
+    const petType = await this.taxonomyService.rejectPetType(id);
+    return mapPetType(petType);
+  }
+
+  @Mutation(() => BrandType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async approveBrand(@Args('id') id: string): Promise<BrandType> {
+    const brand = await this.taxonomyService.approveBrand(id);
+    return mapBrand(brand);
+  }
+
+  @Mutation(() => BrandType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async rejectBrand(@Args('id') id: string): Promise<BrandType> {
+    const brand = await this.taxonomyService.rejectBrand(id);
+    return mapBrand(brand);
+  }
+
+  @Query(() => TaxonomyDeleteImpactType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async categoryDeleteImpact(
+    @Args('categoryId') categoryId: string,
+  ): Promise<TaxonomyDeleteImpactType> {
+    return this.mapDeleteImpact(await this.taxonomyService.getCategoryDeleteImpact(categoryId));
+  }
+
+  @Query(() => TaxonomyDeleteImpactType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async tagDeleteImpact(@Args('tagId') tagId: string): Promise<TaxonomyDeleteImpactType> {
+    return this.mapDeleteImpact(await this.taxonomyService.getTagDeleteImpact(tagId));
+  }
+
+  @Query(() => TaxonomyDeleteImpactType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async petTypeDeleteImpact(
+    @Args('petTypeId') petTypeId: string,
+  ): Promise<TaxonomyDeleteImpactType> {
+    return this.mapDeleteImpact(await this.taxonomyService.getPetTypeDeleteImpact(petTypeId));
+  }
+
+  @Query(() => TaxonomyDeleteImpactType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async brandDeleteImpact(@Args('brandId') brandId: string): Promise<TaxonomyDeleteImpactType> {
+    return this.mapDeleteImpact(await this.taxonomyService.getBrandDeleteImpact(brandId));
+  }
+
+  @Mutation(() => DeleteTaxonomyResultType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async deleteCategory(
+    @Args('input') input: DeleteTaxonomyInput,
+  ): Promise<DeleteTaxonomyResultType> {
+    return this.mapDeleteResult(await this.taxonomyService.deleteCategory(input.id));
+  }
+
+  @Mutation(() => DeleteTaxonomyResultType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async deleteTag(@Args('id') id: string): Promise<DeleteTaxonomyResultType> {
+    return this.mapDeleteResult(await this.taxonomyService.deleteTag(id));
+  }
+
+  @Mutation(() => DeleteTaxonomyResultType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async deletePetType(
+    @Args('input') input: DeleteTaxonomyInput,
+  ): Promise<DeleteTaxonomyResultType> {
+    return this.mapDeleteResult(await this.taxonomyService.deletePetType(input.id));
+  }
+
+  @Mutation(() => DeleteTaxonomyResultType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async deleteBrand(@Args('input') input: DeleteTaxonomyInput): Promise<DeleteTaxonomyResultType> {
+    return this.mapDeleteResult(await this.taxonomyService.deleteBrand(input.id));
   }
 }

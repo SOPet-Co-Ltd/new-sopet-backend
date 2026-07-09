@@ -4,6 +4,8 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { CustomersService } from './customers.service';
 import { Customer } from '../../database/entities/customer.entity';
 import { OrderItem } from '../../database/entities/order-item.entity';
+import { OrdersService } from '../orders/orders.service';
+import { CustomerRepository } from '../../database/repositories/customer.repository';
 
 describe('CustomersService', () => {
   let service: CustomersService;
@@ -25,6 +27,8 @@ describe('CustomersService', () => {
         CustomersService,
         { provide: getRepositoryToken(Customer), useValue: customerRepo },
         { provide: getRepositoryToken(OrderItem), useValue: orderItemRepo },
+        { provide: OrdersService, useValue: {} },
+        { provide: CustomerRepository, useValue: {} },
       ],
     }).compile();
 

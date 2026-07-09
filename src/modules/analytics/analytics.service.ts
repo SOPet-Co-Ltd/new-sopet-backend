@@ -288,20 +288,28 @@ export class AnalyticsService {
     }));
   }
 
-  async getProductSoldCount(productId: string): Promise<number> {
-    const row = await this.orderItemRepository
+  async getProductSoldCounts(productIds: string[]): Promise<number[]> {
+    if (productIds.length === 0) {
+      return [];
+    }
+
+    const rows = await this.orderItemRepository
       .createQueryBuilder('oi')
       .innerJoin('oi.order', 'o')
       .innerJoin('oi.productVariant', 'variant')
       .innerJoin('variant.product', 'product')
-      .select('COALESCE(SUM(oi.quantity), 0)', 'unitsSold')
-      .where('product.id = :productId', { productId })
+      .select('product.id', 'productId')
+      .addSelect('COALESCE(SUM(oi.quantity), 0)', 'unitsSold')
+      .where('product.id IN (:...productIds)', { productIds })
       .andWhere('o.status NOT IN (:...excludedStatuses)', {
         excludedStatuses: [OrderStatus.CANCELLED, OrderStatus.REFUNDED],
       })
-      .getRawOne<{ unitsSold: string }>();
+      .groupBy('product.id')
+      .getRawMany<{ productId: string; unitsSold: string }>();
 
-    return Number(row?.unitsSold ?? 0);
+    const countByProductId = new Map(rows.map((row) => [row.productId, Number(row.unitsSold)]));
+
+    return productIds.map((productId) => countByProductId.get(productId) ?? 0);
   }
 
   async getPlatformTopStores(limit = 10): Promise<TopStoreResult[]> {

@@ -5,6 +5,7 @@ export const PRODUCT_PUBLISH_CHECKLIST_KEYS = [
   'name',
   'media',
   'category',
+  'petType',
   'variants',
   'price',
   'stock',
@@ -33,6 +34,7 @@ export function getProductPublishChecklist(product: Product): ProductPublishChec
   const hasName = Boolean(product.name?.trim());
   const hasMedia = images.length > 0;
   const hasCategory = Boolean(product.categoryId);
+  const hasPetType = Boolean(product.petTypeId);
   const hasVariants = variants.length > 0;
   const basePrice = Number(product.basePrice ?? 0);
   const hasValidPrice =
@@ -45,6 +47,7 @@ export function getProductPublishChecklist(product: Product): ProductPublishChec
     { key: 'name', complete: hasName },
     { key: 'media', complete: hasMedia },
     { key: 'category', complete: hasCategory },
+    { key: 'petType', complete: hasPetType },
     { key: 'variants', complete: hasVariants },
     { key: 'price', complete: hasValidPrice },
     { key: 'stock', complete: hasStock },
@@ -63,6 +66,7 @@ export const PRODUCT_PUBLISH_CHECKLIST_LABELS: Record<ProductPublishChecklistKey
   name: 'ชื่อสินค้า',
   media: 'รูปภาพสินค้า (อย่างน้อย 1 รูป)',
   category: 'หมวดหมู่',
+  petType: 'ประเภทสัตว์เลี้ยง',
   variants: 'ตัวเลือกสินค้า (อย่างน้อย 1 รายการ)',
   price: 'ราคา',
   stock: 'สต็อก',

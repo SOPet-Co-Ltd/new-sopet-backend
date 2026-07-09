@@ -113,6 +113,16 @@ type AuthTokens {
   refreshToken: String!
 }
 
+type BrandType {
+  approvalStatus: String!
+  createdAt: DateTime!
+  createdBy: String!
+  id: String!
+  name: String!
+  slug: String!
+  updatedAt: DateTime!
+}
+
 type CartItemType {
   id: String!
   productVariant: ProductVariantType
@@ -162,6 +172,10 @@ input CreateAddressInput {
   tumbon: String
 }
 
+input CreateBrandInput {
+  name: String!
+}
+
 input CreateCategoryInput {
   imageUrl: String
   name: String!
@@ -202,6 +216,11 @@ input CreatePayoutInput {
   storeId: String!
 }
 
+input CreatePetTypeInput {
+  imageUrl: String
+  name: String!
+}
+
 input CreatePlatformAdInput {
   endsAt: DateTime
   imageUrl: String!
@@ -234,12 +253,14 @@ input CreatePlatformSponsorInput {
 
 input CreateProductInput {
   basePrice: Float!
+  brandId: String
   category: String
   categoryId: String
   compareAtPrice: Float
   description: String
   expiryDate: String
   name: String!
+  petTypeId: String
   tagIds: [String!]
   tags: [String!]
   warning: String
@@ -332,6 +353,17 @@ A date-time string at UTC, such as 2019-12-03T09:54:33Z, compliant with the date
 """
 scalar DateTime
 
+input DeleteTaxonomyInput {
+  id: String!
+}
+
+type DeleteTaxonomyResultType {
+  deletedId: String!
+  detachedProductCount: Int!
+  notifiedStoreCount: Int!
+  success: Boolean!
+}
+
 type DisputeImageType {
   id: String!
   imageUrl: String!
@@ -408,7 +440,9 @@ type Mutation {
   adminLogin(input: VendorLoginInput!): VendorAuthPayload!
   adminTriggerVendorPasswordReset(vendorId: String!): MessagePayload!
   adminUpdateStoreShippingOption(id: String!, input: UpdateShippingOptionInput!): StoreShippingOptionType!
+  approveBrand(id: String!): BrandType!
   approveCategory(id: String!): CategoryType!
+  approvePetType(id: String!): PetTypeType!
   approveStore(input: ApproveStoreInput!): StoreType!
   approveStoreReactivationRequest(id: String!): StoreReactivationRequestType!
   approveStoreRequest(id: String!): StoreRequestType!
@@ -416,11 +450,13 @@ type Mutation {
   changeCustomerPhone(input: ChangeCustomerPhoneInput!): CustomerAuthPayload!
   changePassword(input: ChangePasswordInput!): MessagePayload!
   createAddress(input: CreateAddressInput!): SavedAddressType!
+  createBrand(input: CreateBrandInput!): BrandType!
   createCategory(input: CreateCategoryInput!): CategoryType!
   createDispute(input: CreateDisputeInput!): DisputeType!
   createOrder(input: CreateOrderInput!): OrderType!
   createPayment(input: CreatePaymentInput!): PaymentType!
   createPayout(input: CreatePayoutInput!): PayoutType!
+  createPetType(input: CreatePetTypeInput!): PetTypeType!
   createPlatformAd(input: CreatePlatformAdInput!): PlatformAdType!
   createPlatformBanner(input: CreatePlatformBannerInput!): PlatformBannerType!
   createPlatformSponsor(input: CreatePlatformSponsorInput!): PlatformSponsorType!
@@ -435,7 +471,10 @@ type Mutation {
   createTag(input: CreateTagInput!): TagType!
   declineStoreInvitation(token: String!): Boolean!
   deleteAddress(id: String!): Boolean!
+  deleteBrand(input: DeleteTaxonomyInput!): DeleteTaxonomyResultType!
+  deleteCategory(input: DeleteTaxonomyInput!): DeleteTaxonomyResultType!
   deletePaymentMethod(id: String!): Boolean!
+  deletePetType(input: DeleteTaxonomyInput!): DeleteTaxonomyResultType!
   deletePlatformAd(id: String!): Boolean!
   deletePlatformBanner(id: String!): Boolean!
   deletePlatformSponsor(id: String!): Boolean!
@@ -445,6 +484,7 @@ type Mutation {
   deletePromotion(id: String!): Boolean!
   deleteShippingOption(id: String!): Boolean!
   deleteShippingProvider(id: String!): Boolean!
+  deleteTag(id: String!): DeleteTaxonomyResultType!
   inviteAdmin(input: InviteAdminInput!): AdminInvitationType!
   inviteStoreMember(input: InviteStoreMemberInput!): StoreMemberInvitationType!
   inviteVendor(input: InviteVendorInput!): VendorInvitationType!
@@ -457,7 +497,9 @@ type Mutation {
   refundPayment(paymentId: String!): PaymentType!
   registerStore(input: RegisterStoreInput!): VendorAuthPayload!
   registerVendor(input: RegisterVendorInput!): VendorAuthPayload!
+  rejectBrand(id: String!): BrandType!
   rejectCategory(id: String!): CategoryType!
+  rejectPetType(id: String!): PetTypeType!
   rejectStore(input: RejectStoreInput!): StoreType!
   rejectStoreReactivationRequest(input: RejectStoreReactivationRequestInput!): StoreReactivationRequestType!
   rejectStoreRequest(input: RejectStoreRequestInput!): StoreRequestType!
@@ -480,6 +522,7 @@ type Mutation {
   setCustomerActive(id: String!, isActive: Boolean!): AdminCustomerType!
   setDefaultAddress(id: String!): SavedAddressType!
   setDefaultPaymentMethod(id: String!): SavedPaymentMethodType!
+  setPetTypeImage(input: SetPetTypeImageInput!): PetTypeType!
   setProductThumbnail(imageId: String!, productId: String!): ProductImageType!
   submitStoreReactivationRequest(input: SubmitStoreReactivationRequestInput!): StoreReactivationRequestType!
   submitStoreRequest(input: SubmitStoreRequestInput!): StoreRequestType!
@@ -491,6 +534,7 @@ type Mutation {
   updateCategory(input: UpdateCategoryInput!): CategoryType!
   updateCustomerAsAdmin(input: UpdateCustomerAsAdminInput!): AdminCustomerType!
   updateOrderStatus(input: UpdateOrderStatusInput!): OrderType!
+  updatePetType(input: UpdatePetTypeInput!): PetTypeType!
   updatePlatformAd(input: UpdatePlatformAdInput!): PlatformAdType!
   updatePlatformBanner(input: UpdatePlatformBannerInput!): PlatformBannerType!
   updatePlatformSponsor(input: UpdatePlatformSponsorInput!): PlatformSponsorType!
@@ -621,6 +665,17 @@ type PayoutType {
   storeId: String!
 }
 
+type PetTypeType {
+  approvalStatus: String!
+  createdAt: DateTime!
+  createdBy: String!
+  id: String!
+  imageUrl: String
+  name: String!
+  slug: String!
+  updatedAt: DateTime!
+}
+
 type PlatformAdType {
   endsAt: DateTime
   id: String!
@@ -704,6 +759,7 @@ type ProductReviewBreakdownType {
 type ProductType {
   averageRating: Float!
   basePrice: Float!
+  brandId: String
   category: String
   categoryId: String
   compareAtPrice: Float
@@ -712,6 +768,7 @@ type ProductType {
   id: String!
   images: [ProductImageType!]
   name: String!
+  petTypeId: String
   reviewCount: Int!
   slug: String!
   soldCount: Int!
@@ -780,9 +837,13 @@ type Query {
   allPlatformAds: [PlatformAdType!]!
   allPlatformBanners: [PlatformBannerType!]!
   allPlatformSponsors: [PlatformSponsorType!]!
+  approvedBrands: [BrandType!]!
   approvedCategories: [CategoryType!]!
+  approvedPetTypes: [PetTypeType!]!
   approvedTags: [TagType!]!
+  brandDeleteImpact(brandId: String!): TaxonomyDeleteImpactType!
   cart(sessionId: String): CartType!
+  categoryDeleteImpact(categoryId: String!): TaxonomyDeleteImpactType!
   favorites: [FavoriteType!]!
   guestOrders(guestPhone: String!): [OrderType!]!
 
@@ -791,8 +852,10 @@ type Query {
   latestPurchaseProduct: ProductType
   latestPurchaseProducts(limit: Int = 10): [ProductType!]!
   me: MeResult!
+  myBrandProposals: [BrandType!]!
   myCategoryProposals: [CategoryType!]!
   myDisputes: [DisputeType!]!
+  myPetTypeProposals: [PetTypeType!]!
   myStore: MyStoreType!
   myStoreRequests: [StoreRequestType!]!
   myStoreShippingOptions: [StoreShippingOptionType!]!
@@ -806,11 +869,14 @@ type Query {
   paymentByOrderId(orderId: String!): PaymentType!
   paymentMethods: [SavedPaymentMethodType!]!
   pendingAdminInvitations: [AdminInvitationType!]!
+  pendingBrands: [BrandType!]!
   pendingCategories: [CategoryType!]!
+  pendingPetTypes: [PetTypeType!]!
   pendingStoreRequests: [StoreRequestType!]!
   pendingStores: [StoreType!]!
   pendingTags: [TagType!]!
   pendingVendorInvitations: [VendorInvitationType!]!
+  petTypeDeleteImpact(petTypeId: String!): TaxonomyDeleteImpactType!
   platformAds: [PlatformAdType!]!
   platformAnalytics(fromDate: String, toDate: String): PlatformAnalyticsType!
   platformBanners: [PlatformBannerType!]!
@@ -826,7 +892,7 @@ type Query {
   productBySlug(slug: String!, storeId: String!): ProductType!
   productPublishChecklist(productId: String!): ProductPublishChecklistType!
   productReviews(productId: String!): [ReviewType!]!
-  products(category: String, limit: Int = 20, page: Int = 1, search: String, storeId: String, tag: String): ProductConnection!
+  products(brandIds: [String!], category: String, limit: Int = 20, maxPrice: Int, minPrice: Int, page: Int = 1, petTypeIds: [String!], search: String, sortBy: String, sortOrder: String, storeId: String, tag: String): ProductConnection!
   recommendedProducts(limit: Int = 50): [ProductType!]!
   shippingProviders(includeInactive: Boolean): [ShippingProviderType!]!
   store(id: String!): StoreType!
@@ -842,6 +908,7 @@ type Query {
   storeReviewSummary(storeId: String!): StoreReviewSummaryType!
   storeShippingOptions(storeId: String!): [StoreShippingOptionType!]!
   stores: [StoreType!]!
+  tagDeleteImpact(tagId: String!): TaxonomyDeleteImpactType!
   topProducts(limit: Int, storeId: String!): [TopProductType!]!
   unreadNotificationsCount: Int!
   validatePromotion(input: ValidatePromotionInput!): PromotionValidationResult!
@@ -968,6 +1035,11 @@ input SendCustomerOtpInput {
 input SetCategoryImageInput {
   categoryId: String!
   imageUrl: String!
+}
+
+input SetPetTypeImageInput {
+  imageUrl: String!
+  petTypeId: String!
 }
 
 input ShippingAddressInput {
@@ -1145,6 +1217,17 @@ type TagType {
   updatedAt: DateTime!
 }
 
+type TaxonomyDeleteImpactProductType {
+  id: String!
+  name: String!
+  slug: String!
+}
+
+type TaxonomyDeleteImpactType {
+  productCount: Int!
+  products: [TaxonomyDeleteImpactProductType!]!
+}
+
 type TopProductType {
   name: String!
   productId: String!
@@ -1197,6 +1280,11 @@ input UpdateOrderStatusInput {
   status: String!
 }
 
+input UpdatePetTypeInput {
+  name: String!
+  petTypeId: String!
+}
+
 input UpdatePlatformAdInput {
   endsAt: DateTime
   id: String!
@@ -1238,12 +1326,14 @@ input UpdateProductImageInput {
 
 input UpdateProductInput {
   basePrice: Float
+  brandId: String
   category: String
   categoryId: String
   compareAtPrice: Float
   description: String
   expiryDate: String
   name: String
+  petTypeId: String
   status: String
   tagIds: [String!]
   tags: [String!]

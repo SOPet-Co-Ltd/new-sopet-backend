@@ -181,6 +181,7 @@ describe('ProductsService', () => {
       ...product,
       basePrice: 299,
       categoryId: 'cat-1',
+      petTypeId: 'pet-1',
       images: [{ id: 'img-1' }],
       variants: [{ id: 'var-1', stockQuantity: 5, priceAdjustment: 0 }],
     });
@@ -207,6 +208,7 @@ describe('ProductsService', () => {
       ...product,
       basePrice: 299,
       categoryId: 'cat-1',
+      petTypeId: 'pet-1',
       images: [{ id: 'img-1' }],
       variants: [{ id: 'var-1', stockQuantity: 5, priceAdjustment: 0 }],
     });
@@ -259,20 +261,85 @@ describe('ProductsService', () => {
   });
 
   it('lists products with pagination', async () => {
-    const qb = {
-      leftJoinAndSelect: jest.fn().mockReturnThis(),
+    const idQb = {
       andWhere: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
-      skip: jest.fn().mockReturnThis(),
-      take: jest.fn().mockReturnThis(),
-      getManyAndCount: jest.fn().mockResolvedValue([[product], 1]),
+      addOrderBy: jest.fn().mockReturnThis(),
+      setParameter: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      distinct: jest.fn().mockReturnThis(),
+      offset: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue([{ id: 'prod-1' }]),
     };
-    productRepository.createQueryBuilder.mockReturnValue(qb);
+    const countQb = {
+      andWhere: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      getRawOne: jest.fn().mockResolvedValue({ cnt: '1' }),
+    };
+    const hydrateQb = {
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([product]),
+    };
+    productRepository.createQueryBuilder
+      .mockReturnValueOnce(idQb)
+      .mockReturnValueOnce(countQb)
+      .mockReturnValueOnce(hydrateQb);
 
     const result = await service.findAll({ page: 1, limit: 10 });
 
     expect(result.items).toHaveLength(1);
     expect(result.pagination.total).toBe(1);
+  });
+
+  it('preserves relevance sort select columns in phase A id query', async () => {
+    const idQb = {
+      andWhere: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      setParameter: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      distinct: jest.fn().mockReturnThis(),
+      offset: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue([{ id: 'prod-1' }]),
+    };
+    const countQb = {
+      andWhere: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      getRawOne: jest.fn().mockResolvedValue({ cnt: '1' }),
+    };
+    const hydrateQb = {
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([product]),
+    };
+    productRepository.createQueryBuilder
+      .mockReturnValueOnce(idQb)
+      .mockReturnValueOnce(countQb)
+      .mockReturnValueOnce(hydrateQb);
+
+    await service.findAll({
+      search: 'dog food',
+      sortBy: 'relevance',
+      sortOrder: 'DESC',
+      page: 1,
+      limit: 10,
+    });
+
+    expect(idQb.select).toHaveBeenCalledTimes(1);
+    expect(idQb.select).toHaveBeenCalledWith('product.id', 'id');
+    expect(idQb.addSelect).toHaveBeenCalledWith(
+      'CASE WHEN product.name ILIKE :relevancePrefix THEN 0 WHEN product.name ILIKE :relevanceContains THEN 1 ELSE 2 END',
+      'relevance_rank',
+    );
+    expect(idQb.addSelect).toHaveBeenCalledWith('product.createdAt', 'product_created_at');
+    expect(idQb.distinct).not.toHaveBeenCalled();
   });
 
   it('updates variant for own product', async () => {

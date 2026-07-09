@@ -23,9 +23,12 @@ describe('AnalyticsService', () => {
   const createOrderItemQb = (raw: Record<string, string>) => ({
     innerJoin: jest.fn().mockReturnThis(),
     select: jest.fn().mockReturnThis(),
+    addSelect: jest.fn().mockReturnThis(),
     where: jest.fn().mockReturnThis(),
     andWhere: jest.fn().mockReturnThis(),
+    groupBy: jest.fn().mockReturnThis(),
     getRawOne: jest.fn().mockResolvedValue(raw),
+    getRawMany: jest.fn().mockResolvedValue([]),
   });
 
   const createOrderQb = (raw: Record<string, string>) => ({
@@ -162,6 +165,34 @@ describe('AnalyticsService', () => {
       expect(result.averageOrderValue).toBe(0);
       expect(result.totalOrders).toBe(0);
       expect(result.totalRevenue).toBe(0);
+    });
+  });
+
+  describe('getProductSoldCounts', () => {
+    it('returns counts in input order and zero-fills missing product ids', async () => {
+      const qb = createOrderItemQb({});
+      qb.getRawMany.mockResolvedValue([
+        { productId: 'p1', unitsSold: '5' },
+        { productId: 'p3', unitsSold: '12' },
+      ]);
+      orderItemRepository.createQueryBuilder.mockReturnValue(qb);
+
+      const result = await service.getProductSoldCounts(['p1', 'p2', 'p3']);
+
+      expect(result).toEqual([5, 0, 12]);
+      expect(qb.where).toHaveBeenCalledWith('product.id IN (:...productIds)', {
+        productIds: ['p1', 'p2', 'p3'],
+      });
+      expect(qb.andWhere).toHaveBeenCalledWith('o.status NOT IN (:...excludedStatuses)', {
+        excludedStatuses: expect.arrayContaining(['cancelled', 'refunded']) as string[],
+      });
+    });
+
+    it('returns an empty array for empty input', async () => {
+      const result = await service.getProductSoldCounts([]);
+
+      expect(result).toEqual([]);
+      expect(orderItemRepository.createQueryBuilder).not.toHaveBeenCalled();
     });
   });
 });

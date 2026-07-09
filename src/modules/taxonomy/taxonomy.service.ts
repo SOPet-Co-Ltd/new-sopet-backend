@@ -5,13 +5,20 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { ILike, In, Not, QueryFailedError, Repository } from 'typeorm';
+import { ILike, In, Not, QueryFailedError, Repository, DataSource } from 'typeorm';
 import { Category } from '../../database/entities/category.entity';
 import { Tag } from '../../database/entities/tag.entity';
+import { PetType } from '../../database/entities/pet-type.entity';
+import { Brand } from '../../database/entities/brand.entity';
+import { Product } from '../../database/entities/product.entity';
 import { TaxonomyApprovalStatus } from '../../database/entities/enums/taxonomy.enums';
 import { UserRole } from '../../database/entities/user.entity';
 import { generateSlug } from '../../common/utils/slug.util';
 import { StorageService } from '../storage/storage.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { DeleteTaxonomyResult, TaxonomyDeleteImpact } from './taxonomy-delete.types';
+
+type TaxonomyRepository = Repository<Category | Tag | PetType | Brand>;
 
 @Injectable()
 export class TaxonomyService {
@@ -20,11 +27,19 @@ export class TaxonomyService {
     private readonly categoryRepository: Repository<Category>,
     @InjectRepository(Tag)
     private readonly tagRepository: Repository<Tag>,
+    @InjectRepository(PetType)
+    private readonly petTypeRepository: Repository<PetType>,
+    @InjectRepository(Brand)
+    private readonly brandRepository: Repository<Brand>,
+    @InjectRepository(Product)
+    private readonly productRepository: Repository<Product>,
+    private readonly dataSource: DataSource,
     private readonly storageService: StorageService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   private async ensureUniqueSlug(
-    repository: Repository<Category | Tag>,
+    repository: TaxonomyRepository,
     name: string,
     fallback: string,
   ): Promise<string> {
@@ -42,7 +57,7 @@ export class TaxonomyService {
   }
 
   private async assertUniqueName(
-    repository: Repository<Category | Tag>,
+    repository: TaxonomyRepository,
     name: string,
     label: string,
   ): Promise<void> {
@@ -228,7 +243,7 @@ export class TaxonomyService {
   }
 
   private async ensureUniqueSlugForEntity(
-    repository: Repository<Category | Tag>,
+    repository: TaxonomyRepository,
     name: string,
     fallback: string,
     excludeId: string,
@@ -428,5 +443,517 @@ export class TaxonomyService {
     }
 
     return tags;
+  }
+
+  async findPetTypesByCreator(createdBy: string): Promise<PetType[]> {
+    return this.petTypeRepository.find({
+      where: { createdBy },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async findBrandsByCreator(createdBy: string): Promise<Brand[]> {
+    return this.brandRepository.find({
+      where: { createdBy },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async findApprovedPetTypes(): Promise<PetType[]> {
+    return this.petTypeRepository.find({
+      where: { approvalStatus: TaxonomyApprovalStatus.APPROVED },
+      order: { name: 'ASC' },
+    });
+  }
+
+  async findApprovedBrands(): Promise<Brand[]> {
+    return this.brandRepository.find({
+      where: { approvalStatus: TaxonomyApprovalStatus.APPROVED },
+      order: { name: 'ASC' },
+    });
+  }
+
+  async findPendingPetTypes(): Promise<PetType[]> {
+    return this.petTypeRepository.find({
+      where: { approvalStatus: TaxonomyApprovalStatus.PENDING },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async findPendingBrands(): Promise<Brand[]> {
+    return this.brandRepository.find({
+      where: { approvalStatus: TaxonomyApprovalStatus.PENDING },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async createPetType(name: string, createdBy: string, imageUrl?: string | null): Promise<PetType> {
+    await this.assertUniqueName(this.petTypeRepository, name, 'ประเภทสัตว์เลี้ยง');
+
+    const slug = await this.ensureUniqueSlug(this.petTypeRepository, name, 'pet-type');
+
+    const trimmedImageUrl = imageUrl?.trim() || null;
+    if (trimmedImageUrl) {
+      this.storageService.assertFolderImageUrl(trimmedImageUrl, 'pet-types');
+    }
+
+    const petType = this.petTypeRepository.create({
+      name: name.trim(),
+      slug,
+      createdBy,
+      approvalStatus: TaxonomyApprovalStatus.PENDING,
+      imageUrl: trimmedImageUrl,
+    });
+
+    try {
+      return await this.petTypeRepository.save(petType);
+    } catch (error) {
+      if (this.isUniqueViolation(error)) {
+        throw this.duplicateNameError('ประเภทสัตว์เลี้ยง');
+      }
+      throw error;
+    }
+  }
+
+  async createBrand(name: string, createdBy: string, role: string): Promise<Brand> {
+    await this.assertUniqueName(this.brandRepository, name, 'แบรนด์');
+
+    const slug = await this.ensureUniqueSlug(this.brandRepository, name, 'brand');
+
+    const brand = this.brandRepository.create({
+      name: name.trim(),
+      slug,
+      createdBy,
+      approvalStatus: this.resolveApprovalStatus(role),
+    });
+
+    try {
+      return await this.brandRepository.save(brand);
+    } catch (error) {
+      if (this.isUniqueViolation(error)) {
+        throw this.duplicateNameError('แบรนด์');
+      }
+      throw error;
+    }
+  }
+
+  async updatePetType(petTypeId: string, name: string): Promise<PetType> {
+    const petType = await this.petTypeRepository.findOne({ where: { id: petTypeId } });
+
+    if (!petType) {
+      throw new NotFoundException({
+        code: 'PET_TYPE_NOT_FOUND',
+        message: 'Pet type not found',
+      });
+    }
+
+    const trimmedName = name.trim();
+    if (trimmedName === petType.name) {
+      return petType;
+    }
+
+    const duplicate = await this.petTypeRepository.findOne({
+      where: {
+        name: ILike(trimmedName),
+        approvalStatus: Not(TaxonomyApprovalStatus.REJECTED),
+      },
+    });
+
+    if (duplicate && duplicate.id !== petTypeId) {
+      throw this.duplicateNameError('ประเภทสัตว์เลี้ยง');
+    }
+
+    const slug = await this.ensureUniqueSlugForEntity(
+      this.petTypeRepository,
+      trimmedName,
+      'pet-type',
+      petTypeId,
+    );
+
+    petType.name = trimmedName;
+    petType.slug = slug;
+
+    try {
+      return await this.petTypeRepository.save(petType);
+    } catch (error) {
+      if (this.isUniqueViolation(error)) {
+        throw this.duplicateNameError('ประเภทสัตว์เลี้ยง');
+      }
+      throw error;
+    }
+  }
+
+  async setPetTypeImage(petTypeId: string, imageUrl: string): Promise<PetType> {
+    const petType = await this.petTypeRepository.findOne({ where: { id: petTypeId } });
+
+    if (!petType) {
+      throw new NotFoundException({
+        code: 'PET_TYPE_NOT_FOUND',
+        message: 'Pet type not found',
+      });
+    }
+
+    const trimmedImageUrl = imageUrl.trim();
+    this.storageService.assertFolderImageUrl(trimmedImageUrl, 'pet-types');
+    petType.imageUrl = trimmedImageUrl;
+
+    return this.petTypeRepository.save(petType);
+  }
+
+  async approvePetType(id: string): Promise<PetType> {
+    return this.setPetTypeStatus(id, TaxonomyApprovalStatus.APPROVED);
+  }
+
+  async rejectPetType(id: string): Promise<PetType> {
+    return this.setPetTypeStatus(id, TaxonomyApprovalStatus.REJECTED);
+  }
+
+  async approveBrand(id: string): Promise<Brand> {
+    return this.setBrandStatus(id, TaxonomyApprovalStatus.APPROVED);
+  }
+
+  async rejectBrand(id: string): Promise<Brand> {
+    return this.setBrandStatus(id, TaxonomyApprovalStatus.REJECTED);
+  }
+
+  private async setPetTypeStatus(
+    id: string,
+    approvalStatus: TaxonomyApprovalStatus,
+  ): Promise<PetType> {
+    const petType = await this.petTypeRepository.findOne({ where: { id } });
+
+    if (!petType) {
+      throw new NotFoundException({
+        code: 'PET_TYPE_NOT_FOUND',
+        message: 'Pet type not found',
+      });
+    }
+
+    petType.approvalStatus = approvalStatus;
+    return this.petTypeRepository.save(petType);
+  }
+
+  private async setBrandStatus(id: string, approvalStatus: TaxonomyApprovalStatus): Promise<Brand> {
+    const brand = await this.brandRepository.findOne({ where: { id } });
+
+    if (!brand) {
+      throw new NotFoundException({
+        code: 'BRAND_NOT_FOUND',
+        message: 'Brand not found',
+      });
+    }
+
+    brand.approvalStatus = approvalStatus;
+    return this.brandRepository.save(brand);
+  }
+
+  async getApprovedPetType(id: string): Promise<PetType> {
+    const petType = await this.petTypeRepository.findOne({ where: { id } });
+
+    if (!petType) {
+      throw new NotFoundException({
+        code: 'PET_TYPE_NOT_FOUND',
+        message: 'Pet type not found',
+      });
+    }
+
+    if (petType.approvalStatus !== TaxonomyApprovalStatus.APPROVED) {
+      throw new BadRequestException({
+        code: 'PET_TYPE_NOT_APPROVED',
+        message: 'Only approved pet types can be assigned to products',
+      });
+    }
+
+    return petType;
+  }
+
+  async getApprovedBrand(id: string): Promise<Brand> {
+    const brand = await this.brandRepository.findOne({ where: { id } });
+
+    if (!brand) {
+      throw new NotFoundException({
+        code: 'BRAND_NOT_FOUND',
+        message: 'Brand not found',
+      });
+    }
+
+    if (brand.approvalStatus !== TaxonomyApprovalStatus.APPROVED) {
+      throw new BadRequestException({
+        code: 'BRAND_NOT_APPROVED',
+        message: 'Only approved brands can be assigned to products',
+      });
+    }
+
+    return brand;
+  }
+
+  async getApprovedPetTypeByName(name: string): Promise<PetType> {
+    const petType = await this.petTypeRepository.findOne({
+      where: {
+        name: ILike(name.trim()),
+        approvalStatus: TaxonomyApprovalStatus.APPROVED,
+      },
+    });
+
+    if (!petType) {
+      throw new BadRequestException({
+        code: 'PET_TYPE_NOT_FOUND',
+        message: `ไม่พบประเภทสัตว์เลี้ยง "${name}" ที่ได้รับการอนุมัติในระบบ`,
+      });
+    }
+
+    return petType;
+  }
+
+  async getApprovedBrandByName(name: string): Promise<Brand> {
+    const brand = await this.brandRepository.findOne({
+      where: {
+        name: ILike(name.trim()),
+        approvalStatus: TaxonomyApprovalStatus.APPROVED,
+      },
+    });
+
+    if (!brand) {
+      throw new BadRequestException({
+        code: 'BRAND_NOT_FOUND',
+        message: `ไม่พบแบรนด์ "${name}" ที่ได้รับการอนุมัติในระบบ`,
+      });
+    }
+
+    return brand;
+  }
+
+  async getCategoryDeleteImpact(categoryId: string): Promise<TaxonomyDeleteImpact> {
+    await this.getCategoryOrThrow(categoryId);
+    return this.buildDeleteImpact({ categoryId });
+  }
+
+  async getTagDeleteImpact(tagId: string): Promise<TaxonomyDeleteImpact> {
+    await this.getTagOrThrow(tagId);
+    return this.buildDeleteImpact({ tagId });
+  }
+
+  async getPetTypeDeleteImpact(petTypeId: string): Promise<TaxonomyDeleteImpact> {
+    await this.getPetTypeOrThrow(petTypeId);
+    return this.buildDeleteImpact({ petTypeId });
+  }
+
+  async getBrandDeleteImpact(brandId: string): Promise<TaxonomyDeleteImpact> {
+    await this.getBrandOrThrow(brandId);
+    return this.buildDeleteImpact({ brandId });
+  }
+
+  async deleteCategory(id: string): Promise<DeleteTaxonomyResult> {
+    const category = await this.getCategoryOrThrow(id);
+    const products = await this.productRepository.find({ where: { categoryId: id } });
+    const storeIds = [...new Set(products.map((product) => product.storeId))];
+
+    await this.dataSource.transaction(async (manager) => {
+      if (products.length) {
+        await manager.update(Product, { categoryId: id }, { categoryId: null, category: null });
+      }
+      await manager.delete(Category, id);
+    });
+
+    const notifiedStoreCount = await this.notificationsService.notifyVendorsAboutTaxonomyDeleted(
+      storeIds,
+      'category',
+      category.name,
+    );
+
+    return {
+      success: true,
+      deletedId: id,
+      detachedProductCount: products.length,
+      notifiedStoreCount,
+    };
+  }
+
+  async deleteTag(id: string): Promise<DeleteTaxonomyResult> {
+    const tag = await this.getTagOrThrow(id);
+    const products = await this.productRepository
+      .createQueryBuilder('product')
+      .innerJoin('product.taxonomyTags', 'tag', 'tag.id = :tagId', { tagId: id })
+      .getMany();
+    const storeIds = [...new Set(products.map((product) => product.storeId))];
+    const tagNameLower = tag.name.toLowerCase();
+
+    await this.dataSource.transaction(async (manager) => {
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from('product_tags')
+        .where('tag_id = :tagId', { tagId: id })
+        .execute();
+
+      for (const product of products) {
+        product.tags = product.tags.filter((name) => name.toLowerCase() !== tagNameLower);
+      }
+      if (products.length) {
+        await manager.save(Product, products);
+      }
+
+      await manager.delete(Tag, id);
+    });
+
+    const notifiedStoreCount = await this.notificationsService.notifyVendorsAboutTaxonomyDeleted(
+      storeIds,
+      'tag',
+      tag.name,
+    );
+
+    return {
+      success: true,
+      deletedId: id,
+      detachedProductCount: products.length,
+      notifiedStoreCount,
+    };
+  }
+
+  async deletePetType(id: string): Promise<DeleteTaxonomyResult> {
+    const petType = await this.getPetTypeOrThrow(id);
+    const products = await this.productRepository.find({ where: { petTypeId: id } });
+    const storeIds = [...new Set(products.map((product) => product.storeId))];
+
+    await this.dataSource.transaction(async (manager) => {
+      if (products.length) {
+        await manager.update(Product, { petTypeId: id }, { petTypeId: null });
+      }
+      await manager.delete(PetType, id);
+    });
+
+    const notifiedStoreCount = await this.notificationsService.notifyVendorsAboutTaxonomyDeleted(
+      storeIds,
+      'pet_type',
+      petType.name,
+    );
+
+    return {
+      success: true,
+      deletedId: id,
+      detachedProductCount: products.length,
+      notifiedStoreCount,
+    };
+  }
+
+  async deleteBrand(id: string): Promise<DeleteTaxonomyResult> {
+    const brand = await this.getBrandOrThrow(id);
+    const products = await this.productRepository.find({ where: { brandId: id } });
+    const storeIds = [...new Set(products.map((product) => product.storeId))];
+
+    await this.dataSource.transaction(async (manager) => {
+      if (products.length) {
+        await manager.update(Product, { brandId: id }, { brandId: null });
+      }
+      await manager.delete(Brand, id);
+    });
+
+    const notifiedStoreCount = await this.notificationsService.notifyVendorsAboutTaxonomyDeleted(
+      storeIds,
+      'brand',
+      brand.name,
+    );
+
+    return {
+      success: true,
+      deletedId: id,
+      detachedProductCount: products.length,
+      notifiedStoreCount,
+    };
+  }
+
+  private async getCategoryOrThrow(id: string): Promise<Category> {
+    const category = await this.categoryRepository.findOne({ where: { id } });
+    if (!category) {
+      throw new NotFoundException({
+        code: 'CATEGORY_NOT_FOUND',
+        message: 'Category not found',
+      });
+    }
+    return category;
+  }
+
+  private async getTagOrThrow(id: string): Promise<Tag> {
+    const tag = await this.tagRepository.findOne({ where: { id } });
+    if (!tag) {
+      throw new NotFoundException({
+        code: 'TAG_NOT_FOUND',
+        message: 'Tag not found',
+      });
+    }
+    return tag;
+  }
+
+  private async getPetTypeOrThrow(id: string): Promise<PetType> {
+    const petType = await this.petTypeRepository.findOne({ where: { id } });
+    if (!petType) {
+      throw new NotFoundException({
+        code: 'PET_TYPE_NOT_FOUND',
+        message: 'Pet type not found',
+      });
+    }
+    return petType;
+  }
+
+  private async getBrandOrThrow(id: string): Promise<Brand> {
+    const brand = await this.brandRepository.findOne({ where: { id } });
+    if (!brand) {
+      throw new NotFoundException({
+        code: 'BRAND_NOT_FOUND',
+        message: 'Brand not found',
+      });
+    }
+    return brand;
+  }
+
+  private async buildDeleteImpact(filter: {
+    categoryId?: string;
+    tagId?: string;
+    petTypeId?: string;
+    brandId?: string;
+  }): Promise<TaxonomyDeleteImpact> {
+    let qb = this.productRepository
+      .createQueryBuilder('product')
+      .select(['product.id', 'product.name', 'product.slug'])
+      .orderBy('product.name', 'ASC')
+      .take(10);
+
+    if (filter.categoryId) {
+      qb = qb.where('product.category_id = :categoryId', { categoryId: filter.categoryId });
+    } else if (filter.petTypeId) {
+      qb = qb.where('product.pet_type_id = :petTypeId', { petTypeId: filter.petTypeId });
+    } else if (filter.brandId) {
+      qb = qb.where('product.brand_id = :brandId', { brandId: filter.brandId });
+    } else if (filter.tagId) {
+      qb = qb.innerJoin('product.taxonomyTags', 'tag', 'tag.id = :tagId', {
+        tagId: filter.tagId,
+      });
+    }
+
+    const products = await qb.getMany();
+    const countQb = this.productRepository.createQueryBuilder('product');
+
+    if (filter.categoryId) {
+      countQb.where('product.category_id = :categoryId', { categoryId: filter.categoryId });
+    } else if (filter.petTypeId) {
+      countQb.where('product.pet_type_id = :petTypeId', { petTypeId: filter.petTypeId });
+    } else if (filter.brandId) {
+      countQb.where('product.brand_id = :brandId', { brandId: filter.brandId });
+    } else if (filter.tagId) {
+      countQb.innerJoin('product.taxonomyTags', 'tag', 'tag.id = :tagId', {
+        tagId: filter.tagId,
+      });
+    }
+
+    const productCount = await countQb.getCount();
+
+    return {
+      productCount,
+      products: products.map((product) => ({
+        id: product.id,
+        name: product.name,
+        slug: product.slug,
+      })),
+    };
   }
 }

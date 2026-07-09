@@ -5,10 +5,12 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, ILike, Between, In } from 'typeorm';
+import { Repository, ILike, Between, In, SelectQueryBuilder } from 'typeorm';
 import { Product, ProductStatus } from '../../database/entities/product.entity';
 import { ProductVariant } from '../../database/entities/product-variant.entity';
 import { ProductImage } from '../../database/entities/product-image.entity';
+import { OrderItem } from '../../database/entities/order-item.entity';
+import { OrderStatus } from '../../database/entities/enums/order.enums';
 import {
   CreateProductDto,
   UpdateProductDto,
@@ -76,21 +78,29 @@ export class ProductsService {
     categoryId?: string;
     tags?: string[];
     tagIds?: string[];
+    petTypeId?: string;
+    brandId?: string;
   }): Promise<{
     category: string | null | undefined;
     categoryId: string | null | undefined;
     tags: string[] | undefined;
     taxonomyTags: Tag[] | undefined;
+    petTypeId: string | null | undefined;
+    brandId: string | null | undefined;
   }> {
     const hasCategoryId = input.categoryId !== undefined;
     const hasTagIds = input.tagIds !== undefined;
+    const hasPetTypeId = input.petTypeId !== undefined;
+    const hasBrandId = input.brandId !== undefined;
 
-    if (!hasCategoryId && !hasTagIds) {
+    if (!hasCategoryId && !hasTagIds && !hasPetTypeId && !hasBrandId) {
       return {
         category: input.category,
         categoryId: undefined,
         tags: input.tags,
         taxonomyTags: undefined,
+        petTypeId: undefined,
+        brandId: undefined,
       };
     }
 
@@ -98,6 +108,8 @@ export class ProductsService {
     let categoryId: string | null | undefined = input.categoryId ?? null;
     let tags = input.tags;
     let taxonomyTags: Tag[] | undefined;
+    let petTypeId: string | null | undefined = input.petTypeId ?? null;
+    let brandId: string | null | undefined = input.brandId ?? null;
 
     if (hasCategoryId) {
       if (input.categoryId) {
@@ -114,7 +126,25 @@ export class ProductsService {
       tags = taxonomyTags.map((tag) => tag.name);
     }
 
-    return { category, categoryId, tags, taxonomyTags };
+    if (hasPetTypeId) {
+      if (input.petTypeId) {
+        const resolvedPetType = await this.taxonomyService.getApprovedPetType(input.petTypeId);
+        petTypeId = resolvedPetType.id;
+      } else {
+        petTypeId = null;
+      }
+    }
+
+    if (hasBrandId) {
+      if (input.brandId) {
+        const resolvedBrand = await this.taxonomyService.getApprovedBrand(input.brandId);
+        brandId = resolvedBrand.id;
+      } else {
+        brandId = null;
+      }
+    }
+
+    return { category, categoryId, tags, taxonomyTags, petTypeId, brandId };
   }
 
   // Create product
@@ -124,12 +154,15 @@ export class ProductsService {
     createProductDto: CreateProductDto,
   ): Promise<Product> {
     await this.assertStoreAccess(userId, storeId, 'create products');
-    const { name, categoryId, tagIds, category, tags, ...productData } = createProductDto;
+    const { name, categoryId, tagIds, petTypeId, brandId, category, tags, ...productData } =
+      createProductDto;
     const taxonomy = await this.resolveTaxonomyFields({
       category,
       categoryId,
       tags,
       tagIds,
+      petTypeId,
+      brandId,
     });
 
     // Generate unique slug within store
@@ -183,6 +216,8 @@ export class ProductsService {
       expiryDate?: string;
       category?: string;
       tags?: string[];
+      petType?: string;
+      brand?: string;
       variants: Array<{ name: string; values: string[] }>;
       variantItems: Array<{
         sku: string;
@@ -293,6 +328,18 @@ export class ProductsService {
       tagIds = tags.map((tag) => tag.id);
     }
 
+    let petTypeId: string | undefined;
+    if (input.petType) {
+      const petType = await this.taxonomyService.getApprovedPetTypeByName(input.petType);
+      petTypeId = petType.id;
+    }
+
+    let brandId: string | undefined;
+    if (input.brand) {
+      const brand = await this.taxonomyService.getApprovedBrandByName(input.brand);
+      brandId = brand.id;
+    }
+
     // Derive base price from the cheapest variant item; each item stores the
     // difference as its price adjustment so effective prices are preserved.
     const basePrice = Math.min(...items.map((item) => item.price));
@@ -308,6 +355,8 @@ export class ProductsService {
       basePrice,
       categoryId,
       tagIds,
+      petTypeId,
+      brandId,
     });
 
     // Persist each variant item as one ProductVariant (options = combination),
@@ -338,6 +387,8 @@ export class ProductsService {
       tag,
       status,
       allStatuses,
+      petTypeIds,
+      brandIds,
       minPrice,
       maxPrice,
       page = 1,
@@ -346,15 +397,100 @@ export class ProductsService {
       sortOrder = 'DESC',
     } = queryDto;
 
-    const queryBuilder = this.productRepository
+    const skip = (page - 1) * limit;
+    const filters = {
+      search,
+      storeId,
+      category,
+      tag,
+      status,
+      allStatuses,
+      petTypeIds,
+      brandIds,
+      minPrice,
+      maxPrice,
+    };
+
+    const idQueryBuilder = this.productRepository.createQueryBuilder('product');
+    idQueryBuilder.select('product.id', 'id');
+    this.applyProductListFilters(idQueryBuilder, filters);
+    this.applyProductSorting(idQueryBuilder, sortBy, sortOrder, search);
+    idQueryBuilder.offset(skip).limit(limit);
+
+    const idRows = await idQueryBuilder.getRawMany<{ id: string }>();
+    const ids = idRows.map((row) => row.id);
+
+    const countQueryBuilder = this.productRepository.createQueryBuilder('product');
+    this.applyProductListFilters(countQueryBuilder, filters);
+    const totalRow = await countQueryBuilder
+      .select('COUNT(product.id)', 'cnt')
+      .getRawOne<{ cnt: string }>();
+    const total = Number(totalRow?.cnt ?? 0);
+
+    if (ids.length === 0) {
+      return {
+        items: [],
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      };
+    }
+
+    const items = await this.productRepository
       .createQueryBuilder('product')
       .leftJoinAndSelect('product.store', 'store')
       .leftJoinAndSelect('product.images', 'images')
       .leftJoinAndSelect('product.variants', 'variants')
       .leftJoinAndSelect('product.categoryRelation', 'categoryRelation')
-      .leftJoinAndSelect('product.taxonomyTags', 'taxonomyTags');
+      .leftJoinAndSelect('product.petTypeRelation', 'petTypeRelation')
+      .leftJoinAndSelect('product.brandRelation', 'brandRelation')
+      .leftJoinAndSelect('product.taxonomyTags', 'taxonomyTags')
+      .where('product.id IN (:...ids)', { ids })
+      .orderBy('array_position(ARRAY[:...ids]::uuid[], product.id)')
+      .getMany();
 
-    // Apply filters
+    return {
+      items,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  private applyProductListFilters(
+    queryBuilder: SelectQueryBuilder<Product>,
+    filters: {
+      search?: string;
+      storeId?: string;
+      category?: string;
+      tag?: string;
+      status?: ProductStatus;
+      allStatuses?: boolean;
+      petTypeIds?: string[];
+      brandIds?: string[];
+      minPrice?: number;
+      maxPrice?: number;
+    },
+  ): void {
+    const {
+      search,
+      storeId,
+      category,
+      tag,
+      status,
+      allStatuses,
+      petTypeIds,
+      brandIds,
+      minPrice,
+      maxPrice,
+    } = filters;
+
     if (search) {
       queryBuilder.andWhere('(product.name ILIKE :search OR product.description ILIKE :search)', {
         search: `%${search}%`,
@@ -370,8 +506,6 @@ export class ProductsService {
     }
 
     if (tag) {
-      // Match either the legacy free-form tags array or approved taxonomy tags
-      // (by slug or name), without disturbing the selected relations or count.
       queryBuilder.andWhere(
         `(:tag = ANY(product.tags) OR EXISTS (
             SELECT 1 FROM "product_tags" "pt"
@@ -386,10 +520,17 @@ export class ProductsService {
     if (status) {
       queryBuilder.andWhere('product.status = :status', { status });
     } else if (!allStatuses) {
-      // Default to published products for public listing
       queryBuilder.andWhere('product.status = :status', {
         status: ProductStatus.PUBLISHED,
       });
+    }
+
+    if (petTypeIds && petTypeIds.length > 0) {
+      queryBuilder.andWhere('product.petTypeId IN (:...petTypeIds)', { petTypeIds });
+    }
+
+    if (brandIds && brandIds.length > 0) {
+      queryBuilder.andWhere('product.brandId IN (:...brandIds)', { brandIds });
     }
 
     if (minPrice !== undefined) {
@@ -399,32 +540,75 @@ export class ProductsService {
     if (maxPrice !== undefined) {
       queryBuilder.andWhere('product.basePrice <= :maxPrice', { maxPrice });
     }
+  }
 
-    // Sorting
-    queryBuilder.orderBy(`product.${sortBy}`, sortOrder);
+  private applyProductSorting(
+    queryBuilder: SelectQueryBuilder<Product>,
+    sortBy: string,
+    sortOrder: 'ASC' | 'DESC',
+    search?: string,
+  ): void {
+    const excludedStatuses = [OrderStatus.CANCELLED, OrderStatus.REFUNDED];
 
-    // Pagination
-    const skip = (page - 1) * limit;
-    queryBuilder.skip(skip).take(limit);
+    if (sortBy === 'soldCount') {
+      queryBuilder
+        .addSelect((subQuery) => {
+          return subQuery
+            .select('COALESCE(SUM(oi.quantity), 0)', 'sold_count')
+            .from(OrderItem, 'oi')
+            .innerJoin('oi.order', 'o')
+            .innerJoin('oi.productVariant', 'salesVariant')
+            .where('salesVariant.productId = product.id')
+            .andWhere('o.status NOT IN (:...excludedStatuses)', { excludedStatuses });
+        }, 'sold_count_sort')
+        .orderBy('sold_count_sort', sortOrder);
+      return;
+    }
 
-    const [items, total] = await queryBuilder.getManyAndCount();
+    if (sortBy === 'relevance') {
+      if (search) {
+        queryBuilder
+          .addSelect(
+            'CASE WHEN product.name ILIKE :relevancePrefix THEN 0 WHEN product.name ILIKE :relevanceContains THEN 1 ELSE 2 END',
+            'relevance_rank',
+          )
+          .setParameter('relevancePrefix', `${search}%`)
+          .setParameter('relevanceContains', `%${search}%`)
+          .addOrderBy('relevance_rank', 'ASC');
+      }
+      queryBuilder
+        .addSelect('product.createdAt', 'product_created_at')
+        .addOrderBy('product.createdAt', 'DESC');
+      return;
+    }
 
-    return {
-      items,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-      },
+    const allowedColumns: Record<string, string> = {
+      createdAt: 'createdAt',
+      basePrice: 'basePrice',
+      averageRating: 'averageRating',
+      name: 'name',
     };
+
+    const column = allowedColumns[sortBy] ?? 'createdAt';
+    queryBuilder
+      .addSelect(`product.${column}`, `product_${column}`)
+      .orderBy(`product.${column}`, sortOrder);
   }
 
   // Find product by ID
   async findOne(id: string): Promise<Product> {
     const product = await this.productRepository.findOne({
       where: { id },
-      relations: ['store', 'images', 'variants', 'reviews', 'categoryRelation', 'taxonomyTags'],
+      relations: [
+        'store',
+        'images',
+        'variants',
+        'reviews',
+        'categoryRelation',
+        'petTypeRelation',
+        'brandRelation',
+        'taxonomyTags',
+      ],
     });
 
     if (!product) {
@@ -455,7 +639,16 @@ export class ProductsService {
 
     const products = await this.productRepository.find({
       where: { id: In(ids), status: ProductStatus.PUBLISHED },
-      relations: ['store', 'images', 'variants', 'reviews', 'categoryRelation', 'taxonomyTags'],
+      relations: [
+        'store',
+        'images',
+        'variants',
+        'reviews',
+        'categoryRelation',
+        'petTypeRelation',
+        'brandRelation',
+        'taxonomyTags',
+      ],
     });
 
     const byId = new Map(products.map((product) => [product.id, product]));
@@ -466,7 +659,16 @@ export class ProductsService {
   async findBySlug(storeId: string, slug: string): Promise<Product> {
     const product = await this.productRepository.findOne({
       where: { storeId, slug },
-      relations: ['store', 'images', 'variants', 'reviews', 'categoryRelation', 'taxonomyTags'],
+      relations: [
+        'store',
+        'images',
+        'variants',
+        'reviews',
+        'categoryRelation',
+        'petTypeRelation',
+        'brandRelation',
+        'taxonomyTags',
+      ],
     });
 
     if (!product) {
@@ -521,12 +723,14 @@ export class ProductsService {
 
     await this.assertStoreAccess(userId, product.storeId, 'update products');
 
-    const { categoryId, tagIds, category, tags, ...rest } = updateProductDto;
+    const { categoryId, tagIds, petTypeId, brandId, category, tags, ...rest } = updateProductDto;
     const taxonomy = await this.resolveTaxonomyFields({
       category,
       categoryId,
       tags,
       tagIds,
+      petTypeId,
+      brandId,
     });
 
     if (rest.status === ProductStatus.PUBLISHED && product.status !== ProductStatus.PUBLISHED) {
@@ -551,6 +755,12 @@ export class ProductsService {
     }
     if (taxonomy.taxonomyTags !== undefined) {
       product.taxonomyTags = taxonomy.taxonomyTags;
+    }
+    if (taxonomy.petTypeId !== undefined) {
+      product.petTypeId = taxonomy.petTypeId;
+    }
+    if (taxonomy.brandId !== undefined) {
+      product.brandId = taxonomy.brandId;
     }
 
     return this.productRepository.save(product);

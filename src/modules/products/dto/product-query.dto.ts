@@ -1,4 +1,4 @@
-import { IsOptional, IsEnum, IsString, IsNumber, Min } from 'class-validator';
+import { IsOptional, IsEnum, IsString, IsNumber, Min, IsArray } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { ProductStatus } from '../../../database/entities/product.entity';
 
@@ -46,6 +46,24 @@ export class ProductQueryDto {
 
   @IsOptional()
   allStatuses?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Filter by approved pet type IDs',
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  petTypeIds?: string[];
+
+  @ApiPropertyOptional({
+    description: 'Filter by approved brand IDs',
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  brandIds?: string[];
 
   @ApiPropertyOptional({
     description: 'Minimum base price filter (THB)',

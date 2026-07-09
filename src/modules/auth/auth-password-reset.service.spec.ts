@@ -14,6 +14,8 @@ import { PasswordResetToken } from '../../database/entities/password-reset-token
 import { SmsService } from '../sms/sms.service';
 import { CartService } from '../cart/cart.service';
 import { EmailDeliveryService } from '../email/email-delivery.service';
+import { CustomerRepository } from '../../database/repositories/customer.repository';
+import { GuestOrderLinkService } from '../orders/guest-order-link.service';
 
 describe('AuthService password reset', () => {
   let service: AuthService;
@@ -50,6 +52,8 @@ describe('AuthService password reset', () => {
         { provide: ConfigService, useValue: { get: jest.fn() } },
         { provide: SmsService, useValue: {} },
         { provide: CartService, useValue: {} },
+        { provide: GuestOrderLinkService, useValue: {} },
+        { provide: CustomerRepository, useValue: {} },
         { provide: EmailDeliveryService, useValue: emailDeliveryService },
       ],
     }).compile();

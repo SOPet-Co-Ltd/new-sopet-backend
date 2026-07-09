@@ -5,6 +5,7 @@ import {
   ID,
   InputType,
   Int,
+  Context,
   Mutation,
   Parent,
   Query,
@@ -13,6 +14,7 @@ import {
 } from '@nestjs/graphql';
 import { UseGuards } from '@nestjs/common';
 import { IsArray, IsNotEmpty, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import type { GraphqlContext } from '../../graphql/loaders/graphql-context.types';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { ProductsService } from './products.service';
 import {
@@ -34,6 +36,12 @@ import { CurrentUser, Public, Roles } from '../../common/decorators';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { ProductStatus } from '../../database/entities/product.entity';
+
+const PUBLIC_PRODUCTS_MAX_LIMIT = 100;
+
+function clampPublicProductsLimit(limit?: number): number {
+  return Math.min(Math.max(limit ?? 20, 1), PUBLIC_PRODUCTS_MAX_LIMIT);
+}
 
 function parseVariantAttributes(attributes?: string): Record<string, any> | undefined {
   if (!attributes) {
@@ -85,6 +93,16 @@ export class CreateProductInput {
   @IsOptional()
   @IsArray()
   tagIds?: string[];
+
+  @Field({ nullable: true })
+  @IsOptional()
+  @IsString()
+  petTypeId?: string;
+
+  @Field({ nullable: true })
+  @IsOptional()
+  @IsString()
+  brandId?: string;
 
   @Field({ nullable: true })
   @IsOptional()
@@ -148,6 +166,16 @@ export class UpdateProductInput {
   @Field({ nullable: true })
   @IsOptional()
   @IsString()
+  petTypeId?: string;
+
+  @Field({ nullable: true })
+  @IsOptional()
+  @IsString()
+  brandId?: string;
+
+  @Field({ nullable: true })
+  @IsOptional()
+  @IsString()
   warning?: string;
 
   @Field({ nullable: true })
@@ -164,8 +192,11 @@ export class ProductsResolver {
   ) {}
 
   @ResolveField(() => Int)
-  async soldCount(@Parent() product: ProductType): Promise<number> {
-    return this.analyticsService.getProductSoldCount(product.id);
+  async soldCount(
+    @Parent() product: ProductType,
+    @Context() context: GraphqlContext,
+  ): Promise<number> {
+    return context.loaders.productSoldCount.load(product.id);
   }
 
   @Query(() => ProductConnection)
@@ -175,17 +206,30 @@ export class ProductsResolver {
     @Args('storeId', { nullable: true }) storeId?: string,
     @Args('category', { nullable: true }) category?: string,
     @Args('tag', { nullable: true }) tag?: string,
+    @Args('petTypeIds', { type: () => [String], nullable: true }) petTypeIds?: string[],
+    @Args('brandIds', { type: () => [String], nullable: true }) brandIds?: string[],
+    @Args('minPrice', { type: () => Int, nullable: true }) minPrice?: number,
+    @Args('maxPrice', { type: () => Int, nullable: true }) maxPrice?: number,
     @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page?: number,
     @Args('limit', { type: () => Int, nullable: true, defaultValue: 20 }) limit?: number,
+    @Args('sortBy', { nullable: true }) sortBy?: string,
+    @Args('sortOrder', { nullable: true }) sortOrder?: 'ASC' | 'DESC',
   ): Promise<ProductConnection> {
+    const cappedLimit = clampPublicProductsLimit(limit);
     const result = await this.productsService.findAll({
       search,
       storeId,
       category,
       tag,
+      petTypeIds,
+      brandIds,
+      minPrice,
+      maxPrice,
       status: ProductStatus.PUBLISHED,
       page,
-      limit,
+      limit: cappedLimit,
+      sortBy,
+      sortOrder,
     });
 
     return {
@@ -280,6 +324,7 @@ export class ProductsResolver {
     @Args('limit', { type: () => Int, nullable: true, defaultValue: 20 }) limit?: number,
   ): Promise<ProductConnection> {
     const activeStoreId = await this.productsService.resolveActiveStoreId(userId, storeId);
+    const cappedLimit = clampPublicProductsLimit(limit);
 
     const result = await this.productsService.findAll({
       search,
@@ -287,7 +332,7 @@ export class ProductsResolver {
       category,
       allStatuses: true,
       page,
-      limit,
+      limit: cappedLimit,
     });
 
     return {
@@ -314,6 +359,8 @@ export class ProductsResolver {
       categoryId: input.categoryId,
       tags: input.tags,
       tagIds: input.tagIds,
+      petTypeId: input.petTypeId,
+      brandId: input.brandId,
       warning: input.warning,
       expiryDate: input.expiryDate,
     });
@@ -349,6 +396,8 @@ export class ProductsResolver {
       categoryId: input.categoryId,
       tags: input.tags,
       tagIds: input.tagIds,
+      petTypeId: input.petTypeId,
+      brandId: input.brandId,
       warning: input.warning,
       expiryDate: input.expiryDate,
     });

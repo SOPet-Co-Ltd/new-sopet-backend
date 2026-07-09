@@ -29,25 +29,52 @@ import { NotificationsModule } from '../modules/notifications/notifications.modu
 import { TaxonomyModule } from '../modules/taxonomy/taxonomy.module';
 import { CustomersModule } from '../modules/customers/customers.module';
 import { ApiKeysModule } from '../modules/api-keys/api-keys.module';
+import { GraphqlLoadersModule } from './loaders/graphql-loaders.module';
+import { GraphqlContextFactory } from './loaders/graphql-context.factory';
 
 const graphqlErrorLogger = new Logger('GraphQLFormatError');
 
 @Module({
   imports: [
-    GraphQLModule.forRoot<ApolloDriverConfig>({
+    GraphqlLoadersModule,
+    GraphQLModule.forRootAsync<ApolloDriverConfig>({
       driver: ApolloDriver,
-      autoSchemaFile: join(process.cwd(), 'src/schema.gql'),
-      sortSchema: true,
-      playground: process.env.NODE_ENV !== 'production',
-      context: ({ req, res }: { req: unknown; res: unknown }) => ({ req, res }),
-      formatError: (
-        formattedError: GraphQLFormattedError,
-        error: unknown,
-      ): GraphQLFormattedError => {
-        const originalError = unwrapResolverError(error);
+      imports: [GraphqlLoadersModule],
+      inject: [GraphqlContextFactory],
+      useFactory: (contextFactory: GraphqlContextFactory) => ({
+        autoSchemaFile: join(process.cwd(), 'src/schema.gql'),
+        sortSchema: true,
+        playground: process.env.NODE_ENV !== 'production',
+        context: ({ req, res }: { req: unknown; res: unknown }) =>
+          contextFactory.create({ req, res }),
+        formatError: (
+          formattedError: GraphQLFormattedError,
+          error: unknown,
+        ): GraphQLFormattedError => {
+          const originalError = unwrapResolverError(error);
 
-        if (originalError instanceof HttpException) {
-          const mapped = responseFromHttpException(originalError);
+          if (originalError instanceof HttpException) {
+            const mapped = responseFromHttpException(originalError);
+            return {
+              ...formattedError,
+              message: mapped.message,
+              extensions: {
+                ...formattedError.extensions,
+                code: mapped.code,
+                ...(mapped.details ? { details: mapped.details } : {}),
+              },
+            };
+          }
+
+          const mapped = mapUnknownException(originalError) ?? mapException(originalError);
+
+          if (mapped.code === 'INTERNAL_SERVER_ERROR') {
+            graphqlErrorLogger.error(
+              originalError instanceof Error ? originalError.message : String(originalError),
+              originalError instanceof Error ? originalError.stack : undefined,
+            );
+          }
+
           return {
             ...formattedError,
             message: mapped.message,
@@ -57,27 +84,8 @@ const graphqlErrorLogger = new Logger('GraphQLFormatError');
               ...(mapped.details ? { details: mapped.details } : {}),
             },
           };
-        }
-
-        const mapped = mapUnknownException(originalError) ?? mapException(originalError);
-
-        if (mapped.code === 'INTERNAL_SERVER_ERROR') {
-          graphqlErrorLogger.error(
-            originalError instanceof Error ? originalError.message : String(originalError),
-            originalError instanceof Error ? originalError.stack : undefined,
-          );
-        }
-
-        return {
-          ...formattedError,
-          message: mapped.message,
-          extensions: {
-            ...formattedError.extensions,
-            code: mapped.code,
-            ...(mapped.details ? { details: mapped.details } : {}),
-          },
-        };
-      },
+        },
+      }),
     }),
     AuthModule,
     CartModule,

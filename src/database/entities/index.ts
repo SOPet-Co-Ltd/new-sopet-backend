@@ -42,6 +42,8 @@ export { PlatformAd } from './platform-ad.entity';
 export { UserNotification } from './user-notification.entity';
 export { Category } from './category.entity';
 export { Tag } from './tag.entity';
+export { PetType } from './pet-type.entity';
+export { Brand } from './brand.entity';
 export { TaxonomyApprovalStatus } from './enums/taxonomy.enums';
 export { StoreRequest, StoreRequestStatus } from './store-request.entity';
 export {

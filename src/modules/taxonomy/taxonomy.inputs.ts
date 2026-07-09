@@ -50,3 +50,61 @@ export class CreateTagInput {
   @Length(1, 255)
   name: string;
 }
+
+@InputType()
+export class CreatePetTypeInput {
+  @Field()
+  @IsString()
+  @IsNotEmpty()
+  @Length(1, 255)
+  name: string;
+
+  @Field(() => String, { nullable: true })
+  @IsOptional()
+  @IsString()
+  imageUrl?: string | null;
+}
+
+@InputType()
+export class UpdatePetTypeInput {
+  @Field()
+  @IsString()
+  @IsNotEmpty()
+  petTypeId: string;
+
+  @Field()
+  @IsString()
+  @IsNotEmpty()
+  @Length(1, 255)
+  name: string;
+}
+
+@InputType()
+export class SetPetTypeImageInput {
+  @Field()
+  @IsString()
+  @IsNotEmpty()
+  petTypeId: string;
+
+  @Field()
+  @IsString()
+  @IsNotEmpty()
+  imageUrl: string;
+}
+
+@InputType()
+export class CreateBrandInput {
+  @Field()
+  @IsString()
+  @IsNotEmpty()
+  @Length(1, 255)
+  name: string;
+}
+
+@InputType()
+export class DeleteTaxonomyInput {
+  @Field()
+  @IsString()
+  @IsNotEmpty()
+  id: string;
+}
