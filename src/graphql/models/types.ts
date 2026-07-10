@@ -1357,6 +1357,15 @@ export class StoreProductReviewType {
 }
 
 @ObjectType()
+export class StoreProductReviewConnection {
+  @Field(() => [StoreProductReviewType])
+  items: StoreProductReviewType[];
+
+  @Field(() => PaginationMeta)
+  pagination: PaginationMeta;
+}
+
+@ObjectType()
 export class ProductReviewBreakdownType {
   @Field()
   productId: string;

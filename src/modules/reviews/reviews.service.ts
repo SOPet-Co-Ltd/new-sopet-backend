@@ -5,7 +5,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, QueryFailedError } from 'typeorm';
+import { Repository, QueryFailedError, SelectQueryBuilder } from 'typeorm';
 import { Review, ReviewStatus } from '../../database/entities/review.entity';
 import { ReviewReply, REVIEW_REPLY_MAX_LENGTH } from '../../database/entities/review-reply.entity';
 import { ReviewImage } from '../../database/entities/review-image.entity';
@@ -15,7 +15,28 @@ import { ProductImage } from '../../database/entities/product-image.entity';
 import { Customer } from '../../database/entities/customer.entity';
 import { OrderItem } from '../../database/entities/order-item.entity';
 import { OrderStatus } from '../../database/entities/enums/order.enums';
+import { PaginatedResponse } from '../../common/interfaces';
 import { StoresService } from '../stores/stores.service';
+
+export type StoreReviewReplyFilter = 'all' | 'unreplied' | 'replied';
+export type StoreReviewRatingFilter = 'all' | '1' | '2' | '3' | '4' | '5';
+
+export const STORE_PRODUCT_REVIEWS_DEFAULT_LIMIT = 20;
+export const STORE_PRODUCT_REVIEWS_MAX_LIMIT = 100;
+
+export function normalizeStoreReviewReplyFilter(value?: string | null): StoreReviewReplyFilter {
+  if (value === 'unreplied' || value === 'replied') {
+    return value;
+  }
+  return 'all';
+}
+
+export function normalizeStoreReviewRatingFilter(value?: string | null): StoreReviewRatingFilter {
+  if (value === '1' || value === '2' || value === '3' || value === '4' || value === '5') {
+    return value;
+  }
+  return 'all';
+}
 
 export function maskCustomerName(
   customer: Pick<Customer, 'fullName' | 'phone'> | null | undefined,
@@ -168,6 +189,7 @@ export interface CustomerReviewResult {
   comment: string | null;
   status: string;
   createdAt: Date;
+  images: ReviewImageResult[];
 }
 
 function mapReply(reply: ReviewReply | null | undefined): ReviewReplyResult | null {
@@ -378,7 +400,7 @@ export class ReviewsService {
 
     const reviews = await this.reviewRepository.find({
       where: { customerId },
-      relations: ['product', 'product.images'],
+      relations: ['product', 'product.images', 'images'],
       order: { createdAt: 'DESC' },
       take: cappedLimit,
       skip: safeOffset,
@@ -395,6 +417,7 @@ export class ReviewsService {
       comment: review.comment,
       status: review.status,
       createdAt: review.createdAt,
+      images: mapReviewImages(review.images),
     }));
   }
 
@@ -407,18 +430,117 @@ export class ReviewsService {
   }
 
   async findByStore(storeId: string): Promise<StoreProductReviewResult[]> {
-    const reviews = await this.reviewRepository
-      .createQueryBuilder('review')
-      .innerJoinAndSelect('review.product', 'product', 'product.store_id = :storeId', { storeId })
+    const reviews = await this.buildStoreReviewsQuery(storeId)
       .leftJoinAndSelect('product.images', 'images')
       .leftJoinAndSelect('review.customer', 'customer')
       .leftJoinAndSelect('review.reply', 'reply')
       .leftJoinAndSelect('review.images', 'reviewImages')
-      .where('review.status = :status', { status: ReviewStatus.APPROVED })
-      .orderBy('review.created_at', 'DESC')
+      .orderBy('review.createdAt', 'DESC')
       .getMany();
 
     return reviews.map(mapReviewToStoreProductReview);
+  }
+
+  async findByStorePaginated(params: {
+    storeId: string;
+    page?: number;
+    limit?: number;
+    replyFilter?: StoreReviewReplyFilter;
+    ratingFilter?: StoreReviewRatingFilter;
+  }): Promise<PaginatedResponse<StoreProductReviewResult>> {
+    const page = Math.max(params.page ?? 1, 1);
+    const limit = Math.min(
+      Math.max(params.limit ?? STORE_PRODUCT_REVIEWS_DEFAULT_LIMIT, 1),
+      STORE_PRODUCT_REVIEWS_MAX_LIMIT,
+    );
+    const replyFilter = params.replyFilter ?? 'all';
+    const ratingFilter = params.ratingFilter ?? 'all';
+
+    const filterQuery = this.applyStoreReviewFilters(
+      this.buildStoreReviewsFilterQuery(params.storeId).leftJoin('review.reply', 'reply'),
+      replyFilter,
+      ratingFilter,
+    );
+
+    const total = await filterQuery.clone().getCount();
+
+    const idRows = await filterQuery
+      .clone()
+      .select('review.id', 'id')
+      .orderBy('review.createdAt', 'DESC')
+      .offset((page - 1) * limit)
+      .limit(limit)
+      .getRawMany<{ id: string }>();
+
+    if (idRows.length === 0) {
+      return {
+        items: [],
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit) || 1,
+        },
+      };
+    }
+
+    const reviewIds = idRows.map((row) => row.id);
+    const loadedReviews = await this.reviewRepository
+      .createQueryBuilder('review')
+      .innerJoinAndSelect('review.product', 'product')
+      .leftJoinAndSelect('product.images', 'images')
+      .leftJoinAndSelect('review.customer', 'customer')
+      .leftJoinAndSelect('review.reply', 'reply')
+      .leftJoinAndSelect('review.images', 'reviewImages')
+      .where('review.id IN (:...reviewIds)', { reviewIds })
+      .getMany();
+
+    const reviewsById = new Map(loadedReviews.map((review) => [review.id, review]));
+    const reviews = reviewIds
+      .map((id) => reviewsById.get(id))
+      .filter((review): review is Review => review !== undefined);
+
+    return {
+      items: reviews.map(mapReviewToStoreProductReview),
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit) || 1,
+      },
+    };
+  }
+
+  private buildStoreReviewsFilterQuery(storeId: string): SelectQueryBuilder<Review> {
+    return this.reviewRepository
+      .createQueryBuilder('review')
+      .innerJoin('review.product', 'product', 'product.store_id = :storeId', { storeId })
+      .where('review.status = :status', { status: ReviewStatus.APPROVED });
+  }
+
+  private buildStoreReviewsQuery(storeId: string): SelectQueryBuilder<Review> {
+    return this.reviewRepository
+      .createQueryBuilder('review')
+      .innerJoinAndSelect('review.product', 'product', 'product.store_id = :storeId', { storeId })
+      .where('review.status = :status', { status: ReviewStatus.APPROVED });
+  }
+
+  private applyStoreReviewFilters(
+    query: SelectQueryBuilder<Review>,
+    replyFilter: StoreReviewReplyFilter,
+    ratingFilter: StoreReviewRatingFilter,
+  ): SelectQueryBuilder<Review> {
+    if (replyFilter === 'unreplied') {
+      query.andWhere('reply.id IS NULL');
+    } else if (replyFilter === 'replied') {
+      query.andWhere('reply.id IS NOT NULL');
+    }
+
+    if (ratingFilter !== 'all') {
+      query.andWhere('review.rating = :rating', { rating: Number(ratingFilter) });
+    }
+
+    return query;
   }
 
   async createReviewReply(params: {

@@ -379,6 +379,7 @@ type CustomerReviewType {
   comment: String
   createdAt: DateTime!
   id: String!
+  images: [ReviewImageType!]!
   orderId: String!
   productId: String!
   productImageUrl: String
@@ -986,7 +987,7 @@ type Query {
   storeInvitations: [StoreMemberInvitationType!]!
   storeMembers: [StoreMemberType!]!
   storePayouts: [PayoutType!]!
-  storeProductReviews(storeId: String!): [StoreProductReviewType!]!
+  storeProductReviews(limit: Int = 20, page: Int = 1, ratingFilter: String, replyFilter: String, storeId: String!): StoreProductReviewConnection!
   storePromotions(storeId: String!): [PromotionType!]!
   storeReactivationRequests(storeId: String!): [StoreReactivationRequestType!]!
   storeReviewSummary(storeId: String!): StoreReviewSummaryType!
@@ -1257,6 +1258,11 @@ type StoreMemberType {
   role: String!
   storeId: String!
   userId: String!
+}
+
+type StoreProductReviewConnection {
+  items: [StoreProductReviewType!]!
+  pagination: PaginationMeta!
 }
 
 type StoreProductReviewType {

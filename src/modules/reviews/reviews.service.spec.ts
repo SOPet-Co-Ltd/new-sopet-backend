@@ -375,6 +375,7 @@ describe('ReviewsService', () => {
           status: ReviewStatus.APPROVED,
           createdAt: newer,
           product: { name: 'Dog Food', slug: 'dog-food', images: [] },
+          images: [{ id: 'img-2', url: 'https://example.com/review-2.jpg' }],
         },
         {
           id: 'review-1',
@@ -385,6 +386,7 @@ describe('ReviewsService', () => {
           status: ReviewStatus.PENDING,
           createdAt: older,
           product: { name: 'Cat Food', slug: 'cat-food', images: [] },
+          images: [],
         },
       ]);
 
@@ -392,13 +394,15 @@ describe('ReviewsService', () => {
 
       expect(reviewRepo.find).toHaveBeenCalledWith({
         where: { customerId: 'cust-1' },
-        relations: ['product', 'product.images'],
+        relations: ['product', 'product.images', 'images'],
         order: { createdAt: 'DESC' },
         take: 100,
         skip: 0,
       });
       expect(results[0].id).toBe('review-2');
+      expect(results[0].images).toEqual([{ id: 'img-2', url: 'https://example.com/review-2.jpg' }]);
       expect(results[1].id).toBe('review-1');
+      expect(results[1].images).toEqual([]);
     });
   });
 
@@ -461,7 +465,9 @@ describe('ReviewsService', () => {
       reviewRepo.createQueryBuilder = jest.fn(() => ({
         innerJoinAndSelect: jest.fn().mockReturnThis(),
         leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         getMany,
       })) as never;
@@ -475,6 +481,64 @@ describe('ReviewsService', () => {
         productName: 'Dog Food',
         productSlug: 'dog-food',
         reply: null,
+      });
+    });
+  });
+
+  describe('findByStorePaginated', () => {
+    it('returns paginated reviews with filters and metadata', async () => {
+      const getRawMany = jest.fn().mockResolvedValue([{ id: 'review-2' }]);
+      const getMany = jest.fn().mockResolvedValue([
+        {
+          id: 'review-2',
+          productId: 'prod-2',
+          rating: 3,
+          comment: 'Okay',
+          createdAt: new Date('2026-01-02T00:00:00.000Z'),
+          product: { name: 'Cat Food', slug: 'cat-food', images: [] },
+          customer: { fullName: 'Jane Doe', phone: '0899999999' },
+          reply: null,
+        },
+      ]);
+      const getCount = jest.fn().mockResolvedValue(25);
+      const createQueryBuilder = jest.fn(() => ({
+        innerJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        innerJoin: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        offset: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        clone: jest.fn().mockReturnThis(),
+        getMany,
+        getCount,
+        getRawMany,
+      })) as never;
+      reviewRepo.createQueryBuilder = createQueryBuilder;
+
+      const result = await service.findByStorePaginated({
+        storeId: 'store-1',
+        page: 2,
+        limit: 20,
+        replyFilter: 'unreplied',
+        ratingFilter: '3',
+      });
+
+      expect(getCount).toHaveBeenCalled();
+      expect(getRawMany).toHaveBeenCalled();
+      expect(getMany).toHaveBeenCalled();
+      expect(result.items[0]).toMatchObject({
+        id: 'review-2',
+        productName: 'Cat Food',
+      });
+      expect(result.pagination).toEqual({
+        page: 2,
+        limit: 20,
+        total: 25,
+        totalPages: 2,
       });
     });
   });

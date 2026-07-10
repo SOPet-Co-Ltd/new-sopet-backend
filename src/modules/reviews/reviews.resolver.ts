@@ -21,7 +21,13 @@ import {
   IsArray,
   ArrayMaxSize,
 } from 'class-validator';
-import { ReviewsService, maskCustomerName, REVIEW_MAX_IMAGES } from './reviews.service';
+import {
+  ReviewsService,
+  maskCustomerName,
+  REVIEW_MAX_IMAGES,
+  normalizeStoreReviewRatingFilter,
+  normalizeStoreReviewReplyFilter,
+} from './reviews.service';
 import { REVIEW_REPLY_MAX_LENGTH } from '../../database/entities/review-reply.entity';
 import { CurrentUser, Public, Roles } from '../../common/decorators';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -29,6 +35,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import {
   ReviewImageType,
   ReviewReplyType,
+  StoreProductReviewConnection,
   StoreProductReviewType,
   StoreReviewSummaryType,
 } from '../../graphql/models/types';
@@ -96,6 +103,9 @@ export class CustomerReviewType {
 
   @Field()
   createdAt: Date;
+
+  @Field(() => [ReviewImageType])
+  images: ReviewImageType[];
 }
 
 @ObjectType()
@@ -227,13 +237,17 @@ export class ReviewsResolver {
     return reviews.map(mapReviewToType);
   }
 
-  @Query(() => [StoreProductReviewType])
+  @Query(() => StoreProductReviewConnection)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('vendor')
   async storeProductReviews(
     @Args('storeId') storeId: string,
     @CurrentUser('id') userId: string,
-  ): Promise<StoreProductReviewType[]> {
+    @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page?: number,
+    @Args('limit', { type: () => Int, nullable: true, defaultValue: 20 }) limit?: number,
+    @Args('replyFilter', { type: () => String, nullable: true }) replyFilter?: string,
+    @Args('ratingFilter', { type: () => String, nullable: true }) ratingFilter?: string,
+  ): Promise<StoreProductReviewConnection> {
     const hasAccess = await this.storesService.userHasStoreAccess(userId, storeId);
     if (!hasAccess) {
       throw new ForbiddenException({
@@ -241,7 +255,13 @@ export class ReviewsResolver {
         message: 'No access to this store',
       });
     }
-    return this.reviewsService.findByStore(storeId);
+    return this.reviewsService.findByStorePaginated({
+      storeId,
+      page,
+      limit,
+      replyFilter: normalizeStoreReviewReplyFilter(replyFilter),
+      ratingFilter: normalizeStoreReviewRatingFilter(ratingFilter),
+    });
   }
 
   @Query(() => [StoreProductReviewType])

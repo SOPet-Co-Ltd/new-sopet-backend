@@ -43,6 +43,7 @@ describe('ReviewsResolver', () => {
       | 'getStoreReviewSummary'
       | 'findByProduct'
       | 'findByStore'
+      | 'findByStorePaginated'
       | 'create'
       | 'createReviewReply'
       | 'updateReviewReply'
@@ -58,6 +59,7 @@ describe('ReviewsResolver', () => {
       getStoreReviewSummary: jest.fn(),
       findByProduct: jest.fn(),
       findByStore: jest.fn(),
+      findByStorePaginated: jest.fn(),
       create: jest.fn(),
       createReviewReply: jest.fn(),
       updateReviewReply: jest.fn(),
@@ -261,6 +263,7 @@ describe('ReviewsResolver', () => {
           comment: 'Great',
           status: ReviewStatus.PENDING,
           createdAt: new Date('2026-06-01T10:00:00.000Z'),
+          images: [{ id: 'img-1', url: 'https://example.com/review-1.jpg' }],
         },
       ]);
 
@@ -338,6 +341,32 @@ describe('ReviewsResolver', () => {
       await expect(resolver.storeProductReviews('store-1', 'user-1')).rejects.toThrow(
         ForbiddenException,
       );
+    });
+
+    it('delegates pagination and filters to findByStorePaginated', async () => {
+      storesService.userHasStoreAccess.mockResolvedValue(true);
+      reviewsService.findByStorePaginated.mockResolvedValue({
+        items: [],
+        pagination: { page: 2, limit: 20, total: 0, totalPages: 1 },
+      });
+
+      const result = await resolver.storeProductReviews(
+        'store-1',
+        'user-1',
+        2,
+        20,
+        'unreplied',
+        '5',
+      );
+
+      expect(reviewsService.findByStorePaginated).toHaveBeenCalledWith({
+        storeId: 'store-1',
+        page: 2,
+        limit: 20,
+        replyFilter: 'unreplied',
+        ratingFilter: '5',
+      });
+      expect(result.pagination.page).toBe(2);
     });
   });
 });
