@@ -48,6 +48,9 @@ export class Payment {
   @Column({ name: 'qr_code_url', type: 'varchar', length: 2048, nullable: true })
   qrCodeUrl: string | null;
 
+  @Column({ name: 'expires_at', type: 'timestamp', nullable: true })
+  expiresAt: Date | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
   createdAt: Date;
 

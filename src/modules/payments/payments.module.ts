@@ -14,6 +14,7 @@ import {
   PaymentMethodType,
 } from '../../database/entities/saved-payment-method.entity';
 import { PaymentsResolver } from './payments.resolver';
+import { PaymentExpiryScheduler } from './payment-expiry.scheduler';
 
 @Module({
   imports: [
@@ -23,7 +24,7 @@ import { PaymentsResolver } from './payments.resolver';
     TypeOrmModule.forFeature([Payment, Order, Customer, SavedPaymentMethod]),
   ],
   controllers: [PaymentsWebhookController],
-  providers: [PaymentsService, PaymentEventsService, PaymentsResolver],
+  providers: [PaymentsService, PaymentEventsService, PaymentsResolver, PaymentExpiryScheduler],
   exports: [PaymentsService, PaymentEventsService],
 })
 export class PaymentsModule {}

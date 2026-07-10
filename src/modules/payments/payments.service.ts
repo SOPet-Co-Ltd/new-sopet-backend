@@ -90,6 +90,95 @@ export class PaymentsService {
     this.omiseWebhookSecret = this.configService.get<string>('omise.webhookSecret') ?? '';
   }
 
+  private getQrExpiryMinutes(): number {
+    const configured = this.configService.get<number>('payment.qrExpiryMinutes');
+    return configured && configured > 0 ? configured : 15;
+  }
+
+  private computeQrExpiresAt(from: Date = new Date()): Date {
+    return new Date(from.getTime() + this.getQrExpiryMinutes() * 60_000);
+  }
+
+  private getEffectiveExpiresAt(payment: Payment): Date | null {
+    if (payment.expiresAt) {
+      return payment.expiresAt;
+    }
+
+    if (payment.paymentMethod === PaymentMethod.PROMPTPAY && payment.status === 'pending') {
+      return this.computeQrExpiresAt(payment.createdAt);
+    }
+
+    return null;
+  }
+
+  isQrPaymentExpired(payment: Payment, now: Date = new Date()): boolean {
+    const expiresAt = this.getEffectiveExpiresAt(payment);
+    return expiresAt !== null && expiresAt.getTime() <= now.getTime();
+  }
+
+  private async finalizeExpiredPayment(payment: Payment): Promise<Payment> {
+    const order = await this.orderRepository.findOne({ where: { id: payment.orderId } });
+    if (!order) {
+      return payment;
+    }
+
+    if (
+      order.status === OrderStatus.CANCELLED ||
+      order.status === OrderStatus.REFUNDED ||
+      payment.status !== 'pending'
+    ) {
+      return payment;
+    }
+
+    await this.paymentRepository.manager.transaction(async (manager) => {
+      payment.status = 'failed';
+      await manager.save(payment);
+
+      order.status = OrderStatus.CANCELLED;
+      await manager.save(order);
+
+      await this.inventoryService.restoreOrderStock(order.id, manager, 'QR payment expired');
+    });
+
+    await this.paymentEventsService.publishPaymentStatusUpdated(payment);
+    return payment;
+  }
+
+  async expirePendingQrPaymentIfNeeded(payment: Payment): Promise<Payment> {
+    if (
+      payment.paymentMethod !== PaymentMethod.PROMPTPAY ||
+      payment.status !== 'pending' ||
+      !this.isQrPaymentExpired(payment)
+    ) {
+      return payment;
+    }
+
+    return this.finalizeExpiredPayment(payment);
+  }
+
+  async expirePendingQrPayments(): Promise<number> {
+    const pendingPayments = await this.paymentRepository.find({
+      where: {
+        paymentMethod: PaymentMethod.PROMPTPAY,
+        status: 'pending',
+      },
+    });
+
+    let expiredCount = 0;
+    for (const payment of pendingPayments) {
+      if (!this.isQrPaymentExpired(payment)) {
+        continue;
+      }
+
+      const updated = await this.finalizeExpiredPayment(payment);
+      if (updated.status === 'failed') {
+        expiredCount += 1;
+      }
+    }
+
+    return expiredCount;
+  }
+
   private async omiseRequest<T>(
     path: string,
     body?: Record<string, unknown>,
@@ -352,7 +441,7 @@ export class PaymentsService {
     }
 
     await this.assertCanPayForOrder(payment.orderId, customerId);
-    return payment;
+    return this.expirePendingQrPaymentIfNeeded(payment);
   }
 
   async findLatestByOrderId(orderId: string, customerId?: string): Promise<Payment> {
@@ -369,7 +458,7 @@ export class PaymentsService {
       });
     }
 
-    return payment;
+    return this.expirePendingQrPaymentIfNeeded(payment);
   }
 
   async createCharge(createChargeDto: CreateChargeDto): Promise<{
@@ -380,6 +469,7 @@ export class PaymentsService {
     paymentMethod: string;
     authorizeUri?: string;
     qrCodeUrl?: string;
+    expiresAt?: Date;
   }> {
     const {
       orderId,
@@ -428,17 +518,29 @@ export class PaymentsService {
         amount,
         paymentMethod: paymentMethod as Payment['paymentMethod'],
       },
+      order: { createdAt: 'DESC' },
     });
     if (existingPayment && existingPayment.status === 'pending') {
-      return {
-        paymentId: existingPayment.id,
-        status: existingPayment.status,
-        amount,
-        currency,
-        paymentMethod,
-        authorizeUri: existingPayment.authorizeUri ?? undefined,
-        qrCodeUrl: existingPayment.qrCodeUrl ?? undefined,
-      };
+      const activePayment = await this.expirePendingQrPaymentIfNeeded(existingPayment);
+      if (activePayment.status === 'pending') {
+        return {
+          paymentId: activePayment.id,
+          status: activePayment.status,
+          amount,
+          currency,
+          paymentMethod,
+          authorizeUri: activePayment.authorizeUri ?? undefined,
+          qrCodeUrl: activePayment.qrCodeUrl ?? undefined,
+          expiresAt: this.getEffectiveExpiresAt(activePayment) ?? undefined,
+        };
+      }
+    }
+
+    if (order.status !== OrderStatus.PENDING_PAYMENT) {
+      throw new BadRequestException({
+        code: 'ORDER_NOT_PAYABLE',
+        message: 'This order is no longer awaiting payment',
+      });
     }
 
     const payment = this.paymentRepository.create({
@@ -500,6 +602,7 @@ export class PaymentsService {
 
     const authorizeUri = charge.authorize_uri ?? null;
     const qrCodeUrl = charge.source?.scannable_code?.image?.download_uri ?? null;
+    const expiresAt = paymentMethod === 'promptpay' ? this.computeQrExpiresAt() : null;
 
     order.paymentReference = charge.id;
     await this.orderRepository.save(order);
@@ -510,6 +613,7 @@ export class PaymentsService {
       payment.status = charge.status === 'failed' ? 'failed' : 'pending';
       payment.authorizeUri = authorizeUri;
       payment.qrCodeUrl = qrCodeUrl;
+      payment.expiresAt = expiresAt;
       await this.paymentRepository.save(payment);
       if (payment.status === 'failed') {
         await this.paymentEventsService.publishPaymentStatusUpdated(payment);
@@ -524,6 +628,7 @@ export class PaymentsService {
       paymentMethod,
       authorizeUri: authorizeUri ?? undefined,
       qrCodeUrl: qrCodeUrl ?? undefined,
+      expiresAt: expiresAt ?? undefined,
     };
   }
 

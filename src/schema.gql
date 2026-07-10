@@ -701,6 +701,7 @@ type PaymentType {
   amount: Float!
   authorizeUri: String
   currency: String!
+  expiresAt: DateTime
   id: String!
   orderId: String!
   paymentMethod: String!

@@ -19,6 +19,7 @@ describe('PaymentsResolver payment queries', () => {
     paymentMethod: 'promptpay',
     authorizeUri: 'https://example.com/authorize',
     qrCodeUrl: 'https://example.com/qr.png',
+    expiresAt: new Date('2026-07-10T09:15:00.000Z'),
   };
 
   beforeEach(() => {
@@ -59,6 +60,7 @@ describe('PaymentsResolver payment queries', () => {
         paymentMethod: 'promptpay',
         authorizeUri: 'https://example.com/authorize',
         qrCodeUrl: 'https://example.com/qr.png',
+        expiresAt: paymentEntity.expiresAt,
       });
     });
 

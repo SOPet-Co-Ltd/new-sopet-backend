@@ -25,6 +25,7 @@ export class PaymentsResolver {
     paymentMethod: string;
     authorizeUri?: string | null;
     qrCodeUrl?: string | null;
+    expiresAt?: Date | null;
   }): PaymentType {
     return {
       id: payment.id,
@@ -35,6 +36,7 @@ export class PaymentsResolver {
       paymentMethod: payment.paymentMethod,
       authorizeUri: payment.authorizeUri ?? null,
       qrCodeUrl: payment.qrCodeUrl ?? null,
+      expiresAt: payment.expiresAt ?? null,
     };
   }
 
@@ -112,16 +114,9 @@ export class PaymentsResolver {
       customerId: effectiveCustomerId,
     });
 
-    return {
-      id: result.paymentId,
-      orderId: input.orderId,
-      amount: input.amount,
-      currency: input.currency,
-      status: result.status,
-      paymentMethod: normalizeCheckoutPaymentMethod(input.paymentMethod),
-      authorizeUri: result.authorizeUri ?? null,
-      qrCodeUrl: result.qrCodeUrl ?? null,
-    };
+    const payment = await this.paymentsService.findById(result.paymentId, effectiveCustomerId);
+
+    return this.mapPayment(payment);
   }
 
   @Mutation(() => PaymentType)

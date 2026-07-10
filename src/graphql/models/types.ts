@@ -478,6 +478,9 @@ export class PaymentType {
 
   @Field(() => String, { nullable: true })
   qrCodeUrl?: string | null;
+
+  @Field(() => Date, { nullable: true })
+  expiresAt?: Date | null;
 }
 
 @ObjectType()
