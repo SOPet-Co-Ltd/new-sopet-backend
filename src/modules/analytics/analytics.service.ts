@@ -362,18 +362,17 @@ export class AnalyticsService {
     const rows = await this.orderItemRepository
       .createQueryBuilder('oi')
       .innerJoin('oi.order', 'o')
-      .innerJoin('oi.productVariant', 'variant')
-      .innerJoin('variant.product', 'product')
-      .select('product.id', 'productId')
-      .addSelect('product.name', 'name')
+      .innerJoin('product_variants', 'variant', 'variant.id = oi.variant_id')
+      .leftJoin('products', 'product', 'product.id = variant.product_id')
+      .select('variant.product_id', 'productId')
+      .addSelect('COALESCE(MAX(product.name), MAX(oi.product_name))', 'name')
       .addSelect('COALESCE(SUM(oi.quantity), 0)', 'unitsSold')
       .addSelect('COALESCE(SUM(oi.subtotal), 0)', 'revenue')
       .where('oi.storeId = :storeId', { storeId })
       .andWhere('o.status NOT IN (:...excludedStatuses)', {
         excludedStatuses: [OrderStatus.CANCELLED, OrderStatus.REFUNDED],
       })
-      .groupBy('product.id')
-      .addGroupBy('product.name')
+      .groupBy('variant.product_id')
       .orderBy('revenue', 'DESC')
       .limit(limit)
       .getRawMany<{

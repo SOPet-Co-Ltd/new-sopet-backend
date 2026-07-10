@@ -11,6 +11,11 @@ describe('ReviewsResolver', () => {
   const summary = {
     averageRating: 4.5,
     totalCount: 10,
+    rating5Count: 7,
+    rating4Count: 2,
+    rating3Count: 1,
+    rating2Count: 0,
+    rating1Count: 0,
     productBreakdown: [
       {
         productId: 'prod-1',
@@ -24,6 +29,11 @@ describe('ReviewsResolver', () => {
   const emptySummary = {
     averageRating: 0,
     totalCount: 0,
+    rating5Count: 0,
+    rating4Count: 0,
+    rating3Count: 0,
+    rating2Count: 0,
+    rating1Count: 0,
     productBreakdown: [],
   };
 
@@ -32,7 +42,10 @@ describe('ReviewsResolver', () => {
       ReviewsService,
       | 'getStoreReviewSummary'
       | 'findByProduct'
+      | 'findByStore'
       | 'create'
+      | 'createReviewReply'
+      | 'updateReviewReply'
       | 'findReviewableItemsForCustomer'
       | 'findMyReviews'
     >
@@ -44,7 +57,10 @@ describe('ReviewsResolver', () => {
     reviewsService = {
       getStoreReviewSummary: jest.fn(),
       findByProduct: jest.fn(),
+      findByStore: jest.fn(),
       create: jest.fn(),
+      createReviewReply: jest.fn(),
+      updateReviewReply: jest.fn(),
       findReviewableItemsForCustomer: jest.fn(),
       findMyReviews: jest.fn(),
     };
@@ -252,6 +268,56 @@ describe('ReviewsResolver', () => {
 
       expect(reviewsService.findMyReviews).toHaveBeenCalledWith('cust-1', 25, 10);
       expect(result[0].id).toBe('review-1');
+    });
+  });
+
+  describe('storeReviews', () => {
+    it('is decorated with @Public()', () => {
+      const method = Object.getOwnPropertyDescriptor(ReviewsResolver.prototype, 'storeReviews')
+        ?.value as (...args: unknown[]) => unknown;
+      const isPublic = Reflect.getMetadata(IS_PUBLIC_KEY, method) as boolean | undefined;
+      expect(isPublic).toBe(true);
+    });
+
+    it('delegates to findByStore', async () => {
+      reviewsService.findByStore.mockResolvedValue([
+        {
+          id: 'review-1',
+          productId: 'prod-1',
+          productName: 'Dog Food',
+          productSlug: 'dog-food',
+          productImageUrl: null,
+          rating: 5,
+          comment: 'Great',
+          customerName: 'John D.',
+          createdAt: new Date('2026-01-01T00:00:00.000Z'),
+          reply: null,
+        },
+      ]);
+
+      const result = await resolver.storeReviews('store-1');
+
+      expect(reviewsService.findByStore).toHaveBeenCalledWith('store-1');
+      expect(result[0].productName).toBe('Dog Food');
+      expect(storesService.userHasStoreAccess).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('createReviewReply', () => {
+    it('is decorated with vendor role guard', () => {
+      const method = Object.getOwnPropertyDescriptor(ReviewsResolver.prototype, 'createReviewReply')
+        ?.value as (...args: unknown[]) => unknown;
+      const roles = Reflect.getMetadata(ROLES_KEY, method) as string[] | undefined;
+      expect(roles).toEqual(['vendor']);
+    });
+  });
+
+  describe('updateReviewReply', () => {
+    it('is decorated with vendor role guard', () => {
+      const method = Object.getOwnPropertyDescriptor(ReviewsResolver.prototype, 'updateReviewReply')
+        ?.value as (...args: unknown[]) => unknown;
+      const roles = Reflect.getMetadata(ROLES_KEY, method) as string[] | undefined;
+      expect(roles).toEqual(['vendor']);
     });
   });
 

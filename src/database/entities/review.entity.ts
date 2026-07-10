@@ -7,6 +7,7 @@ import {
   DeleteDateColumn,
   ManyToOne,
   OneToMany,
+  OneToOne,
   JoinColumn,
   Index,
 } from 'typeorm';
@@ -15,6 +16,7 @@ import { Customer } from './customer.entity';
 import { Product } from './product.entity';
 import { Order } from './order.entity';
 import { ReviewImage } from './review-image.entity';
+import { ReviewReply } from './review-reply.entity';
 
 export enum ReviewStatus {
   PENDING = 'pending',
@@ -91,4 +93,7 @@ export class Review {
 
   @OneToMany(() => ReviewImage, (image) => image.review, { cascade: true })
   images: ReviewImage[];
+
+  @OneToOne(() => ReviewReply, (reply) => reply.review)
+  reply: ReviewReply | null;
 }

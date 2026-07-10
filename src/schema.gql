@@ -303,9 +303,15 @@ input CreatePromotionInput {
 
 input CreateReviewInput {
   comment: String
+  imageUrls: [String!]
   orderId: String!
   productId: String!
   rating: Int!
+}
+
+input CreateReviewReplyInput {
+  body: String!
+  reviewId: String!
 }
 
 input CreateSearchSynonymInput {
@@ -514,6 +520,7 @@ type Mutation {
   createProductVariant(input: CreateProductVariantInput!, productId: String!): ProductVariantType!
   createPromotion(input: CreatePromotionInput!): PromotionType!
   createReview(input: CreateReviewInput!): ReviewType!
+  createReviewReply(input: CreateReviewReplyInput!): ReviewReplyType!
   createSearchSynonym(input: CreateSearchSynonymInput!): SearchSynonymType!
   createShippingOption(input: CreateShippingOptionInput!): StoreShippingOptionType!
   createShippingProvider(input: CreateShippingProviderInput!): ShippingProviderType!
@@ -597,6 +604,7 @@ type Mutation {
   updateProductVariant(input: UpdateProductVariantInput!, variantId: String!): ProductVariantType!
   updateProfile(input: UpdateProfileInput!): CustomerProfile!
   updatePromotion(id: String!, input: UpdatePromotionInput!): PromotionType!
+  updateReviewReply(input: UpdateReviewReplyInput!): ReviewReplyType!
   updateSearchRankingWeights(input: UpdateSearchRankingWeightsInput!): SearchRankingWeightsType!
   updateSearchSynonym(id: String!, input: UpdateSearchSynonymInput!): SearchSynonymType!
   updateShippingOption(id: String!, input: UpdateShippingOptionInput!): StoreShippingOptionType!
@@ -982,6 +990,7 @@ type Query {
   storePromotions(storeId: String!): [PromotionType!]!
   storeReactivationRequests(storeId: String!): [StoreReactivationRequestType!]!
   storeReviewSummary(storeId: String!): StoreReviewSummaryType!
+  storeReviews(storeId: String!): [StoreProductReviewType!]!
   storeShippingOptions(storeId: String!): [StoreShippingOptionType!]!
   stores: [StoreType!]!
   tagDeleteImpact(tagId: String!): TaxonomyDeleteImpactType!
@@ -990,7 +999,7 @@ type Query {
   validatePromotion(input: ValidatePromotionInput!): PromotionValidationResult!
   vendorCustomer(id: String!): VendorCustomerType!
   vendorCustomers(limit: Int! = 20, page: Int! = 1, search: String): VendorCustomerConnection!
-  vendorOrders: [OrderType!]!
+  vendorOrders(storeId: String!): [OrderType!]!
   vendorProduct(id: String!): ProductType!
   vendorProducts(category: String, limit: Int = 20, page: Int = 1, search: String): ProductConnection!
 }
@@ -1057,6 +1066,13 @@ type ReviewImageType {
   url: String!
 }
 
+type ReviewReplyType {
+  body: String!
+  createdAt: DateTime!
+  id: String!
+  updatedAt: DateTime!
+}
+
 type ReviewType {
   comment: String
   createdAt: DateTime!
@@ -1065,6 +1081,7 @@ type ReviewType {
   images: [ReviewImageType!]!
   productId: String!
   rating: Int!
+  reply: ReviewReplyType
   status: String!
 }
 
@@ -1247,9 +1264,13 @@ type StoreProductReviewType {
   createdAt: DateTime!
   customerName: String!
   id: String!
+  images: [ReviewImageType!]!
   productId: String!
+  productImageUrl: String
   productName: String!
+  productSlug: String
   rating: Int!
+  reply: ReviewReplyType
 }
 
 type StoreReactivationRequestImageType {
@@ -1294,6 +1315,11 @@ type StoreRequestType {
 type StoreReviewSummaryType {
   averageRating: Float!
   productBreakdown: [ProductReviewBreakdownType!]!
+  rating1Count: Int!
+  rating2Count: Int!
+  rating3Count: Int!
+  rating4Count: Int!
+  rating5Count: Int!
   totalCount: Int!
 }
 
@@ -1519,6 +1545,11 @@ input UpdatePromotionInput {
   type: String
   usageLimit: Int
   usagePerCustomer: Int
+}
+
+input UpdateReviewReplyInput {
+  body: String!
+  replyId: String!
 }
 
 input UpdateSearchRankingWeightsInput {

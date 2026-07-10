@@ -163,10 +163,17 @@ export class OrdersResolver {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('vendor')
   async vendorOrders(
+    @Args('storeId') storeId: string,
     @CurrentUser('id') userId: string,
-    @CurrentUser('storeId') storeId: string,
   ): Promise<OrderType[]> {
-    await this.storesService.assertStoreOwner(userId, storeId);
+    const hasAccess = await this.storesService.userHasStoreAccess(userId, storeId);
+    if (!hasAccess) {
+      throw new ForbiddenException({
+        code: 'STORE_ACCESS_DENIED',
+        message: 'No access to this store',
+      });
+    }
+
     const orders = await this.ordersService.findByStore(storeId);
     return orders.map(mapOrder);
   }

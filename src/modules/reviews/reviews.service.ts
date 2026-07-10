@@ -1,13 +1,21 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, QueryFailedError } from 'typeorm';
 import { Review, ReviewStatus } from '../../database/entities/review.entity';
+import { ReviewReply, REVIEW_REPLY_MAX_LENGTH } from '../../database/entities/review-reply.entity';
+import { ReviewImage } from '../../database/entities/review-image.entity';
 import { Order } from '../../database/entities/order.entity';
 import { Product } from '../../database/entities/product.entity';
 import { ProductImage } from '../../database/entities/product-image.entity';
 import { Customer } from '../../database/entities/customer.entity';
 import { OrderItem } from '../../database/entities/order-item.entity';
 import { OrderStatus } from '../../database/entities/enums/order.enums';
+import { StoresService } from '../stores/stores.service';
 
 export function maskCustomerName(
   customer: Pick<Customer, 'fullName' | 'phone'> | null | undefined,
@@ -37,6 +45,21 @@ export function getReviewWindowDays(): number {
     return 30;
   }
   return parsed;
+}
+
+export function shouldAutoApproveReview(): boolean {
+  const raw = process.env.REVIEW_AUTO_APPROVE;
+  if (raw === 'true') {
+    return true;
+  }
+  if (raw === 'false') {
+    return false;
+  }
+  return process.env.NODE_ENV !== 'production';
+}
+
+export function resolveInitialReviewStatus(): ReviewStatus {
+  return ReviewStatus.APPROVED;
 }
 
 export function addDays(date: Date, days: number): Date {
@@ -78,19 +101,42 @@ export function resolveItemDeliveredAt(item: OrderItem, order: Order): Date | nu
   return null;
 }
 
+export interface ReviewReplyResult {
+  id: string;
+  body: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export const REVIEW_MAX_IMAGES = 5;
+
+export interface ReviewImageResult {
+  id: string;
+  url: string;
+}
+
 export interface StoreProductReviewResult {
   id: string;
   productId: string;
   productName: string;
+  productSlug: string | null;
+  productImageUrl: string | null;
   rating: number;
   comment: string | null;
   customerName: string;
   createdAt: Date;
+  images: ReviewImageResult[];
+  reply: ReviewReplyResult | null;
 }
 
 export interface StoreReviewSummaryResult {
   averageRating: number;
   totalCount: number;
+  rating5Count: number;
+  rating4Count: number;
+  rating3Count: number;
+  rating2Count: number;
+  rating1Count: number;
   productBreakdown: Array<{
     productId: string;
     productName: string;
@@ -124,15 +170,56 @@ export interface CustomerReviewResult {
   createdAt: Date;
 }
 
+function mapReply(reply: ReviewReply | null | undefined): ReviewReplyResult | null {
+  if (!reply) {
+    return null;
+  }
+
+  return {
+    id: reply.id,
+    body: reply.body,
+    createdAt: reply.createdAt,
+    updatedAt: reply.updatedAt,
+  };
+}
+
+function mapReviewImages(images: ReviewImage[] | null | undefined): ReviewImageResult[] {
+  return (images ?? []).map((image) => ({
+    id: image.id,
+    url: image.url,
+  }));
+}
+
+function mapReviewToStoreProductReview(review: Review): StoreProductReviewResult {
+  return {
+    id: review.id,
+    productId: review.productId,
+    productName: review.product?.name ?? 'Unknown',
+    productSlug: review.product?.slug ?? null,
+    productImageUrl: review.product ? resolveThumbnailUrl(review.product.images) : null,
+    rating: review.rating,
+    comment: review.comment,
+    customerName: maskCustomerName(review.customer),
+    createdAt: review.createdAt,
+    images: mapReviewImages(review.images),
+    reply: mapReply(review.reply),
+  };
+}
+
 @Injectable()
 export class ReviewsService {
   constructor(
     @InjectRepository(Review)
     private readonly reviewRepository: Repository<Review>,
+    @InjectRepository(ReviewReply)
+    private readonly reviewReplyRepository: Repository<ReviewReply>,
+    @InjectRepository(ReviewImage)
+    private readonly reviewImageRepository: Repository<ReviewImage>,
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
     @InjectRepository(Product)
     private readonly productRepository: Repository<Product>,
+    private readonly storesService: StoresService,
   ) {}
 
   async create(input: {
@@ -141,6 +228,7 @@ export class ReviewsService {
     orderId: string;
     rating: number;
     comment?: string;
+    imageUrls?: string[];
   }): Promise<Review> {
     const order = await this.orderRepository.findOne({
       where: { id: input.orderId, customerId: input.customerId },
@@ -192,11 +280,24 @@ export class ReviewsService {
       }
     }
 
+    const status = resolveInitialReviewStatus();
+    const imageUrls = this.normalizeReviewImageUrls(input.imageUrls);
     const review = this.reviewRepository.create({
-      ...input,
-      status: ReviewStatus.PENDING,
+      customerId: input.customerId,
+      productId: input.productId,
+      orderId: input.orderId,
+      rating: input.rating,
+      comment: input.comment,
+      status,
     });
     const saved = await this.reviewRepository.save(review);
+    if (imageUrls.length > 0) {
+      const images = imageUrls.map((url) =>
+        this.reviewImageRepository.create({ reviewId: saved.id, url }),
+      );
+      await this.reviewImageRepository.save(images);
+    }
+    await this.syncProductReviewStats(input.productId);
     const withRelations = await this.reviewRepository.findOne({
       where: { id: saved.id },
       relations: ['customer', 'images'],
@@ -300,29 +401,165 @@ export class ReviewsService {
   async findByProduct(productId: string): Promise<Review[]> {
     return this.reviewRepository.find({
       where: { productId, status: ReviewStatus.APPROVED },
-      relations: ['customer', 'images'],
+      relations: ['customer', 'images', 'reply'],
       order: { createdAt: 'DESC' },
     });
   }
 
   async findByStore(storeId: string): Promise<StoreProductReviewResult[]> {
-    const reviews = await this.reviewRepository.find({
-      where: { status: ReviewStatus.APPROVED },
-      relations: ['product', 'customer'],
-      order: { createdAt: 'DESC' },
-    });
+    const reviews = await this.reviewRepository
+      .createQueryBuilder('review')
+      .innerJoinAndSelect('review.product', 'product', 'product.store_id = :storeId', { storeId })
+      .leftJoinAndSelect('product.images', 'images')
+      .leftJoinAndSelect('review.customer', 'customer')
+      .leftJoinAndSelect('review.reply', 'reply')
+      .leftJoinAndSelect('review.images', 'reviewImages')
+      .where('review.status = :status', { status: ReviewStatus.APPROVED })
+      .orderBy('review.created_at', 'DESC')
+      .getMany();
 
-    return reviews
-      .filter((review) => review.product?.storeId === storeId)
-      .map((review) => ({
-        id: review.id,
-        productId: review.productId,
-        productName: review.product?.name ?? 'Unknown',
-        rating: review.rating,
-        comment: review.comment,
-        customerName: maskCustomerName(review.customer),
-        createdAt: review.createdAt,
-      }));
+    return reviews.map(mapReviewToStoreProductReview);
+  }
+
+  async createReviewReply(params: {
+    userId: string;
+    reviewId: string;
+    body: string;
+  }): Promise<ReviewReply> {
+    const review = await this.assertVendorCanAccessReview(params.userId, params.reviewId);
+    if (review.status !== ReviewStatus.APPROVED) {
+      throw new BadRequestException({
+        code: 'REVIEW_NOT_APPROVED',
+        message: 'Review is not approved',
+      });
+    }
+
+    const existingReply = await this.reviewReplyRepository.findOne({
+      where: { reviewId: params.reviewId },
+    });
+    if (existingReply) {
+      throw new BadRequestException({
+        code: 'REVIEW_REPLY_ALREADY_EXISTS',
+        message: 'A reply already exists for this review',
+      });
+    }
+
+    const normalizedBody = this.validateReplyBody(params.body);
+    const reply = this.reviewReplyRepository.create({
+      reviewId: params.reviewId,
+      body: normalizedBody,
+    });
+    try {
+      return await this.reviewReplyRepository.save(reply);
+    } catch (error) {
+      if (this.isReviewReplyUniqueViolation(error)) {
+        throw new BadRequestException({
+          code: 'REVIEW_REPLY_ALREADY_EXISTS',
+          message: 'A reply already exists for this review',
+        });
+      }
+      throw error;
+    }
+  }
+
+  async updateReviewReply(params: {
+    userId: string;
+    replyId: string;
+    body: string;
+  }): Promise<ReviewReply> {
+    const reply = await this.reviewReplyRepository.findOne({
+      where: { id: params.replyId },
+      relations: ['review', 'review.product'],
+    });
+    if (!reply) {
+      throw new NotFoundException({
+        code: 'REVIEW_REPLY_NOT_FOUND',
+        message: 'Review reply not found',
+      });
+    }
+
+    await this.assertVendorCanAccessReview(params.userId, reply.reviewId);
+
+    if (reply.review.status !== ReviewStatus.APPROVED) {
+      throw new BadRequestException({
+        code: 'REVIEW_NOT_APPROVED',
+        message: 'Review is not approved',
+      });
+    }
+
+    const normalizedBody = this.validateReplyBody(params.body);
+    reply.body = normalizedBody;
+    return this.reviewReplyRepository.save(reply);
+  }
+
+  private async assertVendorCanAccessReview(userId: string, reviewId: string): Promise<Review> {
+    const review = await this.reviewRepository.findOne({
+      where: { id: reviewId },
+      relations: ['product'],
+    });
+    if (!review?.product) {
+      throw new NotFoundException({
+        code: 'REVIEW_NOT_FOUND',
+        message: 'Review not found',
+      });
+    }
+
+    const hasAccess = await this.storesService.userHasStoreAccess(userId, review.product.storeId);
+    if (!hasAccess) {
+      throw new ForbiddenException({
+        code: 'STORE_ACCESS_DENIED',
+        message: 'No access to this store',
+      });
+    }
+
+    return review;
+  }
+
+  private validateReplyBody(body: string): string {
+    const normalized = body.replace(/\0/g, '').trim();
+    if (!normalized) {
+      throw new BadRequestException({
+        code: 'REVIEW_REPLY_BODY_EMPTY',
+        message: 'Reply body cannot be empty',
+      });
+    }
+    if (normalized.length > REVIEW_REPLY_MAX_LENGTH) {
+      throw new BadRequestException({
+        code: 'REVIEW_REPLY_BODY_TOO_LONG',
+        message: `Reply body cannot exceed ${REVIEW_REPLY_MAX_LENGTH} characters`,
+      });
+    }
+    if (/<[^>]+>/.test(normalized)) {
+      throw new BadRequestException({
+        code: 'REVIEW_REPLY_BODY_INVALID',
+        message: 'Reply body cannot contain HTML',
+      });
+    }
+    return normalized;
+  }
+
+  private normalizeReviewImageUrls(imageUrls?: string[]): string[] {
+    if (!imageUrls?.length) {
+      return [];
+    }
+
+    const normalized = imageUrls.map((url) => url.replace(/\0/g, '').trim()).filter(Boolean);
+
+    if (normalized.length > REVIEW_MAX_IMAGES) {
+      throw new BadRequestException({
+        code: 'REVIEW_TOO_MANY_IMAGES',
+        message: `A review cannot have more than ${REVIEW_MAX_IMAGES} images`,
+      });
+    }
+
+    return normalized;
+  }
+
+  private isReviewReplyUniqueViolation(error: unknown): boolean {
+    return (
+      error instanceof QueryFailedError &&
+      (error.driverError as { code?: string })?.code === '23505'
+    );
   }
 
   async getStoreReviewSummary(storeId: string): Promise<StoreReviewSummaryResult> {
@@ -333,7 +570,16 @@ export class ReviewsService {
 
     const productIds = products.map((p) => p.id);
     if (productIds.length === 0) {
-      return { averageRating: 0, totalCount: 0, productBreakdown: [] };
+      return {
+        averageRating: 0,
+        totalCount: 0,
+        rating5Count: 0,
+        rating4Count: 0,
+        rating3Count: 0,
+        rating2Count: 0,
+        rating1Count: 0,
+        productBreakdown: [],
+      };
     }
 
     const summaryRows = await this.reviewRepository
@@ -364,10 +610,59 @@ export class ReviewsService {
         ? productBreakdown.reduce((sum, p) => sum + p.averageRating * p.reviewCount, 0) / totalCount
         : 0;
 
+    const ratingRows = await this.reviewRepository
+      .createQueryBuilder('review')
+      .select('review.rating', 'rating')
+      .addSelect('COUNT(review.id)', 'count')
+      .where('review.productId IN (:...productIds)', { productIds })
+      .andWhere('review.status = :status', { status: ReviewStatus.APPROVED })
+      .groupBy('review.rating')
+      .getRawMany<{
+        rating: string;
+        count: string;
+      }>();
+
+    const ratingCounts = {
+      rating5Count: 0,
+      rating4Count: 0,
+      rating3Count: 0,
+      rating2Count: 0,
+      rating1Count: 0,
+    };
+
+    for (const row of ratingRows) {
+      const rating = Number(row.rating);
+      const count = Number(row.count);
+      if (rating === 5) ratingCounts.rating5Count = count;
+      if (rating === 4) ratingCounts.rating4Count = count;
+      if (rating === 3) ratingCounts.rating3Count = count;
+      if (rating === 2) ratingCounts.rating2Count = count;
+      if (rating === 1) ratingCounts.rating1Count = count;
+    }
+
     return {
       averageRating,
       totalCount,
+      ...ratingCounts,
       productBreakdown,
     };
+  }
+
+  private async syncProductReviewStats(productId: string): Promise<void> {
+    const summary = await this.reviewRepository
+      .createQueryBuilder('review')
+      .select('AVG(review.rating)', 'averageRating')
+      .addSelect('COUNT(review.id)', 'reviewCount')
+      .where('review.productId = :productId', { productId })
+      .andWhere('review.status = :status', { status: ReviewStatus.APPROVED })
+      .getRawOne<{ averageRating: string | null; reviewCount: string }>();
+
+    const reviewCount = Number(summary?.reviewCount ?? 0);
+    const averageRating = summary?.averageRating ? Number(summary.averageRating) : 0;
+
+    await this.productRepository.update(productId, {
+      reviewCount,
+      averageRating: Math.round(averageRating * 100) / 100,
+    });
   }
 }

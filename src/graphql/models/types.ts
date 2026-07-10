@@ -1306,6 +1306,21 @@ export class ReviewImageType {
 }
 
 @ObjectType()
+export class ReviewReplyType {
+  @Field()
+  id: string;
+
+  @Field()
+  body: string;
+
+  @Field()
+  createdAt: Date;
+
+  @Field()
+  updatedAt: Date;
+}
+
+@ObjectType()
 export class StoreProductReviewType {
   @Field()
   id: string;
@@ -1315,6 +1330,12 @@ export class StoreProductReviewType {
 
   @Field()
   productName: string;
+
+  @Field(() => String, { nullable: true })
+  productSlug?: string | null;
+
+  @Field(() => String, { nullable: true })
+  productImageUrl?: string | null;
 
   @Field(() => Int)
   rating: number;
@@ -1327,6 +1348,12 @@ export class StoreProductReviewType {
 
   @Field()
   createdAt: Date;
+
+  @Field(() => [ReviewImageType])
+  images: ReviewImageType[];
+
+  @Field(() => ReviewReplyType, { nullable: true })
+  reply?: ReviewReplyType | null;
 }
 
 @ObjectType()
@@ -1351,6 +1378,21 @@ export class StoreReviewSummaryType {
 
   @Field(() => Int)
   totalCount: number;
+
+  @Field(() => Int)
+  rating5Count: number;
+
+  @Field(() => Int)
+  rating4Count: number;
+
+  @Field(() => Int)
+  rating3Count: number;
+
+  @Field(() => Int)
+  rating2Count: number;
+
+  @Field(() => Int)
+  rating1Count: number;
 
   @Field(() => [ProductReviewBreakdownType])
   productBreakdown: ProductReviewBreakdownType[];

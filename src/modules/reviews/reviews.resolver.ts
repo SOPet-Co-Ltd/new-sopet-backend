@@ -9,13 +9,26 @@ import {
   Resolver,
 } from '@nestjs/graphql';
 import { UseGuards, ForbiddenException } from '@nestjs/common';
-import { IsInt, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
-import { ReviewsService, maskCustomerName } from './reviews.service';
+import {
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Max,
+  MaxLength,
+  Min,
+  IsArray,
+  ArrayMaxSize,
+} from 'class-validator';
+import { ReviewsService, maskCustomerName, REVIEW_MAX_IMAGES } from './reviews.service';
+import { REVIEW_REPLY_MAX_LENGTH } from '../../database/entities/review-reply.entity';
 import { CurrentUser, Public, Roles } from '../../common/decorators';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import {
   ReviewImageType,
+  ReviewReplyType,
   StoreProductReviewType,
   StoreReviewSummaryType,
 } from '../../graphql/models/types';
@@ -110,6 +123,22 @@ export class ReviewType {
 
   @Field(() => [ReviewImageType])
   images: ReviewImageType[];
+
+  @Field(() => ReviewReplyType, { nullable: true })
+  reply?: ReviewReplyType | null;
+}
+
+function mapReplyToType(reply: Review['reply']): ReviewReplyType | null {
+  if (!reply) {
+    return null;
+  }
+
+  return {
+    id: reply.id,
+    body: reply.body,
+    createdAt: reply.createdAt,
+    updatedAt: reply.updatedAt,
+  };
 }
 
 function mapReviewToType(review: Review): ReviewType {
@@ -125,6 +154,7 @@ function mapReviewToType(review: Review): ReviewType {
       id: image.id,
       url: image.url,
     })),
+    reply: mapReplyToType(review.reply),
   };
 }
 
@@ -148,6 +178,39 @@ export class CreateReviewInput {
   @IsOptional()
   @IsString()
   comment?: string;
+
+  @Field(() => [String], { nullable: true })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(REVIEW_MAX_IMAGES)
+  @IsString({ each: true })
+  imageUrls?: string[];
+}
+
+@InputType()
+export class CreateReviewReplyInput {
+  @Field()
+  @IsUUID()
+  reviewId: string;
+
+  @Field()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(REVIEW_REPLY_MAX_LENGTH)
+  body: string;
+}
+
+@InputType()
+export class UpdateReviewReplyInput {
+  @Field()
+  @IsUUID()
+  replyId: string;
+
+  @Field()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(REVIEW_REPLY_MAX_LENGTH)
+  body: string;
 }
 
 @Resolver()
@@ -181,6 +244,12 @@ export class ReviewsResolver {
     return this.reviewsService.findByStore(storeId);
   }
 
+  @Query(() => [StoreProductReviewType])
+  @Public()
+  async storeReviews(@Args('storeId') storeId: string): Promise<StoreProductReviewType[]> {
+    return this.reviewsService.findByStore(storeId);
+  }
+
   @Query(() => StoreReviewSummaryType)
   @Public()
   async storeReviewSummary(@Args('storeId') storeId: string): Promise<StoreReviewSummaryType> {
@@ -200,8 +269,49 @@ export class ReviewsResolver {
       orderId: input.orderId,
       rating: input.rating,
       comment: input.comment,
+      imageUrls: input.imageUrls,
     });
     return mapReviewToType(review);
+  }
+
+  @Mutation(() => ReviewReplyType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('vendor')
+  async createReviewReply(
+    @CurrentUser('id') userId: string,
+    @Args('input') input: CreateReviewReplyInput,
+  ): Promise<ReviewReplyType> {
+    const reply = await this.reviewsService.createReviewReply({
+      userId,
+      reviewId: input.reviewId,
+      body: input.body,
+    });
+    return {
+      id: reply.id,
+      body: reply.body,
+      createdAt: reply.createdAt,
+      updatedAt: reply.updatedAt,
+    };
+  }
+
+  @Mutation(() => ReviewReplyType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('vendor')
+  async updateReviewReply(
+    @CurrentUser('id') userId: string,
+    @Args('input') input: UpdateReviewReplyInput,
+  ): Promise<ReviewReplyType> {
+    const reply = await this.reviewsService.updateReviewReply({
+      userId,
+      replyId: input.replyId,
+      body: input.body,
+    });
+    return {
+      id: reply.id,
+      body: reply.body,
+      createdAt: reply.createdAt,
+      updatedAt: reply.updatedAt,
+    };
   }
 
   @Query(() => [CustomerReviewableItemType])
