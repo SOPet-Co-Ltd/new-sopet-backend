@@ -23,6 +23,7 @@ import { OrdersResolver } from './orders.resolver';
 import { GuestOrderLinkModule } from './guest-order-link.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { PaymentsModule } from '../payments/payments.module';
+import { CartModule } from '../cart/cart.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { PaymentsModule } from '../payments/payments.module';
     StoresModule,
     InventoryModule,
     PaymentsModule,
+    CartModule,
     TypeOrmModule.forFeature([
       Order,
       OrderItem,

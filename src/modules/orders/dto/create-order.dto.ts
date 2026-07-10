@@ -207,4 +207,20 @@ export class CreateOrderDto {
   @IsNotEmpty()
   @IsString()
   paymentMethod: 'promptpay' | 'credit_card' | 'cod';
+
+  @ApiPropertyOptional({
+    description: 'Cart line item IDs to remove after the order is created',
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsUUID(undefined, { each: true })
+  cartItemIds?: string[];
+
+  @ApiPropertyOptional({
+    description: 'Guest session ID used to locate the cart for item removal',
+  })
+  @IsOptional()
+  @IsString()
+  sessionId?: string;
 }

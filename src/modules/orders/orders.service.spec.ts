@@ -81,6 +81,7 @@ describe('OrdersService', () => {
       promotionsService as never,
       guestOrderLinkService as never,
       inventoryService as never,
+      { removeItems: jest.fn() } as never,
       {} as never,
     );
   });

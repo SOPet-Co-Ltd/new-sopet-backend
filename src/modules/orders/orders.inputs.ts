@@ -152,6 +152,17 @@ export class CreateOrderInput {
   @IsNotEmpty()
   @IsString()
   paymentMethod: string;
+
+  @Field(() => [String], { nullable: true })
+  @IsOptional()
+  @IsArray()
+  @IsUUID(undefined, { each: true })
+  cartItemIds?: string[];
+
+  @Field({ nullable: true })
+  @IsOptional()
+  @IsString()
+  sessionId?: string;
 }
 
 @InputType()

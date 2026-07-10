@@ -193,6 +193,7 @@ input CreateDisputeInput {
 }
 
 input CreateOrderInput {
+  cartItemIds: [String!]
   guestEmail: String
   guestName: String
   guestPhone: String
@@ -202,6 +203,7 @@ input CreateOrderInput {
   platformPromotionCode: String
   promotionCode: String
   savedAddressId: String
+  sessionId: String
   shippingAddress: ShippingAddressInput
   storePromotionCodes: [String!]
   storeShipping: [StoreShippingSelectionInput!]

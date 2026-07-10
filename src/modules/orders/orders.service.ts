@@ -21,6 +21,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { PromotionsService } from '../promotions/promotions.service';
 import { GuestOrderLinkService } from './guest-order-link.service';
 import { InventoryService } from '../inventory/inventory.service';
+import { CartService } from '../cart/cart.service';
 import { Store } from '../../database/entities/store.entity';
 import { normalizeCheckoutPaymentMethod } from '../../common/utils/checkout-payment.util';
 import { guestPhoneLookupValues, normalizeThaiPhoneToLocal } from '../../common/utils/phone.util';
@@ -50,6 +51,7 @@ export class OrdersService {
     private promotionsService: PromotionsService,
     private guestOrderLinkService: GuestOrderLinkService,
     private inventoryService: InventoryService,
+    private cartService: CartService,
     @InjectRepository(Store)
     private storeRepository: Repository<Store>,
   ) {}
@@ -378,6 +380,14 @@ export class OrdersService {
 
       return savedOrder.id;
     });
+
+    if (createOrderDto.cartItemIds?.length) {
+      await this.cartService.removeItems(
+        createOrderDto.cartItemIds,
+        customerId,
+        createOrderDto.sessionId,
+      );
+    }
 
     return this.findOne(orderId);
   }

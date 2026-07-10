@@ -187,6 +187,8 @@ export class OrdersResolver {
         guestEmail: input.guestEmail,
         notes: input.notes,
         paymentMethod: normalizeCheckoutPaymentMethod(input.paymentMethod),
+        cartItemIds: input.cartItemIds,
+        sessionId: input.sessionId,
       },
       effectiveCustomerId,
     );
