@@ -458,8 +458,6 @@ export class PaymentsService {
     if (paymentMethod === 'promptpay') {
       chargeBody.source = { type: 'promptpay' };
     } else if (paymentMethod === 'credit_card') {
-      let cardToken = omiseToken;
-
       if (savedPaymentMethodId) {
         if (!customerId) {
           throw new BadRequestException({
@@ -476,17 +474,26 @@ export class PaymentsService {
             message: 'Saved payment method not found',
           });
         }
-        cardToken = saved.omiseCardToken;
-      }
 
-      if (!cardToken) {
+        const customer = await this.customerRepository.findOne({ where: { id: customerId } });
+        if (!customer?.omiseCustomerId) {
+          throw new BadRequestException({
+            code: 'OMISE_CUSTOMER_NOT_FOUND',
+            message: 'Saved card is not linked to a payment profile',
+          });
+        }
+
+        // Saved methods store Omise card ids (card_test_...), not one-time tokens.
+        chargeBody.customer = customer.omiseCustomerId;
+        chargeBody.card = saved.omiseCardToken;
+      } else if (omiseToken) {
+        chargeBody.card = omiseToken;
+      } else {
         throw new BadRequestException({
           code: 'CARD_TOKEN_REQUIRED',
           message: 'Credit card payments require an Omise token or saved payment method',
         });
       }
-
-      chargeBody.card = cardToken;
     }
 
     const charge = await this.omiseRequest<OmiseCharge>('/charges', chargeBody);

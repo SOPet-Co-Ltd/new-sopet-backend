@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule, TypeOrmModuleOptions } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { configurePgUtcTimestampParsing } from './pg-timestamp.util';
 import * as repositories from './repositories';
 import {
   User,
@@ -34,6 +35,8 @@ import {
   StoreRequest,
   VendorInvitation,
 } from './entities';
+
+configurePgUtcTimestampParsing();
 
 const ENTITIES = [
   User,

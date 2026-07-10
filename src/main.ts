@@ -1,3 +1,7 @@
+import { configurePgUtcTimestampParsing } from './database/pg-timestamp.util';
+
+configurePgUtcTimestampParsing();
+
 import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import type { NestExpressApplication } from '@nestjs/platform-express';

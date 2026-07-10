@@ -1,7 +1,9 @@
 import { DataSource } from 'typeorm';
 import { config } from 'dotenv';
+import { configurePgUtcTimestampParsing } from './src/database/pg-timestamp.util';
 
 config();
+configurePgUtcTimestampParsing();
 
 export default new DataSource({
   type: 'postgres',

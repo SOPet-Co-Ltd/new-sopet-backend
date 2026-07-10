@@ -5,6 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { PaymentsService } from './payments.service';
 import { Payment } from '../../database/entities/payment.entity';
 import { Order } from '../../database/entities/order.entity';
+import { Customer } from '../../database/entities/customer.entity';
 import { SavedPaymentMethod } from '../../database/entities/saved-payment-method.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PaymentEventsService } from './payment-events.service';
@@ -36,6 +37,7 @@ describe('PaymentsService guest access', () => {
         PaymentsService,
         { provide: getRepositoryToken(Payment), useValue: paymentRepository },
         { provide: getRepositoryToken(Order), useValue: orderRepository },
+        { provide: getRepositoryToken(Customer), useValue: { findOne: jest.fn() } },
         {
           provide: getRepositoryToken(SavedPaymentMethod),
           useValue: { findOne: jest.fn() },
@@ -131,6 +133,7 @@ describe('PaymentsService payment read queries', () => {
         PaymentsService,
         { provide: getRepositoryToken(Payment), useValue: paymentRepository },
         { provide: getRepositoryToken(Order), useValue: orderRepository },
+        { provide: getRepositoryToken(Customer), useValue: { findOne: jest.fn() } },
         {
           provide: getRepositoryToken(SavedPaymentMethod),
           useValue: { findOne: jest.fn() },
@@ -229,5 +232,115 @@ describe('PaymentsService payment read queries', () => {
 
       await expect(service.findLatestByOrderId('ord-1')).rejects.toThrow(NotFoundException);
     });
+  });
+});
+
+describe('PaymentsService createCharge saved card', () => {
+  let service: PaymentsService;
+  const orderRepository = {
+    findOne: jest.fn(),
+    save: jest.fn(),
+  };
+  const paymentRepository = {
+    create: jest.fn(<T>(x: T): T => x),
+    save: jest.fn((x: Payment) => Promise.resolve({ ...x, id: 'pay-1' })),
+    findOne: jest.fn().mockResolvedValue(null),
+    manager: {
+      transaction: jest.fn(async (cb: (manager: unknown) => Promise<void>) => cb({})),
+    },
+  };
+  const customerRepository = {
+    findOne: jest.fn(),
+  };
+  const savedPaymentMethodRepository = {
+    findOne: jest.fn(),
+  };
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        id: 'chrg_test_1',
+        status: 'pending',
+      }),
+    }) as unknown as typeof fetch;
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        PaymentsService,
+        { provide: getRepositoryToken(Payment), useValue: paymentRepository },
+        { provide: getRepositoryToken(Order), useValue: orderRepository },
+        { provide: getRepositoryToken(Customer), useValue: customerRepository },
+        {
+          provide: getRepositoryToken(SavedPaymentMethod),
+          useValue: savedPaymentMethodRepository,
+        },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn((key: string) => {
+              if (key === 'omise.secretKey') return 'skey_test';
+              if (key === 'omise.publicKey') return 'pkey_test';
+              return '';
+            }),
+          },
+        },
+        {
+          provide: NotificationsService,
+          useValue: { notifyOrderPaid: jest.fn() },
+        },
+        {
+          provide: PaymentEventsService,
+          useValue: paymentEventsServiceMock,
+        },
+        {
+          provide: InventoryService,
+          useValue: { restoreOrderStock: jest.fn().mockResolvedValue(true) },
+        },
+      ],
+    }).compile();
+
+    service = module.get(PaymentsService);
+  });
+
+  it('charges saved card using Omise customer and card id', async () => {
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-1',
+      customerId: 'cust-1',
+      status: 'pending',
+    });
+    orderRepository.save.mockResolvedValue(undefined);
+    savedPaymentMethodRepository.findOne.mockResolvedValue({
+      id: 'saved-1',
+      customerId: 'cust-1',
+      omiseCardToken: 'card_test_68am5rb4ntc85gls2ly',
+    });
+    customerRepository.findOne.mockResolvedValue({
+      id: 'cust-1',
+      omiseCustomerId: 'cust_test_omise_1',
+    });
+
+    await service.createCharge({
+      orderId: 'ord-1',
+      amount: 300,
+      currency: 'THB',
+      paymentMethod: 'credit_card',
+      savedPaymentMethodId: 'saved-1',
+      customerId: 'cust-1',
+    });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://api.omise.co/charges',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          amount: 30000,
+          currency: 'thb',
+          customer: 'cust_test_omise_1',
+          card: 'card_test_68am5rb4ntc85gls2ly',
+        }),
+      }),
+    );
   });
 });
