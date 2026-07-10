@@ -667,6 +667,8 @@ type OrderItemType {
   fulfillmentProvider: String
   fulfillmentStatus: String!
   id: String!
+  productId: String
+  productImageUrl: String
   productName: String!
   quantity: Int!
   storeId: String!

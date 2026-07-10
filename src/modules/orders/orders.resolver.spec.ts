@@ -165,6 +165,46 @@ describe('OrdersResolver mapOrder extensions', () => {
       expect(result.items[0].variantId).toBe('variant-1');
     });
 
+    it('returns productId and productImageUrl when variant relation is loaded', async () => {
+      ordersService.findOne.mockResolvedValue(
+        buildOrderFixture({
+          items: [
+            {
+              id: 'item-1',
+              orderId: 'order-1',
+              storeId: 'store-1',
+              variantId: 'variant-1',
+              productName: 'Dog Food',
+              variantOptions: {},
+              unitPrice: 250,
+              quantity: 2,
+              subtotal: 500,
+              fulfillmentStatus: FulfillmentStatus.PENDING,
+              trackingNumber: null,
+              fulfillmentProvider: null,
+              trackingUrl: null,
+              shippedAt: null,
+              deliveredAt: null,
+              createdAt: new Date('2024-06-15T10:30:00.000Z'),
+              updatedAt: new Date('2024-06-15T10:30:00.000Z'),
+              productVariant: {
+                productId: 'prod-1',
+                imageUrl: 'https://example.com/variant.jpg',
+                product: {
+                  images: [{ url: 'https://example.com/product.jpg', isThumbnail: true }],
+                },
+              },
+            } as Order['items'][number],
+          ],
+        }),
+      );
+
+      const result = await resolver.order('order-1', 'cust-1');
+
+      expect(result.items[0].productId).toBe('prod-1');
+      expect(result.items[0].productImageUrl).toBe('https://example.com/variant.jpg');
+    });
+
     it('returns empty storeShippings array when order has none', async () => {
       ordersService.findOne.mockResolvedValue(buildOrderFixture({ storeShippings: [] }));
 

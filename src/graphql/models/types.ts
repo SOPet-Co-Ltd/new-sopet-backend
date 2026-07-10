@@ -383,6 +383,12 @@ export class OrderItemType {
   @Field()
   productName: string;
 
+  @Field(() => String, { nullable: true })
+  productId?: string | null;
+
+  @Field(() => String, { nullable: true })
+  productImageUrl?: string | null;
+
   @Field(() => Float)
   unitPrice: number;
 

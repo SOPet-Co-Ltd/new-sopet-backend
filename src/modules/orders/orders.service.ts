@@ -406,6 +406,8 @@ export class OrdersService {
         'customer',
         'items',
         'items.productVariant',
+        'items.productVariant.product',
+        'items.productVariant.product.images',
         'shippingAddress',
         'storeShippings',
         'statusHistory',

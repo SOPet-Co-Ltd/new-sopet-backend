@@ -16,8 +16,49 @@ import {
   UpdateOrderStatusInput,
 } from './orders.inputs';
 import { Order, OrderStatus } from '../../database/entities/order.entity';
+import { OrderItem } from '../../database/entities/order-item.entity';
+import { ProductImage } from '../../database/entities/product-image.entity';
 import { normalizeCheckoutPaymentMethod } from '../../common/utils/checkout-payment.util';
 import { CustomerOrderListFilter } from './order-list-filter.util';
+
+function resolveOrderItemImageUrl(item: OrderItem): string | null {
+  const variant = item.productVariant;
+  if (!variant) {
+    return null;
+  }
+
+  if (variant.imageUrl) {
+    return variant.imageUrl;
+  }
+
+  const images = variant.product?.images as ProductImage[] | undefined;
+  if (!images?.length) {
+    return null;
+  }
+
+  const thumbnail = images.find((image) => image.isThumbnail) ?? images[0];
+  return thumbnail?.url ?? null;
+}
+
+function mapOrderItem(item: OrderItem) {
+  const productId = item.productVariant?.productId ?? null;
+
+  return {
+    id: item.id,
+    storeId: item.storeId,
+    variantId: item.variantId,
+    productName: item.productName,
+    productId,
+    productImageUrl: productId ? resolveOrderItemImageUrl(item) : null,
+    unitPrice: Number(item.unitPrice),
+    quantity: item.quantity,
+    subtotal: Number(item.subtotal),
+    fulfillmentStatus: item.fulfillmentStatus,
+    trackingNumber: item.trackingNumber ?? null,
+    fulfillmentProvider: item.fulfillmentProvider ?? null,
+    trackingUrl: item.trackingUrl ?? null,
+  };
+}
 
 function mapOrder(order: Order): OrderType {
   return {
@@ -39,20 +80,7 @@ function mapOrder(order: Order): OrderType {
         optionName: shipping.optionName,
         shippingFee: Number(shipping.shippingFee),
       })) ?? [],
-    items:
-      order.items?.map((item) => ({
-        id: item.id,
-        storeId: item.storeId,
-        variantId: item.variantId,
-        productName: item.productName,
-        unitPrice: Number(item.unitPrice),
-        quantity: item.quantity,
-        subtotal: Number(item.subtotal),
-        fulfillmentStatus: item.fulfillmentStatus,
-        trackingNumber: item.trackingNumber ?? null,
-        fulfillmentProvider: item.fulfillmentProvider ?? null,
-        trackingUrl: item.trackingUrl ?? null,
-      })) ?? [],
+    items: order.items?.map(mapOrderItem) ?? [],
     shippingAddress: order.shippingAddress
       ? {
           fullName: order.shippingAddress.fullName,
