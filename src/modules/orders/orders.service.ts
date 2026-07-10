@@ -25,6 +25,13 @@ import { CartService } from '../cart/cart.service';
 import { Store } from '../../database/entities/store.entity';
 import { normalizeCheckoutPaymentMethod } from '../../common/utils/checkout-payment.util';
 import { guestPhoneLookupValues, normalizeThaiPhoneToLocal } from '../../common/utils/phone.util';
+import { PaginatedResponse } from '../../common/interfaces';
+import {
+  applyCustomerOrderListFilter,
+  CustomerOrderListFilter,
+  normalizeCustomerOrdersLimit,
+  normalizeCustomerOrdersPage,
+} from './order-list-filter.util';
 
 export interface StoreShippingSelection {
   storeId: string;
@@ -430,27 +437,75 @@ export class OrdersService {
     });
   }
 
+  async findByCustomerPaginated(
+    customerId: string,
+    options: {
+      page?: number;
+      limit?: number;
+      filter?: CustomerOrderListFilter;
+    } = {},
+  ): Promise<PaginatedResponse<Order>> {
+    const page = normalizeCustomerOrdersPage(options.page);
+    const limit = normalizeCustomerOrdersLimit(options.limit);
+    const filter = options.filter ?? CustomerOrderListFilter.ALL;
+    const offset = (page - 1) * limit;
+
+    const query = this.orderRepository
+      .createQueryBuilder('order')
+      .leftJoinAndSelect('order.items', 'items')
+      .where('order.customerId = :customerId', { customerId })
+      .orderBy('order.createdAt', 'DESC');
+
+    applyCustomerOrderListFilter(query, filter);
+
+    const [items, total] = await query.skip(offset).take(limit).getManyAndCount();
+
+    return {
+      items,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit) || 1,
+      },
+    };
+  }
+
   async findLatestPurchaseProductId(customerId: string): Promise<string | null> {
-    const orders = await this.findByCustomer(customerId);
-    const latestOrder = orders[0];
-    const firstItem = latestOrder?.items?.[0];
-    return firstItem?.productVariant?.productId ?? null;
+    const row = await this.orderRepository
+      .createQueryBuilder('order')
+      .innerJoin('order.items', 'item')
+      .innerJoin('item.productVariant', 'variant')
+      .select('variant.productId', 'productId')
+      .where('order.customerId = :customerId', { customerId })
+      .orderBy('order.createdAt', 'DESC')
+      .addOrderBy('item.createdAt', 'ASC')
+      .limit(1)
+      .getRawOne<{ productId: string }>();
+
+    return row?.productId ?? null;
   }
 
   async findLatestPurchaseProductIds(customerId: string, limit: number): Promise<string[]> {
-    const orders = await this.findByCustomer(customerId);
+    const rows = await this.orderRepository
+      .createQueryBuilder('order')
+      .innerJoin('order.items', 'item')
+      .innerJoin('item.productVariant', 'variant')
+      .select('variant.productId', 'productId')
+      .where('order.customerId = :customerId', { customerId })
+      .orderBy('order.createdAt', 'DESC')
+      .addOrderBy('item.createdAt', 'ASC')
+      .getRawMany<{ productId: string }>();
+
     const productIds: string[] = [];
     const seen = new Set<string>();
 
-    for (const order of orders) {
-      for (const item of order.items ?? []) {
-        const productId = item.productVariant?.productId;
-        if (productId && !seen.has(productId)) {
-          seen.add(productId);
-          productIds.push(productId);
-          if (productIds.length >= limit) {
-            return productIds;
-          }
+    for (const row of rows) {
+      if (row.productId && !seen.has(row.productId)) {
+        seen.add(row.productId);
+        productIds.push(row.productId);
+        if (productIds.length >= limit) {
+          break;
         }
       }
     }

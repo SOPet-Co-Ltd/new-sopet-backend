@@ -354,6 +354,14 @@ type CustomerAuthPayload {
   tokens: AuthTokens
 }
 
+enum CustomerOrderListFilter {
+  ALL
+  CANCELLED
+  DELIVERED
+  IN_PROGRESS
+  PENDING_PAYMENT
+}
+
 type CustomerProfile {
   email: String
   fullName: String
@@ -632,6 +640,11 @@ type NotificationType {
   metadata: String
   title: String
   type: String!
+}
+
+type OrderConnection {
+  items: [OrderType!]!
+  pagination: PaginationMeta!
 }
 
 input OrderItemInput {
@@ -919,7 +932,7 @@ type Query {
   notifications(unreadOnly: Boolean): [NotificationType!]!
   openDisputes: [DisputeType!]!
   order(id: String!): OrderType!
-  orders: [OrderType!]!
+  orders(filter: CustomerOrderListFilter = ALL, limit: Int = 10, page: Int = 1): OrderConnection!
   payment(id: String!): PaymentType!
   paymentByOrderId(orderId: String!): PaymentType!
   paymentMethods: [SavedPaymentMethodType!]!

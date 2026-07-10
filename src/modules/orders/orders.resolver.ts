@@ -4,7 +4,7 @@ import { OrdersService } from './orders.service';
 import { OrderFulfillmentService } from './order-fulfillment.service';
 import { ProductsService } from '../products/products.service';
 import { StoresService } from '../stores/stores.service';
-import { OrderType, ProductType } from '../../graphql/models/types';
+import { OrderType, ProductType, OrderConnection } from '../../graphql/models/types';
 import { mapProduct } from '../../graphql/models/mappers';
 import { CurrentUser, Public, Roles } from '../../common/decorators';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -17,6 +17,7 @@ import {
 } from './orders.inputs';
 import { Order, OrderStatus } from '../../database/entities/order.entity';
 import { normalizeCheckoutPaymentMethod } from '../../common/utils/checkout-payment.util';
+import { CustomerOrderListFilter } from './order-list-filter.util';
 
 function mapOrder(order: Order): OrderType {
   return {
@@ -112,12 +113,29 @@ export class OrdersResolver {
     return products.map(mapProduct);
   }
 
-  @Query(() => [OrderType])
+  @Query(() => OrderConnection)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('customer')
-  async orders(@CurrentUser('id') customerId: string): Promise<OrderType[]> {
-    const orders = await this.ordersService.findByCustomer(customerId);
-    return orders.map(mapOrder);
+  async orders(
+    @CurrentUser('id') customerId: string,
+    @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page?: number,
+    @Args('limit', { type: () => Int, nullable: true, defaultValue: 10 }) limit?: number,
+    @Args('filter', {
+      type: () => CustomerOrderListFilter,
+      nullable: true,
+      defaultValue: CustomerOrderListFilter.ALL,
+    })
+    filter?: CustomerOrderListFilter,
+  ): Promise<OrderConnection> {
+    const result = await this.ordersService.findByCustomerPaginated(customerId, {
+      page,
+      limit,
+      filter,
+    });
+    return {
+      items: result.items.map(mapOrder),
+      pagination: result.pagination,
+    };
   }
 
   @Query(() => OrderType)

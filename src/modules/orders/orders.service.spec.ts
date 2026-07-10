@@ -1,10 +1,16 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { OrderStatus } from '../../database/entities/order.entity';
+import { CustomerOrderListFilter } from './order-list-filter.util';
 
 describe('OrdersService', () => {
   let service: OrdersService;
-  let orderRepository: { findOne: jest.Mock; find: jest.Mock; update: jest.Mock };
+  let orderRepository: {
+    findOne: jest.Mock;
+    find: jest.Mock;
+    update: jest.Mock;
+    createQueryBuilder: jest.Mock;
+  };
   let savedAddressRepository: { findOne: jest.Mock };
   let variantRepository: { findOne: jest.Mock };
   let shippingOptionRepository: { findOne: jest.Mock };
@@ -39,7 +45,12 @@ describe('OrdersService', () => {
   };
 
   beforeEach(() => {
-    orderRepository = { findOne: jest.fn(), find: jest.fn(), update: jest.fn() };
+    orderRepository = {
+      findOne: jest.fn(),
+      find: jest.fn(),
+      update: jest.fn(),
+      createQueryBuilder: jest.fn(),
+    };
     savedAddressRepository = { findOne: jest.fn() };
     variantRepository = { findOne: jest.fn() };
     shippingOptionRepository = { findOne: jest.fn() };
@@ -375,5 +386,105 @@ describe('OrdersService', () => {
     );
 
     expect(promotionsService.applyStackedPromotions).toHaveBeenCalled();
+  });
+
+  describe('findByCustomerPaginated', () => {
+    it('returns paginated orders with default page size', async () => {
+      const queryBuilder = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([[{ id: 'ord-1' }], 25]),
+      };
+      orderRepository.createQueryBuilder.mockReturnValue(queryBuilder);
+
+      const result = await service.findByCustomerPaginated('cust-1');
+
+      expect(orderRepository.createQueryBuilder).toHaveBeenCalledWith('order');
+      expect(queryBuilder.where).toHaveBeenCalledWith('order.customerId = :customerId', {
+        customerId: 'cust-1',
+      });
+      expect(queryBuilder.skip).toHaveBeenCalledWith(0);
+      expect(queryBuilder.take).toHaveBeenCalledWith(10);
+      expect(result.items).toHaveLength(1);
+      expect(result.pagination).toEqual({
+        page: 1,
+        limit: 10,
+        total: 25,
+        totalPages: 3,
+      });
+    });
+
+    it('applies status filter and caps limit at 50', async () => {
+      const queryBuilder = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+      };
+      orderRepository.createQueryBuilder.mockReturnValue(queryBuilder);
+
+      await service.findByCustomerPaginated('cust-1', {
+        page: 2,
+        limit: 100,
+        filter: CustomerOrderListFilter.PENDING_PAYMENT,
+      });
+
+      expect(queryBuilder.andWhere).toHaveBeenCalledWith('order.status IN (:...statuses)', {
+        statuses: ['pending_payment'],
+      });
+      expect(queryBuilder.skip).toHaveBeenCalledWith(50);
+      expect(queryBuilder.take).toHaveBeenCalledWith(50);
+    });
+  });
+
+  describe('findLatestPurchaseProductId', () => {
+    it('returns product id from latest order item', async () => {
+      const queryBuilder = {
+        innerJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        getRawOne: jest.fn().mockResolvedValue({ productId: 'prod-1' }),
+      };
+      orderRepository.createQueryBuilder.mockReturnValue(queryBuilder);
+
+      const productId = await service.findLatestPurchaseProductId('cust-1');
+
+      expect(productId).toBe('prod-1');
+    });
+  });
+
+  describe('findLatestPurchaseProductIds', () => {
+    it('returns unique product ids in recent order order', async () => {
+      const queryBuilder = {
+        innerJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest
+          .fn()
+          .mockResolvedValue([
+            { productId: 'prod-1' },
+            { productId: 'prod-1' },
+            { productId: 'prod-2' },
+            { productId: 'prod-3' },
+          ]),
+      };
+      orderRepository.createQueryBuilder.mockReturnValue(queryBuilder);
+
+      const productIds = await service.findLatestPurchaseProductIds('cust-1', 2);
+
+      expect(productIds).toEqual(['prod-1', 'prod-2']);
+    });
   });
 });

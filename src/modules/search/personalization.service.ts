@@ -144,11 +144,15 @@ export class PersonalizationService {
       return;
     }
 
-    await this.userSearchProfileRepository.save({
-      userId,
-      recentQueries,
-      recentProductIds,
-    });
+    try {
+      await this.userSearchProfileRepository.save({
+        userId,
+        recentQueries,
+        recentProductIds,
+      });
+    } catch {
+      // Profile persistence is best-effort; auth user ids may not exist in users table yet.
+    }
   }
 
   private tokenizeQueries(queries: string[]): string[] {

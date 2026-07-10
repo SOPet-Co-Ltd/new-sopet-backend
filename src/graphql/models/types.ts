@@ -454,6 +454,15 @@ export class OrderType {
 }
 
 @ObjectType()
+export class OrderConnection {
+  @Field(() => [OrderType])
+  items: OrderType[];
+
+  @Field(() => PaginationMeta)
+  pagination: PaginationMeta;
+}
+
+@ObjectType()
 export class PaymentType {
   @Field()
   id: string;

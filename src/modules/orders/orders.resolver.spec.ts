@@ -90,6 +90,7 @@ describe('OrdersResolver mapOrder extensions', () => {
       OrdersService,
       | 'findOne'
       | 'findByCustomer'
+      | 'findByCustomerPaginated'
       | 'findByGuestPhone'
       | 'findByStore'
       | 'findLatestPurchaseProductId'
@@ -109,6 +110,7 @@ describe('OrdersResolver mapOrder extensions', () => {
     ordersService = {
       findOne: jest.fn(),
       findByCustomer: jest.fn(),
+      findByCustomerPaginated: jest.fn(),
       findByGuestPhone: jest.fn(),
       findByStore: jest.fn(),
       findLatestPurchaseProductId: jest.fn(),
@@ -173,15 +175,24 @@ describe('OrdersResolver mapOrder extensions', () => {
   });
 
   describe('orders', () => {
-    it('returns extended fields on customer order list', async () => {
-      ordersService.findByCustomer.mockResolvedValue([buildOrderFixture()]);
+    it('returns paginated customer order list with extended fields', async () => {
+      ordersService.findByCustomerPaginated.mockResolvedValue({
+        items: [buildOrderFixture()],
+        pagination: { page: 1, limit: 10, total: 1, totalPages: 1 },
+      });
 
-      const result = await resolver.orders('cust-1');
+      const result = await resolver.orders('cust-1', 1, 10);
 
-      expect(result).toHaveLength(1);
-      expect(result[0].createdAt).toEqual(new Date('2024-06-15T10:30:00.000Z'));
-      expect(result[0].storeShippings).toHaveLength(2);
-      expect(result[0].items[0].variantId).toBe('variant-1');
+      expect(ordersService.findByCustomerPaginated).toHaveBeenCalledWith('cust-1', {
+        page: 1,
+        limit: 10,
+        filter: undefined,
+      });
+      expect(result.items).toHaveLength(1);
+      expect(result.pagination).toEqual({ page: 1, limit: 10, total: 1, totalPages: 1 });
+      expect(result.items[0].createdAt).toEqual(new Date('2024-06-15T10:30:00.000Z'));
+      expect(result.items[0].storeShippings).toHaveLength(2);
+      expect(result.items[0].items[0].variantId).toBe('variant-1');
     });
   });
 
