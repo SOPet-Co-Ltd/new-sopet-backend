@@ -39,6 +39,7 @@ async function bootstrap() {
   const apiUrl = process.env.API_URL?.replace(/\/$/, '') || `http://localhost:${port}`;
 
   console.log(`🚀 SOPet API: ${apiUrl}/graphql`);
+  console.log(`🔌 GraphQL subscriptions: ${apiUrl.replace(/^http/, 'ws')}/graphql`);
   console.log(`🔗 Omise webhook: ${apiUrl}/webhooks/omise`);
   console.log(
     `🔑 Public API: ${apiUrl}/api/v1/stores/{storeId} (Authorization: Bearer sopet_sk_...)`,

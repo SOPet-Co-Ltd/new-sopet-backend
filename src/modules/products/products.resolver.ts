@@ -16,6 +16,8 @@ import { UseGuards } from '@nestjs/common';
 import { IsArray, IsNotEmpty, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 import type { GraphqlContext } from '../../graphql/loaders/graphql-context.types';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { SearchContextInput } from '../search/search.inputs';
+import { SearchAnalyticsService } from '../search/search-analytics.service';
 import { ProductsService } from './products.service';
 import {
   AddProductImageInput,
@@ -184,11 +186,18 @@ export class UpdateProductInput {
   expiryDate?: string;
 }
 
+function getOptionalUserId(context: GraphqlContext): string | undefined {
+  const request = context.req as { user?: { id?: string } } | undefined;
+  const userId = request?.user?.id;
+  return typeof userId === 'string' ? userId : undefined;
+}
+
 @Resolver(() => ProductType)
 export class ProductsResolver {
   constructor(
     private readonly productsService: ProductsService,
     private readonly analyticsService: AnalyticsService,
+    private readonly searchAnalyticsService: SearchAnalyticsService,
   ) {}
 
   @ResolveField(() => Int)
@@ -214,8 +223,13 @@ export class ProductsResolver {
     @Args('limit', { type: () => Int, nullable: true, defaultValue: 20 }) limit?: number,
     @Args('sortBy', { nullable: true }) sortBy?: string,
     @Args('sortOrder', { nullable: true }) sortOrder?: 'ASC' | 'DESC',
+    @Args('sessionId', { nullable: true }) sessionId?: string,
+    @Args('searchContext', { nullable: true }) searchContext?: SearchContextInput,
+    @Context() context?: GraphqlContext,
   ): Promise<ProductConnection> {
     const cappedLimit = clampPublicProductsLimit(limit);
+    const startedAt = Date.now();
+    const userId = context ? getOptionalUserId(context) : undefined;
     const result = await this.productsService.findAll({
       search,
       storeId,
@@ -230,7 +244,31 @@ export class ProductsResolver {
       limit: cappedLimit,
       sortBy,
       sortOrder,
+      sessionId,
+      searchContext,
+      userId,
     });
+
+    if (search?.trim()) {
+      this.searchAnalyticsService.recordSearchEvent({
+        query: search.trim(),
+        resultCount: result.pagination.total,
+        latencyMs: Date.now() - startedAt,
+        filters: {
+          storeId,
+          category,
+          tag,
+          petTypeIds,
+          brandIds,
+          minPrice,
+          maxPrice,
+          sortBy,
+          sortOrder,
+        },
+        sessionId,
+        userId,
+      });
+    }
 
     return {
       items: result.items.map(mapProduct),

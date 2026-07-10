@@ -12,7 +12,15 @@ export class ValidationPipe implements PipeTransform<any> {
       return value;
     }
 
+    if (value === undefined || value === null) {
+      return value;
+    }
+
     const object = plainToInstance(metatype, value);
+    if (object === undefined || object === null) {
+      return value;
+    }
+
     const errors = await validate(object);
 
     if (errors.length > 0) {

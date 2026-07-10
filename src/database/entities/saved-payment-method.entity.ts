@@ -39,6 +39,9 @@ export class SavedPaymentMethod {
   @IsNotEmpty()
   omiseCardToken: string;
 
+  @Column({ name: 'card_fingerprint', type: 'varchar', length: 255, nullable: true })
+  cardFingerprint: string | null;
+
   @Column({ name: 'last_four', type: 'varchar', length: 4 })
   @IsNotEmpty()
   @Length(4, 4)

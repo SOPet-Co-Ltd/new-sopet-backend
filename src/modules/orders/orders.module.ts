@@ -6,6 +6,7 @@ import { PromotionsModule } from '../promotions/promotions.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { StoresModule } from '../stores/stores.module';
 import { OrdersService } from './orders.service';
+import { OrderFulfillmentService } from './order-fulfillment.service';
 import { Order } from '../../database/entities/order.entity';
 import { OrderItem } from '../../database/entities/order-item.entity';
 import { OrderStatusHistory } from '../../database/entities/order-status-history.entity';
@@ -20,6 +21,8 @@ import { StoreMember } from '../../database/entities/store-member.entity';
 import { User } from '../../database/entities/user.entity';
 import { OrdersResolver } from './orders.resolver';
 import { GuestOrderLinkModule } from './guest-order-link.module';
+import { InventoryModule } from '../inventory/inventory.module';
+import { PaymentsModule } from '../payments/payments.module';
 
 @Module({
   imports: [
@@ -29,6 +32,8 @@ import { GuestOrderLinkModule } from './guest-order-link.module';
     PromotionsModule,
     NotificationsModule,
     StoresModule,
+    InventoryModule,
+    PaymentsModule,
     TypeOrmModule.forFeature([
       Order,
       OrderItem,
@@ -44,7 +49,7 @@ import { GuestOrderLinkModule } from './guest-order-link.module';
       User,
     ]),
   ],
-  providers: [OrdersService, OrdersResolver],
-  exports: [OrdersService],
+  providers: [OrdersService, OrderFulfillmentService, OrdersResolver],
+  exports: [OrdersService, OrderFulfillmentService],
 })
 export class OrdersModule {}

@@ -28,7 +28,14 @@ describe('ReviewsResolver', () => {
   };
 
   let reviewsService: jest.Mocked<
-    Pick<ReviewsService, 'getStoreReviewSummary' | 'findByProduct' | 'create'>
+    Pick<
+      ReviewsService,
+      | 'getStoreReviewSummary'
+      | 'findByProduct'
+      | 'create'
+      | 'findReviewableItemsForCustomer'
+      | 'findMyReviews'
+    >
   >;
   let storesService: jest.Mocked<Pick<StoresService, 'userHasStoreAccess'>>;
   let resolver: ReviewsResolver;
@@ -38,6 +45,8 @@ describe('ReviewsResolver', () => {
       getStoreReviewSummary: jest.fn(),
       findByProduct: jest.fn(),
       create: jest.fn(),
+      findReviewableItemsForCustomer: jest.fn(),
+      findMyReviews: jest.fn(),
     };
     storesService = {
       userHasStoreAccess: jest.fn(),
@@ -178,6 +187,71 @@ describe('ReviewsResolver', () => {
         customerName: 'Jane S.',
         images: [],
       });
+    });
+  });
+
+  describe('customerReviewableItems', () => {
+    it('is decorated with customer role guard', () => {
+      const method = Object.getOwnPropertyDescriptor(
+        ReviewsResolver.prototype,
+        'customerReviewableItems',
+      )?.value as (...args: unknown[]) => unknown;
+      const roles = Reflect.getMetadata(ROLES_KEY, method) as string[] | undefined;
+      expect(roles).toEqual(['customer']);
+    });
+
+    it('returns reviewable items for authenticated customer', async () => {
+      const deliveredAt = new Date('2026-06-01T10:00:00.000Z');
+      reviewsService.findReviewableItemsForCustomer.mockResolvedValue([
+        {
+          orderId: 'order-1',
+          orderNumber: 'ORD-001',
+          orderItemId: 'item-1',
+          productId: 'prod-1',
+          productName: 'Cat Food',
+          productSlug: 'cat-food',
+          productImageUrl: 'https://cdn.example.com/cat.jpg',
+          deliveredAt,
+          reviewDeadline: new Date('2026-07-01T10:00:00.000Z'),
+        },
+      ]);
+
+      const result = await resolver.customerReviewableItems('cust-1');
+
+      expect(reviewsService.findReviewableItemsForCustomer).toHaveBeenCalledWith('cust-1');
+      expect(result).toHaveLength(1);
+      expect(result[0].productName).toBe('Cat Food');
+    });
+  });
+
+  describe('myReviews', () => {
+    it('is decorated with customer role guard', () => {
+      const method = Object.getOwnPropertyDescriptor(ReviewsResolver.prototype, 'myReviews')
+        ?.value as (...args: unknown[]) => unknown;
+      const roles = Reflect.getMetadata(ROLES_KEY, method) as string[] | undefined;
+      expect(roles).toEqual(['customer']);
+    });
+
+    it('passes limit and offset to service', async () => {
+      reviewsService.findMyReviews.mockResolvedValue([
+        {
+          id: 'review-1',
+          productId: 'prod-1',
+          productName: 'Cat Food',
+          productSlug: 'cat-food',
+          productImageUrl: null,
+          orderId: 'order-1',
+          rating: 5,
+          comment: 'Great',
+          status: ReviewStatus.PENDING,
+          createdAt: new Date('2026-06-01T10:00:00.000Z'),
+        },
+      ]);
+
+      const result = await resolver.myReviews('cust-1', 25, 10);
+
+      expect(reviewsService.findMyReviews).toHaveBeenCalledWith('cust-1', 25, 10);
+      expect(result[0].id).toBe('review-1');
     });
   });
 

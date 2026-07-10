@@ -1,6 +1,7 @@
-import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
-import { UseGuards } from '@nestjs/common';
+import { Args, Mutation, Query, Resolver, Subscription } from '@nestjs/graphql';
+import { BadRequestException, UseGuards } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
+import { PaymentEventsService, type PaymentStatusUpdatedPayload } from './payment-events.service';
 import { PaymentType } from '../../graphql/models/types';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -10,7 +11,10 @@ import { normalizeCheckoutPaymentMethod } from '../../common/utils/checkout-paym
 
 @Resolver()
 export class PaymentsResolver {
-  constructor(private readonly paymentsService: PaymentsService) {}
+  constructor(
+    private readonly paymentsService: PaymentsService,
+    private readonly paymentEventsService: PaymentEventsService,
+  ) {}
 
   private mapPayment(payment: {
     id: string;
@@ -56,6 +60,37 @@ export class PaymentsResolver {
     const effectiveCustomerId = role === 'customer' ? customerId : undefined;
     const payment = await this.paymentsService.findLatestByOrderId(orderId, effectiveCustomerId);
     return this.mapPayment(payment);
+  }
+
+  @Subscription(() => PaymentType, {
+    filter: (
+      payload: PaymentStatusUpdatedPayload,
+      variables: { paymentId?: string; orderId?: string },
+    ) => {
+      const payment = payload.paymentStatusUpdated;
+      if (variables.paymentId) {
+        return payment.id === variables.paymentId;
+      }
+      if (variables.orderId) {
+        return payment.orderId === variables.orderId;
+      }
+      return false;
+    },
+    resolve: (payload: PaymentStatusUpdatedPayload) => payload.paymentStatusUpdated,
+  })
+  @Public()
+  paymentStatusUpdated(
+    @Args('paymentId', { type: () => String, nullable: true }) paymentId?: string,
+    @Args('orderId', { type: () => String, nullable: true }) orderId?: string,
+  ) {
+    if (!paymentId && !orderId) {
+      throw new BadRequestException({
+        code: 'PAYMENT_SUBSCRIPTION_TARGET_REQUIRED',
+        message: 'Either paymentId or orderId is required',
+      });
+    }
+
+    return this.paymentEventsService.paymentStatusUpdatedIterator();
   }
 
   @Mutation(() => PaymentType)

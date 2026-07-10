@@ -10,6 +10,7 @@ import twilioConfig from './config/twilio.config';
 import resendConfig from './config/resend.config';
 import thaibulksmsConfig from './config/thaibulksms.config';
 import redisConfig from './config/redis.config';
+import searchConfig from './config/search.config';
 
 // Filters, Interceptors, Pipes
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
@@ -18,8 +19,6 @@ import { ValidationPipe } from './common/pipes/validation.pipe';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { StoreStatusGuard } from './modules/auth/guards/store-status.guard';
 import { CustomerStatusGuard } from './modules/auth/guards/customer-status.guard';
-import { Store } from './database/entities/store.entity';
-import { Customer } from './database/entities/customer.entity';
 
 // Modules
 import { AuthModule } from './modules/auth/auth.module';
@@ -36,6 +35,7 @@ import { StorageModule } from './modules/storage/storage.module';
 import { PlatformModule } from './modules/platform/platform.module';
 import { AdminTeamModule } from './modules/admin-team/admin-team.module';
 import { PublicApiModule } from './modules/public-api/public-api.module';
+import { SearchModule } from './modules/search/search.module';
 
 @Module({
   imports: [
@@ -51,6 +51,7 @@ import { PublicApiModule } from './modules/public-api/public-api.module';
         thaibulksmsConfig,
         resendConfig,
         redisConfig,
+        searchConfig,
       ],
     }),
 
@@ -73,9 +74,6 @@ import { PublicApiModule } from './modules/public-api/public-api.module';
       inject: [ConfigService],
     }),
 
-    // Store repository for the global suspension guard
-    TypeOrmModule.forFeature([Store, Customer]),
-
     // Feature Modules
     RedisModule,
     EmailModule,
@@ -90,6 +88,7 @@ import { PublicApiModule } from './modules/public-api/public-api.module';
     PlatformModule,
     AdminTeamModule,
     PublicApiModule,
+    SearchModule,
     AppGraphqlModule,
   ],
   providers: [
@@ -116,12 +115,12 @@ import { PublicApiModule } from './modules/public-api/public-api.module';
     // Global store-suspension guard (runs after JwtAuthGuard populates the user)
     {
       provide: APP_GUARD,
-      useClass: StoreStatusGuard,
+      useExisting: StoreStatusGuard,
     },
     // Global customer-suspension guard
     {
       provide: APP_GUARD,
-      useClass: CustomerStatusGuard,
+      useExisting: CustomerStatusGuard,
     },
   ],
 })

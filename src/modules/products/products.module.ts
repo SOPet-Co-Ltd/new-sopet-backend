@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AnalyticsModule } from '../analytics/analytics.module';
 import { StoresModule } from '../stores/stores.module';
 import { TaxonomyModule } from '../taxonomy/taxonomy.module';
+import { SearchModule } from '../search/search.module';
 import { ProductsService } from './products.service';
 import { Product } from '../../database/entities/product.entity';
 import { ProductVariant } from '../../database/entities/product-variant.entity';
@@ -14,6 +15,7 @@ import { ProductsResolver } from './products.resolver';
     AnalyticsModule,
     StoresModule,
     TaxonomyModule,
+    SearchModule,
     TypeOrmModule.forFeature([Product, ProductVariant, ProductImage]),
   ],
   providers: [ProductsService, ProductsResolver],

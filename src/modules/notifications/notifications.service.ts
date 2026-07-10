@@ -91,7 +91,21 @@ export class NotificationsService {
     type: string,
     message: string,
     metadata: Record<string, unknown> = {},
+    dedupeMetadataKeys?: string[],
   ): Promise<UserNotification> {
+    if (dedupeMetadataKeys?.length) {
+      const match: Record<string, unknown> = {};
+      for (const key of dedupeMetadataKeys) {
+        if (key in metadata) {
+          match[key] = metadata[key];
+        }
+      }
+      const existing = await this.findExistingUserNotification(userId, type, match);
+      if (existing) {
+        return existing;
+      }
+    }
+
     const notification = this.userNotificationRepository.create({
       userId,
       type,
@@ -100,6 +114,32 @@ export class NotificationsService {
       channel: NotificationChannel.PUSH,
     });
     return this.userNotificationRepository.save(notification);
+  }
+
+  private async findExistingUserNotification(
+    userId: string,
+    type: string,
+    metadataMatch: Record<string, unknown>,
+  ): Promise<UserNotification | null> {
+    if (Object.keys(metadataMatch).length === 0) {
+      return null;
+    }
+
+    const qb = this.userNotificationRepository
+      .createQueryBuilder('notification')
+      .where('notification.user_id = :userId', { userId })
+      .andWhere('notification.type = :type', { type });
+
+    for (const [key, value] of Object.entries(metadataMatch)) {
+      if (value === undefined || value === null) {
+        continue;
+      }
+      qb.andWhere(`notification.metadata->>'${key}' = :meta_${key}`, {
+        [`meta_${key}`]: String(value),
+      });
+    }
+
+    return qb.getOne();
   }
 
   async findByUser(userId: string, unreadOnly?: boolean): Promise<UserNotification[]> {
@@ -164,6 +204,7 @@ export class NotificationsService {
           'new_store_request',
           `ร้านใหม่ "${request.storeName}" กำลังรอการอนุมัติ`,
           { requestId: request.id, storeName: request.storeName, storeRequestId: request.id },
+          ['requestId'],
         ),
       );
     }
@@ -184,19 +225,46 @@ export class NotificationsService {
         ? `ร้าน "${store.name}" ของคุณได้รับการอนุมัติแล้ว`
         : `ร้าน "${store.name}" ได้รับการปฏิเสธ`;
 
-    return this.createUserNotification(vendorId, 'store_status_changed', subject, {
-      storeId: store.id,
-      storeName: store.name,
-      status,
-      rejectionReason,
-    });
+    return this.createUserNotification(
+      vendorId,
+      'store_status_changed',
+      subject,
+      {
+        storeId: store.id,
+        storeName: store.name,
+        status,
+        rejectionReason,
+      },
+      ['storeId', 'status'],
+    );
+  }
+
+  private uniqueStoreIdsFromOrder(order: Order): string[] {
+    return [...new Set((order.items ?? []).map((item) => item.storeId))];
+  }
+
+  /**
+   * Notify each affected vendor once per store about a new order.
+   */
+  async notifyVendorsAboutNewOrder(order: Order): Promise<void> {
+    for (const storeId of this.uniqueStoreIdsFromOrder(order)) {
+      await this.notifyVendorAboutNewOrder(storeId, order);
+    }
+  }
+
+  /**
+   * Notify each affected vendor once per store about an order status change.
+   */
+  async notifyVendorsAboutOrderStatus(order: Order, status: string): Promise<void> {
+    for (const storeId of this.uniqueStoreIdsFromOrder(order)) {
+      await this.notifyVendorAboutOrderStatus(storeId, order, status);
+    }
   }
 
   /**
    * Notify a vendor about a new order on their store.
    */
   async notifyVendorAboutNewOrder(storeId: string, order: Order): Promise<UserNotification | null> {
-    // Find the vendor who owns this store
     const store = await this.storeRepository.findOne({
       where: { id: storeId },
       relations: ['owner'],
@@ -210,6 +278,7 @@ export class NotificationsService {
       'new_order',
       `มีออเดอร์ใหม่ #${order.orderNumber} — ฿${Number(order.total).toLocaleString('th-TH')}`,
       { orderId: order.id, orderNumber: order.orderNumber, total: Number(order.total) },
+      ['orderId'],
     );
   }
 
@@ -234,6 +303,7 @@ export class NotificationsService {
       'order_status_changed',
       `ออเดอร์ #${order.orderNumber} เปลี่ยนเป็น "${status.replace(/_/g, ' ')}"`,
       { orderId: order.id, orderNumber: order.orderNumber, status },
+      ['orderId', 'status'],
     );
   }
 
@@ -247,11 +317,17 @@ export class NotificationsService {
     success: boolean,
     metadata?: Record<string, unknown>,
   ): Promise<UserNotification> {
-    return this.createUserNotification(vendorId, 'request_status_changed', title, {
-      type,
-      success,
-      ...metadata,
-    });
+    return this.createUserNotification(
+      vendorId,
+      'request_status_changed',
+      title,
+      {
+        type,
+        success,
+        ...metadata,
+      },
+      ['requestId', 'type', 'success'],
+    );
   }
 
   /**
@@ -294,6 +370,7 @@ export class NotificationsService {
           taxonomyKind: kind,
           taxonomyName: name,
         },
+        ['storeId', 'taxonomyKind', 'taxonomyName'],
       );
       notified++;
     }

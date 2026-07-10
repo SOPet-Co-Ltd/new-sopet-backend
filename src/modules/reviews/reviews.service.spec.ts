@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { ReviewsService, maskCustomerName } from './reviews.service';
+import { ReviewsService, maskCustomerName, getReviewWindowDays, addDays } from './reviews.service';
 import { Review, ReviewStatus } from '../../database/entities/review.entity';
 import { Order } from '../../database/entities/order.entity';
 import { Product } from '../../database/entities/product.entity';
@@ -9,6 +9,7 @@ import { OrderStatus } from '../../database/entities/enums/order.enums';
 
 describe('ReviewsService', () => {
   let service: ReviewsService;
+  const originalReviewWindowDays = process.env.REVIEW_WINDOW_DAYS;
 
   const reviewRepo = {
     create: jest.fn(<T extends object>(x: T): T => x),
@@ -20,6 +21,7 @@ describe('ReviewsService', () => {
 
   const orderRepo = {
     findOne: jest.fn(),
+    find: jest.fn(),
   };
 
   const productRepo = {
@@ -28,6 +30,7 @@ describe('ReviewsService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    delete process.env.REVIEW_WINDOW_DAYS;
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ReviewsService,
@@ -40,6 +43,14 @@ describe('ReviewsService', () => {
     service = module.get(ReviewsService);
   });
 
+  afterAll(() => {
+    if (originalReviewWindowDays === undefined) {
+      delete process.env.REVIEW_WINDOW_DAYS;
+    } else {
+      process.env.REVIEW_WINDOW_DAYS = originalReviewWindowDays;
+    }
+  });
+
   describe('create', () => {
     const input = {
       customerId: 'cust-1',
@@ -47,6 +58,24 @@ describe('ReviewsService', () => {
       orderId: 'order-1',
       rating: 5,
       comment: 'Great product',
+    };
+
+    const deliveredAt = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
+
+    const deliveredOrder = {
+      id: 'order-1',
+      customerId: 'cust-1',
+      status: OrderStatus.DELIVERED,
+      updatedAt: deliveredAt,
+      items: [
+        {
+          id: 'item-1',
+          productName: 'Cat Food',
+          deliveredAt,
+          productVariant: { productId: 'prod-1' },
+        },
+      ],
+      statusHistory: [],
     };
 
     it('throws when order not found', async () => {
@@ -58,10 +87,8 @@ describe('ReviewsService', () => {
 
     it('throws when order not DELIVERED', async () => {
       orderRepo.findOne.mockResolvedValue({
-        id: 'order-1',
-        customerId: 'cust-1',
+        ...deliveredOrder,
         status: OrderStatus.SHIPPED,
-        items: [],
       });
 
       await expect(service.create(input)).rejects.toThrow(BadRequestException);
@@ -70,9 +97,7 @@ describe('ReviewsService', () => {
 
     it('throws when product not in order', async () => {
       orderRepo.findOne.mockResolvedValue({
-        id: 'order-1',
-        customerId: 'cust-1',
-        status: OrderStatus.DELIVERED,
+        ...deliveredOrder,
         items: [{ productVariant: { productId: 'other-prod' } }],
       });
 
@@ -80,13 +105,29 @@ describe('ReviewsService', () => {
       expect(reviewRepo.save).not.toHaveBeenCalled();
     });
 
-    it('saves review on success', async () => {
+    it('throws REVIEW_WINDOW_EXPIRED when deadline passed', async () => {
+      const expiredDeliveredAt = new Date('2020-01-01T10:00:00.000Z');
       orderRepo.findOne.mockResolvedValue({
-        id: 'order-1',
-        customerId: 'cust-1',
-        status: OrderStatus.DELIVERED,
-        items: [{ productVariant: { productId: 'prod-1' } }],
+        ...deliveredOrder,
+        items: [
+          {
+            id: 'item-1',
+            deliveredAt: expiredDeliveredAt,
+            productVariant: { productId: 'prod-1' },
+          },
+        ],
       });
+      reviewRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.create(input)).rejects.toMatchObject({
+        response: { code: 'REVIEW_WINDOW_EXPIRED' },
+      });
+      expect(reviewRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('saves review on success', async () => {
+      orderRepo.findOne.mockResolvedValue(deliveredOrder);
+      reviewRepo.findOne.mockResolvedValue(null);
 
       const result = await service.create(input);
 
@@ -97,6 +138,170 @@ describe('ReviewsService', () => {
       expect(reviewRepo.save).toHaveBeenCalled();
       expect(result.id).toBe('review-1');
       expect(result.status).toBe(ReviewStatus.PENDING);
+    });
+  });
+
+  describe('getReviewWindowDays', () => {
+    it('defaults to 30 when env unset', () => {
+      delete process.env.REVIEW_WINDOW_DAYS;
+      expect(getReviewWindowDays()).toBe(30);
+    });
+
+    it('reads REVIEW_WINDOW_DAYS from env', () => {
+      process.env.REVIEW_WINDOW_DAYS = '14';
+      expect(getReviewWindowDays()).toBe(14);
+    });
+  });
+
+  describe('findReviewableItemsForCustomer', () => {
+    const deliveredAt = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
+
+    it('returns only delivered orders without existing reviews and within window', async () => {
+      orderRepo.find.mockResolvedValue([
+        {
+          id: 'order-1',
+          orderNumber: 'ORD-001',
+          status: OrderStatus.DELIVERED,
+          updatedAt: deliveredAt,
+          items: [
+            {
+              id: 'item-1',
+              productName: 'Cat Food',
+              deliveredAt,
+              productVariant: {
+                productId: 'prod-1',
+                product: {
+                  id: 'prod-1',
+                  name: 'Cat Food Premium',
+                  slug: 'cat-food',
+                  images: [
+                    { url: 'https://cdn.example.com/cat.jpg', sortOrder: 0, isThumbnail: true },
+                  ],
+                },
+              },
+            },
+          ],
+          statusHistory: [],
+        },
+        {
+          id: 'order-2',
+          orderNumber: 'ORD-002',
+          status: OrderStatus.SHIPPED,
+          items: [],
+          statusHistory: [],
+        },
+      ]);
+      reviewRepo.find.mockResolvedValue([]);
+
+      const results = await service.findReviewableItemsForCustomer('cust-1');
+
+      expect(results).toHaveLength(1);
+      expect(results[0]).toMatchObject({
+        orderId: 'order-1',
+        orderNumber: 'ORD-001',
+        orderItemId: 'item-1',
+        productId: 'prod-1',
+        productName: 'Cat Food Premium',
+        productSlug: 'cat-food',
+        productImageUrl: 'https://cdn.example.com/cat.jpg',
+      });
+      expect(results[0].reviewDeadline).toEqual(addDays(deliveredAt, 30));
+    });
+
+    it('excludes already reviewed customer+order+product pairs', async () => {
+      orderRepo.find.mockResolvedValue([
+        {
+          id: 'order-1',
+          orderNumber: 'ORD-001',
+          status: OrderStatus.DELIVERED,
+          updatedAt: deliveredAt,
+          items: [
+            {
+              id: 'item-1',
+              deliveredAt,
+              productVariant: {
+                productId: 'prod-1',
+                product: { name: 'Cat Food', slug: 'cat-food', images: [] },
+              },
+            },
+          ],
+          statusHistory: [],
+        },
+      ]);
+      reviewRepo.find.mockResolvedValue([{ orderId: 'order-1', productId: 'prod-1' }]);
+
+      const results = await service.findReviewableItemsForCustomer('cust-1');
+
+      expect(results).toEqual([]);
+    });
+
+    it('excludes items past review window', async () => {
+      const expiredDeliveredAt = new Date('2020-01-01T10:00:00.000Z');
+      orderRepo.find.mockResolvedValue([
+        {
+          id: 'order-1',
+          orderNumber: 'ORD-001',
+          status: OrderStatus.DELIVERED,
+          updatedAt: expiredDeliveredAt,
+          items: [
+            {
+              id: 'item-1',
+              deliveredAt: expiredDeliveredAt,
+              productVariant: {
+                productId: 'prod-1',
+                product: { name: 'Cat Food', slug: 'cat-food', images: [] },
+              },
+            },
+          ],
+          statusHistory: [],
+        },
+      ]);
+      reviewRepo.find.mockResolvedValue([]);
+
+      const results = await service.findReviewableItemsForCustomer('cust-1');
+
+      expect(results).toEqual([]);
+    });
+  });
+
+  describe('findMyReviews', () => {
+    it('returns reviews ordered by createdAt DESC with capped limit', async () => {
+      const older = new Date('2026-05-01T10:00:00.000Z');
+      const newer = new Date('2026-06-01T10:00:00.000Z');
+      reviewRepo.find.mockResolvedValue([
+        {
+          id: 'review-2',
+          productId: 'prod-2',
+          orderId: 'order-2',
+          rating: 4,
+          comment: 'Good',
+          status: ReviewStatus.APPROVED,
+          createdAt: newer,
+          product: { name: 'Dog Food', slug: 'dog-food', images: [] },
+        },
+        {
+          id: 'review-1',
+          productId: 'prod-1',
+          orderId: 'order-1',
+          rating: 5,
+          comment: 'Great',
+          status: ReviewStatus.PENDING,
+          createdAt: older,
+          product: { name: 'Cat Food', slug: 'cat-food', images: [] },
+        },
+      ]);
+
+      const results = await service.findMyReviews('cust-1', 101, -1);
+
+      expect(reviewRepo.find).toHaveBeenCalledWith({
+        where: { customerId: 'cust-1' },
+        relations: ['product', 'product.images'],
+        order: { createdAt: 'DESC' },
+        take: 100,
+        skip: 0,
+      });
+      expect(results[0].id).toBe('review-2');
+      expect(results[1].id).toBe('review-1');
     });
   });
 

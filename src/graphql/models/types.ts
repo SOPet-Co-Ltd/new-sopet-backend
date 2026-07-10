@@ -394,6 +394,15 @@ export class OrderItemType {
 
   @Field()
   fulfillmentStatus: string;
+
+  @Field(() => String, { nullable: true })
+  trackingNumber?: string | null;
+
+  @Field(() => String, { nullable: true })
+  fulfillmentProvider?: string | null;
+
+  @Field(() => String, { nullable: true })
+  trackingUrl?: string | null;
 }
 
 @ObjectType()

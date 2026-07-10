@@ -158,6 +158,11 @@ input ChangePasswordInput {
   newPassword: String!
 }
 
+input ConfirmOrderDeliveredInput {
+  guestPhone: String
+  orderId: String!
+}
+
 input CreateAddressInput {
   addressLine1: String!
   addressLine2: String
@@ -301,6 +306,12 @@ input CreateReviewInput {
   rating: Int!
 }
 
+input CreateSearchSynonymInput {
+  expansion: String!
+  isActive: Boolean = true
+  terms: [String!]!
+}
+
 input CreateShippingOptionInput {
   description: String
   isActive: Boolean
@@ -346,6 +357,31 @@ type CustomerProfile {
   fullName: String
   id: String!
   phone: String!
+}
+
+type CustomerReviewType {
+  comment: String
+  createdAt: DateTime!
+  id: String!
+  orderId: String!
+  productId: String!
+  productImageUrl: String
+  productName: String!
+  productSlug: String
+  rating: Int!
+  status: String!
+}
+
+type CustomerReviewableItemType {
+  deliveredAt: DateTime!
+  orderId: String!
+  orderItemId: String!
+  orderNumber: String!
+  productId: String!
+  productImageUrl: String
+  productName: String!
+  productSlug: String
+  reviewDeadline: DateTime
 }
 
 """
@@ -431,6 +467,7 @@ type MessagePayload {
 type Mutation {
   acceptStoreInvitation(token: String!): StoreMemberType!
   acceptVendorInvitation(input: AcceptVendorInvitationInput!): VendorAuthPayload!
+  acknowledgeVendorOrder(orderId: String!): OrderType!
   addFavorite(input: FavoriteProductInput!): FavoriteType!
   addPaymentMethod(input: AddPaymentMethodInput!): SavedPaymentMethodType!
   addProductImage(input: AddProductImageInput!, productId: String!): ProductImageType!
@@ -447,8 +484,11 @@ type Mutation {
   approveStoreReactivationRequest(id: String!): StoreReactivationRequestType!
   approveStoreRequest(id: String!): StoreRequestType!
   approveTag(id: String!): TagType!
+  cancelVendorOrder(orderId: String!): OrderType!
   changeCustomerPhone(input: ChangeCustomerPhoneInput!): CustomerAuthPayload!
   changePassword(input: ChangePasswordInput!): MessagePayload!
+  confirmGuestOrderDelivered(input: ConfirmOrderDeliveredInput!): OrderType!
+  confirmOrderDelivered(input: ConfirmOrderDeliveredInput!): OrderType!
   createAddress(input: CreateAddressInput!): SavedAddressType!
   createBrand(input: CreateBrandInput!): BrandType!
   createCategory(input: CreateCategoryInput!): CategoryType!
@@ -464,6 +504,7 @@ type Mutation {
   createProductVariant(input: CreateProductVariantInput!, productId: String!): ProductVariantType!
   createPromotion(input: CreatePromotionInput!): PromotionType!
   createReview(input: CreateReviewInput!): ReviewType!
+  createSearchSynonym(input: CreateSearchSynonymInput!): SearchSynonymType!
   createShippingOption(input: CreateShippingOptionInput!): StoreShippingOptionType!
   createShippingProvider(input: CreateShippingProviderInput!): ShippingProviderType!
   createStoreApiKey(name: String!, storeId: String!): CreateStoreApiKeyPayload!
@@ -482,6 +523,7 @@ type Mutation {
   deleteProductImage(imageId: String!): Boolean!
   deleteProductVariant(variantId: String!): Boolean!
   deletePromotion(id: String!): Boolean!
+  deleteSearchSynonym(id: String!): Boolean!
   deleteShippingOption(id: String!): Boolean!
   deleteShippingProvider(id: String!): Boolean!
   deleteTag(id: String!): DeleteTaxonomyResultType!
@@ -490,6 +532,7 @@ type Mutation {
   inviteVendor(input: InviteVendorInput!): VendorInvitationType!
   markAllNotificationsRead: Boolean!
   markNotificationRead(id: String!): Boolean!
+  markVendorOrderPaid(orderId: String!): OrderType!
   mergeCart(sessionId: String!): CartType!
   publishProduct(id: String!): ProductType!
   reactivateAccount(input: ReactivateAccountInput!): CustomerAuthPayload!
@@ -524,6 +567,7 @@ type Mutation {
   setDefaultPaymentMethod(id: String!): SavedPaymentMethodType!
   setPetTypeImage(input: SetPetTypeImageInput!): PetTypeType!
   setProductThumbnail(imageId: String!, productId: String!): ProductImageType!
+  shipVendorOrder(input: ShipVendorOrderInput!): OrderType!
   submitStoreReactivationRequest(input: SubmitStoreReactivationRequestInput!): StoreReactivationRequestType!
   submitStoreRequest(input: SubmitStoreRequestInput!): StoreRequestType!
   switchStore(input: SwitchStoreInput!): VendorAuthPayload!
@@ -543,6 +587,8 @@ type Mutation {
   updateProductVariant(input: UpdateProductVariantInput!, variantId: String!): ProductVariantType!
   updateProfile(input: UpdateProfileInput!): CustomerProfile!
   updatePromotion(id: String!, input: UpdatePromotionInput!): PromotionType!
+  updateSearchRankingWeights(input: UpdateSearchRankingWeightsInput!): SearchRankingWeightsType!
+  updateSearchSynonym(id: String!, input: UpdateSearchSynonymInput!): SearchSynonymType!
   updateShippingOption(id: String!, input: UpdateShippingOptionInput!): StoreShippingOptionType!
   updateShippingProvider(id: String!, input: UpdateShippingProviderInput!): ShippingProviderType!
   updateStore(input: UpdateStoreSettingsInput!): MyStoreType!
@@ -594,12 +640,15 @@ input OrderItemInput {
 }
 
 type OrderItemType {
+  fulfillmentProvider: String
   fulfillmentStatus: String!
   id: String!
   productName: String!
   quantity: Int!
   storeId: String!
   subtotal: Float!
+  trackingNumber: String
+  trackingUrl: String
   unitPrice: Float!
   variantId: String!
 }
@@ -844,6 +893,8 @@ type Query {
   brandDeleteImpact(brandId: String!): TaxonomyDeleteImpactType!
   cart(sessionId: String): CartType!
   categoryDeleteImpact(categoryId: String!): TaxonomyDeleteImpactType!
+  customerReviewableItems: [CustomerReviewableItemType!]!
+  exportSearchAnalyticsCsv(fromDate: DateTime, toDate: DateTime): String!
   favorites: [FavoriteType!]!
   guestOrders(guestPhone: String!): [OrderType!]!
 
@@ -856,6 +907,7 @@ type Query {
   myCategoryProposals: [CategoryType!]!
   myDisputes: [DisputeType!]!
   myPetTypeProposals: [PetTypeType!]!
+  myReviews(limit: Int = 50, offset: Int = 0): [CustomerReviewType!]!
   myStore: MyStoreType!
   myStoreRequests: [StoreRequestType!]!
   myStoreShippingOptions: [StoreShippingOptionType!]!
@@ -892,8 +944,16 @@ type Query {
   productBySlug(slug: String!, storeId: String!): ProductType!
   productPublishChecklist(productId: String!): ProductPublishChecklistType!
   productReviews(productId: String!): [ReviewType!]!
-  products(brandIds: [String!], category: String, limit: Int = 20, maxPrice: Int, minPrice: Int, page: Int = 1, petTypeIds: [String!], search: String, sortBy: String, sortOrder: String, storeId: String, tag: String): ProductConnection!
+  products(brandIds: [String!], category: String, limit: Int = 20, maxPrice: Int, minPrice: Int, page: Int = 1, petTypeIds: [String!], search: String, searchContext: SearchContextInput, sessionId: String, sortBy: String, sortOrder: String, storeId: String, tag: String): ProductConnection!
   recommendedProducts(limit: Int = 50): [ProductType!]!
+  searchAnalyticsSuggestionCtr(fromDate: DateTime, toDate: DateTime): [SearchSuggestionCtrRowType!]!
+  searchAnalyticsSummary(fromDate: DateTime, toDate: DateTime): SearchAnalyticsSummaryType!
+  searchAnalyticsTopQueries(fromDate: DateTime, limit: Int = 50, toDate: DateTime): [SearchAnalyticsQueryRowType!]!
+  searchAnalyticsZeroResultQueries(fromDate: DateTime, limit: Int = 50, toDate: DateTime): [SearchAnalyticsQueryRowType!]!
+  searchRankingWeights: SearchRankingWeightsType!
+  searchRecoverySuggestions(query: String!): [String!]!
+  searchSuggestions(limit: Int = 10, query: String!, sessionId: String): SearchSuggestionsPayloadType!
+  searchSynonyms: [SearchSynonymType!]!
   shippingProviders(includeInactive: Boolean): [ShippingProviderType!]!
   store(id: String!): StoreType!
   storeAnalytics(fromDate: String, storeId: String!, toDate: String): StoreAnalyticsType!
@@ -1028,6 +1088,68 @@ type SavedPaymentMethodType {
   type: String!
 }
 
+type SearchAnalyticsQueryRowType {
+  avgResultCount: Float!
+  query: String!
+  searchCount: Int!
+}
+
+type SearchAnalyticsSummaryType {
+  avgLatencyMs: Float!
+  avgResultsPerQuery: Float!
+  totalSearches: Int!
+  uniqueQueries: Int!
+  zeroResultRate: Float!
+}
+
+input SearchContextInput {
+  recentProductIds: [String!]
+  recentQueries: [String!]
+}
+
+type SearchProductSuggestionType {
+  id: String!
+  name: String!
+  slug: String!
+  thumbnailUrl: String
+}
+
+type SearchQuerySuggestionType {
+  query: String!
+}
+
+type SearchRankingWeightsType {
+  averageRating: Float!
+  personalizationCap: Float!
+  prefixBoost: Float!
+  reviewCount: Float!
+  rrfK: Int!
+  soldCount: Float!
+  text: Float!
+  trigramFallbackThreshold: Int!
+  trigramMinSimilarity: Float!
+}
+
+type SearchSuggestionCtrRowType {
+  clicks: Int!
+  ctr: Float!
+  impressions: Int!
+  prefixBucket: String!
+}
+
+type SearchSuggestionsPayloadType {
+  products: [SearchProductSuggestionType!]!
+  queries: [SearchQuerySuggestionType!]!
+}
+
+type SearchSynonymType {
+  expansion: String!
+  id: String!
+  isActive: Boolean!
+  terms: [String!]!
+  updatedAt: DateTime!
+}
+
 input SendCustomerOtpInput {
   phone: String!
 }
@@ -1040,6 +1162,13 @@ input SetCategoryImageInput {
 input SetPetTypeImageInput {
   imageUrl: String!
   petTypeId: String!
+}
+
+input ShipVendorOrderInput {
+  fulfillmentProvider: String!
+  orderId: String!
+  trackingNumber: String!
+  trackingUrl: String
 }
 
 input ShippingAddressInput {
@@ -1192,6 +1321,10 @@ input SubmitStoreRequestInput {
   description: String
   logoUrl: String
   storeName: String!
+}
+
+type Subscription {
+  paymentStatusUpdated(orderId: String, paymentId: String): PaymentType!
 }
 
 input SwitchStoreInput {
@@ -1370,6 +1503,24 @@ input UpdatePromotionInput {
   type: String
   usageLimit: Int
   usagePerCustomer: Int
+}
+
+input UpdateSearchRankingWeightsInput {
+  averageRating: Float
+  personalizationCap: Float
+  prefixBoost: Float
+  reviewCount: Float
+  rrfK: Int
+  soldCount: Float
+  text: Float
+  trigramFallbackThreshold: Int
+  trigramMinSimilarity: Float
+}
+
+input UpdateSearchSynonymInput {
+  expansion: String
+  isActive: Boolean
+  terms: [String!]
 }
 
 input UpdateShippingOptionInput {

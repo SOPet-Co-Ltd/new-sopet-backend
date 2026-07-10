@@ -74,6 +74,12 @@ export class OrderItem {
   @Column({ name: 'tracking_number', type: 'varchar', length: 100, nullable: true })
   trackingNumber: string | null;
 
+  @Column({ name: 'fulfillment_provider', type: 'varchar', length: 100, nullable: true })
+  fulfillmentProvider: string | null;
+
+  @Column({ name: 'tracking_url', type: 'varchar', length: 2048, nullable: true })
+  trackingUrl: string | null;
+
   @Column({ name: 'shipped_at', type: 'timestamp', nullable: true })
   shippedAt: Date | null;
 

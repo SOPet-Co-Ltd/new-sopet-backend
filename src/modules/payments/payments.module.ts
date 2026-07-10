@@ -2,10 +2,13 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { InventoryModule } from '../inventory/inventory.module';
 import { PaymentsService } from './payments.service';
+import { PaymentEventsService } from './payment-events.service';
 import { PaymentsWebhookController } from './payments-webhook.controller';
 import { Payment } from '../../database/entities/payment.entity';
 import { Order } from '../../database/entities/order.entity';
+import { Customer } from '../../database/entities/customer.entity';
 import {
   SavedPaymentMethod,
   PaymentMethodType,
@@ -16,10 +19,11 @@ import { PaymentsResolver } from './payments.resolver';
   imports: [
     AuthModule,
     NotificationsModule,
-    TypeOrmModule.forFeature([Payment, Order, SavedPaymentMethod]),
+    InventoryModule,
+    TypeOrmModule.forFeature([Payment, Order, Customer, SavedPaymentMethod]),
   ],
   controllers: [PaymentsWebhookController],
-  providers: [PaymentsService, PaymentsResolver],
-  exports: [PaymentsService],
+  providers: [PaymentsService, PaymentEventsService, PaymentsResolver],
+  exports: [PaymentsService, PaymentEventsService],
 })
 export class PaymentsModule {}

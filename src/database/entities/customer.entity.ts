@@ -57,6 +57,9 @@ export class Customer {
   @Column({ name: 'last_login_at', type: 'timestamp', nullable: true })
   lastLoginAt: Date | null;
 
+  @Column({ name: 'omise_customer_id', type: 'varchar', length: 255, nullable: true })
+  omiseCustomerId: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
   createdAt: Date;
 

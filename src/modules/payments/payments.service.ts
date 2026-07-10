@@ -9,12 +9,20 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Payment } from '../../database/entities/payment.entity';
-import { Order, OrderStatus } from '../../database/entities/order.entity';
+import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
+import { Customer } from '../../database/entities/customer.entity';
 import { SavedPaymentMethod } from '../../database/entities/saved-payment-method.entity';
 import { CreateChargeDto } from './dto';
 import { NotificationsService } from '../notifications/notifications.service';
+import { PaymentEventsService } from './payment-events.service';
+import { InventoryService } from '../inventory/inventory.service';
 import { verifyOmiseWebhookSignature } from './omise-webhook.util';
 import { normalizeCheckoutPaymentMethod } from '../../common/utils/checkout-payment.util';
+
+const ONLINE_PAYMENT_METHODS = new Set<PaymentMethod>([
+  PaymentMethod.PROMPTPAY,
+  PaymentMethod.CREDIT_CARD,
+]);
 
 interface OmiseCharge {
   id: string;
@@ -23,6 +31,37 @@ interface OmiseCharge {
   source?: { scannable_code?: { image?: { download_uri?: string } } };
   failure_code?: string;
   failure_message?: string;
+}
+
+interface OmiseCustomer {
+  id: string;
+  default_card?: string | null;
+  cards?: {
+    data: OmiseCard[];
+  };
+}
+
+interface OmiseCard {
+  id: string;
+  last_digits: string;
+  brand: string;
+  expiration_month: number;
+  expiration_year: number;
+  fingerprint?: string;
+}
+
+interface OmiseToken {
+  id: string;
+  card: OmiseCard;
+}
+
+export interface SavedOmiseCardDetails {
+  omiseCardId: string;
+  cardFingerprint: string | null;
+  lastFour: string;
+  brand: string;
+  expiryMonth: number;
+  expiryYear: number;
 }
 
 @Injectable()
@@ -37,35 +76,251 @@ export class PaymentsService {
     private paymentRepository: Repository<Payment>,
     @InjectRepository(Order)
     private orderRepository: Repository<Order>,
+    @InjectRepository(Customer)
+    private customerRepository: Repository<Customer>,
     @InjectRepository(SavedPaymentMethod)
     private savedPaymentMethodRepository: Repository<SavedPaymentMethod>,
     private configService: ConfigService,
     private notificationsService: NotificationsService,
+    private paymentEventsService: PaymentEventsService,
+    private inventoryService: InventoryService,
   ) {
     this.omiseSecretKey = this.configService.get<string>('omise.secretKey') ?? '';
     this.omisePublicKey = this.configService.get<string>('omise.publicKey') ?? '';
     this.omiseWebhookSecret = this.configService.get<string>('omise.webhookSecret') ?? '';
   }
 
-  private async omiseRequest<T>(path: string, body?: Record<string, unknown>): Promise<T> {
+  private async omiseRequest<T>(
+    path: string,
+    body?: Record<string, unknown>,
+    method?: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+  ): Promise<T> {
+    const resolvedMethod = method ?? (body !== undefined ? 'POST' : 'GET');
     const response = await fetch(`https://api.omise.co${path}`, {
-      method: body ? 'POST' : 'GET',
+      method: resolvedMethod,
       headers: {
         Authorization: `Basic ${Buffer.from(`${this.omiseSecretKey}:`).toString('base64')}`,
         'Content-Type': 'application/json',
       },
-      body: body ? JSON.stringify(body) : undefined,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
     });
 
+    return this.parseOmiseResponse<T>(response, resolvedMethod, path);
+  }
+
+  /** Token endpoints live on vault.omise.co and require the public key. */
+  private async omiseVaultRequest<T>(path: string): Promise<T> {
+    if (!this.omisePublicKey) {
+      throw new BadRequestException({
+        code: 'OMISE_NOT_CONFIGURED',
+        message: 'Payment provider is not configured',
+      });
+    }
+
+    const response = await fetch(`https://vault.omise.co${path}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${this.omisePublicKey}:`).toString('base64')}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    return this.parseOmiseResponse<T>(response, 'GET', path);
+  }
+
+  private async parseOmiseResponse<T>(
+    response: Response,
+    method: string,
+    path: string,
+  ): Promise<T> {
     const data = (await response.json()) as T & { message?: string };
     if (!response.ok) {
-      this.logger.error(`Omise error: ${JSON.stringify(data)}`);
+      this.logger.error(`Omise ${method} ${path} failed: ${JSON.stringify(data)}`);
       throw new BadRequestException({
         code: 'OMISE_ERROR',
         message: (data as { message?: string }).message ?? 'Payment provider error',
       });
     }
     return data;
+  }
+
+  private isOmiseNotFoundError(error: unknown): boolean {
+    if (!(error instanceof BadRequestException)) {
+      return false;
+    }
+    const response = error.getResponse();
+    if (typeof response === 'string') {
+      return response === 'Resource was not found';
+    }
+    return (response as { message?: string }).message === 'Resource was not found';
+  }
+
+  private extractCardFromCustomer(omiseCustomer: OmiseCustomer): OmiseCard {
+    const cards = omiseCustomer.cards?.data ?? [];
+    const cardId =
+      typeof omiseCustomer.default_card === 'string' ? omiseCustomer.default_card : undefined;
+    const card = cardId ? cards.find((item) => item.id === cardId) : cards[cards.length - 1];
+
+    if (!card) {
+      throw new BadRequestException({
+        code: 'OMISE_CARD_NOT_FOUND',
+        message: 'Saved card could not be retrieved from payment provider',
+      });
+    }
+
+    return card;
+  }
+
+  private isSameCard(left: OmiseCard, right: OmiseCard): boolean {
+    if (left.fingerprint && right.fingerprint) {
+      return left.fingerprint === right.fingerprint;
+    }
+
+    return (
+      left.last_digits === right.last_digits &&
+      left.brand.toLowerCase() === right.brand.toLowerCase() &&
+      left.expiration_month === right.expiration_month &&
+      left.expiration_year === right.expiration_year
+    );
+  }
+
+  private async findExistingOmiseCard(
+    omiseCustomerId: string | null,
+    cardFromToken: OmiseCard,
+  ): Promise<OmiseCard | null> {
+    if (!omiseCustomerId) {
+      return null;
+    }
+
+    const omiseCustomer = await this.omiseRequest<OmiseCustomer>(
+      `/customers/${omiseCustomerId}`,
+      undefined,
+      'GET',
+    );
+
+    return (
+      (omiseCustomer.cards?.data ?? []).find((card) => this.isSameCard(card, cardFromToken)) ?? null
+    );
+  }
+
+  private normalizeFingerprint(value?: string | null): string | null {
+    const trimmed = value?.trim();
+    return trimmed ? trimmed : null;
+  }
+
+  private mapOmiseCardToSavedDetails(
+    card: OmiseCard,
+    fallbackFingerprint?: string,
+  ): SavedOmiseCardDetails {
+    return {
+      omiseCardId: card.id,
+      cardFingerprint: this.normalizeFingerprint(card.fingerprint ?? fallbackFingerprint),
+      lastFour: card.last_digits,
+      brand: card.brand.toLowerCase(),
+      expiryMonth: card.expiration_month,
+      expiryYear: card.expiration_year,
+    };
+  }
+
+  /**
+   * Remove a card from the customer's Omise profile. Best-effort; local delete should still proceed.
+   */
+  async deleteOmiseCustomerCard(customerId: string, omiseCardId: string): Promise<void> {
+    if (!this.omiseSecretKey || !omiseCardId) {
+      return;
+    }
+
+    const customer = await this.customerRepository.findOne({ where: { id: customerId } });
+    if (!customer?.omiseCustomerId) {
+      return;
+    }
+
+    try {
+      await this.omiseRequest(
+        `/customers/${customer.omiseCustomerId}/cards/${omiseCardId}`,
+        undefined,
+        'DELETE',
+      );
+    } catch (error) {
+      if (this.isOmiseNotFoundError(error)) {
+        return;
+      }
+
+      this.logger.warn(
+        `Failed to delete Omise card ${omiseCardId} for customer ${customerId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  /**
+   * Attach a one-time Omise card token to the customer's Omise profile and return a reusable card id.
+   */
+  async saveCustomerCard(
+    customerId: string,
+    omiseCardToken: string,
+  ): Promise<SavedOmiseCardDetails> {
+    if (!this.omiseSecretKey || !this.omisePublicKey) {
+      throw new BadRequestException({
+        code: 'OMISE_NOT_CONFIGURED',
+        message: 'Payment provider is not configured',
+      });
+    }
+
+    const customer = await this.customerRepository.findOne({ where: { id: customerId } });
+    if (!customer) {
+      throw new NotFoundException({
+        code: 'CUSTOMER_NOT_FOUND',
+        message: 'Customer not found',
+      });
+    }
+
+    const token = await this.omiseVaultRequest<OmiseToken>(`/tokens/${omiseCardToken}`);
+
+    let omiseCustomerId = customer.omiseCustomerId;
+    if (omiseCustomerId) {
+      try {
+        await this.omiseRequest<OmiseCustomer>(`/customers/${omiseCustomerId}`, undefined, 'GET');
+      } catch (error) {
+        if (!this.isOmiseNotFoundError(error)) {
+          throw error;
+        }
+        this.logger.warn(
+          `Stale Omise customer ${omiseCustomerId} for SOPET customer ${customer.id}; recreating`,
+        );
+        omiseCustomerId = null;
+        customer.omiseCustomerId = null;
+        await this.customerRepository.save(customer);
+      }
+    }
+
+    const existingOmiseCard = await this.findExistingOmiseCard(omiseCustomerId, token.card);
+    if (existingOmiseCard) {
+      return this.mapOmiseCardToSavedDetails(existingOmiseCard, token.card.fingerprint);
+    }
+
+    let omiseCustomer: OmiseCustomer;
+    if (!omiseCustomerId) {
+      omiseCustomer = await this.omiseRequest<OmiseCustomer>('/customers', {
+        email: customer.email ?? undefined,
+        description: `SOPET customer ${customer.id}`,
+        card: omiseCardToken,
+        metadata: { customerId: customer.id },
+      });
+      customer.omiseCustomerId = omiseCustomer.id;
+      await this.customerRepository.save(customer);
+    } else {
+      omiseCustomer = await this.omiseRequest<OmiseCustomer>(
+        `/customers/${omiseCustomerId}`,
+        { card: omiseCardToken },
+        'PATCH',
+      );
+    }
+
+    const card = this.extractCardFromCustomer(omiseCustomer);
+
+    return this.mapOmiseCardToSavedDetails(card, token.card.fingerprint);
   }
 
   async assertCanPayForOrder(orderId: string, customerId?: string): Promise<Order> {
@@ -249,6 +504,9 @@ export class PaymentsService {
       payment.authorizeUri = authorizeUri;
       payment.qrCodeUrl = qrCodeUrl;
       await this.paymentRepository.save(payment);
+      if (payment.status === 'failed') {
+        await this.paymentEventsService.publishPaymentStatusUpdated(payment);
+      }
     }
 
     return {
@@ -335,10 +593,16 @@ export class PaymentsService {
     }
 
     if (payload.key === 'charge.fail' || chargeStatus === 'failed') {
-      payment.status = 'failed';
-      await this.paymentRepository.save(payment);
-      order.status = OrderStatus.CANCELLED;
-      await this.orderRepository.save(order);
+      await this.paymentRepository.manager.transaction(async (manager) => {
+        payment.status = 'failed';
+        await manager.save(payment);
+
+        order.status = OrderStatus.CANCELLED;
+        await manager.save(order);
+
+        await this.inventoryService.restoreOrderStock(order.id, manager, 'Payment failed');
+      });
+      await this.paymentEventsService.publishPaymentStatusUpdated(payment);
     }
   }
 
@@ -353,6 +617,7 @@ export class PaymentsService {
       await trx.save(order);
     });
 
+    await this.paymentEventsService.publishPaymentStatusUpdated(payment);
     await this.notificationsService.notifyOrderPaid(order);
   }
 
@@ -369,6 +634,17 @@ export class PaymentsService {
       });
     }
 
+    if (payment.status === 'refunded') {
+      return payment;
+    }
+
+    if (payment.status !== 'paid') {
+      throw new BadRequestException({
+        code: 'PAYMENT_NOT_REFUNDABLE',
+        message: 'Only paid payments can be refunded',
+      });
+    }
+
     if (this.omiseSecretKey && payment.order.paymentReference) {
       await this.omiseRequest('/refunds', {
         charge: payment.order.paymentReference,
@@ -382,8 +658,38 @@ export class PaymentsService {
 
       payment.order.status = OrderStatus.REFUNDED;
       await trx.save(payment.order);
+
+      await this.inventoryService.restoreOrderStock(payment.order.id, trx, 'Payment refunded');
     });
 
+    await this.paymentEventsService.publishPaymentStatusUpdated(payment);
     return payment;
+  }
+
+  /**
+   * Refunds a completed online payment for an order when eligible (PromptPay / card with Omise charge).
+   * Returns true when a refund was processed.
+   */
+  async refundPaidOnlineOrder(orderId: string): Promise<boolean> {
+    const payment = await this.paymentRepository.findOne({
+      where: { orderId, status: 'paid' },
+      relations: ['order'],
+      order: { createdAt: 'DESC' },
+    });
+
+    if (!payment) {
+      return false;
+    }
+
+    if (!ONLINE_PAYMENT_METHODS.has(payment.paymentMethod)) {
+      return false;
+    }
+
+    if (!payment.order.paymentReference) {
+      return false;
+    }
+
+    await this.refund(payment.id);
+    return true;
   }
 }

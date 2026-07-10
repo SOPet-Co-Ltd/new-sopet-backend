@@ -37,6 +37,10 @@ describe('CustomersService', () => {
 
   describe('findByIdForVendor', () => {
     it('throws Forbidden when customer has not purchased from store', async () => {
+      customerRepo.findOne.mockResolvedValue({
+        id: 'cust-1',
+        phone: '0812345678',
+      });
       const qb = {
         innerJoin: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
@@ -50,7 +54,12 @@ describe('CustomersService', () => {
       );
     });
 
-    it('returns customer when purchase exists', async () => {
+    it('returns customer when purchase exists via customer_id', async () => {
+      customerRepo.findOne.mockResolvedValue({
+        id: 'cust-1',
+        phone: '0812345678',
+        fullName: 'Test User',
+      });
       const qb = {
         innerJoin: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
@@ -58,24 +67,12 @@ describe('CustomersService', () => {
         getCount: jest.fn().mockResolvedValue(2),
       };
       orderItemRepo.createQueryBuilder.mockReturnValue(qb);
-      customerRepo.findOne.mockResolvedValue({
-        id: 'cust-1',
-        phone: '+66812345678',
-        fullName: 'Test User',
-      });
 
       const result = await service.findByIdForVendor('store-1', 'cust-1');
       expect(result.id).toBe('cust-1');
     });
 
     it('throws NotFound when customer does not exist', async () => {
-      const qb = {
-        innerJoin: jest.fn().mockReturnThis(),
-        where: jest.fn().mockReturnThis(),
-        andWhere: jest.fn().mockReturnThis(),
-        getCount: jest.fn().mockResolvedValue(1),
-      };
-      orderItemRepo.createQueryBuilder.mockReturnValue(qb);
       customerRepo.findOne.mockResolvedValue(null);
 
       await expect(service.findByIdForVendor('store-1', 'cust-missing')).rejects.toThrow(

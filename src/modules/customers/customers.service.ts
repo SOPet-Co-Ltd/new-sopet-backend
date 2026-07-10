@@ -5,14 +5,14 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Brackets, Repository } from 'typeorm';
 import { Customer } from '../../database/entities/customer.entity';
 import { OrderItem } from '../../database/entities/order-item.entity';
 import { PaginatedResponse } from '../../common/interfaces';
 import { UpdateCustomerAsAdminInput } from './customers.inputs';
 import { OrdersService } from '../orders/orders.service';
 import { CustomerRepository } from '../../database/repositories/customer.repository';
-import { normalizeThaiPhoneToLocal } from '../../common/utils/phone.util';
+import { guestPhoneLookupValues, normalizeThaiPhoneToLocal } from '../../common/utils/phone.util';
 
 @Injectable()
 export class CustomersService {
@@ -121,6 +121,27 @@ export class CustomersService {
     return this.customerRepository.save(customer);
   }
 
+  private storePurchaserExistsClause(): string {
+    return `EXISTS (
+      SELECT 1
+      FROM order_items oi
+      INNER JOIN orders o ON o.id = oi.order_id
+      WHERE oi.store_id = :storeId
+        AND (
+          o.customer_id = customer.id
+          OR (
+            o.customer_id IS NULL
+            AND o.guest_phone IS NOT NULL
+            AND (
+              customer.phone = o.guest_phone
+              OR customer.phone = CONCAT('+66', SUBSTRING(o.guest_phone FROM 2))
+              OR o.guest_phone = CONCAT('+66', SUBSTRING(customer.phone FROM 2))
+            )
+          )
+        )
+    )`;
+  }
+
   async findForVendorStore(
     storeId: string,
     page: number,
@@ -132,15 +153,7 @@ export class CustomersService {
     const qb = this.customerRepository
       .createQueryBuilder('customer')
       .where('customer.deleted_at IS NULL')
-      .andWhere(
-        `customer.id IN (
-          SELECT DISTINCT o.customer_id
-          FROM orders o
-          INNER JOIN order_items oi ON oi.order_id = o.id
-          WHERE oi.store_id = :storeId AND o.customer_id IS NOT NULL
-        )`,
-        { storeId },
-      );
+      .andWhere(this.storePurchaserExistsClause(), { storeId });
 
     if (search?.trim()) {
       qb.andWhere(
@@ -167,20 +180,6 @@ export class CustomersService {
   }
 
   async findByIdForVendor(storeId: string, customerId: string): Promise<Customer> {
-    const purchaseCount = await this.orderItemRepository
-      .createQueryBuilder('oi')
-      .innerJoin('oi.order', 'order')
-      .where('oi.store_id = :storeId', { storeId })
-      .andWhere('order.customer_id = :customerId', { customerId })
-      .getCount();
-
-    if (purchaseCount === 0) {
-      throw new ForbiddenException({
-        code: 'FORBIDDEN',
-        message: 'Customer has not purchased from this store',
-      });
-    }
-
     const customer = await this.customerRepository.findOne({
       where: { id: customerId },
     });
@@ -190,16 +189,44 @@ export class CustomersService {
         message: 'Customer not found',
       });
     }
+
+    const hasPurchased = await this.customerHasPurchasedFromStore(storeId, customerId);
+    if (!hasPurchased) {
+      throw new ForbiddenException({
+        code: 'FORBIDDEN',
+        message: 'Customer has not purchased from this store',
+      });
+    }
+
     return customer;
   }
 
   async customerHasPurchasedFromStore(storeId: string, customerId: string): Promise<boolean> {
-    const count = await this.orderItemRepository
+    const customer = await this.customerRepository.findOne({
+      where: { id: customerId },
+    });
+    if (!customer) {
+      return false;
+    }
+
+    const phoneVariants = guestPhoneLookupValues(normalizeThaiPhoneToLocal(customer.phone));
+    const qb = this.orderItemRepository
       .createQueryBuilder('oi')
       .innerJoin('oi.order', 'order')
       .where('oi.store_id = :storeId', { storeId })
-      .andWhere('order.customer_id = :customerId', { customerId })
-      .getCount();
+      .andWhere(
+        new Brackets((where) => {
+          where.where('order.customer_id = :customerId', { customerId });
+          if (phoneVariants.length > 0) {
+            where.orWhere(
+              '(order.customer_id IS NULL AND order.guest_phone IN (:...phoneVariants))',
+              { phoneVariants },
+            );
+          }
+        }),
+      );
+
+    const count = await qb.getCount();
     return count > 0;
   }
 }

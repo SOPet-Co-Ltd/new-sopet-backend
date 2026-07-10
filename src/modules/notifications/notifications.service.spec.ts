@@ -153,6 +153,27 @@ describe('NotificationsService', () => {
       expect(userNotificationRepo.save).toHaveBeenCalled();
       expect(result.id).toBe('notif-1');
     });
+
+    it('returns existing notification when dedupe keys match', async () => {
+      const existing = { id: 'notif-existing', type: 'new_order' };
+      const qb = {
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(existing),
+      };
+      userNotificationRepo.createQueryBuilder.mockReturnValue(qb);
+
+      const result = await service.createUserNotification(
+        'user-1',
+        'new_order',
+        'duplicate',
+        { orderId: 'order-1' },
+        ['orderId'],
+      );
+
+      expect(result).toBe(existing);
+      expect(userNotificationRepo.save).not.toHaveBeenCalled();
+    });
   });
 
   describe('findByUser', () => {
@@ -224,6 +245,87 @@ describe('NotificationsService', () => {
         { isRead: true },
       );
       expect(result).toBe(true);
+    });
+  });
+
+  describe('notifyVendorAboutNewOrder', () => {
+    it('returns existing notification for the same order', async () => {
+      const order = {
+        id: 'order-1',
+        orderNumber: 'ORD-001',
+        total: 1999,
+      } as Order;
+      const existing = { id: 'notif-existing', type: 'new_order' };
+
+      storeRepo.findOne.mockResolvedValue({
+        id: 'store-1',
+        owner: { id: 'vendor-1' },
+      });
+
+      const qb = {
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(existing),
+      };
+      userNotificationRepo.createQueryBuilder.mockReturnValue(qb);
+
+      const result = await service.notifyVendorAboutNewOrder('store-1', order);
+
+      expect(result).toBe(existing);
+      expect(userNotificationRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('creates notification when none exists', async () => {
+      const order = {
+        id: 'order-1',
+        orderNumber: 'ORD-001',
+        total: 1999,
+      } as Order;
+
+      storeRepo.findOne.mockResolvedValue({
+        id: 'store-1',
+        owner: { id: 'vendor-1' },
+      });
+
+      const qb = {
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(null),
+      };
+      userNotificationRepo.createQueryBuilder.mockReturnValue(qb);
+      userNotificationRepo.save.mockResolvedValue({ id: 'notif-new' });
+
+      const result = await service.notifyVendorAboutNewOrder('store-1', order);
+
+      expect(userNotificationRepo.save).toHaveBeenCalled();
+      expect(result).toEqual({ id: 'notif-new' });
+    });
+  });
+
+  describe('notifyVendorsAboutOrderStatus', () => {
+    it('notifies each store once for multi-item orders', async () => {
+      const order = {
+        id: 'order-1',
+        orderNumber: 'ORD-001',
+        items: [{ storeId: 'store-1' }, { storeId: 'store-1' }, { storeId: 'store-2' }],
+      } as Order;
+
+      storeRepo.findOne
+        .mockResolvedValueOnce({ id: 'store-1', owner: { id: 'vendor-1' } })
+        .mockResolvedValueOnce({ id: 'store-2', owner: { id: 'vendor-2' } });
+
+      const qb = {
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(null),
+      };
+      userNotificationRepo.createQueryBuilder.mockReturnValue(qb);
+      userNotificationRepo.save.mockResolvedValue({ id: 'notif-new' });
+
+      await service.notifyVendorsAboutOrderStatus(order, 'paid');
+
+      expect(storeRepo.findOne).toHaveBeenCalledTimes(2);
+      expect(userNotificationRepo.save).toHaveBeenCalledTimes(2);
     });
   });
 });

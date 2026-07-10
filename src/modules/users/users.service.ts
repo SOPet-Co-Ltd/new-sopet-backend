@@ -6,7 +6,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, MoreThan } from 'typeorm';
+import { Repository, MoreThan, QueryFailedError } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { Customer } from '../../database/entities/customer.entity';
@@ -18,6 +18,8 @@ import {
 import { CustomerRepository } from '../../database/repositories/customer.repository';
 import { OtpCode } from '../../database/entities/otp-code.entity';
 import { OrdersService } from '../orders/orders.service';
+import { PaymentsService, SavedOmiseCardDetails } from '../payments/payments.service';
+import { PaymentsModule } from '../payments/payments.module';
 import { normalizeThaiPhoneToLocal } from '../../common/utils/phone.util';
 import { UpdateProfileDto, CreateAddressDto, UpdateAddressDto } from './dto';
 import { JwtPayload } from '../../common/interfaces';
@@ -41,6 +43,7 @@ export class UsersService {
     private otpRepository: Repository<OtpCode>,
     private readonly customerRepo: CustomerRepository,
     private readonly ordersService: OrdersService,
+    private readonly paymentsService: PaymentsService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
   ) {}
@@ -284,6 +287,123 @@ export class UsersService {
     });
   }
 
+  private resolveShouldBeDefault(
+    existingMethods: SavedPaymentMethod[],
+    isDefault?: boolean,
+  ): boolean {
+    const isFirstCard = existingMethods.length === 0;
+    const hasDefault = existingMethods.some((method) => method.isDefault);
+    return isFirstCard || Boolean(isDefault) || !hasDefault;
+  }
+
+  private async clearDefaultPaymentMethods(customerId: string): Promise<void> {
+    await this.paymentMethodRepository.update(
+      { customerId, isDefault: true },
+      { isDefault: false },
+    );
+  }
+
+  private async finalizeExistingPaymentMethod(
+    method: SavedPaymentMethod,
+    shouldBeDefault: boolean,
+  ): Promise<SavedPaymentMethod> {
+    if (shouldBeDefault && !method.isDefault) {
+      await this.clearDefaultPaymentMethods(method.customerId);
+      method.isDefault = true;
+      return this.paymentMethodRepository.save(method);
+    }
+
+    return method;
+  }
+
+  private async findActivePaymentMethodByDetails(
+    customerId: string,
+    details: {
+      lastFour: string;
+      brand: string;
+      expiryMonth: number;
+      expiryYear: number;
+      cardFingerprint?: string | null;
+    },
+  ): Promise<SavedPaymentMethod | null> {
+    if (details.cardFingerprint) {
+      const byFingerprint = await this.paymentMethodRepository.findOne({
+        where: { customerId, cardFingerprint: details.cardFingerprint },
+      });
+      if (byFingerprint) {
+        return byFingerprint;
+      }
+    }
+
+    return this.paymentMethodRepository
+      .createQueryBuilder('method')
+      .where('method.customerId = :customerId', { customerId })
+      .andWhere('method.lastFour = :lastFour', { lastFour: details.lastFour })
+      .andWhere('LOWER(method.brand) = LOWER(:brand)', { brand: details.brand })
+      .andWhere('method.expiryMonth = :expiryMonth', { expiryMonth: details.expiryMonth })
+      .andWhere('method.expiryYear = :expiryYear', { expiryYear: details.expiryYear })
+      .getOne();
+  }
+
+  private async findRestorablePaymentMethodByDetails(
+    customerId: string,
+    details: {
+      lastFour: string;
+      brand: string;
+      expiryMonth: number;
+      expiryYear: number;
+      cardFingerprint?: string | null;
+    },
+  ): Promise<SavedPaymentMethod | null> {
+    if (details.cardFingerprint) {
+      const byFingerprint = await this.paymentMethodRepository.findOne({
+        where: { customerId, cardFingerprint: details.cardFingerprint },
+        withDeleted: true,
+      });
+      if (byFingerprint?.deletedAt) {
+        return byFingerprint;
+      }
+    }
+
+    const byDetails = await this.paymentMethodRepository
+      .createQueryBuilder('method')
+      .withDeleted()
+      .where('method.customerId = :customerId', { customerId })
+      .andWhere('method.lastFour = :lastFour', { lastFour: details.lastFour })
+      .andWhere('LOWER(method.brand) = LOWER(:brand)', { brand: details.brand })
+      .andWhere('method.expiryMonth = :expiryMonth', { expiryMonth: details.expiryMonth })
+      .andWhere('method.expiryYear = :expiryYear', { expiryYear: details.expiryYear })
+      .getOne();
+
+    return byDetails?.deletedAt ? byDetails : null;
+  }
+
+  private async findRestorablePaymentMethod(
+    customerId: string,
+    savedCard: SavedOmiseCardDetails,
+  ): Promise<SavedPaymentMethod | null> {
+    return this.findRestorablePaymentMethodByDetails(customerId, {
+      lastFour: savedCard.lastFour,
+      brand: savedCard.brand,
+      expiryMonth: savedCard.expiryMonth,
+      expiryYear: savedCard.expiryYear,
+      cardFingerprint: savedCard.cardFingerprint,
+    });
+  }
+
+  private async findActivePaymentMethod(
+    customerId: string,
+    savedCard: SavedOmiseCardDetails,
+  ): Promise<SavedPaymentMethod | null> {
+    return this.findActivePaymentMethodByDetails(customerId, {
+      lastFour: savedCard.lastFour,
+      brand: savedCard.brand,
+      expiryMonth: savedCard.expiryMonth,
+      expiryYear: savedCard.expiryYear,
+      cardFingerprint: savedCard.cardFingerprint,
+    });
+  }
+
   async addPaymentMethod(
     customerId: string,
     input: {
@@ -295,25 +415,91 @@ export class UsersService {
       isDefault?: boolean;
     },
   ): Promise<SavedPaymentMethod> {
-    if (input.isDefault) {
-      await this.paymentMethodRepository.update(
-        { customerId, isDefault: true },
-        { isDefault: false },
-      );
+    const existingMethods = await this.paymentMethodRepository.find({
+      where: { customerId },
+    });
+    const shouldBeDefault = this.resolveShouldBeDefault(existingMethods, input.isDefault);
+
+    const cardDetails = {
+      lastFour: input.lastFour,
+      brand: input.brand,
+      expiryMonth: input.expiryMonth,
+      expiryYear: input.expiryYear,
+    };
+
+    const existingActive = await this.findActivePaymentMethodByDetails(customerId, cardDetails);
+    if (existingActive) {
+      return this.finalizeExistingPaymentMethod(existingActive, shouldBeDefault);
+    }
+
+    const savedCard = await this.paymentsService.saveCustomerCard(customerId, input.omiseCardToken);
+
+    const existingAfterOmise = await this.findActivePaymentMethodByDetails(customerId, {
+      ...cardDetails,
+      cardFingerprint: savedCard.cardFingerprint,
+    });
+    if (existingAfterOmise) {
+      return this.finalizeExistingPaymentMethod(existingAfterOmise, shouldBeDefault);
+    }
+
+    const activeMethod = await this.findActivePaymentMethod(customerId, savedCard);
+    if (activeMethod) {
+      return this.finalizeExistingPaymentMethod(activeMethod, shouldBeDefault);
+    }
+
+    const restorableMethod = await this.findRestorablePaymentMethod(customerId, savedCard);
+    if (restorableMethod) {
+      await this.paymentMethodRepository.restore(restorableMethod.id);
+      if (shouldBeDefault) {
+        await this.clearDefaultPaymentMethods(customerId);
+      }
+
+      restorableMethod.omiseCardToken = savedCard.omiseCardId;
+      restorableMethod.cardFingerprint = savedCard.cardFingerprint;
+      restorableMethod.lastFour = savedCard.lastFour;
+      restorableMethod.brand = savedCard.brand;
+      restorableMethod.expiryMonth = savedCard.expiryMonth;
+      restorableMethod.expiryYear = savedCard.expiryYear;
+      restorableMethod.isDefault = shouldBeDefault;
+
+      return this.paymentMethodRepository.save(restorableMethod);
+    }
+
+    if (shouldBeDefault) {
+      await this.clearDefaultPaymentMethods(customerId);
     }
 
     const method = this.paymentMethodRepository.create({
       customerId,
       type: PaymentMethodType.CREDIT_CARD,
-      omiseCardToken: input.omiseCardToken,
-      lastFour: input.lastFour,
-      brand: input.brand,
-      expiryMonth: input.expiryMonth,
-      expiryYear: input.expiryYear,
-      isDefault: input.isDefault ?? false,
+      omiseCardToken: savedCard.omiseCardId,
+      cardFingerprint: savedCard.cardFingerprint,
+      lastFour: savedCard.lastFour,
+      brand: savedCard.brand,
+      expiryMonth: savedCard.expiryMonth,
+      expiryYear: savedCard.expiryYear,
+      isDefault: shouldBeDefault,
     });
 
-    return this.paymentMethodRepository.save(method);
+    try {
+      return await this.paymentMethodRepository.save(method);
+    } catch (error) {
+      if (
+        error instanceof QueryFailedError &&
+        (error.driverError as { code?: string }).code === '23505'
+      ) {
+        const existing =
+          (await this.findActivePaymentMethodByDetails(customerId, {
+            ...cardDetails,
+            cardFingerprint: savedCard.cardFingerprint,
+          })) ?? (await this.findActivePaymentMethod(customerId, savedCard));
+        if (existing) {
+          return this.finalizeExistingPaymentMethod(existing, shouldBeDefault);
+        }
+      }
+
+      throw error;
+    }
   }
 
   async deletePaymentMethod(customerId: string, methodId: string): Promise<void> {
@@ -326,7 +512,24 @@ export class UsersService {
         message: 'Payment method not found',
       });
     }
+
+    const wasDefault = method.isDefault;
+    await this.paymentsService.deleteOmiseCustomerCard(customerId, method.omiseCardToken);
     await this.paymentMethodRepository.softDelete(methodId);
+
+    const remaining = await this.paymentMethodRepository.find({
+      where: { customerId },
+      order: { createdAt: 'ASC' },
+    });
+
+    if (remaining.length > 0 && (wasDefault || !remaining.some((item) => item.isDefault))) {
+      await this.paymentMethodRepository.update(
+        { customerId, isDefault: true },
+        { isDefault: false },
+      );
+      remaining[0].isDefault = true;
+      await this.paymentMethodRepository.save(remaining[0]);
+    }
   }
 
   async setDefaultPaymentMethod(customerId: string, methodId: string): Promise<SavedPaymentMethod> {

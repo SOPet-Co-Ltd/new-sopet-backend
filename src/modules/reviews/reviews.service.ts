@@ -4,7 +4,9 @@ import { Repository } from 'typeorm';
 import { Review, ReviewStatus } from '../../database/entities/review.entity';
 import { Order } from '../../database/entities/order.entity';
 import { Product } from '../../database/entities/product.entity';
+import { ProductImage } from '../../database/entities/product-image.entity';
 import { Customer } from '../../database/entities/customer.entity';
+import { OrderItem } from '../../database/entities/order-item.entity';
 import { OrderStatus } from '../../database/entities/enums/order.enums';
 
 export function maskCustomerName(
@@ -23,6 +25,57 @@ export function maskCustomerName(
   const firstName = parts[0];
   const lastInitial = parts[parts.length - 1].charAt(0);
   return `${firstName} ${lastInitial}.`;
+}
+
+export function getReviewWindowDays(): number {
+  const raw = process.env.REVIEW_WINDOW_DAYS;
+  if (raw === undefined || raw.trim() === '') {
+    return 30;
+  }
+  const parsed = Number.parseInt(raw, 10);
+  if (Number.isNaN(parsed) || parsed < 0) {
+    return 30;
+  }
+  return parsed;
+}
+
+export function addDays(date: Date, days: number): Date {
+  const result = new Date(date.getTime());
+  result.setUTCDate(result.getUTCDate() + days);
+  return result;
+}
+
+function resolveThumbnailUrl(images?: ProductImage[]): string | null {
+  if (!images?.length) {
+    return null;
+  }
+
+  const sorted = [...images].sort(
+    (a, b) =>
+      a.sortOrder - b.sortOrder || (a.createdAt?.getTime() ?? 0) - (b.createdAt?.getTime() ?? 0),
+  );
+  const thumbnail = sorted.find((img) => img.isThumbnail) ?? sorted[0];
+  return thumbnail?.url ?? null;
+}
+
+export function resolveItemDeliveredAt(item: OrderItem, order: Order): Date | null {
+  if (item.deliveredAt) {
+    return item.deliveredAt;
+  }
+
+  const deliveredHistory = order.statusHistory
+    ?.filter((entry) => entry.status === OrderStatus.DELIVERED)
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
+
+  if (deliveredHistory) {
+    return deliveredHistory.createdAt;
+  }
+
+  if (order.status === OrderStatus.DELIVERED) {
+    return order.updatedAt;
+  }
+
+  return null;
 }
 
 export interface StoreProductReviewResult {
@@ -46,6 +99,31 @@ export interface StoreReviewSummaryResult {
   }>;
 }
 
+export interface CustomerReviewableItemResult {
+  orderId: string;
+  orderNumber: string;
+  orderItemId: string;
+  productId: string;
+  productName: string;
+  productSlug: string | null;
+  productImageUrl: string | null;
+  deliveredAt: Date;
+  reviewDeadline: Date;
+}
+
+export interface CustomerReviewResult {
+  id: string;
+  productId: string;
+  productName: string;
+  productSlug: string | null;
+  productImageUrl: string | null;
+  orderId: string;
+  rating: number;
+  comment: string | null;
+  status: string;
+  createdAt: Date;
+}
+
 @Injectable()
 export class ReviewsService {
   constructor(
@@ -66,7 +144,7 @@ export class ReviewsService {
   }): Promise<Review> {
     const order = await this.orderRepository.findOne({
       where: { id: input.orderId, customerId: input.customerId },
-      relations: ['items', 'items.productVariant'],
+      relations: ['items', 'items.productVariant', 'statusHistory'],
     });
 
     if (!order) {
@@ -79,14 +157,39 @@ export class ReviewsService {
       });
     }
 
-    const hasProduct = order.items?.some(
+    const orderItem = order.items?.find(
       (item) => item.productVariant?.productId === input.productId,
     );
-    if (!hasProduct) {
+    if (!orderItem) {
       throw new BadRequestException({
         code: 'PRODUCT_NOT_IN_ORDER',
         message: 'Product was not part of this order',
       });
+    }
+
+    const existingReview = await this.reviewRepository.findOne({
+      where: {
+        customerId: input.customerId,
+        orderId: input.orderId,
+        productId: input.productId,
+      },
+    });
+    if (existingReview) {
+      throw new BadRequestException({
+        code: 'REVIEW_ALREADY_EXISTS',
+        message: 'You have already reviewed this product for this order',
+      });
+    }
+
+    const deliveredAt = resolveItemDeliveredAt(orderItem, order);
+    if (deliveredAt) {
+      const reviewDeadline = addDays(deliveredAt, getReviewWindowDays());
+      if (reviewDeadline.getTime() < Date.now()) {
+        throw new BadRequestException({
+          code: 'REVIEW_WINDOW_EXPIRED',
+          message: 'The review window for this order item has expired',
+        });
+      }
     }
 
     const review = this.reviewRepository.create({
@@ -99,6 +202,99 @@ export class ReviewsService {
       relations: ['customer', 'images'],
     });
     return withRelations ?? saved;
+  }
+
+  async findReviewableItemsForCustomer(
+    customerId: string,
+  ): Promise<CustomerReviewableItemResult[]> {
+    const orders = await this.orderRepository.find({
+      where: { customerId, status: OrderStatus.DELIVERED },
+      relations: [
+        'items',
+        'items.productVariant',
+        'items.productVariant.product',
+        'items.productVariant.product.images',
+        'statusHistory',
+      ],
+      order: { createdAt: 'DESC' },
+    });
+
+    const existingReviews = await this.reviewRepository.find({
+      where: { customerId },
+      select: ['orderId', 'productId'],
+    });
+    const reviewedKeys = new Set(
+      existingReviews.map((review) => `${review.orderId}:${review.productId}`),
+    );
+
+    const windowDays = getReviewWindowDays();
+    const now = Date.now();
+    const results: CustomerReviewableItemResult[] = [];
+
+    for (const order of orders) {
+      for (const item of order.items ?? []) {
+        const productId = item.productVariant?.productId;
+        if (!productId) {
+          continue;
+        }
+
+        const reviewKey = `${order.id}:${productId}`;
+        if (reviewedKeys.has(reviewKey)) {
+          continue;
+        }
+
+        const deliveredAt = resolveItemDeliveredAt(item, order);
+        if (!deliveredAt) {
+          continue;
+        }
+
+        const reviewDeadline = addDays(deliveredAt, windowDays);
+        if (reviewDeadline.getTime() < now) {
+          continue;
+        }
+
+        const product = item.productVariant?.product;
+        results.push({
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          orderItemId: item.id,
+          productId,
+          productName: product?.name ?? item.productName,
+          productSlug: product?.slug ?? null,
+          productImageUrl: product ? resolveThumbnailUrl(product.images) : null,
+          deliveredAt,
+          reviewDeadline,
+        });
+      }
+    }
+
+    return results;
+  }
+
+  async findMyReviews(customerId: string, limit = 50, offset = 0): Promise<CustomerReviewResult[]> {
+    const cappedLimit = Math.min(Math.max(limit, 0), 100);
+    const safeOffset = Math.max(offset, 0);
+
+    const reviews = await this.reviewRepository.find({
+      where: { customerId },
+      relations: ['product', 'product.images'],
+      order: { createdAt: 'DESC' },
+      take: cappedLimit,
+      skip: safeOffset,
+    });
+
+    return reviews.map((review) => ({
+      id: review.id,
+      productId: review.productId,
+      productName: review.product?.name ?? 'Unknown',
+      productSlug: review.product?.slug ?? null,
+      productImageUrl: review.product ? resolveThumbnailUrl(review.product.images) : null,
+      orderId: review.orderId,
+      rating: review.rating,
+      comment: review.comment,
+      status: review.status,
+      createdAt: review.createdAt,
+    }));
   }
 
   async findByProduct(productId: string): Promise<Review[]> {

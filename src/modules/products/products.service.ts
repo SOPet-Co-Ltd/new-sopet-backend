@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, ILike, Between, In, SelectQueryBuilder } from 'typeorm';
@@ -28,6 +29,8 @@ import {
   getProductPublishChecklist,
   ProductPublishChecklist,
 } from './product-publish.validation';
+import { SearchService } from '../search/search.service';
+import { SearchEmbeddingQueueService } from '../search/embedding/search-embedding-queue.service';
 
 @Injectable()
 export class ProductsService {
@@ -40,7 +43,44 @@ export class ProductsService {
     private imageRepository: Repository<ProductImage>,
     private readonly storesService: StoresService,
     private readonly taxonomyService: TaxonomyService,
+    @Optional() private readonly searchService?: SearchService,
+    @Optional() private readonly searchEmbeddingQueueService?: SearchEmbeddingQueueService,
   ) {}
+
+  private async enqueueEmbeddingIfPublished(product: Product): Promise<void> {
+    if (product.status !== ProductStatus.PUBLISHED) {
+      return;
+    }
+
+    await this.searchEmbeddingQueueService?.enqueueProductEmbedding(product.id);
+  }
+
+  private shouldReembedAfterUpdate(
+    previousStatus: ProductStatus,
+    saved: Product,
+    updateProductDto: UpdateProductDto,
+  ): boolean {
+    if (saved.status !== ProductStatus.PUBLISHED) {
+      return false;
+    }
+
+    if (previousStatus !== ProductStatus.PUBLISHED) {
+      return true;
+    }
+
+    const materialKeys: Array<keyof UpdateProductDto> = [
+      'name',
+      'description',
+      'category',
+      'categoryId',
+      'petTypeId',
+      'brandId',
+      'tags',
+      'tagIds',
+    ];
+
+    return materialKeys.some((key) => updateProductDto[key] !== undefined);
+  }
 
   private async assertStoreAccess(userId: string, storeId: string, action: string): Promise<void> {
     const hasAccess = await this.storesService.userHasStoreAccess(userId, storeId);
@@ -380,6 +420,10 @@ export class ProductsService {
 
   // Find products with filters and pagination
   async findAll(queryDto: ProductQueryDto): Promise<PaginatedResponse<Product>> {
+    if (queryDto.search?.trim() && this.searchService?.isSmartSearchEnabled()) {
+      return this.searchService.searchProducts(queryDto);
+    }
+
     const {
       search,
       storeId,
@@ -714,12 +758,15 @@ export class ProductsService {
     await this.assertStoreAccess(userId, product.storeId, 'publish products');
     this.assertPublishable(product);
     product.status = ProductStatus.PUBLISHED;
-    return this.productRepository.save(product);
+    const saved = await this.productRepository.save(product);
+    await this.enqueueEmbeddingIfPublished(saved);
+    return saved;
   }
 
   // Update product
   async update(id: string, userId: string, updateProductDto: UpdateProductDto): Promise<Product> {
     const product = await this.findOne(id);
+    const previousStatus = product.status;
 
     await this.assertStoreAccess(userId, product.storeId, 'update products');
 
@@ -763,7 +810,13 @@ export class ProductsService {
       product.brandId = taxonomy.brandId;
     }
 
-    return this.productRepository.save(product);
+    const saved = await this.productRepository.save(product);
+
+    if (this.shouldReembedAfterUpdate(previousStatus, saved, updateProductDto)) {
+      await this.enqueueEmbeddingIfPublished(saved);
+    }
+
+    return saved;
   }
 
   // Delete product (soft delete)

@@ -29,6 +29,7 @@ import { NotificationsModule } from '../modules/notifications/notifications.modu
 import { TaxonomyModule } from '../modules/taxonomy/taxonomy.module';
 import { CustomersModule } from '../modules/customers/customers.module';
 import { ApiKeysModule } from '../modules/api-keys/api-keys.module';
+import { SearchModule } from '../modules/search/search.module';
 import { GraphqlLoadersModule } from './loaders/graphql-loaders.module';
 import { GraphqlContextFactory } from './loaders/graphql-context.factory';
 
@@ -45,8 +46,18 @@ const graphqlErrorLogger = new Logger('GraphQLFormatError');
         autoSchemaFile: join(process.cwd(), 'src/schema.gql'),
         sortSchema: true,
         playground: process.env.NODE_ENV !== 'production',
-        context: ({ req, res }: { req: unknown; res: unknown }) =>
-          contextFactory.create({ req, res }),
+        subscriptions: {
+          'graphql-ws': true,
+        },
+        context: ({
+          req,
+          res,
+          extra,
+        }: {
+          req: unknown;
+          res: unknown;
+          extra?: { request?: unknown };
+        }) => contextFactory.create({ req: extra?.request ?? req, res }),
         formatError: (
           formattedError: GraphQLFormattedError,
           error: unknown,
@@ -106,6 +117,7 @@ const graphqlErrorLogger = new Logger('GraphQLFormatError');
     TaxonomyModule,
     CustomersModule,
     ApiKeysModule,
+    SearchModule,
   ],
   providers: [AppGraphqlResolver],
 })

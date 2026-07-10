@@ -20,6 +20,7 @@ import { CreateOrderDto, ShippingAddressDto } from './dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PromotionsService } from '../promotions/promotions.service';
 import { GuestOrderLinkService } from './guest-order-link.service';
+import { InventoryService } from '../inventory/inventory.service';
 import { Store } from '../../database/entities/store.entity';
 import { normalizeCheckoutPaymentMethod } from '../../common/utils/checkout-payment.util';
 import { guestPhoneLookupValues, normalizeThaiPhoneToLocal } from '../../common/utils/phone.util';
@@ -48,6 +49,7 @@ export class OrdersService {
     private notificationsService: NotificationsService,
     private promotionsService: PromotionsService,
     private guestOrderLinkService: GuestOrderLinkService,
+    private inventoryService: InventoryService,
     @InjectRepository(Store)
     private storeRepository: Repository<Store>,
   ) {}
@@ -244,7 +246,7 @@ export class OrdersService {
 
     const total = subtotal + shippingFee - discountAmount;
 
-    return this.dataSource.transaction(async (manager) => {
+    const orderId = await this.dataSource.transaction(async (manager) => {
       const order = manager.create(Order, {
         orderNumber: this.generateOrderNumber(),
         customerId: customerId ?? null,
@@ -284,7 +286,6 @@ export class OrdersService {
       for (const item of items) {
         const variant = await manager.findOne(ProductVariant, {
           where: { id: item.variantId },
-          relations: ['product'],
           lock: { mode: 'pessimistic_write' },
         });
 
@@ -371,15 +372,14 @@ export class OrdersService {
         await manager.increment(Promotion, { id: promotion.id }, 'usageCount', 1);
       }
 
-      // Notify each vendor about their store's order
-      for (const item of orderItems) {
-        this.notificationsService
-          .notifyVendorAboutNewOrder(item.storeId, savedOrder)
-          .catch(() => {});
-      }
+      // Notify each vendor once per store (not once per line item)
+      savedOrder.items = orderItems;
+      this.notificationsService.notifyVendorsAboutNewOrder(savedOrder).catch(() => {});
 
-      return this.findOne(savedOrder.id);
+      return savedOrder.id;
     });
+
+    return this.findOne(orderId);
   }
 
   async findOne(id: string): Promise<Order> {
@@ -485,6 +485,14 @@ export class OrdersService {
       }
       await manager.save(order);
 
+      if (status === OrderStatus.CANCELLED || status === OrderStatus.REFUNDED) {
+        await this.inventoryService.restoreOrderStock(
+          id,
+          manager,
+          `Order status changed to ${status}`,
+        );
+      }
+
       await manager.save(
         OrderStatusHistory,
         manager.create(OrderStatusHistory, {
@@ -498,13 +506,7 @@ export class OrdersService {
 
     const saved = await this.findOne(id);
     await this.notificationsService.notifyOrderStatusChanged(saved, status);
-
-    // Also notify vendors about order status change (per store)
-    for (const item of saved.items ?? []) {
-      this.notificationsService
-        .notifyVendorAboutOrderStatus(item.storeId, saved, status)
-        .catch(() => {});
-    }
+    this.notificationsService.notifyVendorsAboutOrderStatus(saved, status).catch(() => {});
 
     return saved;
   }

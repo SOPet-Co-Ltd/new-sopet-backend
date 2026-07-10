@@ -164,3 +164,37 @@ export class UpdateOrderStatusInput {
   @IsString()
   status: string;
 }
+
+@InputType()
+export class ShipVendorOrderInput {
+  @Field()
+  @IsUUID()
+  orderId: string;
+
+  @Field()
+  @IsNotEmpty()
+  @IsString()
+  trackingNumber: string;
+
+  @Field()
+  @IsNotEmpty()
+  @IsString()
+  fulfillmentProvider: string;
+
+  @Field(() => String, { nullable: true })
+  @IsOptional()
+  @IsString()
+  trackingUrl?: string | null;
+}
+
+@InputType()
+export class ConfirmOrderDeliveredInput {
+  @Field()
+  @IsUUID()
+  orderId: string;
+
+  @Field(() => String, { nullable: true })
+  @IsOptional()
+  @IsString()
+  guestPhone?: string;
+}

@@ -1,6 +1,7 @@
 import { Args, Int, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { ForbiddenException, NotFoundException, UseGuards } from '@nestjs/common';
 import { OrdersService } from './orders.service';
+import { OrderFulfillmentService } from './order-fulfillment.service';
 import { ProductsService } from '../products/products.service';
 import { StoresService } from '../stores/stores.service';
 import { OrderType, ProductType } from '../../graphql/models/types';
@@ -8,7 +9,12 @@ import { mapProduct } from '../../graphql/models/mappers';
 import { CurrentUser, Public, Roles } from '../../common/decorators';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
-import { CreateOrderInput, UpdateOrderStatusInput } from './orders.inputs';
+import {
+  ConfirmOrderDeliveredInput,
+  CreateOrderInput,
+  ShipVendorOrderInput,
+  UpdateOrderStatusInput,
+} from './orders.inputs';
 import { Order, OrderStatus } from '../../database/entities/order.entity';
 import { normalizeCheckoutPaymentMethod } from '../../common/utils/checkout-payment.util';
 
@@ -42,6 +48,9 @@ function mapOrder(order: Order): OrderType {
         quantity: item.quantity,
         subtotal: Number(item.subtotal),
         fulfillmentStatus: item.fulfillmentStatus,
+        trackingNumber: item.trackingNumber ?? null,
+        fulfillmentProvider: item.fulfillmentProvider ?? null,
+        trackingUrl: item.trackingUrl ?? null,
       })) ?? [],
     shippingAddress: order.shippingAddress
       ? {
@@ -62,6 +71,7 @@ function mapOrder(order: Order): OrderType {
 export class OrdersResolver {
   constructor(
     private readonly ordersService: OrdersService,
+    private readonly orderFulfillmentService: OrderFulfillmentService,
     private readonly productsService: ProductsService,
     private readonly storesService: StoresService,
   ) {}
@@ -186,7 +196,7 @@ export class OrdersResolver {
 
   @Mutation(() => OrderType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor', 'admin')
+  @Roles('admin')
   async updateOrderStatus(
     @Args('input') input: UpdateOrderStatusInput,
     @CurrentUser('id') userId: string,
@@ -199,24 +209,111 @@ export class OrdersResolver {
       });
     }
 
-    if (userId !== 'admin') {
-      // Order doesn't have a direct storeId; verify the vendor owns at least one item's store
-      const orderWithItems = await this.ordersService.findOneWithItems(input.orderId);
-      const accessibleStores = await this.storesService.getAccessibleStores(userId);
-      const ownedStoreIds = new Set(accessibleStores.map((entry) => entry.store.id));
-      if (!orderWithItems?.items?.some((item) => ownedStoreIds.has(item.storeId))) {
-        throw new ForbiddenException({
-          code: 'FORBIDDEN',
-          message: 'You do not have access to this order',
-        });
-      }
-    }
-
     const updated = await this.ordersService.updateStatus(
       input.orderId,
       input.status as OrderStatus,
       userId,
     );
+    return mapOrder(updated);
+  }
+
+  @Mutation(() => OrderType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('vendor')
+  async markVendorOrderPaid(
+    @Args('orderId') orderId: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('storeId') storeId: string,
+  ): Promise<OrderType> {
+    await this.storesService.assertStoreOwner(userId, storeId);
+    const updated = await this.orderFulfillmentService.markVendorOrderPaid(
+      userId,
+      storeId,
+      orderId,
+    );
+    return mapOrder(updated);
+  }
+
+  @Mutation(() => OrderType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('vendor')
+  async acknowledgeVendorOrder(
+    @Args('orderId') orderId: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('storeId') storeId: string,
+  ): Promise<OrderType> {
+    await this.storesService.assertStoreOwner(userId, storeId);
+    const updated = await this.orderFulfillmentService.acknowledgeVendorOrder(
+      userId,
+      storeId,
+      orderId,
+    );
+    return mapOrder(updated);
+  }
+
+  @Mutation(() => OrderType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('vendor')
+  async shipVendorOrder(
+    @Args('input') input: ShipVendorOrderInput,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('storeId') storeId: string,
+  ): Promise<OrderType> {
+    await this.storesService.assertStoreOwner(userId, storeId);
+    const updated = await this.orderFulfillmentService.shipVendorOrder(
+      userId,
+      storeId,
+      input.orderId,
+      input.trackingNumber,
+      input.fulfillmentProvider,
+      input.trackingUrl,
+    );
+    return mapOrder(updated);
+  }
+
+  @Mutation(() => OrderType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('customer')
+  async confirmOrderDelivered(
+    @Args('input') input: ConfirmOrderDeliveredInput,
+    @CurrentUser('id') customerId: string,
+  ): Promise<OrderType> {
+    const updated = await this.orderFulfillmentService.confirmOrderDelivered(
+      input.orderId,
+      customerId,
+    );
+    return mapOrder(updated);
+  }
+
+  @Mutation(() => OrderType)
+  @Public()
+  async confirmGuestOrderDelivered(
+    @Args('input') input: ConfirmOrderDeliveredInput,
+  ): Promise<OrderType> {
+    if (!input.guestPhone) {
+      throw new ForbiddenException({
+        code: 'FORBIDDEN',
+        message: 'Guest phone is required to confirm delivery',
+      });
+    }
+    const updated = await this.orderFulfillmentService.confirmOrderDelivered(
+      input.orderId,
+      undefined,
+      input.guestPhone,
+    );
+    return mapOrder(updated);
+  }
+
+  @Mutation(() => OrderType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('vendor')
+  async cancelVendorOrder(
+    @Args('orderId') orderId: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('storeId') storeId: string,
+  ): Promise<OrderType> {
+    await this.storesService.assertStoreOwner(userId, storeId);
+    const updated = await this.orderFulfillmentService.cancelVendorOrder(userId, storeId, orderId);
     return mapOrder(updated);
   }
 }

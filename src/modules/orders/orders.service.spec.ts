@@ -12,6 +12,7 @@ describe('OrdersService', () => {
   let notificationsService: { notifyOrderStatusChanged: jest.Mock };
   let promotionsService: { applyStackedPromotions: jest.Mock };
   let guestOrderLinkService: { mergeGuestOrders: jest.Mock };
+  let inventoryService: { restoreOrderStock: jest.Mock };
   let mockManager: {
     create: jest.Mock;
     save: jest.Mock;
@@ -45,9 +46,12 @@ describe('OrdersService', () => {
     notificationsService = {
       notifyOrderStatusChanged: jest.fn(),
       notifyVendorAboutNewOrder: jest.fn().mockResolvedValue(undefined),
+      notifyVendorsAboutNewOrder: jest.fn().mockResolvedValue(undefined),
+      notifyVendorsAboutOrderStatus: jest.fn().mockResolvedValue(undefined),
     };
     promotionsService = { applyStackedPromotions: jest.fn() };
     guestOrderLinkService = { mergeGuestOrders: jest.fn() };
+    inventoryService = { restoreOrderStock: jest.fn().mockResolvedValue(true) };
 
     mockManager = {
       create: jest.fn((_entity, data) => ({ ...data })),
@@ -76,6 +80,8 @@ describe('OrdersService', () => {
       notificationsService as never,
       promotionsService as never,
       guestOrderLinkService as never,
+      inventoryService as never,
+      {} as never,
     );
   });
 
@@ -151,6 +157,49 @@ describe('OrdersService', () => {
     expect(result.id).toBe('ord-1');
   });
 
+  it('notifies vendor once per store when order has multiple items', async () => {
+    const variantTwo = {
+      ...variant,
+      id: 'var-2',
+      product: { id: 'prod-2', storeId: 'store-1', name: 'Second Product' },
+    };
+    variantRepository.findOne.mockResolvedValueOnce(variant).mockResolvedValueOnce(variantTwo);
+    mockManager.findOne.mockResolvedValueOnce(variant).mockResolvedValueOnce(variantTwo);
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-1',
+      orderNumber: 'ORD-TEST',
+      status: OrderStatus.PENDING_PAYMENT,
+      items: [],
+      shippingAddress: {},
+      storeShippings: [],
+      statusHistory: [],
+    });
+
+    await service.create(
+      {
+        items: [
+          { productId: 'p1', variantId: 'var-1', quantity: 1, price: 100 },
+          { productId: 'p2', variantId: 'var-2', quantity: 1, price: 200 },
+        ],
+        paymentMethod: 'promptpay',
+        guestPhone: '+66812345678',
+        shippingAddress,
+      },
+      undefined,
+    );
+
+    expect(notificationsService.notifyVendorsAboutNewOrder).toHaveBeenCalledTimes(1);
+    expect(notificationsService.notifyVendorsAboutNewOrder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'ord-1',
+        items: expect.arrayContaining([
+          expect.objectContaining({ storeId: 'store-1' }),
+          expect.objectContaining({ storeId: 'store-1' }),
+        ]),
+      }),
+    );
+  });
+
   it('throws when order not found', async () => {
     orderRepository.findOne.mockResolvedValue(null);
 
@@ -217,7 +266,28 @@ describe('OrdersService', () => {
     const updated = await service.updateStatus('ord-1', OrderStatus.PAID, 'admin-1');
 
     expect(notificationsService.notifyOrderStatusChanged).toHaveBeenCalled();
+    expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
     expect(updated).toBeDefined();
+  });
+
+  it('restores stock when order is cancelled', async () => {
+    const order = {
+      id: 'ord-1',
+      status: OrderStatus.PENDING_PAYMENT,
+      items: [],
+      shippingAddress: {},
+      storeShippings: [],
+      statusHistory: [],
+    };
+    orderRepository.findOne.mockResolvedValue(order);
+
+    await service.updateStatus('ord-1', OrderStatus.CANCELLED, 'admin-1');
+
+    expect(inventoryService.restoreOrderStock).toHaveBeenCalledWith(
+      'ord-1',
+      mockManager,
+      'Order status changed to cancelled',
+    );
   });
 
   it('resolves saved address for logged-in customer', async () => {

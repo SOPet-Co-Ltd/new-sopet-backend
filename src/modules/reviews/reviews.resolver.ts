@@ -23,6 +23,69 @@ import { StoresService } from '../stores/stores.service';
 import { Review } from '../../database/entities/review.entity';
 
 @ObjectType()
+export class CustomerReviewableItemType {
+  @Field()
+  orderId: string;
+
+  @Field()
+  orderNumber: string;
+
+  @Field()
+  orderItemId: string;
+
+  @Field()
+  productId: string;
+
+  @Field()
+  productName: string;
+
+  @Field(() => String, { nullable: true })
+  productSlug?: string | null;
+
+  @Field(() => String, { nullable: true })
+  productImageUrl?: string | null;
+
+  @Field()
+  deliveredAt: Date;
+
+  @Field(() => Date, { nullable: true })
+  reviewDeadline?: Date | null;
+}
+
+@ObjectType()
+export class CustomerReviewType {
+  @Field()
+  id: string;
+
+  @Field()
+  productId: string;
+
+  @Field()
+  productName: string;
+
+  @Field(() => String, { nullable: true })
+  productSlug?: string | null;
+
+  @Field(() => String, { nullable: true })
+  productImageUrl?: string | null;
+
+  @Field()
+  orderId: string;
+
+  @Field(() => Int)
+  rating: number;
+
+  @Field(() => String, { nullable: true })
+  comment?: string | null;
+
+  @Field()
+  status: string;
+
+  @Field()
+  createdAt: Date;
+}
+
+@ObjectType()
 export class ReviewType {
   @Field()
   id: string;
@@ -139,5 +202,25 @@ export class ReviewsResolver {
       comment: input.comment,
     });
     return mapReviewToType(review);
+  }
+
+  @Query(() => [CustomerReviewableItemType])
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('customer')
+  async customerReviewableItems(
+    @CurrentUser('id') customerId: string,
+  ): Promise<CustomerReviewableItemType[]> {
+    return this.reviewsService.findReviewableItemsForCustomer(customerId);
+  }
+
+  @Query(() => [CustomerReviewType])
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('customer')
+  async myReviews(
+    @CurrentUser('id') customerId: string,
+    @Args('limit', { type: () => Int, nullable: true, defaultValue: 50 }) limit: number,
+    @Args('offset', { type: () => Int, nullable: true, defaultValue: 0 }) offset: number,
+  ): Promise<CustomerReviewType[]> {
+    return this.reviewsService.findMyReviews(customerId, limit, offset);
   }
 }

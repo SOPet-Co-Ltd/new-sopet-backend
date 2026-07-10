@@ -7,6 +7,12 @@ import { Payment } from '../../database/entities/payment.entity';
 import { Order } from '../../database/entities/order.entity';
 import { SavedPaymentMethod } from '../../database/entities/saved-payment-method.entity';
 import { NotificationsService } from '../notifications/notifications.service';
+import { PaymentEventsService } from './payment-events.service';
+import { InventoryService } from '../inventory/inventory.service';
+
+const paymentEventsServiceMock = {
+  publishPaymentStatusUpdated: jest.fn(),
+};
 
 describe('PaymentsService guest access', () => {
   let service: PaymentsService;
@@ -18,6 +24,9 @@ describe('PaymentsService guest access', () => {
     create: jest.fn(<T>(x: T): T => x),
     save: jest.fn((x: Payment) => Promise.resolve({ ...x, id: 'pay-1' })),
     findOne: jest.fn(),
+    manager: {
+      transaction: jest.fn(async (cb: (manager: unknown) => Promise<void>) => cb({})),
+    },
   };
 
   beforeEach(async () => {
@@ -38,6 +47,14 @@ describe('PaymentsService guest access', () => {
         {
           provide: NotificationsService,
           useValue: { notifyOrderPaid: jest.fn() },
+        },
+        {
+          provide: PaymentEventsService,
+          useValue: paymentEventsServiceMock,
+        },
+        {
+          provide: InventoryService,
+          useValue: { restoreOrderStock: jest.fn().mockResolvedValue(true) },
         },
       ],
     }).compile();
@@ -91,6 +108,9 @@ describe('PaymentsService payment read queries', () => {
     create: jest.fn(<T>(x: T): T => x),
     save: jest.fn((x: Payment) => Promise.resolve({ ...x, id: 'pay-1' })),
     findOne: jest.fn(),
+    manager: {
+      transaction: jest.fn(async (cb: (manager: unknown) => Promise<void>) => cb({})),
+    },
   };
 
   const guestOrder = { id: 'ord-1', customerId: null };
@@ -122,6 +142,14 @@ describe('PaymentsService payment read queries', () => {
         {
           provide: NotificationsService,
           useValue: { notifyOrderPaid: jest.fn() },
+        },
+        {
+          provide: PaymentEventsService,
+          useValue: paymentEventsServiceMock,
+        },
+        {
+          provide: InventoryService,
+          useValue: { restoreOrderStock: jest.fn().mockResolvedValue(true) },
         },
       ],
     }).compile();

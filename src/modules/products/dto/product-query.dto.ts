@@ -125,4 +125,25 @@ export class ProductQueryDto {
   @IsOptional()
   @IsEnum(['ASC', 'DESC'])
   sortOrder?: 'ASC' | 'DESC' = 'DESC';
+
+  @ApiPropertyOptional({
+    description: 'Anonymous session identifier for search personalization',
+    example: 'a1b2c3d4-e5f6-4789-a012-3456789abcde',
+  })
+  @IsOptional()
+  @IsString()
+  sessionId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Optional search context for personalization (recent queries and product views)',
+  })
+  @IsOptional()
+  searchContext?: {
+    recentQueries?: string[];
+    recentProductIds?: string[];
+  };
+
+  @IsOptional()
+  @IsString()
+  userId?: string;
 }

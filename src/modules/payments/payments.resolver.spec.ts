@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 import { PaymentsResolver } from './payments.resolver';
 import { PaymentsService } from './payments.service';
+import { PaymentEventsService } from './payment-events.service';
 import { IS_PUBLIC_KEY } from '../../common/decorators/public.decorator';
 
 describe('PaymentsResolver payment queries', () => {
@@ -27,7 +28,12 @@ describe('PaymentsResolver payment queries', () => {
       createCharge: jest.fn(),
       refund: jest.fn(),
     };
-    resolver = new PaymentsResolver(paymentsService as unknown as PaymentsService);
+    resolver = new PaymentsResolver(
+      paymentsService as unknown as PaymentsService,
+      {
+        paymentStatusUpdatedIterator: jest.fn(),
+      } as unknown as PaymentEventsService,
+    );
   });
 
   describe('payment', () => {

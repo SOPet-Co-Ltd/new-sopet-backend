@@ -15,6 +15,7 @@ import { SavedPaymentMethod } from '../../database/entities/saved-payment-method
 import { OtpCode } from '../../database/entities/otp-code.entity';
 import { CustomerRepository } from '../../database/repositories/customer.repository';
 import { OrdersService } from '../orders/orders.service';
+import { PaymentsService } from '../payments/payments.service';
 
 describe('UsersService', () => {
   let service: UsersService;
@@ -42,18 +43,40 @@ describe('UsersService', () => {
   const ordersService = {
     mergeGuestOrders: jest.fn(),
   };
+  const paymentsService = {
+    saveCustomerCard: jest.fn(),
+    deleteOmiseCustomerCard: jest.fn(),
+  };
+  const paymentMethodQueryBuilder = {
+    where: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
+    withDeleted: jest.fn().mockReturnThis(),
+    getOne: jest.fn().mockResolvedValue(null),
+  };
+  const paymentMethodRepo = {
+    find: jest.fn(),
+    findOne: jest.fn(),
+    create: jest.fn((value) => value),
+    save: jest.fn(async (value) => ({ id: 'pm-new', ...value })),
+    update: jest.fn(),
+    softDelete: jest.fn(),
+    restore: jest.fn(),
+    createQueryBuilder: jest.fn(() => paymentMethodQueryBuilder),
+  };
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    paymentMethodQueryBuilder.getOne.mockResolvedValue(null);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         UsersService,
         { provide: getRepositoryToken(Customer), useValue: customerRepo },
         { provide: getRepositoryToken(SavedAddress), useValue: {} },
-        { provide: getRepositoryToken(SavedPaymentMethod), useValue: {} },
+        { provide: getRepositoryToken(SavedPaymentMethod), useValue: paymentMethodRepo },
         { provide: getRepositoryToken(OtpCode), useValue: otpRepo },
         { provide: CustomerRepository, useValue: customerRepository },
         { provide: OrdersService, useValue: ordersService },
+        { provide: PaymentsService, useValue: paymentsService },
         { provide: JwtService, useValue: jwtService },
         { provide: ConfigService, useValue: configService },
       ],
@@ -168,5 +191,151 @@ describe('UsersService', () => {
     await expect(service.changeCustomerPhone('cust-1', '0822222222', '123456')).rejects.toThrow(
       ConflictException,
     );
+  });
+
+  describe('payment methods', () => {
+    it('marks the first saved card as default automatically', async () => {
+      paymentsService.saveCustomerCard.mockResolvedValue({
+        omiseCardId: 'card_test_1',
+        cardFingerprint: 'fp-1',
+        lastFour: '4242',
+        brand: 'visa',
+        expiryMonth: 12,
+        expiryYear: 2034,
+      });
+      paymentMethodRepo.find.mockResolvedValue([]);
+
+      const result = await service.addPaymentMethod('cust-1', {
+        omiseCardToken: 'tokn_test_1',
+        lastFour: '4242',
+        brand: 'visa',
+        expiryMonth: 12,
+        expiryYear: 2034,
+        isDefault: false,
+      });
+
+      expect(result.isDefault).toBe(true);
+      expect(paymentMethodRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ isDefault: true }),
+      );
+    });
+
+    it('restores a soft-deleted card instead of inserting a duplicate row', async () => {
+      paymentsService.saveCustomerCard.mockResolvedValue({
+        omiseCardId: 'card_test_restored',
+        cardFingerprint: 'fp-restored',
+        lastFour: '1111',
+        brand: 'visa',
+        expiryMonth: 12,
+        expiryYear: 2034,
+      });
+      paymentMethodRepo.find.mockResolvedValue([]);
+      paymentMethodQueryBuilder.getOne
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({
+          id: 'pm-deleted',
+          customerId: 'cust-1',
+          deletedAt: new Date('2026-01-01'),
+          isDefault: false,
+        });
+
+      const result = await service.addPaymentMethod('cust-1', {
+        omiseCardToken: 'tokn_test_1',
+        lastFour: '1111',
+        brand: 'visa',
+        expiryMonth: 12,
+        expiryYear: 2034,
+      });
+
+      expect(paymentMethodRepo.restore).toHaveBeenCalledWith('pm-deleted');
+      expect(result.omiseCardToken).toBe('card_test_restored');
+      expect(result.isDefault).toBe(true);
+    });
+
+    it('returns an existing active card without calling Omise save', async () => {
+      paymentMethodRepo.find.mockResolvedValue([
+        { id: 'pm-existing', customerId: 'cust-1', isDefault: true },
+      ]);
+      paymentMethodQueryBuilder.getOne.mockResolvedValue({
+        id: 'pm-existing',
+        customerId: 'cust-1',
+        isDefault: true,
+      });
+
+      const result = await service.addPaymentMethod('cust-1', {
+        omiseCardToken: 'tokn_test_1',
+        lastFour: '1111',
+        brand: 'visa',
+        expiryMonth: 12,
+        expiryYear: 2034,
+      });
+
+      expect(paymentsService.saveCustomerCard).not.toHaveBeenCalled();
+      expect(result.id).toBe('pm-existing');
+    });
+
+    it('returns an existing active card without inserting a duplicate row', async () => {
+      paymentsService.saveCustomerCard.mockResolvedValue({
+        omiseCardId: 'card_test_existing',
+        cardFingerprint: 'fp-existing',
+        lastFour: '1111',
+        brand: 'visa',
+        expiryMonth: 12,
+        expiryYear: 2034,
+      });
+      paymentMethodRepo.find.mockResolvedValue([
+        { id: 'pm-existing', customerId: 'cust-1', isDefault: true },
+      ]);
+      paymentMethodQueryBuilder.getOne.mockResolvedValue({
+        id: 'pm-existing',
+        customerId: 'cust-1',
+        isDefault: true,
+      });
+
+      const result = await service.addPaymentMethod('cust-1', {
+        omiseCardToken: 'tokn_test_1',
+        lastFour: '1111',
+        brand: 'visa',
+        expiryMonth: 12,
+        expiryYear: 2034,
+      });
+
+      expect(result.id).toBe('pm-existing');
+      expect(paymentMethodRepo.create).not.toHaveBeenCalled();
+    });
+
+    it('promotes another card when the default card is deleted', async () => {
+      paymentMethodRepo.findOne.mockResolvedValue({
+        id: 'pm-default',
+        customerId: 'cust-1',
+        isDefault: true,
+        omiseCardToken: 'card_test_default',
+      });
+      paymentMethodRepo.find.mockResolvedValue([
+        {
+          id: 'pm-other',
+          customerId: 'cust-1',
+          isDefault: false,
+          createdAt: new Date('2026-01-01'),
+        },
+      ]);
+
+      await service.deletePaymentMethod('cust-1', 'pm-default');
+
+      expect(paymentsService.deleteOmiseCustomerCard).toHaveBeenCalledWith(
+        'cust-1',
+        'card_test_default',
+      );
+      expect(paymentMethodRepo.softDelete).toHaveBeenCalledWith('pm-default');
+      expect(paymentMethodRepo.update).toHaveBeenCalledWith(
+        { customerId: 'cust-1', isDefault: true },
+        { isDefault: false },
+      );
+      expect(paymentMethodRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'pm-other', isDefault: true }),
+      );
+    });
   });
 });

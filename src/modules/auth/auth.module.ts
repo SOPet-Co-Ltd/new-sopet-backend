@@ -21,6 +21,8 @@ import { CartModule } from '../cart/cart.module';
 import { GuestOrderLinkModule } from '../orders/guest-order-link.module';
 import { RedisModule } from '../redis/redis.module';
 import { AuthRateLimitGuard } from './guards/auth-rate-limit.guard';
+import { CustomerStatusGuard } from './guards/customer-status.guard';
+import { StoreStatusGuard } from './guards/store-status.guard';
 
 @Module({
   imports: [
@@ -48,9 +50,19 @@ import { AuthRateLimitGuard } from './guards/auth-rate-limit.guard';
     JwtAuthGuard,
     RolesGuard,
     AuthRateLimitGuard,
+    StoreStatusGuard,
+    CustomerStatusGuard,
     AuthResolver,
     CustomerRepository,
   ],
-  exports: [AuthService, JwtAuthGuard, RolesGuard, AuthRateLimitGuard, JwtModule],
+  exports: [
+    AuthService,
+    JwtAuthGuard,
+    RolesGuard,
+    AuthRateLimitGuard,
+    StoreStatusGuard,
+    CustomerStatusGuard,
+    JwtModule,
+  ],
 })
 export class AuthModule {}
