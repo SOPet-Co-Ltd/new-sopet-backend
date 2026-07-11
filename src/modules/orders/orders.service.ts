@@ -11,7 +11,7 @@ import { ProductVariant } from '../../database/entities/product-variant.entity';
 import { Product } from '../../database/entities/product.entity';
 import { StoreShippingOption } from '../../database/entities/store-shipping-option.entity';
 import { PromotionUsage } from '../../database/entities/promotion-usage.entity';
-import { Promotion } from '../../database/entities/promotion.entity';
+import { Promotion, PromotionType } from '../../database/entities/promotion.entity';
 import {
   InventoryTransaction,
   InventoryTransactionType,
@@ -364,7 +364,7 @@ export class OrdersService {
           appliedPromotions.length === 1
             ? discountAmount
             : Math.min(
-                promotion.type === 'percentage'
+                promotion.type === PromotionType.PERCENTAGE
                   ? (subtotal * Number(promotion.discountValue)) / 100
                   : Number(promotion.discountValue),
                 subtotal,
@@ -513,6 +513,37 @@ export class OrdersService {
     }
 
     return productIds;
+  }
+
+  async findByOrderNumber(orderNumber: string): Promise<Order> {
+    const trimmedOrderNumber = orderNumber.trim();
+
+    if (!trimmedOrderNumber) {
+      throw new NotFoundException({
+        code: 'ORDER_NOT_FOUND',
+        message: 'Order not found',
+      });
+    }
+
+    const order = await this.orderRepository.findOne({
+      where: { orderNumber: trimmedOrderNumber },
+      relations: [
+        'items',
+        'items.productVariant',
+        'items.productVariant.product',
+        'items.productVariant.product.images',
+        'storeShippings',
+      ],
+    });
+
+    if (!order) {
+      throw new NotFoundException({
+        code: 'ORDER_NOT_FOUND',
+        message: 'Order not found',
+      });
+    }
+
+    return order;
   }
 
   async findByGuestPhone(guestPhone: string): Promise<Order[]> {

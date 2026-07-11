@@ -469,15 +469,46 @@ describe('OrdersService', () => {
   });
 
   describe('findByOrderNumber', () => {
+    const trackingRelations = [
+      'items',
+      'items.productVariant',
+      'items.productVariant.product',
+      'items.productVariant.product.images',
+      'storeShippings',
+    ];
+
     it('throws ORDER_NOT_FOUND when order does not exist', async () => {
       orderRepository.findOne.mockResolvedValue(null);
 
-      const findByOrderNumber = (
-        service as unknown as { findByOrderNumber: (orderNumber: string) => Promise<unknown> }
-      ).findByOrderNumber;
-
-      await expect(findByOrderNumber.call(service, 'ORD-MISSING')).rejects.toMatchObject({
+      await expect(service.findByOrderNumber('ORD-MISSING')).rejects.toMatchObject({
         response: { code: 'ORDER_NOT_FOUND' },
+      });
+    });
+
+    it('throws ORDER_NOT_FOUND for whitespace-only input', async () => {
+      await expect(service.findByOrderNumber('   ')).rejects.toMatchObject({
+        response: { code: 'ORDER_NOT_FOUND' },
+      });
+      expect(orderRepository.findOne).not.toHaveBeenCalled();
+    });
+
+    it('returns order when it exists', async () => {
+      const order = { id: 'ord-1', orderNumber: 'ORD-TRACK-001', items: [], storeShippings: [] };
+      orderRepository.findOne.mockResolvedValue(order);
+
+      const result = await service.findByOrderNumber('ORD-TRACK-001');
+
+      expect(result).toBe(order);
+    });
+
+    it('loads image-capable relations for tracking display', async () => {
+      orderRepository.findOne.mockResolvedValue({ id: 'ord-1', orderNumber: 'ORD-TRACK-001' });
+
+      await service.findByOrderNumber('  ORD-TRACK-001  ');
+
+      expect(orderRepository.findOne).toHaveBeenCalledWith({
+        where: { orderNumber: 'ORD-TRACK-001' },
+        relations: trackingRelations,
       });
     });
   });
