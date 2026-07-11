@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { NotFoundException } from '@nestjs/common';
 import { OrdersResolver } from './orders.resolver';
 import { OrdersService } from './orders.service';
 import { OrderFulfillmentService } from './order-fulfillment.service';
@@ -7,6 +8,7 @@ import { StoresService } from '../stores/stores.service';
 import { IS_PUBLIC_KEY } from '../../common/decorators/public.decorator';
 import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
 import { FulfillmentStatus } from '../../database/entities/order-item.entity';
+import * as OrderMapper from './order.mapper';
 
 function buildOrderFixture(overrides: Partial<Order> = {}): Order {
   const createdAt = new Date('2024-06-15T10:30:00.000Z');
@@ -98,6 +100,7 @@ describe('OrdersResolver mapOrder extensions', () => {
       | 'findLatestPurchaseProductId'
       | 'findLatestPurchaseProductIds'
       | 'findOneWithItems'
+      | 'findByOrderNumber'
       | 'create'
       | 'updateStatus'
     >
@@ -119,6 +122,7 @@ describe('OrdersResolver mapOrder extensions', () => {
       findLatestPurchaseProductId: jest.fn(),
       findLatestPurchaseProductIds: jest.fn(),
       findOneWithItems: jest.fn(),
+      findByOrderNumber: jest.fn(),
       create: jest.fn(),
       updateStatus: jest.fn(),
     };
@@ -257,6 +261,19 @@ describe('OrdersResolver mapOrder extensions', () => {
   });
 
   describe('orderTracking', () => {
+    const PII_KEYS = [
+      'id',
+      'customerId',
+      'guestPhone',
+      'guestName',
+      'guestEmail',
+      'shippingAddress',
+      'paymentMethod',
+      'paymentReference',
+      'notes',
+      'paidAt',
+    ] as const;
+
     it('is decorated with @Public()', () => {
       const orderTrackingMethod = Object.getOwnPropertyDescriptor(
         OrdersResolver.prototype,
@@ -268,6 +285,68 @@ describe('OrdersResolver mapOrder extensions', () => {
       const isPublic = Reflect.getMetadata(IS_PUBLIC_KEY, orderTrackingMethod!) as
         boolean | undefined;
       expect(isPublic).toBe(true);
+    });
+
+    it('returns mapped tracking fields without PII for a PII-rich entity', async () => {
+      ordersService.findByOrderNumber.mockResolvedValue(
+        buildOrderFixture({
+          guestPhone: '0812345678',
+          guestName: 'Guest User',
+          guestEmail: 'guest@example.com',
+        }),
+      );
+
+      const result = await resolver.orderTracking('ORD-TEST-001');
+
+      expect(ordersService.findByOrderNumber).toHaveBeenCalledWith('ORD-TEST-001');
+      expect(result.orderNumber).toBe('ORD-TEST-001');
+      expect(result.status).toBe(OrderStatus.PAID);
+      expect(result.createdAt).toEqual(new Date('2024-06-15T10:30:00.000Z'));
+      expect(result.subtotal).toBe(500);
+      expect(result.shippingFee).toBe(80);
+      expect(result.discountAmount).toBe(0);
+      expect(result.total).toBe(580);
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].productName).toBe('Dog Food');
+      expect(result.storeShippings).toEqual([
+        { storeId: 'store-1', optionName: 'Standard Delivery', shippingFee: 50 },
+        { storeId: 'store-2', optionName: 'Express', shippingFee: 30 },
+      ]);
+
+      for (const key of PII_KEYS) {
+        expect(result).not.toHaveProperty(key);
+      }
+    });
+
+    it('trims orderNumber before lookup', async () => {
+      ordersService.findByOrderNumber.mockResolvedValue(buildOrderFixture());
+
+      await resolver.orderTracking('  ORD-TEST-001  ');
+
+      expect(ordersService.findByOrderNumber).toHaveBeenCalledWith('ORD-TEST-001');
+    });
+
+    it('propagates NotFoundException from service', async () => {
+      ordersService.findByOrderNumber.mockRejectedValue(
+        new NotFoundException({
+          code: 'ORDER_NOT_FOUND',
+          message: 'Order not found',
+        }),
+      );
+
+      await expect(resolver.orderTracking('ORD-MISSING')).rejects.toMatchObject({
+        response: { code: 'ORDER_NOT_FOUND' },
+      });
+    });
+
+    it('does not invoke mapOrder', async () => {
+      const mapOrderSpy = jest.spyOn(OrderMapper, 'mapOrder');
+      ordersService.findByOrderNumber.mockResolvedValue(buildOrderFixture());
+
+      await resolver.orderTracking('ORD-TEST-001');
+
+      expect(mapOrderSpy).not.toHaveBeenCalled();
+      mapOrderSpy.mockRestore();
     });
   });
 });

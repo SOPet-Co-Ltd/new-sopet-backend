@@ -4,9 +4,14 @@ import { OrdersService } from './orders.service';
 import { OrderFulfillmentService } from './order-fulfillment.service';
 import { ProductsService } from '../products/products.service';
 import { StoresService } from '../stores/stores.service';
-import { OrderType, ProductType, OrderConnection } from '../../graphql/models/types';
+import {
+  OrderTrackingType,
+  OrderType,
+  ProductType,
+  OrderConnection,
+} from '../../graphql/models/types';
 import { mapProduct } from '../../graphql/models/mappers';
-import { mapOrder } from './order.mapper';
+import { mapOrder, mapOrderTracking } from './order.mapper';
 import { CurrentUser, Public, Roles } from '../../common/decorators';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -16,7 +21,7 @@ import {
   ShipVendorOrderInput,
   UpdateOrderStatusInput,
 } from './orders.inputs';
-import { Order, OrderStatus } from '../../database/entities/order.entity';
+import { OrderStatus } from '../../database/entities/order.entity';
 import { normalizeCheckoutPaymentMethod } from '../../common/utils/checkout-payment.util';
 import { CustomerOrderListFilter } from './order-list-filter.util';
 
@@ -109,6 +114,13 @@ export class OrdersResolver {
   async guestOrders(@Args('guestPhone') guestPhone: string): Promise<OrderType[]> {
     const orders = await this.ordersService.findByGuestPhone(guestPhone);
     return orders.map(mapOrder);
+  }
+
+  @Query(() => OrderTrackingType)
+  @Public()
+  async orderTracking(@Args('orderNumber') orderNumber: string): Promise<OrderTrackingType> {
+    const order = await this.ordersService.findByOrderNumber(orderNumber.trim());
+    return mapOrderTracking(order);
   }
 
   @Query(() => [OrderType])
