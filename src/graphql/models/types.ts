@@ -460,6 +460,84 @@ export class OrderType {
 }
 
 @ObjectType()
+export class OrderTrackingStoreShippingType {
+  @Field()
+  storeId: string;
+
+  @Field()
+  optionName: string;
+
+  @Field(() => Float)
+  shippingFee: number;
+}
+
+@ObjectType()
+export class OrderTrackingItemType {
+  @Field()
+  storeId: string;
+
+  @Field(() => String, { nullable: true })
+  productId?: string | null;
+
+  @Field()
+  productName: string;
+
+  @Field(() => String, { nullable: true })
+  productImageUrl?: string | null;
+
+  @Field(() => Int)
+  quantity: number;
+
+  @Field(() => Float)
+  unitPrice: number;
+
+  @Field(() => Float)
+  subtotal: number;
+
+  @Field()
+  fulfillmentStatus: string;
+
+  @Field(() => String, { nullable: true })
+  trackingNumber?: string | null;
+
+  @Field(() => String, { nullable: true })
+  fulfillmentProvider?: string | null;
+
+  @Field(() => String, { nullable: true })
+  trackingUrl?: string | null;
+}
+
+@ObjectType()
+export class OrderTrackingType {
+  @Field()
+  orderNumber: string;
+
+  @Field()
+  status: string;
+
+  @Field()
+  createdAt: Date;
+
+  @Field(() => Float)
+  subtotal: number;
+
+  @Field(() => Float)
+  shippingFee: number;
+
+  @Field(() => Float)
+  discountAmount: number;
+
+  @Field(() => Float)
+  total: number;
+
+  @Field(() => [OrderTrackingItemType])
+  items: OrderTrackingItemType[];
+
+  @Field(() => [OrderTrackingStoreShippingType])
+  storeShippings: OrderTrackingStoreShippingType[];
+}
+
+@ObjectType()
 export class OrderConnection {
   @Field(() => [OrderType])
   items: OrderType[];
