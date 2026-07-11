@@ -1,4 +1,6 @@
 import { Product } from '../../database/entities/product.entity';
+import { Customer } from '../../database/entities/customer.entity';
+import { User } from '../../database/entities/user.entity';
 import { ProductImage } from '../../database/entities/product-image.entity';
 import { ProductVariant } from '../../database/entities/product-variant.entity';
 import { Store } from '../../database/entities/store.entity';
@@ -26,7 +28,39 @@ import {
   AdminStoreType,
   ShippingProviderType,
   StoreShippingOptionType,
+  CustomerProfile,
+  UserProfile,
 } from './types';
+
+export function mapCustomerProfile(
+  customer: Pick<
+    Customer,
+    'id' | 'phone' | 'fullName' | 'email' | 'profilePhotoUrl' | 'dateOfBirth'
+  >,
+): CustomerProfile {
+  return {
+    id: customer.id,
+    phone: customer.phone,
+    fullName: customer.fullName,
+    email: customer.email,
+    profilePhotoUrl: customer.profilePhotoUrl,
+    dateOfBirth: customer.dateOfBirth,
+  };
+}
+
+export function mapUserProfile(
+  user: Pick<User, 'id' | 'email' | 'fullName' | 'role' | 'profilePhotoUrl'>,
+  storeId?: string | null,
+): UserProfile {
+  return {
+    id: user.id,
+    email: user.email,
+    fullName: user.fullName,
+    role: user.role,
+    storeId: storeId ?? null,
+    profilePhotoUrl: user.profilePhotoUrl,
+  };
+}
 
 export function mapPromotion(promotion: Promotion): PromotionType {
   return {

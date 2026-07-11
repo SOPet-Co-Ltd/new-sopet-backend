@@ -62,6 +62,11 @@ export class UpdateUserProfileInput {
   @IsString()
   @Length(1, 255)
   fullName?: string;
+
+  @Field(() => String, { nullable: true })
+  @IsOptional()
+  @IsString()
+  profilePhotoUrl?: string | null;
 }
 
 @InputType()

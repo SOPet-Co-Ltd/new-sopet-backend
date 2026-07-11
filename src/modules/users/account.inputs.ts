@@ -81,6 +81,16 @@ export class UpdateProfileInput {
   @IsOptional()
   @IsEmail()
   email?: string;
+
+  @Field(() => String, { nullable: true })
+  @IsOptional()
+  @IsString()
+  profilePhotoUrl?: string | null;
+
+  @Field(() => String, { nullable: true })
+  @IsOptional()
+  @IsString()
+  dateOfBirth?: string | null;
 }
 
 @InputType()

@@ -8,7 +8,7 @@ import {
   OneToMany,
   Index,
 } from 'typeorm';
-import { IsEmail, IsEnum, IsNotEmpty } from 'class-validator';
+import { IsEmail, IsEnum, IsNotEmpty, IsOptional } from 'class-validator';
 import { Store } from './store.entity';
 import { StoreMember } from './store-member.entity';
 import { AdminLog } from './admin-log.entity';
@@ -37,6 +37,10 @@ export class User {
   @Column({ name: 'full_name', type: 'varchar', length: 255 })
   @IsNotEmpty()
   fullName: string;
+
+  @Column({ name: 'profile_photo_url', type: 'varchar', length: 500, nullable: true })
+  @IsOptional()
+  profilePhotoUrl: string | null;
 
   @Column({
     name: 'role',

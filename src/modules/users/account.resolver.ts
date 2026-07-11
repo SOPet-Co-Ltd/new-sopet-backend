@@ -9,7 +9,7 @@ import {
   SavedAddressType,
   SavedPaymentMethodType,
 } from '../../graphql/models/types';
-import { mapProduct } from '../../graphql/models/mappers';
+import { mapProduct, mapCustomerProfile } from '../../graphql/models/mappers';
 import { CurrentUser, Roles, Public } from '../../common/decorators';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -76,12 +76,7 @@ export class AccountResolver {
     @Args('input') input: UpdateProfileInput,
   ): Promise<CustomerProfile> {
     const customer = await this.usersService.updateProfile(customerId, input);
-    return {
-      id: customer.id,
-      phone: customer.phone,
-      fullName: customer.fullName,
-      email: customer.email,
-    };
+    return mapCustomerProfile(customer);
   }
 
   @Mutation(() => CustomerAuthPayload)
@@ -265,12 +260,7 @@ export class AccountResolver {
         accessToken: result.accessToken,
         refreshToken: result.refreshToken,
       },
-      customer: {
-        id: result.customer.id,
-        phone: result.customer.phone,
-        fullName: result.customer.fullName,
-        email: result.customer.email,
-      },
+      customer: mapCustomerProfile(result.customer),
       pendingDeletion: false,
     };
   }

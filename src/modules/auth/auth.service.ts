@@ -27,6 +27,7 @@ import { SmsService } from '../sms/sms.service';
 import { CartService } from '../cart/cart.service';
 import { GuestOrderLinkService } from '../orders/guest-order-link.service';
 import { EmailDeliveryService } from '../email/email-delivery.service';
+import { StorageService } from '../storage/storage.service';
 import {
   finalizeCustomerDeletion,
   isAdminSuspended,
@@ -63,6 +64,7 @@ export class AuthService {
     private cartService: CartService,
     private guestOrderLinkService: GuestOrderLinkService,
     private emailDeliveryService: EmailDeliveryService,
+    private readonly storageService: StorageService,
   ) {}
 
   // Generate random 6-digit OTP
@@ -161,6 +163,8 @@ export class AuthService {
                 phone: customer.phone,
                 fullName: customer.fullName,
                 email: customer.email,
+                profilePhotoUrl: customer.profilePhotoUrl,
+                dateOfBirth: customer.dateOfBirth,
               },
               pendingDeletion: true,
               reactivationToken,
@@ -208,6 +212,8 @@ export class AuthService {
         phone: customer.phone,
         fullName: customer.fullName,
         email: customer.email,
+        profilePhotoUrl: customer.profilePhotoUrl,
+        dateOfBirth: customer.dateOfBirth,
       },
     };
   }
@@ -271,6 +277,7 @@ export class AuthService {
         email: user.email,
         fullName: user.fullName,
         role: user.role,
+        profilePhotoUrl: user.profilePhotoUrl,
       },
     };
   }
@@ -431,6 +438,7 @@ export class AuthService {
         email: user.email,
         fullName: user.fullName,
         role: user.role,
+        profilePhotoUrl: user.profilePhotoUrl,
       },
     };
   }
@@ -471,7 +479,10 @@ export class AuthService {
     return !!membership;
   }
 
-  async updateUserProfile(userId: string, data: { fullName?: string }): Promise<User> {
+  async updateUserProfile(
+    userId: string,
+    data: { fullName?: string; profilePhotoUrl?: string | null },
+  ): Promise<User> {
     const user = await this.userRepository.findOne({
       where: { id: userId, isActive: true },
     });
@@ -485,6 +496,14 @@ export class AuthService {
 
     if (data.fullName !== undefined) {
       user.fullName = data.fullName;
+    }
+
+    if (data.profilePhotoUrl !== undefined) {
+      const trimmedUrl = data.profilePhotoUrl?.trim() || null;
+      if (trimmedUrl) {
+        this.storageService.assertFolderImageUrl(trimmedUrl, 'profiles');
+      }
+      user.profilePhotoUrl = trimmedUrl;
     }
 
     return this.userRepository.save(user);

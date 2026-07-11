@@ -20,6 +20,7 @@ import { SmsModule } from '../sms/sms.module';
 import { CartModule } from '../cart/cart.module';
 import { GuestOrderLinkModule } from '../orders/guest-order-link.module';
 import { RedisModule } from '../redis/redis.module';
+import { StorageModule } from '../storage/storage.module';
 import { AuthRateLimitGuard } from './guards/auth-rate-limit.guard';
 import { CustomerStatusGuard } from './guards/customer-status.guard';
 import { StoreStatusGuard } from './guards/store-status.guard';
@@ -32,6 +33,7 @@ import { StoreStatusGuard } from './guards/store-status.guard';
     CartModule,
     GuestOrderLinkModule,
     RedisModule,
+    StorageModule,
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],

@@ -37,6 +37,12 @@ export class CustomerProfile {
 
   @Field(() => String, { nullable: true })
   email?: string | null;
+
+  @Field(() => String, { nullable: true })
+  profilePhotoUrl?: string | null;
+
+  @Field(() => String, { nullable: true })
+  dateOfBirth?: string | null;
 }
 
 @ObjectType()
@@ -55,6 +61,9 @@ export class UserProfile {
 
   @Field(() => String, { nullable: true })
   storeId?: string | null;
+
+  @Field(() => String, { nullable: true })
+  profilePhotoUrl?: string | null;
 }
 
 @ObjectType()

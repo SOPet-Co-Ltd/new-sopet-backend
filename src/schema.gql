@@ -363,10 +363,12 @@ enum CustomerOrderListFilter {
 }
 
 type CustomerProfile {
+  dateOfBirth: String
   email: String
   fullName: String
   id: String!
   phone: String!
+  profilePhotoUrl: String
 }
 
 type CustomerReviewType {
@@ -1535,8 +1537,10 @@ input UpdateProductVariantInput {
 }
 
 input UpdateProfileInput {
+  dateOfBirth: String
   email: String
   fullName: String
+  profilePhotoUrl: String
 }
 
 input UpdatePromotionInput {
@@ -1632,6 +1636,7 @@ input UpdateStoreSettingsInput {
 
 input UpdateUserProfileInput {
   fullName: String
+  profilePhotoUrl: String
 }
 
 input UpdateVendorAsAdminInput {
@@ -1650,6 +1655,7 @@ type UserProfile {
   email: String!
   fullName: String!
   id: String!
+  profilePhotoUrl: String
   role: String!
   storeId: String
 }

@@ -20,4 +20,20 @@ export class UpdateProfileDto {
   @IsOptional()
   @IsEmail()
   email?: string;
+
+  @ApiPropertyOptional({
+    description: 'Customer profile photo URL',
+    example: 'https://cdn.example.com/profiles/abc.webp',
+  })
+  @IsOptional()
+  @IsString()
+  profilePhotoUrl?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Customer date of birth (YYYY-MM-DD)',
+    example: '1990-05-15',
+  })
+  @IsOptional()
+  @IsString()
+  dateOfBirth?: string | null;
 }

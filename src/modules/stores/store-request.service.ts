@@ -11,6 +11,7 @@ import { Store, StoreStatus } from '../../database/entities/store.entity';
 import { StoreMember, StoreMemberRole } from '../../database/entities/store-member.entity';
 import { generateSlug as slugify } from '../../common/utils/slug.util';
 import { NotificationsService } from '../notifications/notifications.service';
+import { StorageService } from '../storage/storage.service';
 
 export interface SubmitStoreRequestData {
   storeName: string;
@@ -31,6 +32,7 @@ export class StoreRequestService {
     @InjectRepository(StoreMember)
     private readonly storeMemberRepository: Repository<StoreMember>,
     private readonly notificationsService: NotificationsService,
+    private readonly storageService: StorageService,
   ) {}
 
   async submit(vendorUserId: string, data: SubmitStoreRequestData): Promise<StoreRequest> {
@@ -48,6 +50,11 @@ export class StoreRequestService {
       });
     }
 
+    const trimmedLogo = data.logoUrl?.trim() || null;
+    if (trimmedLogo) {
+      this.storageService.assertFolderImageUrl(trimmedLogo, 'stores');
+    }
+
     const request = this.storeRequestRepository.create({
       vendorUserId,
       storeName: data.storeName,
@@ -55,7 +62,7 @@ export class StoreRequestService {
       contactPhone: data.contactPhone ?? null,
       contactEmail: data.contactEmail ?? null,
       address: data.address ?? null,
-      logoUrl: data.logoUrl ?? null,
+      logoUrl: trimmedLogo,
       status: StoreRequestStatus.PENDING,
     });
 

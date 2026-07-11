@@ -23,6 +23,7 @@ import { normalizeThaiPhoneToLocal } from '../../common/utils/phone.util';
 import { UpdateProfileDto, CreateAddressDto, UpdateAddressDto } from './dto';
 import { JwtPayload } from '../../common/interfaces';
 import { isPendingDeletion, isDeletionRetentionExpired } from '../customers/customer-deletion.util';
+import { StorageService } from '../storage/storage.service';
 
 interface ReactivationJwtPayload {
   sub: string;
@@ -45,6 +46,7 @@ export class UsersService {
     private readonly paymentsService: PaymentsService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly storageService: StorageService,
   ) {}
 
   // Get customer profile
@@ -77,8 +79,66 @@ export class UsersService {
       });
     }
 
-    Object.assign(customer, updateProfileDto);
+    Object.assign(customer, {
+      fullName: updateProfileDto.fullName,
+      email: updateProfileDto.email,
+    });
+
+    if (updateProfileDto.profilePhotoUrl !== undefined) {
+      const trimmedUrl = updateProfileDto.profilePhotoUrl?.trim() || null;
+      if (trimmedUrl) {
+        this.storageService.assertFolderImageUrl(trimmedUrl, 'profiles');
+      }
+      customer.profilePhotoUrl = trimmedUrl;
+    }
+
+    if (updateProfileDto.dateOfBirth !== undefined) {
+      const trimmedDate = updateProfileDto.dateOfBirth?.trim() || null;
+      if (trimmedDate) {
+        this.assertValidDateOfBirth(trimmedDate);
+      }
+      customer.dateOfBirth = trimmedDate;
+    }
+
     return this.customerRepository.save(customer);
+  }
+
+  private assertValidDateOfBirth(value: string): void {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      throw new BadRequestException({
+        code: 'INVALID_DATE_OF_BIRTH',
+        message: 'รูปแบบวันเกิดไม่ถูกต้อง',
+      });
+    }
+
+    const [year, month, day] = value.split('-').map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    if (
+      date.getUTCFullYear() !== year ||
+      date.getUTCMonth() !== month - 1 ||
+      date.getUTCDate() !== day
+    ) {
+      throw new BadRequestException({
+        code: 'INVALID_DATE_OF_BIRTH',
+        message: 'วันเกิดไม่ถูกต้อง',
+      });
+    }
+
+    const today = new Date();
+    const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+    if (date.getTime() > todayUtc) {
+      throw new BadRequestException({
+        code: 'INVALID_DATE_OF_BIRTH',
+        message: 'วันเกิดต้องไม่เป็นวันในอนาคต',
+      });
+    }
+
+    if (year < 1900) {
+      throw new BadRequestException({
+        code: 'INVALID_DATE_OF_BIRTH',
+        message: 'วันเกิดไม่ถูกต้อง',
+      });
+    }
   }
 
   async changeCustomerPhone(

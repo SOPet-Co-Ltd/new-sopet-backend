@@ -10,10 +10,12 @@ import {
   VendorAuthPayload,
   AuthTokens,
   MeResult,
-  CustomerProfile,
-  UserProfile,
   MessagePayload,
+  UserProfile,
 } from '../../graphql/models/types';
+import { mapCustomerProfile, mapUserProfile } from '../../graphql/models/mappers';
+import { Customer } from '../../database/entities/customer.entity';
+import { User } from '../../database/entities/user.entity';
 import {
   RefreshTokenInput,
   SendCustomerOtpInput,
@@ -42,24 +44,13 @@ export class AuthResolver {
 
     if (result.customer) {
       return {
-        customer: {
-          id: result.customer.id,
-          phone: result.customer.phone,
-          fullName: result.customer.fullName,
-          email: result.customer.email,
-        },
+        customer: mapCustomerProfile(result.customer),
       };
     }
 
     if (result.user) {
       return {
-        user: {
-          id: result.user.id,
-          email: result.user.email,
-          fullName: result.user.fullName,
-          role: result.user.role,
-          storeId: storeId ?? null,
-        },
+        user: mapUserProfile(result.user, storeId),
       };
     }
 
@@ -88,7 +79,7 @@ export class AuthResolver {
       return {
         pendingDeletion: true,
         reactivationToken: result.reactivationToken,
-        customer: result.customer as CustomerProfile,
+        customer: mapCustomerProfile(result.customer as Customer),
       };
     }
 
@@ -97,7 +88,7 @@ export class AuthResolver {
         accessToken: result.accessToken!,
         refreshToken: result.refreshToken!,
       },
-      customer: result.customer as CustomerProfile,
+      customer: mapCustomerProfile(result.customer as Customer),
       pendingDeletion: false,
     };
   }
@@ -116,7 +107,7 @@ export class AuthResolver {
         accessToken: result.accessToken,
         refreshToken: result.refreshToken,
       },
-      user: result.user as UserProfile,
+      user: mapUserProfile(result.user as User),
     };
   }
 
@@ -134,7 +125,7 @@ export class AuthResolver {
         accessToken: result.accessToken,
         refreshToken: result.refreshToken,
       },
-      user: result.user as UserProfile,
+      user: mapUserProfile(result.user as User),
     };
   }
 
@@ -159,10 +150,7 @@ export class AuthResolver {
         accessToken: result.accessToken,
         refreshToken: result.refreshToken,
       },
-      user: {
-        ...(result.user as UserProfile),
-        storeId: input.storeId,
-      },
+      user: mapUserProfile(result.user as User, input.storeId),
     };
   }
 
@@ -176,13 +164,7 @@ export class AuthResolver {
     @Args('input') input: UpdateUserProfileInput,
   ): Promise<UserProfile> {
     const user = await this.authService.updateUserProfile(userId, input);
-    return {
-      id: user.id,
-      email: user.email,
-      fullName: user.fullName,
-      role: user.role,
-      storeId: storeId ?? null,
-    };
+    return mapUserProfile(user, storeId);
   }
 
   @Mutation(() => MessagePayload)

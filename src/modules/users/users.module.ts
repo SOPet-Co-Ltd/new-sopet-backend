@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
 import { OrdersModule } from '../orders/orders.module';
 import { PaymentsModule } from '../payments/payments.module';
+import { StorageModule } from '../storage/storage.module';
 import { UsersService } from './users.service';
 import { Customer } from '../../database/entities/customer.entity';
 import { SavedAddress } from '../../database/entities/saved-address.entity';
@@ -19,6 +20,7 @@ import { CustomerRepository } from '../../database/repositories/customer.reposit
     AuthModule,
     OrdersModule,
     PaymentsModule,
+    StorageModule,
     TypeOrmModule.forFeature([
       Customer,
       SavedAddress,

@@ -16,6 +16,7 @@ import { generateSlug as slugify } from '../../common/utils/slug.util';
 import { OmiseService } from '../omise/omise.service';
 import { pickDefaultAccessibleStoreId } from './store-selection.util';
 import { NotificationsService } from '../notifications/notifications.service';
+import { StorageService } from '../storage/storage.service';
 
 @Injectable()
 export class StoresService {
@@ -28,6 +29,7 @@ export class StoresService {
     private storeMemberRepository: Repository<StoreMember>,
     private readonly omiseService: OmiseService,
     private readonly notificationsService: NotificationsService,
+    private readonly storageService: StorageService,
   ) {}
 
   // Generate slug from store name
@@ -343,8 +345,20 @@ export class StoresService {
     if (data.contactPhone !== undefined) store.contactPhone = data.contactPhone;
     if (data.contactEmail !== undefined) store.contactEmail = data.contactEmail;
     if (data.address !== undefined) store.address = data.address;
-    if (data.logoUrl !== undefined) store.logoUrl = data.logoUrl;
-    if (data.bannerUrl !== undefined) store.bannerUrl = data.bannerUrl;
+    if (data.logoUrl !== undefined) {
+      const trimmedLogo = data.logoUrl?.trim() || null;
+      if (trimmedLogo) {
+        this.storageService.assertFolderImageUrl(trimmedLogo, 'stores');
+      }
+      store.logoUrl = trimmedLogo;
+    }
+    if (data.bannerUrl !== undefined) {
+      const trimmedBanner = data.bannerUrl?.trim() || null;
+      if (trimmedBanner) {
+        this.storageService.assertFolderImageUrl(trimmedBanner, 'stores');
+      }
+      store.bannerUrl = trimmedBanner;
+    }
     return this.storeRepository.save(store);
   }
 
