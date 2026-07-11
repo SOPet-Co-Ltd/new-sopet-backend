@@ -186,7 +186,9 @@ export class PlatformService {
   }
 
   async createAd(data: Partial<PlatformAd>): Promise<PlatformAd> {
-    const { sortOrder: _sortOrder, ...rest } = data;
+    // sortOrder is managed server-side; ignore client-supplied values on create.
+    const rest = { ...data };
+    delete rest.sortOrder;
     const ad = this.adRepository.create(rest);
     if (ad.isActive !== false) {
       await this.deactivateOtherAds();
@@ -204,7 +206,9 @@ export class PlatformService {
         message: 'Platform ad not found',
       });
     }
-    const { sortOrder: _sortOrder, ...rest } = data;
+    // sortOrder is managed server-side; ignore client-supplied values on update.
+    const rest = { ...data };
+    delete rest.sortOrder;
     Object.assign(ad, rest);
     if (ad.isActive) {
       await this.deactivateOtherAds(id);

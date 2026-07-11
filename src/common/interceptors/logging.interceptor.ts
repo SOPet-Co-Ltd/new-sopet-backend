@@ -12,7 +12,7 @@ export class LoggingInterceptor implements NestInterceptor {
     }
 
     const request = context.switchToHttp().getRequest();
-    const { method, url, body } = request;
+    const { method, url } = request;
     const userAgent = request.get('user-agent') || '';
     const ip = request.ip;
 
@@ -22,7 +22,7 @@ export class LoggingInterceptor implements NestInterceptor {
 
     return next.handle().pipe(
       tap({
-        next: (data) => {
+        next: () => {
           const responseTime = Date.now() - now;
           this.logger.log(`Outgoing Response: ${method} ${url} - ${responseTime}ms`);
         },

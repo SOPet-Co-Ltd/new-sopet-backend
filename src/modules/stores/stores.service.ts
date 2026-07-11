@@ -186,8 +186,9 @@ export class StoresService {
     return store;
   }
 
-  // Suspend store (admin)
+  // Suspend store (admin). adminId is kept for a future audit log entry.
   async suspend(id: string, adminId: string): Promise<Store> {
+    void adminId;
     const store = await this.findOne(id);
 
     store.status = StoreStatus.SUSPENDED;

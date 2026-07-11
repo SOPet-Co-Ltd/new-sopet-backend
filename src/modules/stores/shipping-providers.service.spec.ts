@@ -1,6 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { NotFoundException } from '@nestjs/common';
 import { ShippingProvidersService } from './shipping-providers.service';
 import { ShippingProvider } from '../../database/entities/shipping-provider.entity';
 

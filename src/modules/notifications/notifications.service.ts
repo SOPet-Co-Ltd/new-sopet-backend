@@ -6,7 +6,7 @@ import { EmailService } from '../email/email.service';
 import { Order } from '../../database/entities/order.entity';
 import { Customer } from '../../database/entities/customer.entity';
 import { UserNotification } from '../../database/entities/user-notification.entity';
-import { NotificationChannel, NotificationType } from '../../database/entities/notification.entity';
+import { NotificationChannel } from '../../database/entities/notification.entity';
 import { Store } from '../../database/entities/store.entity';
 import { StoreRequest } from '../../database/entities/store-request.entity';
 import { User, UserRole } from '../../database/entities/user.entity';

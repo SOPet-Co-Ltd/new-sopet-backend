@@ -10,7 +10,7 @@ import {
   Length,
   Min,
 } from 'class-validator';
-import { PromotionScope, PromotionType } from '../../database/entities/promotion.entity';
+import { PromotionType } from '../../database/entities/promotion.entity';
 
 @InputType()
 export class ValidatePromotionInput {

@@ -1,5 +1,4 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
-import { Job } from 'bullmq';
 import { PayoutSchedulerService } from './payout-scheduler.service';
 import { PAYOUT_SCHEDULER_QUEUE } from './payout-scheduler.constants';
 
@@ -9,7 +8,7 @@ export class PayoutSchedulerProcessor extends WorkerHost {
     super();
   }
 
-  async process(_job: Job): Promise<void> {
+  async process(): Promise<void> {
     await this.payoutSchedulerService.runScheduledPayouts();
   }
 }

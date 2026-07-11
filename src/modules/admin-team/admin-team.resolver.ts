@@ -1,6 +1,6 @@
 import { Args, Field, InputType, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { UseGuards } from '@nestjs/common';
-import { IsEmail, IsNotEmpty } from 'class-validator';
+import { IsEmail } from 'class-validator';
 import { AdminTeamService } from './admin-team.service';
 import { AdminInvitationType, AdminTeamMemberType } from '../../graphql/models/types';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';

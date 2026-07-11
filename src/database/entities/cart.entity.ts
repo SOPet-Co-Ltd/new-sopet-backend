@@ -9,7 +9,7 @@ import {
   JoinColumn,
   Index,
 } from 'typeorm';
-import { IsOptional, IsNotEmpty } from 'class-validator';
+import { IsOptional } from 'class-validator';
 import { Customer } from './customer.entity';
 import { CartItem } from './cart-item.entity';
 

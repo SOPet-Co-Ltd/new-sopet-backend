@@ -306,7 +306,7 @@ export class AuthService {
       }
 
       return this.generateTokens(newPayload);
-    } catch (error) {
+    } catch {
       throw new UnauthorizedException({
         code: 'INVALID_REFRESH_TOKEN',
         message: 'Invalid or expired refresh token',

@@ -19,7 +19,6 @@ import { CustomerRepository } from '../../database/repositories/customer.reposit
 import { OtpCode } from '../../database/entities/otp-code.entity';
 import { OrdersService } from '../orders/orders.service';
 import { PaymentsService, SavedOmiseCardDetails } from '../payments/payments.service';
-import { PaymentsModule } from '../payments/payments.module';
 import { normalizeThaiPhoneToLocal } from '../../common/utils/phone.util';
 import { UpdateProfileDto, CreateAddressDto, UpdateAddressDto } from './dto';
 import { JwtPayload } from '../../common/interfaces';

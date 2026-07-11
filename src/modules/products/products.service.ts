@@ -6,7 +6,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, ILike, Between, In, SelectQueryBuilder } from 'typeorm';
+import { Repository, In, SelectQueryBuilder } from 'typeorm';
 import { Product, ProductStatus } from '../../database/entities/product.entity';
 import { ProductVariant } from '../../database/entities/product-variant.entity';
 import { ProductImage } from '../../database/entities/product-image.entity';

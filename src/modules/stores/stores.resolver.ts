@@ -38,7 +38,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { AuthRateLimitGuard } from '../auth/guards/auth-rate-limit.guard';
 import { StoreStatus } from '../../database/entities/store.entity';
 import { Field, InputType } from '@nestjs/graphql';
-import { IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
+import { IsOptional, IsString, IsUUID } from 'class-validator';
 import { RegisterStoreInput } from './register-store.input';
 import {
   InviteStoreMemberInput,

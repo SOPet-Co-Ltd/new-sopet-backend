@@ -33,6 +33,7 @@ export function validateOptionalTrackingUrl(trackingUrl?: string | null): string
   }
 
   if (parsed.protocol !== 'https:') {
+    // Tracking links are rendered in customer emails; require HTTPS to avoid mixed-content blocks.
     throw new BadRequestException({
       code: 'TRACKING_URL_INSECURE',
       message: 'Tracking URL must use HTTPS',

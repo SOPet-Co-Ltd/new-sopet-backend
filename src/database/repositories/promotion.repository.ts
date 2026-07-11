@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, IsNull, LessThanOrEqual, MoreThanOrEqual } from 'typeorm';
+import { Repository, IsNull } from 'typeorm';
 import { Promotion, PromotionScope, PromotionType } from '../entities/promotion.entity';
 import { PromotionUsage } from '../entities/promotion-usage.entity';
 

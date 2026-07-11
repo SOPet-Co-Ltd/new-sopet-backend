@@ -9,10 +9,7 @@ import { PaymentsWebhookController } from './payments-webhook.controller';
 import { Payment } from '../../database/entities/payment.entity';
 import { Order } from '../../database/entities/order.entity';
 import { Customer } from '../../database/entities/customer.entity';
-import {
-  SavedPaymentMethod,
-  PaymentMethodType,
-} from '../../database/entities/saved-payment-method.entity';
+import { SavedPaymentMethod } from '../../database/entities/saved-payment-method.entity';
 import { PaymentsResolver } from './payments.resolver';
 import { PaymentExpiryScheduler } from './payment-expiry.scheduler';
 

@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { StoresService } from './stores.service';
 import { StoreStatus } from '../../database/entities/store.entity';
 import { UserRole } from '../../database/entities/user.entity';

@@ -3,7 +3,6 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { SearchEvent } from '../../database/entities/search-event.entity';
 import { SearchSuggestionEvent } from '../../database/entities/search-suggestion-event.entity';
-import type { SearchContextPayload } from './search.types';
 import { resolveTrigramMinSimilarity } from './trigram-match.util';
 
 export type SearchEventInput = {

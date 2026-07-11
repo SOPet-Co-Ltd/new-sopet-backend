@@ -8,6 +8,7 @@ export class RrfEngine {
     for (const list of lists) {
       list.forEach((id, index) => {
         const rank = index + 1;
+        // Reciprocal rank fusion: 1 / (k + rank) per list, summed across retrievers.
         scores.set(id, (scores.get(id) ?? 0) + 1 / (k + rank));
       });
     }

@@ -17,8 +17,10 @@ export class SearchSuggestionsService {
   async getSuggestions(
     query: string,
     limit = DEFAULT_LIMIT,
-    _sessionId?: string,
+    sessionId?: string,
   ): Promise<SearchSuggestionsPayload> {
+    // sessionId is forwarded for future suggestion personalization; not used yet.
+    void sessionId;
     const trimmed = query.trim();
     if (trimmed.length < MIN_QUERY_LENGTH) {
       throw new BadRequestException('Query must be at least 2 characters');

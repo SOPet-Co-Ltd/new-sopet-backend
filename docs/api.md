@@ -112,6 +112,14 @@ Order sync on resolve: `src/modules/disputes/dispute-order-sync.util.ts`. Cancel
 
 Runtime reference: [workspace returns-and-disputes](../../new-sopet-workspace/docs/developer/returns-and-disputes.md).
 
+### Order tracking (public, no auth)
+
+| Operation                    | Role        | Notes                                                                                                                                                        |
+| ---------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `orderTracking(orderNumber)` | `@Public()` | Returns `OrderTrackingType` — capability-URL lookup, dedicated mapper excludes all PII (`shippingAddress`, `guest*`, `customerId`, `paymentReference`, etc.) |
+
+Unknown, malformed, or whitespace-only `orderNumber` all throw the identical `NotFoundException({ code: 'ORDER_NOT_FOUND' })` to prevent order enumeration. Implementation: `src/modules/orders/orders.service.ts` (`findByOrderNumber`), `src/modules/orders/orders.resolver.ts`, mapper in `src/graphql/models/mappers.ts`. Consumed by storefront `/track/[orderNumber]` and linked from the admin vendor orders action menu.
+
 ## REST endpoints (limited)
 
 | Method | Path                               | Auth                          | Module                           |

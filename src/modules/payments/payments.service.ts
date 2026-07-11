@@ -19,11 +19,6 @@ import { InventoryService } from '../inventory/inventory.service';
 import { verifyOmiseWebhookSignature } from './omise-webhook.util';
 import { normalizeCheckoutPaymentMethod } from '../../common/utils/checkout-payment.util';
 
-const ONLINE_PAYMENT_METHODS = new Set<PaymentMethod>([
-  PaymentMethod.PROMPTPAY,
-  PaymentMethod.CREDIT_CARD,
-]);
-
 interface OmiseCharge {
   id: string;
   status: string;

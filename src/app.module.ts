@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { APP_FILTER, APP_INTERCEPTOR, APP_GUARD, APP_PIPE } from '@nestjs/core';
 import appConfig from './config/app.config';
@@ -60,7 +60,7 @@ import { SearchModule } from './modules/search/search.module';
     // Database
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
-      useFactory: (configService: ConfigService) => ({
+      useFactory: () => ({
         type: 'postgres',
         host: process.env.DB_HOST || 'localhost',
         port: parseInt(process.env.DB_PORT || '5432', 10),
@@ -73,7 +73,6 @@ import { SearchModule } from './modules/search/search.module';
         migrationsRun: false,
         logging: process.env.NODE_ENV === 'development',
       }),
-      inject: [ConfigService],
     }),
 
     // Feature Modules

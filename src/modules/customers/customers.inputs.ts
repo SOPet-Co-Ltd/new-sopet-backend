@@ -1,13 +1,5 @@
 import { Field, InputType } from '@nestjs/graphql';
-import {
-  IsEmail,
-  IsNotEmpty,
-  IsOptional,
-  IsPhoneNumber,
-  IsString,
-  IsUUID,
-  Length,
-} from 'class-validator';
+import { IsEmail, IsOptional, IsPhoneNumber, IsString, IsUUID, Length } from 'class-validator';
 
 @InputType()
 export class UpdateCustomerAsAdminInput {
