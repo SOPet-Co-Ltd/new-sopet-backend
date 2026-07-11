@@ -640,6 +640,24 @@ export class StoreMemberInvitationType {
 }
 
 @ObjectType()
+export class StoreInvitationPreviewType {
+  @Field()
+  storeName: string;
+
+  @Field()
+  email: string;
+
+  @Field()
+  role: string;
+
+  @Field()
+  expiresAt: string;
+
+  @Field()
+  userExists: boolean;
+}
+
+@ObjectType()
 export class ShippingProviderType {
   @Field()
   id: string;

@@ -7,12 +7,13 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { randomBytes } from 'crypto';
+import * as bcrypt from 'bcrypt';
 import { StoreMember, StoreMemberRole } from '../../database/entities/store-member.entity';
 import {
   StoreMemberInvitation,
   StoreMemberInvitationStatus,
 } from '../../database/entities/store-member-invitation.entity';
-import { User } from '../../database/entities/user.entity';
+import { User, UserRole } from '../../database/entities/user.entity';
 import { Store } from '../../database/entities/store.entity';
 import { EmailDeliveryService } from '../email/email-delivery.service';
 
@@ -100,6 +101,91 @@ export class StoreTeamService {
     );
 
     return saved;
+  }
+
+  async getInvitationByToken(token: string): Promise<{
+    storeName: string;
+    email: string;
+    role: StoreMemberRole;
+    expiresAt: Date;
+    userExists: boolean;
+  }> {
+    const invitation = await this.findValidPendingInvitation(token);
+    const store = await this.storeRepository.findOne({
+      where: { id: invitation.storeId },
+    });
+
+    const existingUser = await this.userRepository.findOne({
+      where: { email: invitation.email },
+    });
+
+    return {
+      storeName: store?.name ?? 'ร้านค้า',
+      email: invitation.email,
+      role: invitation.role,
+      expiresAt: invitation.expiresAt,
+      userExists: !!existingUser,
+    };
+  }
+
+  async acceptInvitationAsNewUser(
+    token: string,
+    password: string,
+    fullName: string,
+  ): Promise<StoreMember> {
+    const invitation = await this.findValidPendingInvitation(token);
+
+    const existingUser = await this.userRepository.findOne({
+      where: { email: invitation.email },
+    });
+    if (existingUser) {
+      throw new ConflictException({
+        code: 'EMAIL_EXISTS',
+        message: 'Email already registered — please log in to accept this invitation',
+      });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    const user = this.userRepository.create({
+      email: invitation.email,
+      passwordHash,
+      fullName,
+      role: UserRole.VENDOR,
+    });
+    const savedUser = await this.userRepository.save(user);
+
+    return this.acceptInvitation(token, savedUser.id);
+  }
+
+  private async findValidPendingInvitation(token: string): Promise<StoreMemberInvitation> {
+    const invitation = await this.invitationRepository.findOne({
+      where: { token },
+    });
+
+    if (!invitation) {
+      throw new NotFoundException({
+        code: 'INVITATION_NOT_FOUND',
+        message: 'Invitation not found',
+      });
+    }
+
+    if (invitation.status !== StoreMemberInvitationStatus.PENDING) {
+      throw new BadRequestException({
+        code: 'INVITATION_INVALID',
+        message: 'Invitation is no longer valid',
+      });
+    }
+
+    if (invitation.expiresAt < new Date()) {
+      invitation.status = StoreMemberInvitationStatus.EXPIRED;
+      await this.invitationRepository.save(invitation);
+      throw new BadRequestException({
+        code: 'INVITATION_EXPIRED',
+        message: 'Invitation has expired',
+      });
+    }
+
+    return invitation;
   }
 
   async acceptInvitation(token: string, userId: string): Promise<StoreMember> {

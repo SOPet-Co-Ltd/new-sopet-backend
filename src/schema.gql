@@ -2,6 +2,12 @@
 # THIS FILE WAS AUTOMATICALLY GENERATED (DO NOT MODIFY)
 # ------------------------------------------------------
 
+input AcceptStoreMemberInvitationInput {
+  fullName: String!
+  password: String!
+  token: String!
+}
+
 input AcceptVendorInvitationInput {
   fullName: String!
   password: String!
@@ -457,6 +463,7 @@ type MessagePayload {
 
 type Mutation {
   acceptStoreInvitation(token: String!): StoreMemberType!
+  acceptStoreMemberInvitation(input: AcceptStoreMemberInvitationInput!): VendorAuthPayload!
   acceptVendorInvitation(input: AcceptVendorInvitationInput!): VendorAuthPayload!
   acknowledgeVendorOrder(orderId: String!): OrderType!
   addFavorite(input: FavoriteProductInput!): FavoriteType!
@@ -926,6 +933,7 @@ type Query {
   customerReviewableItems: [CustomerReviewableItemType!]!
   exportSearchAnalyticsCsv(fromDate: DateTime, toDate: DateTime): String!
   favorites: [FavoriteType!]!
+  getStoreInvitationByToken(token: String!): StoreInvitationPreviewType!
   guestOrders(guestPhone: String!): [OrderType!]!
 
   """GraphQL API health check"""
@@ -1246,6 +1254,14 @@ type StoreApiKeyType {
   lastUsedAt: DateTime
   name: String!
   revokedAt: DateTime
+}
+
+type StoreInvitationPreviewType {
+  email: String!
+  expiresAt: String!
+  role: String!
+  storeName: String!
+  userExists: Boolean!
 }
 
 type StoreMemberInvitationType {

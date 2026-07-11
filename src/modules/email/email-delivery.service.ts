@@ -56,7 +56,7 @@ export class EmailDeliveryService {
     storeId: string,
     storeName: string,
   ): Promise<void> {
-    const inviteUrl = `${this.adminPanelUrl}/register?storeToken=${token}&storeId=${storeId}`;
+    const inviteUrl = `${this.adminPanelUrl}/invite/store?token=${token}`;
     await this.sendTemplate(
       email,
       storeMemberInviteTemplate({ inviteUrl, storeName }),

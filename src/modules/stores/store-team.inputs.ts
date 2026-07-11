@@ -1,5 +1,14 @@
 import { Field, InputType } from '@nestjs/graphql';
-import { IsEmail, IsEnum, IsOptional, IsString, IsUUID, Length } from 'class-validator';
+import {
+  IsEmail,
+  IsEnum,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Length,
+  MinLength,
+} from 'class-validator';
 import { StoreMemberRole } from '../../database/entities/store-member.entity';
 
 @InputType()
@@ -11,6 +20,26 @@ export class InviteStoreMemberInput {
   @Field()
   @IsEnum(StoreMemberRole)
   role: StoreMemberRole;
+}
+
+@InputType()
+export class AcceptStoreMemberInvitationInput {
+  @Field()
+  @IsNotEmpty()
+  @IsString()
+  token: string;
+
+  @Field()
+  @IsNotEmpty()
+  @IsString()
+  @MinLength(8)
+  password: string;
+
+  @Field()
+  @IsNotEmpty()
+  @IsString()
+  @Length(1, 255)
+  fullName: string;
 }
 
 @InputType()

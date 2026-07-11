@@ -14,6 +14,7 @@ import {
   UserProfile,
   StoreMemberType,
   StoreMemberInvitationType,
+  StoreInvitationPreviewType,
   StoreShippingOptionType,
   ShippingProviderType,
   VendorStoreType,
@@ -41,6 +42,7 @@ import { IsOptional, IsString, IsUUID } from 'class-validator';
 import { RegisterStoreInput } from './register-store.input';
 import {
   InviteStoreMemberInput,
+  AcceptStoreMemberInvitationInput,
   UpdateStoreMemberRoleInput,
   UpdateStoreSettingsInput,
   UpdateStorePayoutInput,
@@ -680,6 +682,55 @@ export class StoresResolver {
       input.role,
     );
     return mapStoreMemberInvitation(invitation);
+  }
+
+  @Query(() => StoreInvitationPreviewType)
+  @Public()
+  async getStoreInvitationByToken(
+    @Args('token') token: string,
+  ): Promise<StoreInvitationPreviewType> {
+    const preview = await this.storeTeamService.getInvitationByToken(token);
+    return {
+      storeName: preview.storeName,
+      email: preview.email,
+      role: preview.role,
+      expiresAt: preview.expiresAt.toISOString(),
+      userExists: preview.userExists,
+    };
+  }
+
+  @Mutation(() => VendorAuthPayload)
+  @Public()
+  @UseGuards(AuthRateLimitGuard)
+  async acceptStoreMemberInvitation(
+    @Args('input') input: AcceptStoreMemberInvitationInput,
+  ): Promise<VendorAuthPayload> {
+    const member = await this.storeTeamService.acceptInvitationAsNewUser(
+      input.token,
+      input.password,
+      input.fullName,
+    );
+
+    const email = member.user?.email;
+    if (!email) {
+      throw new BadRequestException({
+        code: 'USER_NOT_FOUND',
+        message: 'User not found',
+      });
+    }
+
+    const result = await this.authService.login({
+      email,
+      password: input.password,
+    });
+
+    return {
+      tokens: {
+        accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
+      },
+      user: result.user as UserProfile,
+    };
   }
 
   @Mutation(() => StoreMemberType)
