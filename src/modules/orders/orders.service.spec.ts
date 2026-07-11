@@ -1,7 +1,9 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { NotFoundException } from '@nestjs/common';
 import { OrdersService } from './orders.service';
-import { OrderStatus } from '../../database/entities/order.entity';
+import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
+import { FulfillmentStatus } from '../../database/entities/order-item.entity';
 import { CustomerOrderListFilter } from './order-list-filter.util';
+import * as OrderMapper from './order.mapper';
 
 describe('OrdersService', () => {
   let service: OrdersService;
@@ -65,11 +67,12 @@ describe('OrdersService', () => {
     inventoryService = { restoreOrderStock: jest.fn().mockResolvedValue(true) };
 
     mockManager = {
-      create: jest.fn((_entity, data) => ({ ...data })),
-      save: jest.fn(async (entity, data?) => {
+      create: jest.fn((_entity: unknown, data: Record<string, unknown>) => ({ ...data })),
+      save: jest.fn((entity: unknown, data?: unknown) => {
         const payload = data ?? entity;
-        if (Array.isArray(payload)) return payload;
-        return { ...payload, id: payload.id ?? 'ord-1' };
+        if (Array.isArray(payload)) return payload as unknown[];
+        const record = payload as Record<string, unknown>;
+        return { ...record, id: record.id ?? 'ord-1' };
       }),
       findOne: jest.fn().mockResolvedValue(variant),
       update: jest.fn(),
@@ -77,7 +80,7 @@ describe('OrdersService', () => {
     };
 
     dataSource = {
-      transaction: jest.fn(async (cb) => cb(mockManager)),
+      transaction: jest.fn((cb: (manager: typeof mockManager) => unknown) => cb(mockManager)),
     };
 
     service = new OrdersService(
@@ -204,6 +207,8 @@ describe('OrdersService', () => {
     expect(notificationsService.notifyVendorsAboutNewOrder).toHaveBeenCalledWith(
       expect.objectContaining({
         id: 'ord-1',
+        // jest matchers are typed as any; safe in assertion context
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         items: expect.arrayContaining([
           expect.objectContaining({ storeId: 'store-1' }),
           expect.objectContaining({ storeId: 'store-1' }),
@@ -460,6 +465,114 @@ describe('OrdersService', () => {
       const productId = await service.findLatestPurchaseProductId('cust-1');
 
       expect(productId).toBe('prod-1');
+    });
+  });
+
+  describe('findByOrderNumber', () => {
+    it('throws ORDER_NOT_FOUND when order does not exist', async () => {
+      orderRepository.findOne.mockResolvedValue(null);
+
+      const findByOrderNumber = (
+        service as unknown as { findByOrderNumber: (orderNumber: string) => Promise<unknown> }
+      ).findByOrderNumber;
+
+      await expect(findByOrderNumber.call(service, 'ORD-MISSING')).rejects.toMatchObject({
+        response: { code: 'ORDER_NOT_FOUND' },
+      });
+    });
+  });
+
+  describe('mapOrderTracking', () => {
+    const PII_KEYS = [
+      'id',
+      'customerId',
+      'guestPhone',
+      'guestName',
+      'guestEmail',
+      'shippingAddress',
+      'paymentMethod',
+      'paymentReference',
+      'notes',
+      'paidAt',
+    ] as const;
+
+    it('excludes PII fields when entity includes shippingAddress and guest fields', () => {
+      const mapOrderTracking = (
+        OrderMapper as unknown as { mapOrderTracking: (order: Order) => Record<string, unknown> }
+      ).mapOrderTracking;
+
+      expect(mapOrderTracking).toBeDefined();
+
+      const createdAt = new Date('2024-06-15T10:30:00.000Z');
+      const order = {
+        id: 'order-1',
+        orderNumber: 'ORD-TRACK-001',
+        customerId: 'cust-1',
+        guestPhone: '0812345678',
+        guestName: 'Guest User',
+        guestEmail: 'guest@example.com',
+        status: OrderStatus.PAID,
+        subtotal: 500,
+        discountAmount: 0,
+        shippingFee: 80,
+        total: 580,
+        paymentMethod: PaymentMethod.PROMPTPAY,
+        paymentReference: 'pay-ref-1',
+        paidAt: createdAt,
+        notes: 'Leave at door',
+        createdAt,
+        updatedAt: createdAt,
+        items: [
+          {
+            id: 'item-1',
+            orderId: 'order-1',
+            storeId: 'store-1',
+            variantId: 'variant-1',
+            productName: 'Dog Food',
+            variantOptions: {},
+            unitPrice: 250,
+            quantity: 2,
+            subtotal: 500,
+            fulfillmentStatus: FulfillmentStatus.PENDING,
+            trackingNumber: null,
+            shippedAt: null,
+            deliveredAt: null,
+            createdAt,
+            updatedAt: createdAt,
+          },
+        ],
+        storeShippings: [
+          {
+            id: 'oss-1',
+            orderId: 'order-1',
+            storeId: 'store-1',
+            shippingOptionId: 'ship-opt-1',
+            optionName: 'Standard Delivery',
+            shippingFee: 50,
+            createdAt,
+          },
+        ],
+        shippingAddress: {
+          id: 'addr-1',
+          orderId: 'order-1',
+          savedAddressId: null,
+          fullName: 'Guest User',
+          phone: '0812345678',
+          addressLine1: '123 Main St',
+          addressLine2: null,
+          tumbon: null,
+          amphoe: 'Bang Kapi',
+          province: 'Bangkok',
+          postalCode: '10240',
+          createdAt,
+        },
+      } as Order;
+
+      const result = mapOrderTracking(order);
+
+      for (const key of PII_KEYS) {
+        expect(result).not.toHaveProperty(key);
+      }
     });
   });
 

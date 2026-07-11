@@ -1,8 +1,10 @@
 import 'reflect-metadata';
 import { OrdersResolver } from './orders.resolver';
 import { OrdersService } from './orders.service';
+import { OrderFulfillmentService } from './order-fulfillment.service';
 import { ProductsService } from '../products/products.service';
 import { StoresService } from '../stores/stores.service';
+import { IS_PUBLIC_KEY } from '../../common/decorators/public.decorator';
 import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
 import { FulfillmentStatus } from '../../database/entities/order-item.entity';
 
@@ -104,6 +106,7 @@ describe('OrdersResolver mapOrder extensions', () => {
     Pick<ProductsService, 'findOnePublished' | 'findPublishedByIds'>
   >;
   let storesService: jest.Mocked<Pick<StoresService, 'assertStoreOwner' | 'getAccessibleStores'>>;
+  let orderFulfillmentService: jest.Mocked<Pick<OrderFulfillmentService, never>>;
   let resolver: OrdersResolver;
 
   beforeEach(() => {
@@ -127,8 +130,10 @@ describe('OrdersResolver mapOrder extensions', () => {
       assertStoreOwner: jest.fn(),
       getAccessibleStores: jest.fn(),
     };
+    orderFulfillmentService = {};
     resolver = new OrdersResolver(
       ordersService as unknown as OrdersService,
+      orderFulfillmentService as unknown as OrderFulfillmentService,
       productsService as unknown as ProductsService,
       storesService as unknown as StoresService,
     );
@@ -248,6 +253,21 @@ describe('OrdersResolver mapOrder extensions', () => {
       expect(result[0].createdAt).toBeInstanceOf(Date);
       expect(result[0].storeShippings).toHaveLength(2);
       expect(result[0].items[0].variantId).toBe('variant-1');
+    });
+  });
+
+  describe('orderTracking', () => {
+    it('is decorated with @Public()', () => {
+      const orderTrackingMethod = Object.getOwnPropertyDescriptor(
+        OrdersResolver.prototype,
+        'orderTracking',
+      )?.value as ((...args: unknown[]) => unknown) | undefined;
+
+      expect(orderTrackingMethod).toBeDefined();
+
+      const isPublic = Reflect.getMetadata(IS_PUBLIC_KEY, orderTrackingMethod!) as
+        boolean | undefined;
+      expect(isPublic).toBe(true);
     });
   });
 });
