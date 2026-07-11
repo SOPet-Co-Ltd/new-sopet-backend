@@ -662,6 +662,38 @@ type OrderStoreShippingType {
   storeId: String!
 }
 
+type OrderTrackingItemType {
+  fulfillmentProvider: String
+  fulfillmentStatus: String!
+  productId: String
+  productImageUrl: String
+  productName: String!
+  quantity: Int!
+  storeId: String!
+  subtotal: Float!
+  trackingNumber: String
+  trackingUrl: String
+  unitPrice: Float!
+}
+
+type OrderTrackingStoreShippingType {
+  optionName: String!
+  shippingFee: Float!
+  storeId: String!
+}
+
+type OrderTrackingType {
+  createdAt: DateTime!
+  discountAmount: Float!
+  items: [OrderTrackingItemType!]!
+  orderNumber: String!
+  shippingFee: Float!
+  status: String!
+  storeShippings: [OrderTrackingStoreShippingType!]!
+  subtotal: Float!
+  total: Float!
+}
+
 type OrderType {
   createdAt: DateTime!
   discountAmount: Float!
@@ -906,6 +938,7 @@ type Query {
   myTagProposals: [TagType!]!
   notifications(unreadOnly: Boolean): [NotificationType!]!
   order(id: String!): OrderType!
+  orderTracking(orderNumber: String!): OrderTrackingType!
   orders(filter: CustomerOrderListFilter = ALL, limit: Int = 10, page: Int = 1): OrderConnection!
   payment(id: String!): PaymentType!
   paymentByOrderId(orderId: String!): PaymentType!
