@@ -76,6 +76,7 @@ describe('Product publish (e2e)', () => {
     productRepository.findOne.mockResolvedValue({
       ...product,
       categoryId: 'cat-1',
+      petTypeId: 'pet-1',
       images: [{ id: 'img-1', url: 'https://example.com/a.jpg' }],
       variants: [{ id: 'var-1', sku: 'SKU-1', stockQuantity: 10, priceAdjustment: 0 }],
     });

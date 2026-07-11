@@ -10,8 +10,11 @@ import { PaymentsWebhookController } from '../src/modules/payments/payments-webh
 import { PaymentsService } from '../src/modules/payments/payments.service';
 import { Payment } from '../src/database/entities/payment.entity';
 import { Order } from '../src/database/entities/order.entity';
+import { Customer } from '../src/database/entities/customer.entity';
 import { SavedPaymentMethod } from '../src/database/entities/saved-payment-method.entity';
 import { NotificationsService } from '../src/modules/notifications/notifications.service';
+import { PaymentEventsService } from '../src/modules/payments/payment-events.service';
+import { InventoryService } from '../src/modules/inventory/inventory.service';
 import { computeOmiseWebhookSignature } from '../src/modules/payments/omise-webhook.util';
 
 describe('Omise webhook (e2e)', () => {
@@ -45,8 +48,17 @@ describe('Omise webhook (e2e)', () => {
         PaymentsService,
         { provide: getRepositoryToken(Payment), useValue: paymentRepo },
         { provide: getRepositoryToken(Order), useValue: orderRepo },
+        { provide: getRepositoryToken(Customer), useValue: { findOne: jest.fn() } },
         { provide: getRepositoryToken(SavedPaymentMethod), useValue: { findOne: jest.fn() } },
         { provide: NotificationsService, useValue: notifications },
+        {
+          provide: PaymentEventsService,
+          useValue: { publishPaymentStatusUpdated: jest.fn() },
+        },
+        {
+          provide: InventoryService,
+          useValue: { restoreOrderStock: jest.fn().mockResolvedValue(true) },
+        },
       ],
     }).compile();
 

@@ -16,6 +16,7 @@ import { OtpCode } from '../../database/entities/otp-code.entity';
 import { CustomerRepository } from '../../database/repositories/customer.repository';
 import { OrdersService } from '../orders/orders.service';
 import { PaymentsService } from '../payments/payments.service';
+import { StorageService } from '../storage/storage.service';
 
 describe('UsersService', () => {
   let service: UsersService;
@@ -79,6 +80,12 @@ describe('UsersService', () => {
         { provide: PaymentsService, useValue: paymentsService },
         { provide: JwtService, useValue: jwtService },
         { provide: ConfigService, useValue: configService },
+        {
+          provide: StorageService,
+          useValue: {
+            assertFolderImageUrl: jest.fn().mockResolvedValue(undefined),
+          },
+        },
       ],
     }).compile();
 

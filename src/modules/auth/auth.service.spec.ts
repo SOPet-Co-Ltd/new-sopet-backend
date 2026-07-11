@@ -16,6 +16,7 @@ import { SmsService } from '../sms/sms.service';
 import { CartService } from '../cart/cart.service';
 import { GuestOrderLinkService } from '../orders/guest-order-link.service';
 import { EmailDeliveryService } from '../email/email-delivery.service';
+import { StorageService } from '../storage/storage.service';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -74,6 +75,12 @@ describe('AuthService', () => {
         { provide: CartService, useValue: cartService },
         { provide: GuestOrderLinkService, useValue: guestOrderLinkService },
         { provide: EmailDeliveryService, useValue: { sendPasswordReset: jest.fn() } },
+        {
+          provide: StorageService,
+          useValue: {
+            assertFolderImageUrl: jest.fn().mockResolvedValue(undefined),
+          },
+        },
       ],
     }).compile();
 

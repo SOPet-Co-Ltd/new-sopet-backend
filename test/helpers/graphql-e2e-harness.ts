@@ -23,6 +23,9 @@ import { PetType } from '../../src/database/entities/pet-type.entity';
 import { Brand } from '../../src/database/entities/brand.entity';
 import { AnalyticsService } from '../../src/modules/analytics/analytics.service';
 import { SearchAnalyticsService } from '../../src/modules/search/search-analytics.service';
+import { SearchRepository } from '../../src/modules/search/search.repository';
+import { PersonalizationService } from '../../src/modules/search/personalization.service';
+import { SearchSettingsService } from '../../src/modules/search/search-settings.service';
 import { OmiseService } from '../../src/modules/omise/omise.service';
 import { NotificationsService } from '../../src/modules/notifications/notifications.service';
 import { StorageService } from '../../src/modules/storage/storage.service';
@@ -32,6 +35,57 @@ export interface SearchTaxonomyGraphqlE2eHarness {
   app: INestApplication;
   moduleFixture: TestingModule;
 }
+
+export const searchTaxonomyGraphqlMockProviders = [
+  {
+    provide: AnalyticsService,
+    useValue: {
+      getProductSoldCounts: jest.fn().mockResolvedValue([]),
+    },
+  },
+  {
+    provide: SearchAnalyticsService,
+    useValue: {
+      recordSearchEvent: jest.fn(),
+    },
+  },
+  {
+    provide: SearchRepository,
+    useValue: {
+      fetchProductPersonalizationMeta: jest.fn().mockResolvedValue([]),
+    },
+  },
+  {
+    provide: PersonalizationService,
+    useValue: {
+      buildProfile: jest.fn().mockResolvedValue(null),
+      reorderIds: jest.fn((ids: string[]) => ids),
+    },
+  },
+  {
+    provide: SearchSettingsService,
+    useValue: {
+      getRankingWeights: jest.fn().mockResolvedValue({}),
+    },
+  },
+  {
+    provide: OmiseService,
+    useValue: {},
+  },
+  {
+    provide: NotificationsService,
+    useValue: {
+      notifyTaxonomyProposal: jest.fn(),
+      notifyStoreStatusChanged: jest.fn(),
+    },
+  },
+  {
+    provide: StorageService,
+    useValue: {
+      assertFolderImageUrl: jest.fn().mockResolvedValue(undefined),
+    },
+  },
+];
 
 /**
  * Boots Nest + GraphQL + real PostgreSQL for search-taxonomy integration suites.
@@ -68,35 +122,7 @@ export async function createSearchTaxonomyGraphqlE2eHarness(): Promise<SearchTax
       TaxonomyResolver,
       TaxonomyService,
       GraphqlContextFactory,
-      {
-        provide: AnalyticsService,
-        useValue: {
-          getProductSoldCounts: jest.fn().mockResolvedValue([]),
-        },
-      },
-      {
-        provide: SearchAnalyticsService,
-        useValue: {
-          recordSearchEvent: jest.fn(),
-        },
-      },
-      {
-        provide: OmiseService,
-        useValue: {},
-      },
-      {
-        provide: NotificationsService,
-        useValue: {
-          notifyTaxonomyProposal: jest.fn(),
-          notifyStoreStatusChanged: jest.fn(),
-        },
-      },
-      {
-        provide: StorageService,
-        useValue: {
-          assertFolderImageUrl: jest.fn().mockResolvedValue(undefined),
-        },
-      },
+      ...searchTaxonomyGraphqlMockProviders,
     ],
   }).compile();
 

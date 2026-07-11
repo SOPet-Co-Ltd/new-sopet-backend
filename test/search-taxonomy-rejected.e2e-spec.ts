@@ -36,11 +36,7 @@ import { ProductsService } from '../src/modules/products/products.service';
 import { StoresService } from '../src/modules/stores/stores.service';
 import { TaxonomyResolver } from '../src/modules/taxonomy/taxonomy.resolver';
 import { TaxonomyService } from '../src/modules/taxonomy/taxonomy.service';
-import { AnalyticsService } from '../src/modules/analytics/analytics.service';
-import { SearchAnalyticsService } from '../src/modules/search/search-analytics.service';
-import { OmiseService } from '../src/modules/omise/omise.service';
-import { NotificationsService } from '../src/modules/notifications/notifications.service';
-import { StorageService } from '../src/modules/storage/storage.service';
+import { searchTaxonomyGraphqlMockProviders } from './helpers/graphql-e2e-harness';
 import { JwtAuthGuard } from '../src/modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../src/modules/auth/guards/roles.guard';
 import {
@@ -127,26 +123,7 @@ async function createRejectedTaxonomyHarness(): Promise<INestApplication> {
       TaxonomyResolver,
       TaxonomyService,
       GraphqlContextFactory,
-      {
-        provide: AnalyticsService,
-        useValue: { getProductSoldCounts: jest.fn().mockResolvedValue([]) },
-      },
-      {
-        provide: SearchAnalyticsService,
-        useValue: { recordSearchEvent: jest.fn() },
-      },
-      { provide: OmiseService, useValue: {} },
-      {
-        provide: NotificationsService,
-        useValue: {
-          notifyTaxonomyProposal: jest.fn(),
-          notifyStoreStatusChanged: jest.fn(),
-        },
-      },
-      {
-        provide: StorageService,
-        useValue: { assertFolderImageUrl: jest.fn().mockResolvedValue(undefined) },
-      },
+      ...searchTaxonomyGraphqlMockProviders,
     ],
   })
     .overrideGuard(JwtAuthGuard)

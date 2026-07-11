@@ -4,7 +4,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { PaymentsService } from './payments.service';
 import { Payment } from '../../database/entities/payment.entity';
-import { Order } from '../../database/entities/order.entity';
+import { Order, OrderStatus } from '../../database/entities/order.entity';
 import { Customer } from '../../database/entities/customer.entity';
 import { SavedPaymentMethod } from '../../database/entities/saved-payment-method.entity';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -308,7 +308,7 @@ describe('PaymentsService createCharge saved card', () => {
     orderRepository.findOne.mockResolvedValue({
       id: 'ord-1',
       customerId: 'cust-1',
-      status: 'pending',
+      status: OrderStatus.PENDING_PAYMENT,
     });
     orderRepository.save.mockResolvedValue(undefined);
     savedPaymentMethodRepository.findOne.mockResolvedValue({
