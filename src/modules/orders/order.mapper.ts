@@ -1,9 +1,9 @@
-import { OrderType } from '../../graphql/models/types';
+import { OrderTrackingItemType, OrderTrackingType, OrderType } from '../../graphql/models/types';
 import { Order } from '../../database/entities/order.entity';
 import { OrderItem } from '../../database/entities/order-item.entity';
 import { ProductImage } from '../../database/entities/product-image.entity';
 
-function resolveOrderItemImageUrl(item: OrderItem): string | null {
+export function resolveOrderItemImageUrl(item: OrderItem): string | null {
   const variant = item.productVariant;
   if (!variant) {
     return null;
@@ -39,6 +39,43 @@ export function mapOrderItem(item: OrderItem) {
     trackingNumber: item.trackingNumber ?? null,
     fulfillmentProvider: item.fulfillmentProvider ?? null,
     trackingUrl: item.trackingUrl ?? null,
+  };
+}
+
+export function mapOrderTrackingItem(item: OrderItem): OrderTrackingItemType {
+  const productId = item.productVariant?.productId ?? null;
+
+  return {
+    storeId: item.storeId,
+    productId,
+    productName: item.productName,
+    productImageUrl: productId ? resolveOrderItemImageUrl(item) : null,
+    quantity: item.quantity,
+    unitPrice: Number(item.unitPrice),
+    subtotal: Number(item.subtotal),
+    fulfillmentStatus: item.fulfillmentStatus,
+    trackingNumber: item.trackingNumber ?? null,
+    fulfillmentProvider: item.fulfillmentProvider ?? null,
+    trackingUrl: item.trackingUrl ?? null,
+  };
+}
+
+export function mapOrderTracking(order: Order): OrderTrackingType {
+  return {
+    orderNumber: order.orderNumber,
+    status: order.status,
+    createdAt: order.createdAt,
+    subtotal: Number(order.subtotal),
+    shippingFee: Number(order.shippingFee),
+    discountAmount: Number(order.discountAmount),
+    total: Number(order.total),
+    items: order.items?.map(mapOrderTrackingItem) ?? [],
+    storeShippings:
+      order.storeShippings?.map((shipping) => ({
+        storeId: shipping.storeId,
+        optionName: shipping.optionName,
+        shippingFee: Number(shipping.shippingFee),
+      })) ?? [],
   };
 }
 
