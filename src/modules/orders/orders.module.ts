@@ -24,7 +24,6 @@ import { GuestOrderLinkModule } from './guest-order-link.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { CartModule } from '../cart/cart.module';
-
 @Module({
   imports: [
     AuthModule,

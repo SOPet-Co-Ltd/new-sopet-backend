@@ -763,9 +763,6 @@ export class PlatformAnalyticsType {
 
   @Field(() => Int)
   totalCustomers: number;
-
-  @Field(() => Int)
-  openDisputes: number;
 }
 
 @ObjectType()

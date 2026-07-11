@@ -186,12 +186,6 @@ input CreateCategoryInput {
   name: String!
 }
 
-input CreateDisputeInput {
-  issueType: String!
-  orderId: String!
-  reason: String!
-}
-
 input CreateOrderInput {
   cartItemIds: [String!]
   guestEmail: String
@@ -417,32 +411,6 @@ type DeleteTaxonomyResultType {
   success: Boolean!
 }
 
-type DisputeImageType {
-  id: String!
-  imageUrl: String!
-  sortOrder: Float!
-}
-
-type DisputeMessageType {
-  attachments: [String!]!
-  createdAt: DateTime!
-  id: String!
-  message: String!
-  senderType: String!
-}
-
-type DisputeType {
-  createdAt: DateTime!
-  id: String!
-  images: [DisputeImageType!]!
-  issueType: String!
-  messages: [DisputeMessageType!]!
-  orderId: String!
-  reason: String!
-  status: String!
-  updatedAt: DateTime!
-}
-
 input FavoriteProductInput {
   productId: String!
 }
@@ -509,7 +477,6 @@ type Mutation {
   createAddress(input: CreateAddressInput!): SavedAddressType!
   createBrand(input: CreateBrandInput!): BrandType!
   createCategory(input: CreateCategoryInput!): CategoryType!
-  createDispute(input: CreateDisputeInput!): DisputeType!
   createOrder(input: CreateOrderInput!): OrderType!
   createPayment(input: CreatePaymentInput!): PaymentType!
   createPayout(input: CreatePayoutInput!): PayoutType!
@@ -555,7 +522,6 @@ type Mutation {
   publishProduct(id: String!): ProductType!
   reactivateAccount(input: ReactivateAccountInput!): CustomerAuthPayload!
   refreshToken(input: RefreshTokenInput!): AuthTokens!
-  refundPayment(paymentId: String!): PaymentType!
   registerStore(input: RegisterStoreInput!): VendorAuthPayload!
   registerVendor(input: RegisterVendorInput!): VendorAuthPayload!
   rejectBrand(id: String!): BrandType!
@@ -765,7 +731,6 @@ type PlatformAdType {
 
 type PlatformAnalyticsType {
   averageOrderValue: Float!
-  openDisputes: Int!
   pendingStores: Int!
   totalCustomers: Int!
   totalOrders: Int!
@@ -932,7 +897,6 @@ type Query {
   me: MeResult!
   myBrandProposals: [BrandType!]!
   myCategoryProposals: [CategoryType!]!
-  myDisputes: [DisputeType!]!
   myPetTypeProposals: [PetTypeType!]!
   myReviews(limit: Int = 50, offset: Int = 0): [CustomerReviewType!]!
   myStore: MyStoreType!
@@ -941,7 +905,6 @@ type Query {
   myStores: [VendorStoreType!]!
   myTagProposals: [TagType!]!
   notifications(unreadOnly: Boolean): [NotificationType!]!
-  openDisputes: [DisputeType!]!
   order(id: String!): OrderType!
   orders(filter: CustomerOrderListFilter = ALL, limit: Int = 10, page: Int = 1): OrderConnection!
   payment(id: String!): PaymentType!

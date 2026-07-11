@@ -6,7 +6,7 @@ import { IS_PUBLIC_KEY } from '../../common/decorators/public.decorator';
 
 describe('PaymentsResolver payment queries', () => {
   let paymentsService: jest.Mocked<
-    Pick<PaymentsService, 'findById' | 'findLatestByOrderId' | 'createCharge' | 'refund'>
+    Pick<PaymentsService, 'findById' | 'findLatestByOrderId' | 'createCharge'>
   >;
   let resolver: PaymentsResolver;
 
@@ -27,7 +27,6 @@ describe('PaymentsResolver payment queries', () => {
       findById: jest.fn(),
       findLatestByOrderId: jest.fn(),
       createCharge: jest.fn(),
-      refund: jest.fn(),
     };
     resolver = new PaymentsResolver(
       paymentsService as unknown as PaymentsService,

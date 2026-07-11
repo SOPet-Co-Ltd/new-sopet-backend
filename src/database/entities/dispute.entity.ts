@@ -12,8 +12,10 @@ import {
 import { IsNotEmpty, IsEnum, IsOptional } from 'class-validator';
 import { Customer } from './customer.entity';
 import { Order } from './order.entity';
+import { Store } from './store.entity';
 import { DisputeMessage } from './dispute-message.entity';
 import { DisputeImage } from './dispute-image.entity';
+import { DisputeItem } from './dispute-item.entity';
 
 export enum DisputeStatus {
   OPEN = 'open',
@@ -40,6 +42,7 @@ export enum DisputeIssueType {
 @Index(['orderId'])
 @Index(['customerId', 'status'])
 @Index(['status'])
+@Index(['storeId', 'status'])
 export class Dispute {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -51,6 +54,10 @@ export class Dispute {
   @Column({ name: 'customer_id', type: 'uuid' })
   @IsNotEmpty()
   customerId: string;
+
+  @Column({ name: 'store_id', type: 'uuid' })
+  @IsNotEmpty()
+  storeId: string;
 
   @Column({ name: 'reason', type: 'text' })
   @IsNotEmpty()
@@ -94,6 +101,9 @@ export class Dispute {
   @IsOptional()
   resolutionNotes: string | null;
 
+  @Column({ name: 'replacement_order_id', type: 'uuid', nullable: true })
+  replacementOrderId: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
   createdAt: Date;
 
@@ -108,6 +118,17 @@ export class Dispute {
   @ManyToOne(() => Customer, (customer) => customer.disputes)
   @JoinColumn({ name: 'customer_id' })
   customer: Customer;
+
+  @ManyToOne(() => Store)
+  @JoinColumn({ name: 'store_id' })
+  store: Store;
+
+  @ManyToOne(() => Order, { nullable: true })
+  @JoinColumn({ name: 'replacement_order_id' })
+  replacementOrder: Order | null;
+
+  @OneToMany(() => DisputeItem, (item) => item.dispute, { cascade: true })
+  items: DisputeItem[];
 
   @OneToMany(() => DisputeMessage, (message) => message.dispute)
   messages: DisputeMessage[];

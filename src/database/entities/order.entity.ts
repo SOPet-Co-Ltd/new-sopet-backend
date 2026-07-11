@@ -100,6 +100,9 @@ export class Order {
   @IsOptional()
   notes: string | null;
 
+  @Column({ name: 'source_dispute_id', type: 'uuid', nullable: true })
+  sourceDisputeId: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
   createdAt: Date;
 

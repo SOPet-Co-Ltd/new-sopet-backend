@@ -10,6 +10,7 @@ export interface FolderUploadRules {
   maxSizeBytes: number;
   allowedMimeTypes: readonly string[];
   aspectRatio?: AspectRatioRule;
+  maxAttachments?: number;
 }
 
 const MB = 1024 * 1024;

@@ -12,7 +12,6 @@ import { OrderStatusHistory } from '../../database/entities/order-status-history
 import { Payment } from '../../database/entities/payment.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 import { StoresService } from '../stores/stores.service';
-import { PaymentsService } from '../payments/payments.service';
 import { InventoryService } from '../inventory/inventory.service';
 import {
   assertVendorItemsUniform,
@@ -31,7 +30,6 @@ export class OrderFulfillmentService {
     private readonly dataSource: DataSource,
     private readonly storesService: StoresService,
     private readonly notificationsService: NotificationsService,
-    private readonly paymentsService: PaymentsService,
     private readonly inventoryService: InventoryService,
   ) {}
 
@@ -324,34 +322,6 @@ export class OrderFulfillmentService {
         code: 'INVALID_ORDER_STATUS',
         message: 'Order cannot be cancelled after it has been shipped',
       });
-    }
-
-    const refundedOnline = await this.paymentsService.refundPaidOnlineOrder(orderId);
-
-    if (refundedOnline) {
-      const updated = await this.loadOrderWithItems(orderId);
-      this.markItemsCancelled(updated.items);
-
-      await this.dataSource.transaction(async (manager) => {
-        await manager.save(OrderItem, updated.items);
-        await manager.save(
-          OrderStatusHistory,
-          manager.create(OrderStatusHistory, {
-            orderId,
-            status: OrderStatus.REFUNDED,
-            changedBy: userId,
-            notes: `Vendor cancelled order with customer refund (store ${storeId})`,
-          }),
-        );
-      });
-
-      const saved = await this.loadOrderWithItems(orderId);
-      await this.notificationsService.notifyOrderStatusChanged(saved, OrderStatus.REFUNDED);
-      this.notificationsService
-        .notifyVendorsAboutOrderStatus(saved, OrderStatus.REFUNDED)
-        .catch(() => {});
-
-      return saved;
     }
 
     this.markItemsCancelled(order.items);

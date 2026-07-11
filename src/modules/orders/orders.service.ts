@@ -544,6 +544,7 @@ export class OrdersService {
   async updateStatus(id: string, status: OrderStatus, userId?: string): Promise<Order> {
     const order = await this.findOne(id);
     const previousStatus = order.status;
+
     order.status = status;
 
     await this.dataSource.transaction(async (manager) => {

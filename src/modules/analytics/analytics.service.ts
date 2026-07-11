@@ -5,7 +5,6 @@ import { Order } from '../../database/entities/order.entity';
 import { OrderItem, FulfillmentStatus } from '../../database/entities/order-item.entity';
 import { Store, StoreStatus } from '../../database/entities/store.entity';
 import { Customer } from '../../database/entities/customer.entity';
-import { Dispute, DisputeStatus } from '../../database/entities/dispute.entity';
 import { Product } from '../../database/entities/product.entity';
 import { OrderStatus } from '../../database/entities/enums/order.enums';
 
@@ -29,7 +28,6 @@ export interface PlatformAnalyticsResult {
   totalStores: number;
   pendingStores: number;
   totalCustomers: number;
-  openDisputes: number;
 }
 
 export interface SalesTimePointResult {
@@ -69,8 +67,6 @@ export class AnalyticsService {
     private readonly storeRepository: Repository<Store>,
     @InjectRepository(Customer)
     private readonly customerRepository: Repository<Customer>,
-    @InjectRepository(Dispute)
-    private readonly disputeRepository: Repository<Dispute>,
     @InjectRepository(Product)
     private readonly productRepository: Repository<Product>,
   ) {}
@@ -158,10 +154,6 @@ export class AnalyticsService {
 
     const totalCustomers = await this.customerRepository.count();
 
-    const openDisputes = await this.disputeRepository.count({
-      where: { status: DisputeStatus.OPEN },
-    });
-
     const totalOrders = Number(ordersResult?.count ?? 0);
     const totalRevenue = Number(ordersResult?.total ?? 0);
 
@@ -172,7 +164,6 @@ export class AnalyticsService {
       totalStores,
       pendingStores,
       totalCustomers,
-      openDisputes,
     };
   }
 

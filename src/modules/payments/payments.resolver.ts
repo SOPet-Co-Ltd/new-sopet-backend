@@ -1,11 +1,9 @@
 import { Args, Mutation, Query, Resolver, Subscription } from '@nestjs/graphql';
-import { BadRequestException, UseGuards } from '@nestjs/common';
+import { BadRequestException } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import { PaymentEventsService, type PaymentStatusUpdatedPayload } from './payment-events.service';
 import { PaymentType } from '../../graphql/models/types';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { CurrentUser, Public, Roles } from '../../common/decorators';
+import { CurrentUser, Public } from '../../common/decorators';
 import { CreatePaymentInput } from './payments.inputs';
 import { normalizeCheckoutPaymentMethod } from '../../common/utils/checkout-payment.util';
 
@@ -117,21 +115,5 @@ export class PaymentsResolver {
     const payment = await this.paymentsService.findById(result.paymentId, effectiveCustomerId);
 
     return this.mapPayment(payment);
-  }
-
-  @Mutation(() => PaymentType)
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
-  async refundPayment(@Args('paymentId') paymentId: string): Promise<PaymentType> {
-    const payment = await this.paymentsService.refund(paymentId);
-
-    return {
-      id: payment.id,
-      orderId: payment.orderId,
-      amount: Number(payment.amount),
-      currency: payment.currency,
-      status: payment.status,
-      paymentMethod: payment.paymentMethod,
-    };
   }
 }

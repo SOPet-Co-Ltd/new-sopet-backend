@@ -393,5 +393,5 @@ yarn test user.repository.spec.ts
 
 For issues or questions about the database layer, refer to:
 
-- Database design document: `/.full-stack-feature/02-database-design.md`
-- Requirements document: `/.full-stack-feature/01-requirements.md`
+- [Backend README](../../README.md)
+- [Workspace design docs](../../../new-sopet-workspace/docs/design/)
