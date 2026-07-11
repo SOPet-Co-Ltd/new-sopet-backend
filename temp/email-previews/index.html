@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SOPet Email Previews</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { margin: 0; padding: 40px 24px; font-family: 'Noto Sans Thai', Arial, sans-serif; background: #F9F6FE; color: #1A1A1A; }
+    .wrap { max-width: 760px; margin: 0 auto; }
+    h1 { margin: 0 0 8px; font-size: 30px; }
+    .sub { margin: 0 0 28px; color: #5C5C5C; line-height: 1.6; }
+    .grid { display: grid; gap: 12px; }
+    a.card { display: block; background: #fff; border: 1px solid #E7DBF9; border-radius: 16px; padding: 20px 24px; text-decoration: none; color: inherit; }
+    a.card:hover { border-color: #9C6ADE; box-shadow: 0 8px 24px rgba(156,106,222,0.14); }
+    .card h2 { margin: 0 0 6px; font-size: 18px; color: #884ECF; }
+    .card p { margin: 0; font-size: 14px; color: #5C5C5C; }
+    .badge { display: inline-block; margin-top: 10px; font-size: 12px; color: #884ECF; background: #F2EBFC; padding: 4px 10px; border-radius: 999px; }
+    .note { margin-top: 28px; padding: 16px 20px; background: #fff; border: 1px solid #E7DBF9; border-radius: 12px; font-size: 13px; color: #666; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>SOPet Email Previews</h1>
+    <p class="sub">Generated from <code>src/modules/email/email-templates.ts</code> with SOPet brand primary <strong>#9C6ADE</strong> and logo header.</p>
+    <div class="grid">
+      <a class="card" href="01-vendor-invite.html" target="_blank">
+        <h2>1. คำเชิญเข้าร่วม SOPet ในฐานะผู้ขาย</h2>
+        <p>Open rendered HTML preview</p>
+        <span class="badge">01-vendor-invite.html</span>
+      </a><a class="card" href="02-admin-invite.html" target="_blank">
+        <h2>2. คำเชิญเข้าร่วมทีมผู้ดูแลระบบ SOPet</h2>
+        <p>Open rendered HTML preview</p>
+        <span class="badge">02-admin-invite.html</span>
+      </a><a class="card" href="03-store-member-invite.html" target="_blank">
+        <h2>3. คำเชิญเข้าร่วมทีมร้าน เพ็ทแฮปปี้</h2>
+        <p>Open rendered HTML preview</p>
+        <span class="badge">03-store-member-invite.html</span>
+      </a><a class="card" href="04-password-reset.html" target="_blank">
+        <h2>4. รีเซ็ตรหัสผ่าน SOPet</h2>
+        <p>Open rendered HTML preview</p>
+        <span class="badge">04-password-reset.html</span>
+      </a><a class="card" href="05-order-paid.html" target="_blank">
+        <h2>5. ชำระเงินสำเร็จ — คำสั่งซื้อ ORD-20250711-0042</h2>
+        <p>Open rendered HTML preview</p>
+        <span class="badge">05-order-paid.html</span>
+      </a><a class="card" href="06-order-status-changed.html" target="_blank">
+        <h2>6. คำสั่งซื้อ ORD-20250711-0042 — จัดส่งแล้ว</h2>
+        <p>Open rendered HTML preview</p>
+        <span class="badge">06-order-status-changed.html</span>
+      </a>
+    </div>
+    <p class="note">Regenerate anytime with <code>yarn email:previews</code>. Logo path in previews is local for browser viewing.</p>
+  </div>
+</body>
+</html>

@@ -2,8 +2,9 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
-import { EmailService } from '../email/email.service';
+import { EmailDeliveryService } from '../email/email-delivery.service';
 import { Order } from '../../database/entities/order.entity';
+import { OrderItem } from '../../database/entities/order-item.entity';
 import { Customer } from '../../database/entities/customer.entity';
 import { UserNotification } from '../../database/entities/user-notification.entity';
 import { NotificationChannel } from '../../database/entities/notification.entity';
@@ -17,7 +18,7 @@ export class NotificationsService {
   private readonly storefrontUrl: string;
 
   constructor(
-    private readonly emailService: EmailService,
+    private readonly emailDeliveryService: EmailDeliveryService,
     private readonly configService: ConfigService,
     @InjectRepository(Customer)
     private readonly customerRepository: Repository<Customer>,
@@ -29,6 +30,8 @@ export class NotificationsService {
     private readonly storeRequestRepository: Repository<StoreRequest>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(Order)
+    private readonly orderRepository: Repository<Order>,
   ) {
     this.storefrontUrl =
       this.configService.get<string>('app.storefrontUrl') ||
@@ -36,53 +39,84 @@ export class NotificationsService {
       'http://localhost:3000';
   }
 
+  private formatOrderDate(date: Date): string {
+    return date.toLocaleString('th-TH', {
+      dateStyle: 'long',
+      timeStyle: 'short',
+    });
+  }
+
+  private async resolveOrderWithItems(order: Order): Promise<Order> {
+    if (order.items?.length) {
+      return order;
+    }
+
+    const loaded = await this.orderRepository.findOne({
+      where: { id: order.id },
+      relations: ['items'],
+    });
+
+    return loaded ?? order;
+  }
+
+  private mapOrderItems(items: OrderItem[] = []) {
+    return items.map((item) => ({
+      productName: item.productName,
+      variantOptions: item.variantOptions,
+      quantity: item.quantity,
+      unitPrice: Number(item.unitPrice),
+      subtotal: Number(item.subtotal),
+    }));
+  }
+
   async notifyOrderPaid(order: Order): Promise<void> {
-    const customer = order.customerId
-      ? await this.customerRepository.findOne({ where: { id: order.customerId } })
+    const orderWithItems = await this.resolveOrderWithItems(order);
+    const customer = orderWithItems.customerId
+      ? await this.customerRepository.findOne({ where: { id: orderWithItems.customerId } })
       : null;
 
-    const email = customer?.email ?? order.guestEmail;
+    const email = customer?.email ?? orderWithItems.guestEmail;
     if (!email) {
-      this.logger.log(`No email for order ${order.orderNumber} — skip paid notification`);
+      this.logger.log(`No email for order ${orderWithItems.orderNumber} — skip paid notification`);
       return;
     }
 
-    const orderUrl = order.customerId
-      ? `${this.storefrontUrl}/account/orders/${order.id}`
-      : `${this.storefrontUrl}/checkout/success?orderId=${order.id}`;
-    await this.emailService.send({
-      to: email,
-      subject: `Payment received — Order ${order.orderNumber}`,
-      html: `
-        <p>Thank you! We received your payment for order <strong>${order.orderNumber}</strong>.</p>
-        <p>Total: ฿${Number(order.total).toLocaleString('th-TH')}</p>
-        <p><a href="${orderUrl}">View your order</a></p>
-      `,
-      text: `Payment received for order ${order.orderNumber}. Total ฿${order.total}. View: ${orderUrl}`,
+    const orderUrl = orderWithItems.customerId
+      ? `${this.storefrontUrl}/account/orders/${orderWithItems.id}`
+      : `${this.storefrontUrl}/checkout/success?orderId=${orderWithItems.id}`;
+    await this.emailDeliveryService.sendOrderPaid(email, {
+      orderNumber: orderWithItems.orderNumber,
+      orderDate: this.formatOrderDate(orderWithItems.paidAt ?? orderWithItems.createdAt),
+      paymentMethod: orderWithItems.paymentMethod,
+      customerName: customer?.fullName ?? orderWithItems.guestName ?? undefined,
+      items: this.mapOrderItems(orderWithItems.items),
+      subtotal: Number(orderWithItems.subtotal),
+      discountAmount: Number(orderWithItems.discountAmount),
+      shippingFee: Number(orderWithItems.shippingFee),
+      total: Number(orderWithItems.total),
+      orderUrl,
     });
   }
 
   async notifyOrderStatusChanged(order: Order, status: string): Promise<void> {
-    const customer = order.customerId
-      ? await this.customerRepository.findOne({ where: { id: order.customerId } })
+    const orderWithItems = await this.resolveOrderWithItems(order);
+    const customer = orderWithItems.customerId
+      ? await this.customerRepository.findOne({ where: { id: orderWithItems.customerId } })
       : null;
 
-    const email = customer?.email ?? order.guestEmail;
+    const email = customer?.email ?? orderWithItems.guestEmail;
     if (!email) {
       return;
     }
 
-    const orderUrl = order.customerId
-      ? `${this.storefrontUrl}/account/orders/${order.id}`
-      : `${this.storefrontUrl}/checkout/success?orderId=${order.id}`;
-    await this.emailService.send({
-      to: email,
-      subject: `Order ${order.orderNumber} — ${status.replace(/_/g, ' ')}`,
-      html: `
-        <p>Your order <strong>${order.orderNumber}</strong> is now <strong>${status}</strong>.</p>
-        <p><a href="${orderUrl}">Track your order</a></p>
-      `,
-      text: `Order ${order.orderNumber} status: ${status}. ${orderUrl}`,
+    const orderUrl = orderWithItems.customerId
+      ? `${this.storefrontUrl}/account/orders/${orderWithItems.id}`
+      : `${this.storefrontUrl}/checkout/success?orderId=${orderWithItems.id}`;
+    await this.emailDeliveryService.sendOrderStatusChanged(email, {
+      orderNumber: orderWithItems.orderNumber,
+      status,
+      orderDate: this.formatOrderDate(orderWithItems.createdAt),
+      orderUrl,
     });
   }
 

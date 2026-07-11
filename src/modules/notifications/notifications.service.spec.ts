@@ -3,7 +3,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import { NotFoundException } from '@nestjs/common';
 import { NotificationsService } from './notifications.service';
-import { EmailService } from '../email/email.service';
+import { EmailDeliveryService } from '../email/email-delivery.service';
 import { Customer } from '../../database/entities/customer.entity';
 import { UserNotification } from '../../database/entities/user-notification.entity';
 import { Store } from '../../database/entities/store.entity';
@@ -15,8 +15,9 @@ import { Order } from '../../database/entities/order.entity';
 describe('NotificationsService', () => {
   let service: NotificationsService;
 
-  const emailService = {
-    send: jest.fn(),
+  const emailDeliveryService = {
+    sendOrderPaid: jest.fn(),
+    sendOrderStatusChanged: jest.fn(),
   };
 
   const configService = {
@@ -47,12 +48,16 @@ describe('NotificationsService', () => {
     find: jest.fn(),
   };
 
+  const orderRepo = {
+    findOne: jest.fn(),
+  };
+
   beforeEach(async () => {
     jest.clearAllMocks();
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         NotificationsService,
-        { provide: EmailService, useValue: emailService },
+        { provide: EmailDeliveryService, useValue: emailDeliveryService },
         { provide: ConfigService, useValue: configService },
         { provide: getRepositoryToken(Customer), useValue: customerRepo },
         {
@@ -62,6 +67,7 @@ describe('NotificationsService', () => {
         { provide: getRepositoryToken(Store), useValue: storeRepo },
         { provide: getRepositoryToken(StoreRequest), useValue: storeRequestRepo },
         { provide: getRepositoryToken(User), useValue: userRepo },
+        { provide: getRepositoryToken(Order), useValue: orderRepo },
       ],
     }).compile();
 
@@ -74,18 +80,46 @@ describe('NotificationsService', () => {
         id: 'order-1',
         orderNumber: 'ORD-001',
         customerId: 'cust-1',
+        paymentMethod: 'promptpay',
+        subtotal: 1400,
+        discountAmount: 0,
+        shippingFee: 100,
         total: 1500,
+        createdAt: new Date('2025-07-11T12:00:00.000Z'),
+        paidAt: new Date('2025-07-11T12:05:00.000Z'),
+        items: [
+          {
+            productName: 'Dog Food Premium',
+            variantOptions: { ขนาด: '2kg' },
+            quantity: 1,
+            unitPrice: 1400,
+            subtotal: 1400,
+          },
+        ],
       } as Order;
-      customerRepo.findOne.mockResolvedValue({ id: 'cust-1', email: 'user@example.com' });
+      customerRepo.findOne.mockResolvedValue({
+        id: 'cust-1',
+        email: 'user@example.com',
+        fullName: 'คุณสมชาย',
+      });
 
       await service.notifyOrderPaid(order);
 
-      expect(emailService.send).toHaveBeenCalledWith(
+      expect(emailDeliveryService.sendOrderPaid).toHaveBeenCalledWith(
+        'user@example.com',
         expect.objectContaining({
-          to: 'user@example.com',
-          subject: expect.stringContaining('ORD-001'),
+          orderNumber: 'ORD-001',
+          total: 1500,
+          customerName: 'คุณสมชาย',
+          items: expect.arrayContaining([
+            expect.objectContaining({
+              productName: 'Dog Food Premium',
+              quantity: 1,
+            }),
+          ]),
         }),
       );
+      expect(orderRepo.findOne).not.toHaveBeenCalled();
     });
 
     it('skips when no email (guest without guestEmail)', async () => {
@@ -100,7 +134,7 @@ describe('NotificationsService', () => {
       await service.notifyOrderPaid(order);
 
       expect(customerRepo.findOne).not.toHaveBeenCalled();
-      expect(emailService.send).not.toHaveBeenCalled();
+      expect(emailDeliveryService.sendOrderPaid).not.toHaveBeenCalled();
     });
   });
 
@@ -111,15 +145,19 @@ describe('NotificationsService', () => {
         orderNumber: 'ORD-001',
         customerId: 'cust-1',
         guestEmail: null,
+        createdAt: new Date('2025-07-11T12:00:00.000Z'),
+        items: [],
       } as Order;
       customerRepo.findOne.mockResolvedValue({ id: 'cust-1', email: 'user@example.com' });
 
-      await service.notifyOrderStatusChanged(order, 'SHIPPED');
+      await service.notifyOrderStatusChanged(order, 'shipped');
 
-      expect(emailService.send).toHaveBeenCalledWith(
+      expect(emailDeliveryService.sendOrderStatusChanged).toHaveBeenCalledWith(
+        'user@example.com',
         expect.objectContaining({
-          to: 'user@example.com',
-          subject: expect.stringContaining('ORD-001'),
+          orderNumber: 'ORD-001',
+          status: 'shipped',
+          orderDate: expect.any(String),
         }),
       );
     });
