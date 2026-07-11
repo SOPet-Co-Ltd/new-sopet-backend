@@ -14,6 +14,9 @@ export interface TaxonomyDeleteImpact {
 export interface DeleteTaxonomyResult {
   success: boolean;
   deletedId: string;
+  deletedCategoryId?: string | null;
   detachedProductCount: number;
+  reassignedProductCount?: number;
+  replacementCategoryId?: string | null;
   notifiedStoreCount: number;
 }

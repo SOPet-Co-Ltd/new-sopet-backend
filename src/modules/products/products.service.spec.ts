@@ -36,6 +36,8 @@ describe('ProductsService', () => {
     getApprovedTags: jest.Mock;
     getApprovedCategoryByName: jest.Mock;
     getApprovedTagsByNames: jest.Mock;
+    resolveApprovedCategoryFilter: jest.Mock;
+    resolveApprovedTagFilter: jest.Mock;
   };
 
   const product = {
@@ -86,6 +88,8 @@ describe('ProductsService', () => {
       getApprovedTags: jest.fn(async () => []),
       getApprovedCategoryByName: jest.fn(),
       getApprovedTagsByNames: jest.fn(async () => []),
+      resolveApprovedCategoryFilter: jest.fn(async () => null),
+      resolveApprovedTagFilter: jest.fn(async () => null),
     };
 
     service = new ProductsService(
@@ -263,6 +267,7 @@ describe('ProductsService', () => {
   it('lists products with pagination', async () => {
     const idQb = {
       andWhere: jest.fn().mockReturnThis(),
+      innerJoin: jest.fn().mockReturnThis(),
       addSelect: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
       addOrderBy: jest.fn().mockReturnThis(),
@@ -275,6 +280,7 @@ describe('ProductsService', () => {
     };
     const countQb = {
       andWhere: jest.fn().mockReturnThis(),
+      innerJoin: jest.fn().mockReturnThis(),
       select: jest.fn().mockReturnThis(),
       getRawOne: jest.fn().mockResolvedValue({ cnt: '1' }),
     };
@@ -298,6 +304,7 @@ describe('ProductsService', () => {
   it('preserves relevance sort select columns in phase A id query', async () => {
     const idQb = {
       andWhere: jest.fn().mockReturnThis(),
+      innerJoin: jest.fn().mockReturnThis(),
       addSelect: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
       addOrderBy: jest.fn().mockReturnThis(),
@@ -310,6 +317,7 @@ describe('ProductsService', () => {
     };
     const countQb = {
       andWhere: jest.fn().mockReturnThis(),
+      innerJoin: jest.fn().mockReturnThis(),
       select: jest.fn().mockReturnThis(),
       getRawOne: jest.fn().mockResolvedValue({ cnt: '1' }),
     };
@@ -340,6 +348,79 @@ describe('ProductsService', () => {
     );
     expect(idQb.addSelect).toHaveBeenCalledWith('product.createdAt', 'product_created_at');
     expect(idQb.distinct).not.toHaveBeenCalled();
+  });
+
+  it('short-circuits to empty listing when category filter is unresolvable', async () => {
+    taxonomyService.resolveApprovedCategoryFilter.mockResolvedValue(null);
+
+    const result = await service.findAll({
+      category: 'nonexistent-slug',
+      page: 1,
+      limit: 10,
+    });
+
+    expect(result.items).toEqual([]);
+    expect(result.pagination.total).toBe(0);
+    expect(productRepository.createQueryBuilder).not.toHaveBeenCalled();
+  });
+
+  it('short-circuits to empty listing when tag filter is unresolvable', async () => {
+    taxonomyService.resolveApprovedTagFilter.mockResolvedValue(null);
+
+    const result = await service.findAll({
+      tag: '00000000-0000-0000-0000-000000000000',
+      page: 1,
+      limit: 10,
+    });
+
+    expect(result.items).toEqual([]);
+    expect(result.pagination.total).toBe(0);
+    expect(productRepository.createQueryBuilder).not.toHaveBeenCalled();
+  });
+
+  it('applies resolved categoryId and approved-store join in legacy listing filters', async () => {
+    taxonomyService.resolveApprovedCategoryFilter.mockResolvedValue({
+      id: 'cat-resolved',
+      slug: 'dog-food',
+      name: 'Dog Food',
+    });
+
+    const idQb = {
+      andWhere: jest.fn().mockReturnThis(),
+      innerJoin: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      setParameter: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      distinct: jest.fn().mockReturnThis(),
+      offset: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue([]),
+    };
+    const countQb = {
+      andWhere: jest.fn().mockReturnThis(),
+      innerJoin: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      getRawOne: jest.fn().mockResolvedValue({ cnt: '0' }),
+    };
+    productRepository.createQueryBuilder.mockReturnValueOnce(idQb).mockReturnValueOnce(countQb);
+
+    await service.findAll({
+      category: 'dog-food',
+      status: ProductStatus.PUBLISHED,
+      page: 1,
+      limit: 10,
+    });
+
+    expect(taxonomyService.resolveApprovedCategoryFilter).toHaveBeenCalledWith('dog-food');
+    expect(idQb.innerJoin).toHaveBeenCalledWith('product.store', 'store');
+    expect(idQb.andWhere).toHaveBeenCalledWith('store.status = :approvedStoreStatus', {
+      approvedStoreStatus: 'approved',
+    });
+    expect(idQb.andWhere).toHaveBeenCalledWith('product.categoryId = :categoryId', {
+      categoryId: 'cat-resolved',
+    });
   });
 
   it('updates variant for own product', async () => {

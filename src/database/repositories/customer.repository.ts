@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, IsNull, In } from 'typeorm';
+import { Repository, IsNull, In, type QueryDeepPartialEntity } from 'typeorm';
 import { Customer } from '../entities/customer.entity';
 import { guestPhoneLookupValues, normalizeThaiPhoneToLocal } from '../../common/utils/phone.util';
 
@@ -62,7 +62,7 @@ export class CustomerRepository {
     const existing = await this.findActiveByPhone(normalizedPhone);
 
     if (existing) {
-      await this.repository.update(existing.id, data);
+      await this.repository.update(existing.id, data as QueryDeepPartialEntity<Customer>);
       const updated = await this.findById(existing.id);
       return updated!;
     }

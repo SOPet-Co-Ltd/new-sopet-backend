@@ -1,5 +1,6 @@
 import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { UseGuards } from '@nestjs/common';
+import { UserRole } from '../../database/entities/user.entity';
 import { TaxonomyService } from './taxonomy.service';
 import {
   CreateCategoryInput,
@@ -84,12 +85,28 @@ export class TaxonomyResolver {
     return tags.map(mapTag);
   }
 
+  @Query(() => [CategoryType])
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async rejectedCategories(): Promise<CategoryType[]> {
+    const categories = await this.taxonomyService.findRejectedCategories();
+    return categories.map(mapCategory);
+  }
+
+  @Query(() => [TagType])
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async rejectedTags(): Promise<TagType[]> {
+    const tags = await this.taxonomyService.findRejectedTags();
+    return tags.map(mapTag);
+  }
+
   @Mutation(() => CategoryType)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('vendor', 'admin')
   async createCategory(
     @CurrentUser('id') userId: string,
-    @CurrentUser('role') role: string,
+    @CurrentUser('role') role: UserRole,
     @Args('input') input: CreateCategoryInput,
   ): Promise<CategoryType> {
     const category = await this.taxonomyService.createCategory(
@@ -122,7 +139,7 @@ export class TaxonomyResolver {
   @Roles('vendor', 'admin')
   async createTag(
     @CurrentUser('id') userId: string,
-    @CurrentUser('role') role: string,
+    @CurrentUser('role') role: UserRole,
     @Args('input') input: CreateTagInput,
   ): Promise<TagType> {
     const tag = await this.taxonomyService.createTag(input.name, userId, role);
@@ -316,7 +333,9 @@ export class TaxonomyResolver {
   async deleteCategory(
     @Args('input') input: DeleteTaxonomyInput,
   ): Promise<DeleteTaxonomyResultType> {
-    return this.mapDeleteResult(await this.taxonomyService.deleteCategory(input.id));
+    return this.mapDeleteResult(
+      await this.taxonomyService.deleteCategory(input.id, input.replacementCategoryId),
+    );
   }
 
   @Mutation(() => DeleteTaxonomyResultType)

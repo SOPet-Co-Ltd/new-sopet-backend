@@ -187,9 +187,9 @@ await orderRepository.updateStatus(
 ```typescript
 import { ProductRepository } from '@repositories/product.repository';
 
-// Full-text search
-const products = await productRepository.search(
-  'สุนัข', // Thai search
+// Find products by store with optional filters
+const products = await productRepository.findByStore(
+  'store-uuid',
   { category: 'pet-food', minPrice: 100, maxPrice: 500 },
   20,
   0,
@@ -269,9 +269,7 @@ const product = await productRepository.create({
   basePrice: 500,
 });
 
-// Search works for Thai and English
-const results = await productRepository.search('สุนัข');
-const results2 = await productRepository.search('Royal Canin');
+// Inventory updates use transactions (see updateInventory below)
 ```
 
 ### 3. Transaction Management

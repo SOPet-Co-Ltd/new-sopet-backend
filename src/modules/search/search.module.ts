@@ -82,11 +82,13 @@ import { VectorSearchSupport } from './vector-search.support';
   ],
   exports: [
     SearchService,
+    SearchRepository,
     SearchSettingsService,
     SearchSynonymService,
     SearchSuggestionsService,
     SearchAnalyticsService,
     SearchEmbeddingQueueService,
+    PersonalizationService,
   ],
 })
 export class SearchModule {}

@@ -15,9 +15,13 @@ import {
 import { UseGuards } from '@nestjs/common';
 import { IsArray, IsNotEmpty, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 import type { GraphqlContext } from '../../graphql/loaders/graphql-context.types';
+import { seededShuffle } from '../../common/utils/seeded-shuffle';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { SearchContextInput } from '../search/search.inputs';
+import { PersonalizationService } from '../search/personalization.service';
 import { SearchAnalyticsService } from '../search/search-analytics.service';
+import { SearchRepository } from '../search/search.repository';
+import { SearchSettingsService } from '../search/search-settings.service';
 import { ProductsService } from './products.service';
 import {
   AddProductImageInput,
@@ -198,6 +202,9 @@ export class ProductsResolver {
     private readonly productsService: ProductsService,
     private readonly analyticsService: AnalyticsService,
     private readonly searchAnalyticsService: SearchAnalyticsService,
+    private readonly searchRepository: SearchRepository,
+    private readonly personalizationService: PersonalizationService,
+    private readonly searchSettingsService: SearchSettingsService,
   ) {}
 
   @ResolveField(() => Int)
@@ -280,23 +287,30 @@ export class ProductsResolver {
   @Public()
   async recommendedProducts(
     @Args('limit', { type: () => Int, nullable: true, defaultValue: 50 }) limit?: number,
+    @Args('sessionId', { nullable: true }) sessionId?: string,
+    @Args('searchContext', { nullable: true }) searchContext?: SearchContextInput,
+    @Args('excludeProductIds', { type: () => [String], nullable: true })
+    excludeProductIds?: string[],
+    @Args('shuffleSeed', { nullable: true }) shuffleSeed?: string,
+    @Context() context?: GraphqlContext,
   ): Promise<ProductType[]> {
     const cappedLimit = Math.min(Math.max(limit ?? 50, 1), 50);
-    const topProducts = await this.analyticsService.getPlatformTopProducts(cappedLimit);
+    const poolLimit = Math.min(cappedLimit * 3, 50);
+    const topProducts = await this.analyticsService.getPlatformTopProducts(poolLimit);
     const productIds = topProducts.map((item) => item.productId);
-    const products = await this.productsService.findPublishedByIds(productIds);
+    let products = await this.productsService.findPublishedByIds(productIds);
 
     // Backfill with recently published products when there is little or no sales
     // history, so the storefront always has products to recommend.
-    if (products.length < cappedLimit) {
+    if (products.length < poolLimit) {
       const seenIds = new Set(products.map((product) => product.id));
       const { items: latestProducts } = await this.productsService.findAll({
         status: ProductStatus.PUBLISHED,
         page: 1,
-        limit: cappedLimit,
+        limit: poolLimit,
       });
       for (const product of latestProducts) {
-        if (products.length >= cappedLimit) {
+        if (products.length >= poolLimit) {
           break;
         }
         if (!seenIds.has(product.id)) {
@@ -306,7 +320,48 @@ export class ProductsResolver {
       }
     }
 
-    return products.map(mapProduct);
+    const excludeSet = new Set(excludeProductIds ?? []);
+    products = products.filter((product) => !excludeSet.has(product.id));
+
+    const userId = context ? getOptionalUserId(context) : undefined;
+    let orderedProducts = products;
+
+    if ((sessionId || searchContext || userId) && products.length > 1) {
+      const recentProductIds = searchContext?.recentProductIds ?? [];
+      const recentMeta =
+        recentProductIds.length > 0
+          ? await this.searchRepository.fetchProductPersonalizationMeta(recentProductIds)
+          : [];
+      const profile = await this.personalizationService.buildProfile(
+        userId,
+        searchContext,
+        recentMeta,
+      );
+      const weights = await this.searchSettingsService.getRankingWeights();
+      const metaRows = await this.searchRepository.fetchProductPersonalizationMeta(
+        products.map((product) => product.id),
+      );
+      const productsById = new Map(metaRows.map((row) => [row.id, row]));
+      const scoreById = new Map(
+        products.map((product, index) => [product.id, products.length - index]),
+      );
+      const orderedIds = this.personalizationService.reorderIds(
+        products.map((product) => product.id),
+        scoreById,
+        productsById,
+        profile,
+        weights.personalizationCap,
+      );
+      const productsByIdEntity = new Map(products.map((product) => [product.id, product]));
+      orderedProducts = orderedIds
+        .map((id) => productsByIdEntity.get(id))
+        .filter((product): product is NonNullable<typeof product> => Boolean(product));
+    }
+
+    const seed = shuffleSeed?.trim() || `${Date.now()}`;
+    const shuffledProducts = seededShuffle(orderedProducts, seed);
+
+    return shuffledProducts.slice(0, cappedLimit).map(mapProduct);
   }
 
   @Query(() => ProductType)
@@ -358,6 +413,10 @@ export class ProductsResolver {
     @CurrentUser('storeId') storeId: string,
     @Args('search', { nullable: true }) search?: string,
     @Args('category', { nullable: true }) category?: string,
+    @Args('petTypeIds', { type: () => [String], nullable: true }) petTypeIds?: string[],
+    @Args('brandIds', { type: () => [String], nullable: true }) brandIds?: string[],
+    @Args('minPrice', { type: () => Float, nullable: true }) minPrice?: number,
+    @Args('maxPrice', { type: () => Float, nullable: true }) maxPrice?: number,
     @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page?: number,
     @Args('limit', { type: () => Int, nullable: true, defaultValue: 20 }) limit?: number,
   ): Promise<ProductConnection> {
@@ -368,6 +427,10 @@ export class ProductsResolver {
       search,
       storeId: activeStoreId,
       category,
+      petTypeIds,
+      brandIds,
+      minPrice,
+      maxPrice,
       allStatuses: true,
       page,
       limit: cappedLimit,

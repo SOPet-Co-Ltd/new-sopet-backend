@@ -1037,8 +1037,17 @@ export class DeleteTaxonomyResultType {
   @Field()
   deletedId: string;
 
+  @Field(() => String, { nullable: true })
+  deletedCategoryId?: string | null;
+
   @Field(() => Int)
   detachedProductCount: number;
+
+  @Field(() => Int, { nullable: true })
+  reassignedProductCount?: number;
+
+  @Field(() => String, { nullable: true })
+  replacementCategoryId?: string | null;
 
   @Field(() => Int)
   notifiedStoreCount: number;

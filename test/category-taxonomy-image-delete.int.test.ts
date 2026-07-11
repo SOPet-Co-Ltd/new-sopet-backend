@@ -31,17 +31,17 @@
 // - approveCategory after setCategoryImage returns approvalStatus approved
 // - CATEGORY_IMAGE_REQUIRED not thrown on second step
 //
-// AC3: "When admin calls createCategory with name only, the system shall create category with approvalStatus pending and imageUrl null (AC-004)"
+// AC3: "When admin calls createCategory with name only, the system shall create category with approvalStatus approved (AC-010)"
 // ROI: 78 (BV:9 × Freq:7 + Legal:0 + Defect:9)
-// Behavior: Admin createCategory(name only) → category created with approvalStatus pending and imageUrl null (regression vs legacy admin auto-approve)
+// Behavior: Admin createCategory(name only) → category created with approvalStatus approved and imageUrl null
 // @category: integration
 // @lane: integration
 // @dependency: TaxonomyService, Category repository (mock)
 // @complexity: low
-// Primary failure mode: admin createCategory still returns approvalStatus approved — breaking change not applied
-// Proof obligation: invoke createCategory with UserRole.ADMIN and no imageUrl; assert returned entity approvalStatus === pending and imageUrl null; verify resolveApprovalStatus auto-approve path not used for categories. Boundary: admin role input class that previously auto-approved
+// Primary failure mode: admin createCategory still returns approvalStatus pending — auto-approve not applied
+// Proof obligation: invoke createCategory with UserRole.ADMIN and no imageUrl; assert returned entity approvalStatus === approved and imageUrl null; verify resolveApprovalStatus auto-approve path used for categories. Boundary: admin role input class
 // Verification points / expected results / pass criteria:
-// - createCategory(admin) returns approvalStatus pending
+// - createCategory(admin) returns approvalStatus approved
 // - imageUrl is null
 // - slug and name persisted per existing conventions
 // - Replaces legacy taxonomy.service.spec.ts admin-auto-approve expectation
@@ -231,8 +231,8 @@ describe('Category taxonomy image pipeline (integration)', () => {
     });
   });
 
-  describe('AC-004: admin createCategory always pending', () => {
-    it('creates category with approvalStatus pending and imageUrl null', async () => {
+  describe('AC-010: admin createCategory auto-approved', () => {
+    it('creates category with approvalStatus approved and imageUrl null', async () => {
       categoryRepository.findOne.mockImplementation(async ({ where: { slug, name } }) => {
         if (slug) {
           return [...categoryStore.values()].find((category) => category.slug === slug) ?? null;
@@ -252,7 +252,7 @@ describe('Category taxonomy image pipeline (integration)', () => {
 
       const category = await service.createCategory('Dog Food', 'admin-1', UserRole.ADMIN);
 
-      expect(category.approvalStatus).toBe(TaxonomyApprovalStatus.PENDING);
+      expect(category.approvalStatus).toBe(TaxonomyApprovalStatus.APPROVED);
       expect(category.imageUrl ?? null).toBeNull();
       expect(category.name).toBe('Dog Food');
       expect(category.slug).toBe('dog-food');

@@ -402,12 +402,16 @@ scalar DateTime
 
 input DeleteTaxonomyInput {
   id: String!
+  replacementCategoryId: String
 }
 
 type DeleteTaxonomyResultType {
+  deletedCategoryId: String
   deletedId: String!
   detachedProductCount: Int!
   notifiedStoreCount: Int!
+  reassignedProductCount: Int
+  replacementCategoryId: String
   success: Boolean!
 }
 
@@ -968,7 +972,9 @@ type Query {
   productPublishChecklist(productId: String!): ProductPublishChecklistType!
   productReviews(productId: String!): [ReviewType!]!
   products(brandIds: [String!], category: String, limit: Int = 20, maxPrice: Int, minPrice: Int, page: Int = 1, petTypeIds: [String!], search: String, searchContext: SearchContextInput, sessionId: String, sortBy: String, sortOrder: String, storeId: String, tag: String): ProductConnection!
-  recommendedProducts(limit: Int = 50): [ProductType!]!
+  recommendedProducts(excludeProductIds: [String!], limit: Int = 50, searchContext: SearchContextInput, sessionId: String, shuffleSeed: String): [ProductType!]!
+  rejectedCategories: [CategoryType!]!
+  rejectedTags: [TagType!]!
   searchAnalyticsSuggestionCtr(fromDate: DateTime, toDate: DateTime): [SearchSuggestionCtrRowType!]!
   searchAnalyticsSummary(fromDate: DateTime, toDate: DateTime): SearchAnalyticsSummaryType!
   searchAnalyticsTopQueries(fromDate: DateTime, limit: Int = 50, toDate: DateTime): [SearchAnalyticsQueryRowType!]!
@@ -1000,7 +1006,7 @@ type Query {
   vendorCustomers(limit: Int! = 20, page: Int! = 1, search: String): VendorCustomerConnection!
   vendorOrders(storeId: String!): [OrderType!]!
   vendorProduct(id: String!): ProductType!
-  vendorProducts(category: String, limit: Int = 20, page: Int = 1, search: String): ProductConnection!
+  vendorProducts(brandIds: [String!], category: String, limit: Int = 20, maxPrice: Float, minPrice: Float, page: Int = 1, petTypeIds: [String!], search: String): ProductConnection!
 }
 
 input ReactivateAccountInput {

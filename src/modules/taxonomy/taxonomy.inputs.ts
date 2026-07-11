@@ -107,4 +107,9 @@ export class DeleteTaxonomyInput {
   @IsString()
   @IsNotEmpty()
   id: string;
+
+  @Field({ nullable: true })
+  @IsOptional()
+  @IsString()
+  replacementCategoryId?: string;
 }

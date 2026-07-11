@@ -3,6 +3,7 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, In, Not, QueryFailedError, Repository, DataSource } from 'typeorm';
@@ -10,12 +11,13 @@ import { Category } from '../../database/entities/category.entity';
 import { Tag } from '../../database/entities/tag.entity';
 import { PetType } from '../../database/entities/pet-type.entity';
 import { Brand } from '../../database/entities/brand.entity';
-import { Product } from '../../database/entities/product.entity';
+import { Product, ProductStatus } from '../../database/entities/product.entity';
 import { TaxonomyApprovalStatus } from '../../database/entities/enums/taxonomy.enums';
 import { UserRole } from '../../database/entities/user.entity';
 import { generateSlug } from '../../common/utils/slug.util';
 import { StorageService } from '../storage/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { SearchEmbeddingQueueService } from '../search/embedding/search-embedding-queue.service';
 import { DeleteTaxonomyResult, TaxonomyDeleteImpact } from './taxonomy-delete.types';
 
 type TaxonomyRepository = Repository<Category | Tag | PetType | Brand>;
@@ -36,6 +38,7 @@ export class TaxonomyService {
     private readonly dataSource: DataSource,
     private readonly storageService: StorageService,
     private readonly notificationsService: NotificationsService,
+    @Optional() private readonly searchEmbeddingQueueService?: SearchEmbeddingQueueService,
   ) {}
 
   private async ensureUniqueSlug(
@@ -107,7 +110,7 @@ export class TaxonomyService {
     });
   }
 
-  private resolveApprovalStatus(role: string): TaxonomyApprovalStatus {
+  private resolveApprovalStatus(role: UserRole): TaxonomyApprovalStatus {
     return role === UserRole.ADMIN
       ? TaxonomyApprovalStatus.APPROVED
       : TaxonomyApprovalStatus.PENDING;
@@ -141,10 +144,24 @@ export class TaxonomyService {
     });
   }
 
+  async findRejectedCategories(): Promise<Category[]> {
+    return this.categoryRepository.find({
+      where: { approvalStatus: TaxonomyApprovalStatus.REJECTED },
+      order: { name: 'ASC' },
+    });
+  }
+
+  async findRejectedTags(): Promise<Tag[]> {
+    return this.tagRepository.find({
+      where: { approvalStatus: TaxonomyApprovalStatus.REJECTED },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
   async createCategory(
     name: string,
     createdBy: string,
-    role: string,
+    role: UserRole,
     imageUrl?: string | null,
   ): Promise<Category> {
     await this.assertUniqueName(this.categoryRepository, name, 'หมวดหมู่');
@@ -160,7 +177,7 @@ export class TaxonomyService {
       name: name.trim(),
       slug,
       createdBy,
-      approvalStatus: TaxonomyApprovalStatus.PENDING,
+      approvalStatus: this.resolveApprovalStatus(role),
       imageUrl: trimmedImageUrl,
     });
 
@@ -174,7 +191,7 @@ export class TaxonomyService {
     }
   }
 
-  async createTag(name: string, createdBy: string, role: string): Promise<Tag> {
+  async createTag(name: string, createdBy: string, role: UserRole): Promise<Tag> {
     await this.assertUniqueName(this.tagRepository, name, 'แท็ก');
 
     const slug = await this.ensureUniqueSlug(this.tagRepository, name, 'tag');
@@ -418,6 +435,74 @@ export class TaxonomyService {
    * Throws a validation error naming any tags that do not exist / are not
    * approved. Does NOT auto-create tags.
    */
+  /**
+   * Resolve an approved category for public listing filters.
+   * Lookup order: exact slug, then case-insensitive name match.
+   * Returns null when no approved category matches (caller returns empty listing).
+   */
+  async resolveApprovedCategoryFilter(category: string): Promise<Category | null> {
+    const trimmed = category.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    const bySlug = await this.categoryRepository.findOne({
+      where: {
+        slug: trimmed,
+        approvalStatus: TaxonomyApprovalStatus.APPROVED,
+      },
+    });
+    if (bySlug) {
+      return bySlug;
+    }
+
+    return this.categoryRepository.findOne({
+      where: {
+        name: ILike(trimmed),
+        approvalStatus: TaxonomyApprovalStatus.APPROVED,
+      },
+    });
+  }
+
+  /**
+   * Resolve an approved tag for public listing filters.
+   * Lookup order: exact id (storefront UUID contract), exact slug, then ILike name.
+   * Returns null when no approved tag matches (caller returns empty listing).
+   */
+  async resolveApprovedTagFilter(tag: string): Promise<Tag | null> {
+    const trimmed = tag.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    const byId = await this.tagRepository.findOne({
+      where: {
+        id: trimmed,
+        approvalStatus: TaxonomyApprovalStatus.APPROVED,
+      },
+    });
+    if (byId) {
+      return byId;
+    }
+
+    const bySlug = await this.tagRepository.findOne({
+      where: {
+        slug: trimmed,
+        approvalStatus: TaxonomyApprovalStatus.APPROVED,
+      },
+    });
+    if (bySlug) {
+      return bySlug;
+    }
+
+    return this.tagRepository.findOne({
+      where: {
+        name: ILike(trimmed),
+        approvalStatus: TaxonomyApprovalStatus.APPROVED,
+      },
+    });
+  }
+
   async getApprovedTagsByNames(names: string[]): Promise<Tag[]> {
     const cleaned = [...new Set(names.map((name) => name.trim()).filter(Boolean))];
 
@@ -524,7 +609,7 @@ export class TaxonomyService {
       name: name.trim(),
       slug,
       createdBy,
-      approvalStatus: this.resolveApprovalStatus(role),
+      approvalStatus: this.resolveApprovalStatus(role as UserRole),
     });
 
     try {
@@ -743,29 +828,91 @@ export class TaxonomyService {
     return this.buildDeleteImpact({ brandId });
   }
 
-  async deleteCategory(id: string): Promise<DeleteTaxonomyResult> {
+  async deleteCategory(id: string, replacementCategoryId?: string): Promise<DeleteTaxonomyResult> {
     const category = await this.getCategoryOrThrow(id);
-    const products = await this.productRepository.find({ where: { categoryId: id } });
-    const storeIds = [...new Set(products.map((product) => product.storeId))];
+    const products = await this.findActiveProductsByCategoryId(id);
+
+    if (products.length > 0) {
+      if (!replacementCategoryId) {
+        throw new BadRequestException({
+          code: 'CATEGORY_REPLACEMENT_REQUIRED',
+          message: 'Replacement category is required when products are bound to this category',
+        });
+      }
+
+      if (replacementCategoryId === id) {
+        throw new BadRequestException({
+          code: 'CATEGORY_REPLACEMENT_INVALID',
+          message: 'Replacement category must differ from the category being deleted',
+        });
+      }
+
+      const replacement = await this.categoryRepository.findOne({
+        where: {
+          id: replacementCategoryId,
+          approvalStatus: TaxonomyApprovalStatus.APPROVED,
+        },
+      });
+
+      if (!replacement) {
+        throw new BadRequestException({
+          code: 'CATEGORY_REPLACEMENT_INVALID',
+          message: 'Replacement category must be an approved category',
+        });
+      }
+
+      const storeIds = [...new Set(products.map((product) => product.storeId))];
+      const reassignedProductIds: string[] = [];
+
+      await this.dataSource.transaction(async (manager) => {
+        await manager
+          .createQueryBuilder()
+          .update(Product)
+          .set({ categoryId: replacement.id, category: replacement.name })
+          .where('category_id = :categoryId', { categoryId: id })
+          .andWhere('deleted_at IS NULL')
+          .execute();
+
+        reassignedProductIds.push(
+          ...products
+            .filter((product) => product.status === ProductStatus.PUBLISHED)
+            .map((product) => product.id),
+        );
+
+        await manager.delete(Category, id);
+      });
+
+      const notifiedStoreCount = await this.notificationsService.notifyVendorsAboutTaxonomyDeleted(
+        storeIds,
+        'category',
+        category.name,
+      );
+
+      await this.enqueueEmbeddingsForProducts(reassignedProductIds);
+
+      return {
+        success: true,
+        deletedId: id,
+        deletedCategoryId: id,
+        detachedProductCount: 0,
+        reassignedProductCount: products.length,
+        replacementCategoryId: replacement.id,
+        notifiedStoreCount,
+      };
+    }
 
     await this.dataSource.transaction(async (manager) => {
-      if (products.length) {
-        await manager.update(Product, { categoryId: id }, { categoryId: null, category: null });
-      }
       await manager.delete(Category, id);
     });
-
-    const notifiedStoreCount = await this.notificationsService.notifyVendorsAboutTaxonomyDeleted(
-      storeIds,
-      'category',
-      category.name,
-    );
 
     return {
       success: true,
       deletedId: id,
-      detachedProductCount: products.length,
-      notifiedStoreCount,
+      deletedCategoryId: id,
+      detachedProductCount: 0,
+      reassignedProductCount: 0,
+      replacementCategoryId: null,
+      notifiedStoreCount: 0,
     };
   }
 
@@ -862,6 +1009,36 @@ export class TaxonomyService {
     };
   }
 
+  private async findActiveProductsByCategoryId(categoryId: string): Promise<Product[]> {
+    return this.productRepository
+      .createQueryBuilder('product')
+      .where('product.category_id = :categoryId', { categoryId })
+      .andWhere('product.deleted_at IS NULL')
+      .getMany();
+  }
+
+  private async enqueueEmbeddingsForProducts(productIds: string[]): Promise<void> {
+    if (!this.searchEmbeddingQueueService || productIds.length === 0) {
+      return;
+    }
+
+    await Promise.all(
+      productIds.map(async (productId) => {
+        try {
+          await this.searchEmbeddingQueueService!.enqueueProductEmbedding(productId);
+        } catch {
+          // Non-blocking post-commit enqueue; failures are retried by the queue worker.
+        }
+      }),
+    );
+  }
+
+  private applyActiveProductFilter(
+    qb: ReturnType<Repository<Product>['createQueryBuilder']>,
+  ): ReturnType<Repository<Product>['createQueryBuilder']> {
+    return qb.andWhere('product.deleted_at IS NULL');
+  }
+
   private async getCategoryOrThrow(id: string): Promise<Category> {
     const category = await this.categoryRepository.findOne({ where: { id } });
     if (!category) {
@@ -920,14 +1097,18 @@ export class TaxonomyService {
 
     if (filter.categoryId) {
       qb = qb.where('product.category_id = :categoryId', { categoryId: filter.categoryId });
+      qb = this.applyActiveProductFilter(qb);
     } else if (filter.petTypeId) {
       qb = qb.where('product.pet_type_id = :petTypeId', { petTypeId: filter.petTypeId });
+      qb = this.applyActiveProductFilter(qb);
     } else if (filter.brandId) {
       qb = qb.where('product.brand_id = :brandId', { brandId: filter.brandId });
+      qb = this.applyActiveProductFilter(qb);
     } else if (filter.tagId) {
       qb = qb.innerJoin('product.taxonomyTags', 'tag', 'tag.id = :tagId', {
         tagId: filter.tagId,
       });
+      qb = this.applyActiveProductFilter(qb);
     }
 
     const products = await qb.getMany();
@@ -935,14 +1116,18 @@ export class TaxonomyService {
 
     if (filter.categoryId) {
       countQb.where('product.category_id = :categoryId', { categoryId: filter.categoryId });
+      this.applyActiveProductFilter(countQb);
     } else if (filter.petTypeId) {
       countQb.where('product.pet_type_id = :petTypeId', { petTypeId: filter.petTypeId });
+      this.applyActiveProductFilter(countQb);
     } else if (filter.brandId) {
       countQb.where('product.brand_id = :brandId', { brandId: filter.brandId });
+      this.applyActiveProductFilter(countQb);
     } else if (filter.tagId) {
       countQb.innerJoin('product.taxonomyTags', 'tag', 'tag.id = :tagId', {
         tagId: filter.tagId,
       });
+      this.applyActiveProductFilter(countQb);
     }
 
     const productCount = await countQb.getCount();

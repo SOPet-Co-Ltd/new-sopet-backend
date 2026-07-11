@@ -68,52 +68,6 @@ export class ProductRepository {
     return query.getMany();
   }
 
-  async search(
-    searchQuery: string,
-    filters?: ProductFilters,
-    limit: number = 20,
-    offset: number = 0,
-  ): Promise<Product[]> {
-    const query = this.repository
-      .createQueryBuilder('product')
-      .leftJoinAndSelect('product.images', 'images')
-      .leftJoinAndSelect('product.variants', 'variants')
-      .leftJoin('product.store', 'store')
-      .where('product.deleted_at IS NULL')
-      .andWhere('store.status = :storeStatus', { storeStatus: 'approved' })
-      .andWhere('product.status = :productStatus', { productStatus: ProductStatus.PUBLISHED })
-      .andWhere(
-        `(
-          to_tsvector('simple', product.name) @@ plainto_tsquery('simple', :query)
-          OR to_tsvector('simple', product.description) @@ plainto_tsquery('simple', :query)
-          OR product.name ILIKE :likeQuery
-        )`,
-        { query: searchQuery, likeQuery: `%${searchQuery}%` },
-      )
-      .orderBy('images.sort_order', 'ASC')
-      .addOrderBy('product.created_at', 'DESC')
-      .take(limit)
-      .skip(offset);
-
-    if (filters?.category) {
-      query.andWhere('product.category = :category', { category: filters.category });
-    }
-
-    if (filters?.tags && filters.tags.length > 0) {
-      query.andWhere('product.tags && :tags', { tags: filters.tags });
-    }
-
-    if (filters?.minPrice !== undefined) {
-      query.andWhere('product.base_price >= :minPrice', { minPrice: filters.minPrice });
-    }
-
-    if (filters?.maxPrice !== undefined) {
-      query.andWhere('product.base_price <= :maxPrice', { maxPrice: filters.maxPrice });
-    }
-
-    return query.getMany();
-  }
-
   async findBySlug(storeId: string, slug: string): Promise<Product | null> {
     return this.repository.findOne({
       where: { storeId, slug, deletedAt: IsNull() },

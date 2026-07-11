@@ -7,6 +7,7 @@ import { Brand } from '../../database/entities/brand.entity';
 import { Product } from '../../database/entities/product.entity';
 import { StorageModule } from '../storage/storage.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { SearchModule } from '../search/search.module';
 import { TaxonomyService } from './taxonomy.service';
 import { TaxonomyResolver } from './taxonomy.resolver';
 
@@ -15,6 +16,7 @@ import { TaxonomyResolver } from './taxonomy.resolver';
     TypeOrmModule.forFeature([Category, Tag, PetType, Brand, Product]),
     StorageModule,
     NotificationsModule,
+    SearchModule,
   ],
   providers: [TaxonomyService, TaxonomyResolver],
   exports: [TaxonomyService],

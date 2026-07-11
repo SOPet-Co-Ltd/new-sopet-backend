@@ -146,4 +146,19 @@ export class ProductQueryDto {
   @IsOptional()
   @IsString()
   userId?: string;
+
+  /** Set by ProductsService after resolveApprovedCategoryFilter; not a public GraphQL arg. */
+  @IsOptional()
+  @IsString()
+  categoryId?: string;
+
+  /** Set by ProductsService after resolveApprovedTagFilter; not a public GraphQL arg. */
+  @IsOptional()
+  @IsString()
+  tagId?: string;
+
+  /** Resolved tag display name for legacy product.tags array match; not a public GraphQL arg. */
+  @IsOptional()
+  @IsString()
+  tagName?: string;
 }

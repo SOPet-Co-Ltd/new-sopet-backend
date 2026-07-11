@@ -8,6 +8,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, SelectQueryBuilder } from 'typeorm';
 import { Product, ProductStatus } from '../../database/entities/product.entity';
+import { StoreStatus } from '../../database/entities/store.entity';
 import { ProductVariant } from '../../database/entities/product-variant.entity';
 import { ProductImage } from '../../database/entities/product-image.entity';
 import { OrderItem } from '../../database/entities/order-item.entity';
@@ -418,35 +419,69 @@ export class ProductsService {
     return this.findOne(product.id);
   }
 
+  private emptyPaginatedResponse(page: number, limit: number): PaginatedResponse<Product> {
+    return {
+      items: [],
+      pagination: {
+        page,
+        limit,
+        total: 0,
+        totalPages: 0,
+      },
+    };
+  }
+
   // Find products with filters and pagination
   async findAll(queryDto: ProductQueryDto): Promise<PaginatedResponse<Product>> {
-    if (queryDto.search?.trim() && this.searchService?.isSmartSearchEnabled()) {
-      return this.searchService.searchProducts(queryDto);
+    const { page = 1, limit = 20, sortBy = 'createdAt', sortOrder = 'DESC' } = queryDto;
+
+    const resolvedDto: ProductQueryDto = { ...queryDto };
+
+    const categoryArg = queryDto.category?.trim();
+    if (categoryArg) {
+      const resolvedCategory =
+        await this.taxonomyService.resolveApprovedCategoryFilter(categoryArg);
+      if (!resolvedCategory) {
+        return this.emptyPaginatedResponse(page, limit);
+      }
+      resolvedDto.categoryId = resolvedCategory.id;
+    }
+
+    const tagArg = queryDto.tag?.trim();
+    if (tagArg) {
+      const resolvedTag = await this.taxonomyService.resolveApprovedTagFilter(tagArg);
+      if (!resolvedTag) {
+        return this.emptyPaginatedResponse(page, limit);
+      }
+      resolvedDto.tagId = resolvedTag.id;
+      resolvedDto.tagName = resolvedTag.name;
+    }
+
+    if (resolvedDto.search?.trim() && this.searchService?.isSmartSearchEnabled()) {
+      return this.searchService.searchProducts(resolvedDto);
     }
 
     const {
       search,
       storeId,
-      category,
-      tag,
+      categoryId,
+      tagId,
+      tagName,
       status,
       allStatuses,
       petTypeIds,
       brandIds,
       minPrice,
       maxPrice,
-      page = 1,
-      limit = 20,
-      sortBy = 'createdAt',
-      sortOrder = 'DESC',
-    } = queryDto;
+    } = resolvedDto;
 
     const skip = (page - 1) * limit;
     const filters = {
       search,
       storeId,
-      category,
-      tag,
+      categoryId,
+      tagId,
+      tagName,
       status,
       allStatuses,
       petTypeIds,
@@ -512,8 +547,9 @@ export class ProductsService {
     filters: {
       search?: string;
       storeId?: string;
-      category?: string;
-      tag?: string;
+      categoryId?: string;
+      tagId?: string;
+      tagName?: string;
       status?: ProductStatus;
       allStatuses?: boolean;
       petTypeIds?: string[];
@@ -525,8 +561,9 @@ export class ProductsService {
     const {
       search,
       storeId,
-      category,
-      tag,
+      categoryId,
+      tagId,
+      tagName,
       status,
       allStatuses,
       petTypeIds,
@@ -545,19 +582,26 @@ export class ProductsService {
       queryBuilder.andWhere('product.storeId = :storeId', { storeId });
     }
 
-    if (category) {
-      queryBuilder.andWhere('product.category = :category', { category });
+    if (!allStatuses) {
+      queryBuilder.innerJoin('product.store', 'store');
+      queryBuilder.andWhere('store.status = :approvedStoreStatus', {
+        approvedStoreStatus: StoreStatus.APPROVED,
+      });
     }
 
-    if (tag) {
+    if (categoryId) {
+      queryBuilder.andWhere('product.categoryId = :categoryId', { categoryId });
+    }
+
+    if (tagId && tagName) {
       queryBuilder.andWhere(
-        `(:tag = ANY(product.tags) OR EXISTS (
+        `(:tagName = ANY(product.tags) OR EXISTS (
             SELECT 1 FROM "product_tags" "pt"
             INNER JOIN "tags" "t" ON "t"."id" = "pt"."tag_id"
             WHERE "pt"."product_id" = product.id
-              AND ("t"."slug" = :tag OR "t"."name" = :tag)
+              AND "t"."id" = :tagId
           ))`,
-        { tag },
+        { tagId, tagName },
       );
     }
 

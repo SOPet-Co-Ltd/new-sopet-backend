@@ -27,7 +27,10 @@ export type SmartSearchFilters = Pick<
   | 'search'
   | 'storeId'
   | 'category'
+  | 'categoryId'
   | 'tag'
+  | 'tagId'
+  | 'tagName'
   | 'status'
   | 'allStatuses'
   | 'petTypeIds'
@@ -35,6 +38,25 @@ export type SmartSearchFilters = Pick<
   | 'minPrice'
   | 'maxPrice'
 >;
+
+/** Shared tag predicate — lexical, legacy, and semantic legs (post resolveApprovedTagFilter). */
+function tagFilterSql(alias: string): string {
+  return `(:tagName = ANY(${alias}.tags) OR EXISTS (
+    SELECT 1 FROM "product_tags" "pt"
+    INNER JOIN "tags" "t" ON "t"."id" = "pt"."tag_id"
+    WHERE "pt"."product_id" = ${alias}.id
+      AND "t"."id" = :tagId
+  ))`;
+}
+
+function tagFilterSqlRaw(alias: string, tagNameParam: string, tagIdParam: string): string {
+  return `(${tagNameParam} = ANY(${alias}.tags) OR EXISTS (
+    SELECT 1 FROM product_tags pt
+    INNER JOIN tags t ON t.id = pt.tag_id
+    WHERE pt.product_id = ${alias}.id
+      AND t.id = ${tagIdParam}::uuid
+  ))`;
+}
 
 @Injectable()
 export class SearchRepository {
@@ -138,9 +160,13 @@ export class SearchRepository {
       conditions.push(`product.store_id = $${paramIndex++}`);
       params.push(filters.storeId);
     }
-    if (filters.category) {
-      conditions.push(`product.category = $${paramIndex++}`);
-      params.push(filters.category);
+    if (filters.categoryId) {
+      conditions.push(`product.category_id = $${paramIndex++}::uuid`);
+      params.push(filters.categoryId);
+    }
+    if (filters.tagId && filters.tagName) {
+      conditions.push(tagFilterSqlRaw('product', `$${paramIndex++}`, `$${paramIndex++}`));
+      params.push(filters.tagName, filters.tagId);
     }
     if (filters.petTypeIds && filters.petTypeIds.length > 0) {
       conditions.push(`product.pet_type_id = ANY($${paramIndex++}::uuid[])`);
@@ -159,7 +185,7 @@ export class SearchRepository {
       params.push(filters.maxPrice);
     }
 
-    const rows = await this.dataSource.query(
+    const rows: Array<{ id: string }> = await this.dataSource.query(
       `
       SELECT product.id AS id
       FROM products product
@@ -172,7 +198,7 @@ export class SearchRepository {
       params,
     );
 
-    return rows.map((row: { id: string }) => row.id);
+    return rows.map((row) => row.id);
   }
 
   async fetchProductPersonalizationMeta(productIds: string[]): Promise<
@@ -208,8 +234,9 @@ export class SearchRepository {
   ): void {
     const {
       storeId,
-      category,
-      tag,
+      categoryId,
+      tagId,
+      tagName,
       status,
       allStatuses,
       petTypeIds,
@@ -221,19 +248,11 @@ export class SearchRepository {
     if (storeId) {
       queryBuilder.andWhere(`${alias}.storeId = :storeId`, { storeId });
     }
-    if (category) {
-      queryBuilder.andWhere(`${alias}.category = :category`, { category });
+    if (categoryId) {
+      queryBuilder.andWhere(`${alias}.categoryId = :categoryId`, { categoryId });
     }
-    if (tag) {
-      queryBuilder.andWhere(
-        `(:tag = ANY(${alias}.tags) OR EXISTS (
-            SELECT 1 FROM "product_tags" "pt"
-            INNER JOIN "tags" "t" ON "t"."id" = "pt"."tag_id"
-            WHERE "pt"."product_id" = ${alias}.id
-              AND ("t"."slug" = :tag OR "t"."name" = :tag)
-          ))`,
-        { tag },
-      );
+    if (tagId && tagName) {
+      queryBuilder.andWhere(tagFilterSql(alias), { tagId, tagName });
     }
     if (status) {
       queryBuilder.andWhere(`${alias}.status = :status`, { status });
@@ -265,8 +284,9 @@ export class SearchRepository {
     const {
       search,
       storeId,
-      category,
-      tag,
+      categoryId,
+      tagId,
+      tagName,
       status,
       allStatuses,
       petTypeIds,
@@ -300,20 +320,12 @@ export class SearchRepository {
       queryBuilder.andWhere(`${alias}.storeId = :storeId`, { storeId });
     }
 
-    if (category) {
-      queryBuilder.andWhere(`${alias}.category = :category`, { category });
+    if (categoryId) {
+      queryBuilder.andWhere(`${alias}.categoryId = :categoryId`, { categoryId });
     }
 
-    if (tag) {
-      queryBuilder.andWhere(
-        `(:tag = ANY(${alias}.tags) OR EXISTS (
-            SELECT 1 FROM "product_tags" "pt"
-            INNER JOIN "tags" "t" ON "t"."id" = "pt"."tag_id"
-            WHERE "pt"."product_id" = ${alias}.id
-              AND ("t"."slug" = :tag OR "t"."name" = :tag)
-          ))`,
-        { tag },
-      );
+    if (tagId && tagName) {
+      queryBuilder.andWhere(tagFilterSql(alias), { tagId, tagName });
     }
 
     if (status) {

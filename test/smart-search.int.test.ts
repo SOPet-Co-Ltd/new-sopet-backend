@@ -3,6 +3,7 @@
 // Generated: 2026-07-10 | Budget Used (Smart Search feature): integration 2/3 (this file), fixture-e2e n/a (storefront), service-e2e 1/2 (see smart-search.service.e2e.test.ts)
 //
 // Implement target: test/smart-search.e2e-spec.ts
+// Promoted AC-006 (search-taxonomy-fixes backend-task-03): test/smart-search.e2e-spec.ts
 // (Comment-only skeleton per repo convention; promote to `.e2e-spec.ts` picked up by
 // `test/jest-e2e.json` once implemented, mirroring
 // test/product-sold-count-batching.int.test.ts → test/product-sold-count-batching.e2e-spec.ts.)
@@ -98,3 +99,32 @@
 //   - Synonym term query returns products matching expansion tokens not literal query token.
 //   - Candidate below `trigramMinSimilarity` excluded.
 //   - Fail if typo/synonym paths do not change result membership as specified.
+//
+// ---------------------------------------------------------------------------
+// Search & Taxonomy Fixes extension — Design Doc: search-taxonomy-fixes-design.md
+// Budget (Search Taxonomy feature): integration 3/3 (this block), fixture-e2e n/a, service-e2e n/a
+//
+// AC-006: "When Smart Search is active and `tag` filter is provided, the semantic search leg shall
+// apply the tag constraint conjunctively with other filters."
+// ROI: 72 (BV:9 × Freq:7 + Legal:0 + Defect:9)
+// Behavior: client calls `products(search: "อาหารแมว", tag: "grain-free-tag")` with Smart Search
+// enabled → semantic leg candidates exclude products without tag association; lexical+semantic RRF
+// result set respects tag same as lexical-only path
+// @category: core-functionality
+// @lane: integration
+// @dependency: SearchRepository.fetchSemanticLegIds, SearchService, ProductsService pre-resolution, PostgreSQL (product_tags, tags)
+// @real-dependency: PostgreSQL
+// @complexity: high
+// Primary failure mode: semantic leg omits tag EXISTS clause — tag-filtered Smart Search returns
+// semantically similar products lacking the selected tag
+// Proof obligation: seed products P1 (matches search + has tag T), P2 (matches search semantically
+// but no tag T), P3 (has tag T but weak search match); execute products(search, tag: T.slug) with
+// SEARCH_SMART_ENABLED=true; assert P1 in results, P2 absent, P3 only if search relevance
+// threshold met; compare with tag omitted — P2 may appear. Boundary: semantic leg tag filter
+// conjunctive with category/petType filters when combined
+// Verification points / expected results / pass criteria:
+// - Product without tag association excluded from tag-filtered Smart Search results
+// - Product with tag association included when search relevance qualifies
+// - Tag filter applied in semantic leg SQL (not lexical leg only)
+// - Combined tag + category filter uses pre-resolved categoryId in both legs
+// - Fail if semantic-only candidate leaks without tag when tag param set
