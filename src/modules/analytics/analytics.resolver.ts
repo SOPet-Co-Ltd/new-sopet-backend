@@ -1,6 +1,5 @@
 import { Args, Int, Query, Resolver } from '@nestjs/graphql';
-import { BadRequestException } from '@nestjs/common';
-import { UseGuards } from '@nestjs/common';
+import { BadRequestException, UseGuards } from '@nestjs/common';
 import { AnalyticsService } from './analytics.service';
 import {
   PlatformAnalyticsType,

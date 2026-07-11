@@ -1,4 +1,4 @@
-import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
+import { Args, Field, InputType, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { BadRequestException, UseGuards } from '@nestjs/common';
 import { StoresService } from './stores.service';
 import { StoreTeamService } from './store-team.service';
@@ -36,8 +36,7 @@ import { Public, CurrentUser, Roles, AllowSuspendedStore } from '../../common/de
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { AuthRateLimitGuard } from '../auth/guards/auth-rate-limit.guard';
-import { StoreStatus } from '../../database/entities/store.entity';
-import { Field, InputType } from '@nestjs/graphql';
+import { Store, StoreStatus } from '../../database/entities/store.entity';
 import { IsOptional, IsString, IsUUID } from 'class-validator';
 import { RegisterStoreInput } from './register-store.input';
 import {
@@ -66,7 +65,6 @@ import {
 import { StoreMember } from '../../database/entities/store-member.entity';
 import { StoreMemberInvitation } from '../../database/entities/store-member-invitation.entity';
 import { StoreReactivationRequestStatus } from '../../database/entities/store-reactivation-request.entity';
-import { Store } from '../../database/entities/store.entity';
 
 @InputType()
 export class ApproveStoreInput {

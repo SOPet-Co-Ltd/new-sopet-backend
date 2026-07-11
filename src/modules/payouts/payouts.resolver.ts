@@ -1,5 +1,13 @@
-import { Args, Float, Mutation, Query, Resolver } from '@nestjs/graphql';
-import { Field, InputType, ObjectType } from '@nestjs/graphql';
+import {
+  Args,
+  Field,
+  Float,
+  InputType,
+  Mutation,
+  ObjectType,
+  Query,
+  Resolver,
+} from '@nestjs/graphql';
 import { UseGuards } from '@nestjs/common';
 import { IsNumber, IsUUID, Min } from 'class-validator';
 import { PayoutsService } from './payouts.service';

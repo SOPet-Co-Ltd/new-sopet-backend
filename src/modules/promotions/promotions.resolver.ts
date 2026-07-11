@@ -1,6 +1,5 @@
-import { Args, Float, Mutation, Query, Resolver } from '@nestjs/graphql';
+import { Args, Field, Float, InputType, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { BadRequestException, UseGuards } from '@nestjs/common';
-import { Field, InputType } from '@nestjs/graphql';
 import { IsNotEmpty, IsString } from 'class-validator';
 import { PromotionsService } from './promotions.service';
 import { Public, CurrentUser, Roles } from '../../common/decorators';

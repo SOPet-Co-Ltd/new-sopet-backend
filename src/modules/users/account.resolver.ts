@@ -1,4 +1,4 @@
-import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
+import { Args, Field, InputType, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { UseGuards } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { FavoritesService } from './favorites.service';
@@ -21,7 +21,6 @@ import {
   ChangeCustomerPhoneInput,
 } from './account.inputs';
 import { ReactivateAccountInput } from '../auth/auth.inputs';
-import { Field, InputType } from '@nestjs/graphql';
 import { IsUUID } from 'class-validator';
 import { SavedAddress } from '../../database/entities/saved-address.entity';
 import { SavedPaymentMethod } from '../../database/entities/saved-payment-method.entity';

@@ -1,5 +1,4 @@
-import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
-import { Field, ID, InputType, Int } from '@nestjs/graphql';
+import { Args, Field, ID, InputType, Int, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { UseGuards } from '@nestjs/common';
 import {
   IsBoolean,
