@@ -157,7 +157,7 @@ describe('Category taxonomy image pipeline (integration)', () => {
       storageService as never,
     );
 
-    service = taxonomyService as unknown as CategoryImageTaxonomyService;
+    service = taxonomyService;
   });
 
   async function seedPendingCategory(

@@ -59,7 +59,7 @@ describe('SearchService RRF path', () => {
     searchSettingsService as never,
     searchSynonymService as never,
     embeddingService as never,
-    rrfEngine as never,
+    rrfEngine,
     personalizationService as never,
     productRepository as never,
   );

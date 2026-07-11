@@ -41,7 +41,7 @@ describe('SearchSettingsService', () => {
       row: {
         key: 'search.ranking_weights',
         value: { text: 55 },
-      } as Setting,
+      },
     });
 
     const weights = await service.getRankingWeights();

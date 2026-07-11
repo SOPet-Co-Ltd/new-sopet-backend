@@ -22,7 +22,7 @@ describe('SearchService', () => {
       {} as SearchSettingsService,
       {} as import('./search-synonym.service').SearchSynonymService,
       { isConfigured: () => false, embedText: jest.fn() } as never,
-      { merge: jest.fn(), scoreMap: jest.fn() } as never,
+      { merge: jest.fn(), scoreMap: jest.fn() },
       {
         buildProfile: jest.fn(),
         reorderIds: jest.fn(),

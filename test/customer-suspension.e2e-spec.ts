@@ -71,7 +71,7 @@ describe('Customer suspension (e2e)', () => {
       phone: '+66812345678',
       isActive: false,
       deletionRequestedAt: null,
-    } as Customer);
+    });
 
     await expect(
       authService.verifyOtp({ phone: '+66812345678', code: '123456' }),
@@ -115,7 +115,7 @@ describe('Customer suspension (e2e)', () => {
       phone: '+66812345678',
       isActive: false,
       deletionRequestedAt: null,
-    } as Customer);
+    });
 
     await expect(authService.verifyOtp({ phone: '+66812345678', code: '123456' })).rejects.toThrow(
       ForbiddenException,

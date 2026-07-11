@@ -264,7 +264,7 @@ describe('PaymentsService createCharge saved card', () => {
         id: 'chrg_test_1',
         status: 'pending',
       }),
-    }) as unknown as typeof fetch;
+    });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
