@@ -1,0 +1,15 @@
+.git
+.github
+.cursor
+.cursorignore
+.cursorrules
+node_modules
+dist
+coverage
+temp
+test
+docs
+*.md
+.env
+.env.*
+!.env.example

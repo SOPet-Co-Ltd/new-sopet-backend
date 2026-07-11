@@ -1,0 +1,56 @@
+{
+  "family": "sopet-backend-uat",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::123:role/exec",
+  "taskRoleArn": "arn:aws:iam::123:role/task",
+  "containerDefinitions": [
+    {
+      "name": "api",
+      "image": "123.dkr.ecr.ap-southeast-1.amazonaws.com/sopet-backend:abc",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 3002,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "NODE_ENV",
+          "value": "production"
+        },
+        {
+          "name": "PORT",
+          "value": "3002"
+        },
+        {
+          "name": "DB_HOST",
+          "value": "uat.rds.amazonaws.com"
+        },
+        {
+          "name": "AWS_REGION",
+          "value": "ap-southeast-1"
+        },
+        {
+          "name": "DB_PASSWORD",
+          "value": "secret"
+        },
+        {
+          "name": "JWT_SECRET",
+          "value": "jwt-secret"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/sopet-uat",
+          "awslogs-region": "ap-southeast-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      }
+    }
+  ]
+}

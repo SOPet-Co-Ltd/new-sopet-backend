@@ -1,0 +1,31 @@
+{
+  "family": "sopet-backend",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::000000000000:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::000000000000:role/ecsTaskRole",
+  "containerDefinitions": [
+    {
+      "name": "api",
+      "image": "000000000000.dkr.ecr.ap-southeast-1.amazonaws.com/sopet-backend:placeholder",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 3002,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/sopet-backend",
+          "awslogs-region": "ap-southeast-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      }
+    }
+  ]
+}
