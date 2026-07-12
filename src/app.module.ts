@@ -38,6 +38,7 @@ import { PlatformModule } from './modules/platform/platform.module';
 import { AdminTeamModule } from './modules/admin-team/admin-team.module';
 import { PublicApiModule } from './modules/public-api/public-api.module';
 import { SearchModule } from './modules/search/search.module';
+import { HealthModule } from './modules/health/health.module';
 import { getPostgresSslOptions } from './database/postgres-ssl.util';
 
 @Module({
@@ -95,6 +96,7 @@ import { getPostgresSslOptions } from './database/postgres-ssl.util';
     PublicApiModule,
     SearchModule,
     AppGraphqlModule,
+    HealthModule,
   ],
   providers: [
     // Global exception filter
