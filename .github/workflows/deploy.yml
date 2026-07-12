@@ -97,6 +97,18 @@ jobs:
           chmod +x infra/validate-deploy-env.sh
           infra/validate-deploy-env.sh '${{ github.ref_name == 'deploy/production' && 'production' || 'uat' }}'
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn
+
+      - name: Run database migrations
+        run: |
+          yarn install --frozen-lockfile --production=false
+          yarn typeorm migration:show -d ormconfig.ts
+          yarn migration:run
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:

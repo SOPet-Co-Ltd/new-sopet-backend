@@ -45,6 +45,15 @@ E2E tests use mocked repositories — no Postgres/Redis/MinIO in CI.
 
 Dummy env vars: `JWT_SECRET`, `OMISE_*`.
 
+`.github/workflows/deploy.yml` — triggered on push to `deploy/uat` or `deploy/production`:
+
+1. Load GitHub Environment (`DB_*`, secrets, ECS config)
+2. **Run pending TypeORM migrations** (`yarn migration:run`) against the target database
+3. Build/push Docker image (if not already in ECR for this commit)
+4. Deploy to ECS
+
+Migrations run **before** the new task is deployed so the schema matches the code being rolled out. The GitHub Actions runner must be able to reach `DB_HOST` (managed Postgres firewall / allowlist). Extensions that require superuser (e.g. `vector`) must be pre-installed on the database once by an admin.
+
 ## Environment (production)
 
 Key variables from `.env.example`:
@@ -61,12 +70,13 @@ Key variables from `.env.example`:
 
 ### Production bootstrap
 
+First-time setup only (migrations run automatically on each deploy after this):
+
 ```bash
-yarn migration:run
-yarn db:seed:prod    # Creates admin@sopet.org if missing (idempotent)
+yarn db:seed:prod
 ```
 
-Change default admin password after first login.
+Creates `admin@sopet.org` with password `P@ssw0rd` — no vendor, store, or product data. Idempotent: skips if the admin already exists. Change the password after first login.
 
 ## Object storage
 

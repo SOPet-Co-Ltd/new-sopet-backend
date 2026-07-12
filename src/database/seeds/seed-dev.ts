@@ -10,11 +10,13 @@ import { StoreShippingOption } from '../entities/store-shipping-option.entity';
 import { StoreMember, StoreMemberRole } from '../entities/store-member.entity';
 import { DEV_ADMIN_EMAIL, DEV_VENDOR_EMAIL, SEED_PASSWORD } from './constants';
 import { DEV_PRODUCT_CATALOG } from './dev-catalog';
+import { assertLocalDevOnly } from './guards';
 import { createDataSource, findOrCreateUser } from './helpers';
 
 config();
 
 export async function runDevSeed(): Promise<void> {
+  assertLocalDevOnly('dev seed');
   const dataSource = await createDataSource();
 
   try {

@@ -17,9 +17,11 @@ yarn migration:revert    # Revert last migration
 yarn migration:run
 ```
 
-### `db:reset:dev` refused
+### `db:reset:migrate` / `db:reset:dev` refused
 
-Reset only runs on local hosts. For unrecognized local hosts, set `DB_RESET_ALLOW=1`. Never runs when `NODE_ENV=production`.
+Local reset: point `DB_HOST` at localhost, or set `DB_RESET_ALLOW=1` for unrecognized local hosts.
+
+UAT/prod reset (destructive): set `DB_RESET_ALLOW_PRODUCTION=1` and run `yarn db:reset:migrate` only — not `db:reset:dev` (dev seed stays local-only). Reset drops app tables/enums/routines only (skips extension-owned views on managed Postgres).
 
 ## GraphQL
 
