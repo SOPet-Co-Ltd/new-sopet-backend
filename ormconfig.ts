@@ -1,6 +1,7 @@
 import { DataSource } from 'typeorm';
 import { config } from 'dotenv';
 import { configurePgUtcTimestampParsing } from './src/database/pg-timestamp.util';
+import { getPostgresSslOptions } from './src/database/postgres-ssl.util';
 
 config();
 configurePgUtcTimestampParsing();
@@ -16,10 +17,5 @@ export default new DataSource({
   migrations: ['src/database/migrations/*.ts'],
   synchronize: false,
   logging: process.env.NODE_ENV === 'development',
-  ssl:
-    process.env.DB_SSL === 'true'
-      ? {
-          rejectUnauthorized: false,
-        }
-      : false,
+  ssl: getPostgresSslOptions(),
 });

@@ -38,6 +38,7 @@ import { PlatformModule } from './modules/platform/platform.module';
 import { AdminTeamModule } from './modules/admin-team/admin-team.module';
 import { PublicApiModule } from './modules/public-api/public-api.module';
 import { SearchModule } from './modules/search/search.module';
+import { getPostgresSslOptions } from './database/postgres-ssl.util';
 
 @Module({
   imports: [
@@ -73,6 +74,7 @@ import { SearchModule } from './modules/search/search.module';
         migrations: ['dist/database/migrations/*.js'],
         migrationsRun: false,
         logging: process.env.NODE_ENV === 'development',
+        ssl: getPostgresSslOptions(),
       }),
     }),
 
