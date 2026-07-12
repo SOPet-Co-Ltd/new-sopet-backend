@@ -73,10 +73,10 @@ Key variables from `.env.example`:
 First-time setup only (migrations run automatically on each deploy after this):
 
 ```bash
-PROD_ADMIN_INITIAL_PASSWORD='your-secure-password' yarn db:seed:prod
+yarn db:seed:prod
 ```
 
-Creates `admin@sopet.org` only — no vendor, store, or product data. Idempotent: skips if the admin already exists. Change the password after first login.
+Creates `admin@sopet.org` with password `P@ssw0rd` — no vendor, store, or product data. Idempotent: skips if the admin already exists. Change the password after first login.
 
 ## Object storage
 

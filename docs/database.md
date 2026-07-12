@@ -90,15 +90,16 @@ Use for complex queries. Most modules inject `@InjectRepository(Entity)` directl
 
 ## Seeds
 
-| Script         | Command             | Purpose                                  |
-| -------------- | ------------------- | ---------------------------------------- |
-| Dev seed       | `yarn db:seed:dev`  | Admin, vendor, demo catalog (idempotent) |
-| Dev reset      | `yarn db:reset:dev` | Drop schema, migrate, seed               |
-| Prod bootstrap | `yarn db:seed:prod` | Admin account only (idempotent)          |
+| Script         | Command                 | Purpose                                  |
+| -------------- | ----------------------- | ---------------------------------------- |
+| Dev seed       | `yarn db:seed:dev`      | Admin, vendor, demo catalog (idempotent) |
+| Reset (empty)  | `yarn db:reset:migrate` | Drop schema, migrate, **no seed**        |
+| Dev reset      | `yarn db:reset:dev`     | Drop schema, migrate, dev seed           |
+| Prod bootstrap | `yarn db:seed:prod`     | Admin account only (idempotent)          |
 
-**Safety:** `db:reset:dev` refuses to run on production hosts or `NODE_ENV=production`.
+**Safety:** `db:reset:dev` and `db:seed:dev` are local-only. `db:reset:migrate` is local-only unless you explicitly set `DB_RESET_ALLOW_PRODUCTION=1` (wipes all data on UAT/prod).
 
-`db:seed:prod` creates **only** the platform admin (`admin@sopet.org` by default). It does not seed vendors, stores, or products. When `NODE_ENV=production` and the admin does not exist yet, set `PROD_ADMIN_INITIAL_PASSWORD` before running.
+`db:seed:prod` creates **only** the platform admin (`admin@sopet.org` by default). It does not seed vendors, stores, or products. Default password: `P@ssw0rd` — change after first login.
 
 Default credentials after dev seed:
 
@@ -107,7 +108,7 @@ Default credentials after dev seed:
 | Admin  | `admin@sopet.org`  | `P@ssw0rd` |
 | Vendor | `vendor@sopet.org` | `P@ssw0rd` |
 
-Production bootstrap uses the same admin email by default; password comes from `PROD_ADMIN_INITIAL_PASSWORD` (not the dev default).
+Production bootstrap uses the same admin email and password (`P@ssw0rd`).
 
 Seed files: `src/database/seeds/seed-dev.ts`, `seed-prod.ts`, `reset-db.ts`.
 

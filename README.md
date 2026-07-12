@@ -131,15 +131,16 @@ src/
 
 ## Common commands
 
-| Command               | Description                              |
-| --------------------- | ---------------------------------------- |
-| `yarn start:dev`      | Dev server with hot reload               |
-| `yarn migration:run`  | Apply database migrations                |
-| `yarn db:reset:dev`   | Drop, migrate, seed (local only)         |
-| `yarn db:seed:prod`   | Bootstrap admin (production, idempotent) |
-| `yarn docker:up`      | Start local infrastructure               |
-| `yarn docker:check`   | Verify Postgres, Redis, MinIO            |
-| `yarn graphql:schema` | Verify schema.gql exists                 |
+| Command                 | Description                                                             |
+| ----------------------- | ----------------------------------------------------------------------- |
+| `yarn start:dev`        | Dev server with hot reload                                              |
+| `yarn migration:run`    | Apply database migrations                                               |
+| `yarn db:reset:migrate` | Drop, migrate, no seed (local; prod with `DB_RESET_ALLOW_PRODUCTION=1`) |
+| `yarn db:reset:dev`     | Drop, migrate, seed (local only)                                        |
+| `yarn db:seed:prod`     | Bootstrap admin (production, idempotent)                                |
+| `yarn docker:up`        | Start local infrastructure                                              |
+| `yarn docker:check`     | Verify Postgres, Redis, MinIO                                           |
+| `yarn graphql:schema`   | Verify schema.gql exists                                                |
 
 ## Contributing
 

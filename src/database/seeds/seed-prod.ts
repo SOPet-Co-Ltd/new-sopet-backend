@@ -9,22 +9,6 @@ function resolveProdAdminEmail(): string {
   return process.env.PROD_ADMIN_EMAIL?.trim() || PROD_ADMIN_EMAIL;
 }
 
-function resolveProdAdminPassword(): string {
-  const envPassword = process.env.PROD_ADMIN_INITIAL_PASSWORD?.trim();
-  if (envPassword) {
-    return envPassword;
-  }
-
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error(
-      'PROD_ADMIN_INITIAL_PASSWORD is required to create the production admin. ' +
-        'Set it in the environment before running yarn db:seed:prod.',
-    );
-  }
-
-  return SEED_PASSWORD;
-}
-
 /**
  * Production bootstrap seed — creates the initial admin account only.
  * Safe to run multiple times: skips if the admin email already exists.
@@ -45,7 +29,7 @@ export async function runProdSeed(): Promise<void> {
 
     const { user, created } = await findOrCreateUser(userRepo, {
       email: adminEmail,
-      password: resolveProdAdminPassword(),
+      password: SEED_PASSWORD,
       fullName: 'Admin SOPet',
       role: UserRole.ADMIN,
     });

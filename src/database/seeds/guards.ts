@@ -9,10 +9,11 @@ const LOCAL_HOST_PATTERNS = [
 ];
 
 // Hostnames that clearly point at managed/production databases. These always
-// block a reset regardless of any allowlist match.
+// block a reset unless DB_RESET_ALLOW_PRODUCTION is set.
 const PRODUCTION_HOST_PATTERNS = [
   /\.rds\.amazonaws\.com$/, // AWS RDS
   /\.amazonaws\.com$/, // AWS (Aurora, etc.)
+  /\.postgresbridge\.com$/, // PostgresBridge
   /\.supabase\.co$/, // Supabase cloud
   /\.supabase\.com$/,
   /\.pooler\.supabase\.com$/,
@@ -31,6 +32,11 @@ const TRUTHY_OVERRIDE = new Set(['1', 'true', 'yes']);
 
 function resetOverrideEnabled(): boolean {
   const values = [process.env.DB_RESET_ALLOW, process.env.ALLOW_DB_RESET];
+  return values.some((value) => value != null && TRUTHY_OVERRIDE.has(value.trim().toLowerCase()));
+}
+
+function productionResetOverrideEnabled(): boolean {
+  const values = [process.env.DB_RESET_ALLOW_PRODUCTION, process.env.ALLOW_DB_RESET_PRODUCTION];
   return values.some((value) => value != null && TRUTHY_OVERRIDE.has(value.trim().toLowerCase()));
 }
 
@@ -73,23 +79,14 @@ function isProductionHost(host: string): boolean {
 }
 
 /**
- * Blocks destructive local-only operations (schema drop, full reset) on
- * production-like environments.
- *
- * Allowed: localhost / 127.0.0.1 / ::1, *.orb.local (OrbStack),
- * *.docker.internal (Docker Desktop), and *.local dev hostnames.
- * Blocked: NODE_ENV=production and managed/cloud database hosts (RDS/Aurora,
- * Supabase, Neon, PlanetScale, etc.).
- *
- * Set DB_RESET_ALLOW=1 (or ALLOW_DB_RESET=true) to override the host check for
- * unrecognized local hosts. This does not override the NODE_ENV=production or
- * production-host guards.
+ * Blocks destructive local-only operations (dev seed, etc.) on production-like
+ * environments. Database reset uses {@link assertDatabaseResetAllowed} instead.
  */
 export function assertLocalDevOnly(operation: string): void {
   if (process.env.NODE_ENV === 'production') {
     throw new Error(
       `Refusing ${operation}: NODE_ENV is "production". ` +
-        'Database reset is only allowed in local development.',
+        'This operation is only allowed in local development.',
     );
   }
 
@@ -99,7 +96,7 @@ export function assertLocalDevOnly(operation: string): void {
   if (productionHost) {
     throw new Error(
       `Refusing ${operation}: host "${productionHost}" looks like a managed/production database. ` +
-        'Database reset is only allowed in local development.',
+        'This operation is only allowed in local development.',
     );
   }
 
@@ -115,4 +112,22 @@ export function assertLocalDevOnly(operation: string): void {
         'or set DB_RESET_ALLOW=1 to override.',
     );
   }
+}
+
+/**
+ * Guards schema drop + migrate reset.
+ *
+ * Local: allowed on localhost / dev hostnames.
+ * Production/UAT: set DB_RESET_ALLOW_PRODUCTION=1 (destructive — wipes all data).
+ */
+export function assertDatabaseResetAllowed(operation: string): void {
+  if (productionResetOverrideEnabled()) {
+    console.warn(
+      `WARNING: ${operation} on DB_HOST=${process.env.DB_HOST ?? 'unknown'} ` +
+        `DB_NAME=${process.env.DB_NAME ?? 'unknown'} (DB_RESET_ALLOW_PRODUCTION is set).`,
+    );
+    return;
+  }
+
+  assertLocalDevOnly(operation);
 }
