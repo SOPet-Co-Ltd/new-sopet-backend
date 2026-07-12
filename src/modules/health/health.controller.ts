@@ -3,20 +3,20 @@ import {
   HealthCheck,
   HealthCheckService,
   HealthIndicatorResult,
-  HttpHealthIndicator,
   TypeOrmHealthIndicator,
 } from '@nestjs/terminus';
 import { ConfigService } from '@nestjs/config';
+import { Public } from '../../common/decorators';
 import { isRedisConfigured } from '../../common/utils/is-redis-configured';
 import { RedisService } from '../redis/redis.service';
 
+@Public()
 @Controller('health')
 export class HealthController {
   private readonly logger = new Logger(HealthController.name);
 
   constructor(
     private readonly health: HealthCheckService,
-    private readonly http: HttpHealthIndicator,
     private readonly db: TypeOrmHealthIndicator,
     private readonly config: ConfigService,
     private readonly redis: RedisService,
