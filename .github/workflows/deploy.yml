@@ -1,9 +1,8 @@
 # SOPET Backend — Deploy to AWS ECS (Fargate)
 # Triggers on push to deploy/production or deploy/uat.
 #
-# All GitHub Environment variables/secrets are mapped once at job level (env:).
-# Application keys must match infra/env.manifest.json.
-# Empty optional values are omitted from the ECS task definition.
+# GitHub Environment vars/secrets are mapped once in "Load GitHub Environment"
+# (step-level env → GITHUB_ENV). Keys: infra/github-env.keys
 
 name: Deploy
 
@@ -25,72 +24,73 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ github.ref_name == 'deploy/production' && 'production' || 'uat' }}
 
-    env:
-      # Deploy infrastructure (GitHub Variables)
-      AWS_REGION: ${{ vars.AWS_REGION }}
-      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
-      ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
-      ECS_SERVICE: ${{ vars.ECS_SERVICE }}
-      ECS_TASK_DEFINITION_FAMILY: ${{ vars.ECS_TASK_DEFINITION_FAMILY }}
-      ECS_CONTAINER_NAME: ${{ vars.ECS_CONTAINER_NAME }}
-      ECS_EXECUTION_ROLE_ARN: ${{ vars.ECS_EXECUTION_ROLE_ARN }}
-      ECS_TASK_ROLE_ARN: ${{ vars.ECS_TASK_ROLE_ARN }}
-      ECS_LOG_GROUP: ${{ vars.ECS_LOG_GROUP }}
-      ECS_CPU: ${{ vars.ECS_CPU }}
-      ECS_MEMORY: ${{ vars.ECS_MEMORY }}
-      # Application variables (infra/env.manifest.json)
-      NODE_ENV: ${{ vars.NODE_ENV }}
-      PORT: ${{ vars.PORT }}
-      DB_HOST: ${{ vars.DB_HOST }}
-      DB_PORT: ${{ vars.DB_PORT }}
-      DB_USERNAME: ${{ vars.DB_USERNAME }}
-      DB_NAME: ${{ vars.DB_NAME }}
-      DB_SSL: ${{ vars.DB_SSL }}
-      DB_POOL_MAX: ${{ vars.DB_POOL_MAX }}
-      REDIS_HOST: ${{ vars.REDIS_HOST }}
-      REDIS_PORT: ${{ vars.REDIS_PORT }}
-      REDIS_DB: ${{ vars.REDIS_DB }}
-      STORAGE_PROVIDER: ${{ vars.STORAGE_PROVIDER }}
-      CDN_URL: ${{ vars.CDN_URL }}
-      JWT_ACCESS_EXPIRES_IN: ${{ vars.JWT_ACCESS_EXPIRES_IN }}
-      JWT_REFRESH_EXPIRES_IN: ${{ vars.JWT_REFRESH_EXPIRES_IN }}
-      THAIBULKSMS_SENDER: ${{ vars.THAIBULKSMS_SENDER }}
-      THAIBULKSMS_FORCE: ${{ vars.THAIBULKSMS_FORCE }}
-      THAIBULKSMS_SHORTEN_URL: ${{ vars.THAIBULKSMS_SHORTEN_URL }}
-      PAYMENT_QR_EXPIRY_MINUTES: ${{ vars.PAYMENT_QR_EXPIRY_MINUTES }}
-      PAYMENT_EXPIRY_CHECK_INTERVAL_MS: ${{ vars.PAYMENT_EXPIRY_CHECK_INTERVAL_MS }}
-      EMAIL_FROM: ${{ vars.EMAIL_FROM }}
-      EMAIL_FROM_NAME: ${{ vars.EMAIL_FROM_NAME }}
-      STOREFRONT_URL: ${{ vars.STOREFRONT_URL }}
-      ADMIN_PANEL_URL: ${{ vars.ADMIN_PANEL_URL }}
-      CORS_ORIGINS: ${{ vars.CORS_ORIGINS }}
-      RATE_LIMIT_TTL: ${{ vars.RATE_LIMIT_TTL }}
-      RATE_LIMIT_MAX: ${{ vars.RATE_LIMIT_MAX }}
-      SEARCH_SMART_ENABLED: ${{ vars.SEARCH_SMART_ENABLED }}
-      REVIEW_AUTO_APPROVE: ${{ vars.REVIEW_AUTO_APPROVE }}
-      REVIEW_WINDOW_DAYS: ${{ vars.REVIEW_WINDOW_DAYS }}
-      PAYOUT_CRON_SCHEDULE: ${{ vars.PAYOUT_CRON_SCHEDULE }}
-      PAYOUT_CRON_TIMEZONE: ${{ vars.PAYOUT_CRON_TIMEZONE }}
-      # Deploy + application secrets
-      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
-      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-      REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      CLOUDFLARE_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_ACCESS_KEY_ID }}
-      CLOUDFLARE_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_SECRET_ACCESS_KEY }}
-      CLOUDFLARE_R2_BUCKET: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
-      JWT_SECRET: ${{ secrets.JWT_SECRET }}
-      THAIBULKSMS_API_KEY: ${{ secrets.THAIBULKSMS_API_KEY }}
-      THAIBULKSMS_API_SECRET: ${{ secrets.THAIBULKSMS_API_SECRET }}
-      OMISE_PUBLIC_KEY: ${{ secrets.OMISE_PUBLIC_KEY }}
-      OMISE_SECRET_KEY: ${{ secrets.OMISE_SECRET_KEY }}
-      OMISE_WEBHOOK_SECRET: ${{ secrets.OMISE_WEBHOOK_SECRET }}
-      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Load GitHub Environment
+        env:
+          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+          ECS_SERVICE: ${{ vars.ECS_SERVICE }}
+          ECS_TASK_DEFINITION_FAMILY: ${{ vars.ECS_TASK_DEFINITION_FAMILY }}
+          ECS_CONTAINER_NAME: ${{ vars.ECS_CONTAINER_NAME }}
+          ECS_EXECUTION_ROLE_ARN: ${{ vars.ECS_EXECUTION_ROLE_ARN }}
+          ECS_TASK_ROLE_ARN: ${{ vars.ECS_TASK_ROLE_ARN }}
+          ECS_LOG_GROUP: ${{ vars.ECS_LOG_GROUP }}
+          ECS_CPU: ${{ vars.ECS_CPU }}
+          ECS_MEMORY: ${{ vars.ECS_MEMORY }}
+          NODE_ENV: ${{ vars.NODE_ENV }}
+          PORT: ${{ vars.PORT }}
+          DB_HOST: ${{ vars.DB_HOST }}
+          DB_PORT: ${{ vars.DB_PORT }}
+          DB_USERNAME: ${{ vars.DB_USERNAME }}
+          DB_NAME: ${{ vars.DB_NAME }}
+          DB_SSL: ${{ vars.DB_SSL }}
+          DB_POOL_MAX: ${{ vars.DB_POOL_MAX }}
+          REDIS_HOST: ${{ vars.REDIS_HOST }}
+          REDIS_PORT: ${{ vars.REDIS_PORT }}
+          REDIS_DB: ${{ vars.REDIS_DB }}
+          STORAGE_PROVIDER: ${{ vars.STORAGE_PROVIDER }}
+          CDN_URL: ${{ vars.CDN_URL }}
+          JWT_ACCESS_EXPIRES_IN: ${{ vars.JWT_ACCESS_EXPIRES_IN }}
+          JWT_REFRESH_EXPIRES_IN: ${{ vars.JWT_REFRESH_EXPIRES_IN }}
+          THAIBULKSMS_SENDER: ${{ vars.THAIBULKSMS_SENDER }}
+          THAIBULKSMS_FORCE: ${{ vars.THAIBULKSMS_FORCE }}
+          THAIBULKSMS_SHORTEN_URL: ${{ vars.THAIBULKSMS_SHORTEN_URL }}
+          PAYMENT_QR_EXPIRY_MINUTES: ${{ vars.PAYMENT_QR_EXPIRY_MINUTES }}
+          PAYMENT_EXPIRY_CHECK_INTERVAL_MS: ${{ vars.PAYMENT_EXPIRY_CHECK_INTERVAL_MS }}
+          EMAIL_FROM: ${{ vars.EMAIL_FROM }}
+          EMAIL_FROM_NAME: ${{ vars.EMAIL_FROM_NAME }}
+          STOREFRONT_URL: ${{ vars.STOREFRONT_URL }}
+          ADMIN_PANEL_URL: ${{ vars.ADMIN_PANEL_URL }}
+          CORS_ORIGINS: ${{ vars.CORS_ORIGINS }}
+          RATE_LIMIT_TTL: ${{ vars.RATE_LIMIT_TTL }}
+          RATE_LIMIT_MAX: ${{ vars.RATE_LIMIT_MAX }}
+          SEARCH_SMART_ENABLED: ${{ vars.SEARCH_SMART_ENABLED }}
+          REVIEW_AUTO_APPROVE: ${{ vars.REVIEW_AUTO_APPROVE }}
+          REVIEW_WINDOW_DAYS: ${{ vars.REVIEW_WINDOW_DAYS }}
+          PAYOUT_CRON_SCHEDULE: ${{ vars.PAYOUT_CRON_SCHEDULE }}
+          PAYOUT_CRON_TIMEZONE: ${{ vars.PAYOUT_CRON_TIMEZONE }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_ACCESS_KEY_ID }}
+          CLOUDFLARE_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_SECRET_ACCESS_KEY }}
+          CLOUDFLARE_R2_BUCKET: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          THAIBULKSMS_API_KEY: ${{ secrets.THAIBULKSMS_API_KEY }}
+          THAIBULKSMS_API_SECRET: ${{ secrets.THAIBULKSMS_API_SECRET }}
+          OMISE_PUBLIC_KEY: ${{ secrets.OMISE_PUBLIC_KEY }}
+          OMISE_SECRET_KEY: ${{ secrets.OMISE_SECRET_KEY }}
+          OMISE_WEBHOOK_SECRET: ${{ secrets.OMISE_WEBHOOK_SECRET }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          chmod +x infra/export-github-env.sh
+          infra/export-github-env.sh
 
       - name: Validate GitHub Environment configuration
         run: |
