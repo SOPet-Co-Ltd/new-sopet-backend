@@ -5,29 +5,55 @@ import { createDataSource, findOrCreateUser } from './helpers';
 
 config();
 
+function resolveProdAdminEmail(): string {
+  return process.env.PROD_ADMIN_EMAIL?.trim() || PROD_ADMIN_EMAIL;
+}
+
+function resolveProdAdminPassword(): string {
+  const envPassword = process.env.PROD_ADMIN_INITIAL_PASSWORD?.trim();
+  if (envPassword) {
+    return envPassword;
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'PROD_ADMIN_INITIAL_PASSWORD is required to create the production admin. ' +
+        'Set it in the environment before running yarn db:seed:prod.',
+    );
+  }
+
+  return SEED_PASSWORD;
+}
+
 /**
  * Production bootstrap seed — creates the initial admin account only.
- * Safe to run multiple times: skips if admin@sopet.org already exists.
- * Does NOT drop data or create demo stores/products.
+ * Safe to run multiple times: skips if the admin email already exists.
+ * Does NOT create vendors, stores, products, promotions, or shipping data.
  */
 export async function runProdSeed(): Promise<void> {
   const dataSource = await createDataSource();
+  const adminEmail = resolveProdAdminEmail();
 
   try {
     const userRepo = dataSource.getRepository(User);
 
+    const existing = await userRepo.findOne({ where: { email: adminEmail } });
+    if (existing) {
+      console.log(`Production admin already exists (${existing.email}) — nothing to do.`);
+      return;
+    }
+
     const { user, created } = await findOrCreateUser(userRepo, {
-      email: PROD_ADMIN_EMAIL,
-      password: SEED_PASSWORD,
+      email: adminEmail,
+      password: resolveProdAdminPassword(),
       fullName: 'Admin SOPet',
       role: UserRole.ADMIN,
     });
 
     if (created) {
-      console.log(`Created production admin (${PROD_ADMIN_EMAIL})`);
-      console.log('\nIMPORTANT: Change the default password after first login.');
-    } else {
-      console.log(`Production admin already exists (${user.email}) — nothing to do.`);
+      console.log(`Created production admin (${user.email})`);
+      console.log('Skipped vendor accounts, stores, and products.');
+      console.log('\nIMPORTANT: Change the admin password after first login.');
     }
   } finally {
     await dataSource.destroy();

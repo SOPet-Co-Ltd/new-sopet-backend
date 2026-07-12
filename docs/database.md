@@ -98,12 +98,16 @@ Use for complex queries. Most modules inject `@InjectRepository(Entity)` directl
 
 **Safety:** `db:reset:dev` refuses to run on production hosts or `NODE_ENV=production`.
 
+`db:seed:prod` creates **only** the platform admin (`admin@sopet.org` by default). It does not seed vendors, stores, or products. When `NODE_ENV=production` and the admin does not exist yet, set `PROD_ADMIN_INITIAL_PASSWORD` before running.
+
 Default credentials after dev seed:
 
 | Role   | Email              | Password   |
 | ------ | ------------------ | ---------- |
 | Admin  | `admin@sopet.org`  | `P@ssw0rd` |
 | Vendor | `vendor@sopet.org` | `P@ssw0rd` |
+
+Production bootstrap uses the same admin email by default; password comes from `PROD_ADMIN_INITIAL_PASSWORD` (not the dev default).
 
 Seed files: `src/database/seeds/seed-dev.ts`, `seed-prod.ts`, `reset-db.ts`.
 
