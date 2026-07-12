@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Apply ECR lifecycle policy (keep last 10 images; expire untagged after 7 days).
+# Apply ECR lifecycle policy (keep last 5 images; expire untagged after 7 days).
 # Run once per ECR repository (e.g. production and uat if separate).
 #
 # Usage:
