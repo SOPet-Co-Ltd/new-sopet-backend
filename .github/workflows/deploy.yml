@@ -22,7 +22,7 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: ${{ github.ref_name == 'deploy/production' && 'production' || 'uat' }}
+    environment: ${{ github.ref_name == 'deploy/production' && 'deploy/production' || 'deploy/uat' }}
 
     steps:
       - name: Checkout
