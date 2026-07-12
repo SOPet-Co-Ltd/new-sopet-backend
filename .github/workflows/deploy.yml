@@ -1,5 +1,5 @@
 # SOPET Backend — Deploy to AWS ECS (Fargate)
-# Triggers on push to main (production) or uat.
+# Triggers on push to deploy/production or deploy/uat.
 #
 # All application environment variables are stored in GitHub Environments
 # (production / uat). Names match .env.example — see infra/env.manifest.json.
@@ -23,7 +23,7 @@ name: Deploy
 
 on:
   push:
-    branches: [main, uat]
+    branches: [deploy/production, deploy/uat]
   workflow_dispatch:
 
 concurrency:
@@ -37,7 +37,7 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: ${{ github.ref_name == 'main' && 'production' || 'uat' }}
+    environment: ${{ github.ref_name == 'deploy/production' && 'production' || 'uat' }}
 
     steps:
       - name: Checkout
