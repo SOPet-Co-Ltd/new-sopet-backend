@@ -24,7 +24,7 @@ OUTPUT="${1:-task-definition.json}"
 
 ECS_CPU="${ECS_CPU:-512}"
 ECS_MEMORY="${ECS_MEMORY:-1024}"
-AWS_REGION="${AWS_REGION:-ap-southeast-1}"
+AWS_REGION="${AWS_REGION:-ap-southeast-7}"
 
 ENV_ENTRIES=()
 while IFS= read -r name; do

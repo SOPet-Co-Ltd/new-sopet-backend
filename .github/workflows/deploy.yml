@@ -1,23 +1,9 @@
 # SOPET Backend — Deploy to AWS ECS (Fargate)
 # Triggers on push to deploy/production or deploy/uat.
 #
-# All application environment variables are stored in GitHub Environments
-# (production / uat). Names match .env.example — see infra/env.manifest.json.
-#
-# GitHub Environment — deploy infrastructure (Variables):
-#   AWS_REGION, ECR_REPOSITORY, ECS_CLUSTER, ECS_SERVICE,
-#   ECS_TASK_DEFINITION_FAMILY, ECS_CONTAINER_NAME,
-#   ECS_EXECUTION_ROLE_ARN, ECS_TASK_ROLE_ARN, ECS_LOG_GROUP,
-#   ECS_CPU (optional), ECS_MEMORY (optional)
-#
-# GitHub Environment — application (Variables + Secrets):
-#   Listed in infra/env.manifest.json (variables → Variables, secrets → Secrets)
-#
-# GitHub Environment — deploy auth (Secret):
-#   AWS_ROLE_ARN — IAM role for GitHub OIDC
-#
-# ECR lifecycle (one-time): ./infra/apply-ecr-lifecycle-policy.sh
-# Shared ECR: images tagged by commit SHA; prod reuses uat build when SHA matches.
+# All GitHub Environment variables/secrets are mapped once at job level (env:).
+# Application keys must match infra/env.manifest.json.
+# Empty optional values are omitted from the ECS task definition.
 
 name: Deploy
 
@@ -39,15 +25,83 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ github.ref_name == 'deploy/production' && 'production' || 'uat' }}
 
+    env:
+      # Deploy infrastructure (GitHub Variables)
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+      ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+      ECS_SERVICE: ${{ vars.ECS_SERVICE }}
+      ECS_TASK_DEFINITION_FAMILY: ${{ vars.ECS_TASK_DEFINITION_FAMILY }}
+      ECS_CONTAINER_NAME: ${{ vars.ECS_CONTAINER_NAME }}
+      ECS_EXECUTION_ROLE_ARN: ${{ vars.ECS_EXECUTION_ROLE_ARN }}
+      ECS_TASK_ROLE_ARN: ${{ vars.ECS_TASK_ROLE_ARN }}
+      ECS_LOG_GROUP: ${{ vars.ECS_LOG_GROUP }}
+      ECS_CPU: ${{ vars.ECS_CPU }}
+      ECS_MEMORY: ${{ vars.ECS_MEMORY }}
+      # Application variables (infra/env.manifest.json)
+      NODE_ENV: ${{ vars.NODE_ENV }}
+      PORT: ${{ vars.PORT }}
+      DB_HOST: ${{ vars.DB_HOST }}
+      DB_PORT: ${{ vars.DB_PORT }}
+      DB_USERNAME: ${{ vars.DB_USERNAME }}
+      DB_NAME: ${{ vars.DB_NAME }}
+      DB_SSL: ${{ vars.DB_SSL }}
+      DB_POOL_MAX: ${{ vars.DB_POOL_MAX }}
+      REDIS_HOST: ${{ vars.REDIS_HOST }}
+      REDIS_PORT: ${{ vars.REDIS_PORT }}
+      REDIS_DB: ${{ vars.REDIS_DB }}
+      STORAGE_PROVIDER: ${{ vars.STORAGE_PROVIDER }}
+      CDN_URL: ${{ vars.CDN_URL }}
+      JWT_ACCESS_EXPIRES_IN: ${{ vars.JWT_ACCESS_EXPIRES_IN }}
+      JWT_REFRESH_EXPIRES_IN: ${{ vars.JWT_REFRESH_EXPIRES_IN }}
+      THAIBULKSMS_SENDER: ${{ vars.THAIBULKSMS_SENDER }}
+      THAIBULKSMS_FORCE: ${{ vars.THAIBULKSMS_FORCE }}
+      THAIBULKSMS_SHORTEN_URL: ${{ vars.THAIBULKSMS_SHORTEN_URL }}
+      PAYMENT_QR_EXPIRY_MINUTES: ${{ vars.PAYMENT_QR_EXPIRY_MINUTES }}
+      PAYMENT_EXPIRY_CHECK_INTERVAL_MS: ${{ vars.PAYMENT_EXPIRY_CHECK_INTERVAL_MS }}
+      EMAIL_FROM: ${{ vars.EMAIL_FROM }}
+      EMAIL_FROM_NAME: ${{ vars.EMAIL_FROM_NAME }}
+      STOREFRONT_URL: ${{ vars.STOREFRONT_URL }}
+      ADMIN_PANEL_URL: ${{ vars.ADMIN_PANEL_URL }}
+      CORS_ORIGINS: ${{ vars.CORS_ORIGINS }}
+      RATE_LIMIT_TTL: ${{ vars.RATE_LIMIT_TTL }}
+      RATE_LIMIT_MAX: ${{ vars.RATE_LIMIT_MAX }}
+      SEARCH_SMART_ENABLED: ${{ vars.SEARCH_SMART_ENABLED }}
+      REVIEW_AUTO_APPROVE: ${{ vars.REVIEW_AUTO_APPROVE }}
+      REVIEW_WINDOW_DAYS: ${{ vars.REVIEW_WINDOW_DAYS }}
+      PAYOUT_CRON_SCHEDULE: ${{ vars.PAYOUT_CRON_SCHEDULE }}
+      PAYOUT_CRON_TIMEZONE: ${{ vars.PAYOUT_CRON_TIMEZONE }}
+      # Deploy + application secrets
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_ACCESS_KEY_ID }}
+      CLOUDFLARE_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_SECRET_ACCESS_KEY }}
+      CLOUDFLARE_R2_BUCKET: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      THAIBULKSMS_API_KEY: ${{ secrets.THAIBULKSMS_API_KEY }}
+      THAIBULKSMS_API_SECRET: ${{ secrets.THAIBULKSMS_API_SECRET }}
+      OMISE_PUBLIC_KEY: ${{ secrets.OMISE_PUBLIC_KEY }}
+      OMISE_SECRET_KEY: ${{ secrets.OMISE_SECRET_KEY }}
+      OMISE_WEBHOOK_SECRET: ${{ secrets.OMISE_WEBHOOK_SECRET }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate GitHub Environment configuration
+        run: |
+          chmod +x infra/validate-deploy-env.sh
+          infra/validate-deploy-env.sh '${{ github.ref_name == 'deploy/production' && 'production' || 'uat' }}'
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
         id: login-ecr
@@ -56,7 +110,6 @@ jobs:
       - name: Check if image exists in ECR
         id: check-image
         env:
-          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
           if aws ecr describe-images \
@@ -74,7 +127,6 @@ jobs:
         if: steps.check-image.outputs.exists != 'true'
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
           docker build -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" .
@@ -82,80 +134,13 @@ jobs:
 
       - name: Render ECS task definition from GitHub Environment
         env:
-          # --- ECS infrastructure ---
-          ECS_TASK_DEFINITION_FAMILY: ${{ vars.ECS_TASK_DEFINITION_FAMILY }}
-          ECS_CONTAINER_NAME: ${{ vars.ECS_CONTAINER_NAME }}
-          ECS_EXECUTION_ROLE_ARN: ${{ vars.ECS_EXECUTION_ROLE_ARN }}
-          ECS_TASK_ROLE_ARN: ${{ vars.ECS_TASK_ROLE_ARN }}
-          ECS_LOG_GROUP: ${{ vars.ECS_LOG_GROUP }}
-          ECS_CPU: ${{ vars.ECS_CPU }}
-          ECS_MEMORY: ${{ vars.ECS_MEMORY }}
-          AWS_REGION: ${{ vars.AWS_REGION }}
-          CONTAINER_IMAGE: ${{ steps.login-ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:${{ github.sha }}
-          # --- Application variables (infra/env.manifest.json) ---
-          NODE_ENV: ${{ vars.NODE_ENV }}
-          PORT: ${{ vars.PORT }}
-          DB_HOST: ${{ vars.DB_HOST }}
-          DB_PORT: ${{ vars.DB_PORT }}
-          DB_USERNAME: ${{ vars.DB_USERNAME }}
-          DB_NAME: ${{ vars.DB_NAME }}
-          DB_SSL: ${{ vars.DB_SSL }}
-          DB_POOL_MAX: ${{ vars.DB_POOL_MAX }}
-          REDIS_HOST: ${{ vars.REDIS_HOST }}
-          REDIS_PORT: ${{ vars.REDIS_PORT }}
-          REDIS_DB: ${{ vars.REDIS_DB }}
-          STORAGE_PROVIDER: ${{ vars.STORAGE_PROVIDER }}
-          AWS_S3_BUCKET: ${{ vars.AWS_S3_BUCKET }}
-          AWS_S3_ENDPOINT: ${{ vars.AWS_S3_ENDPOINT }}
-          AWS_S3_FORCE_PATH_STYLE: ${{ vars.AWS_S3_FORCE_PATH_STYLE }}
-          AWS_S3_PUBLIC_URL: ${{ vars.AWS_S3_PUBLIC_URL }}
-          AWS_S3_OBJECT_ACL: ${{ vars.AWS_S3_OBJECT_ACL }}
-          CDN_URL: ${{ vars.CDN_URL }}
-          JWT_ACCESS_EXPIRES_IN: ${{ vars.JWT_ACCESS_EXPIRES_IN }}
-          JWT_REFRESH_EXPIRES_IN: ${{ vars.JWT_REFRESH_EXPIRES_IN }}
-          THAIBULKSMS_SENDER: ${{ vars.THAIBULKSMS_SENDER }}
-          THAIBULKSMS_FORCE: ${{ vars.THAIBULKSMS_FORCE }}
-          THAIBULKSMS_SHORTEN_URL: ${{ vars.THAIBULKSMS_SHORTEN_URL }}
-          PAYMENT_QR_EXPIRY_MINUTES: ${{ vars.PAYMENT_QR_EXPIRY_MINUTES }}
-          PAYMENT_EXPIRY_CHECK_INTERVAL_MS: ${{ vars.PAYMENT_EXPIRY_CHECK_INTERVAL_MS }}
-          EMAIL_FROM: ${{ vars.EMAIL_FROM }}
-          EMAIL_FROM_NAME: ${{ vars.EMAIL_FROM_NAME }}
-          STOREFRONT_URL: ${{ vars.STOREFRONT_URL }}
-          ADMIN_PANEL_URL: ${{ vars.ADMIN_PANEL_URL }}
-          CORS_ORIGINS: ${{ vars.CORS_ORIGINS }}
-          RATE_LIMIT_TTL: ${{ vars.RATE_LIMIT_TTL }}
-          RATE_LIMIT_MAX: ${{ vars.RATE_LIMIT_MAX }}
-          SEARCH_SMART_ENABLED: ${{ vars.SEARCH_SMART_ENABLED }}
-          REVIEW_AUTO_APPROVE: ${{ vars.REVIEW_AUTO_APPROVE }}
-          REVIEW_WINDOW_DAYS: ${{ vars.REVIEW_WINDOW_DAYS }}
-          PAYOUT_CRON_SCHEDULE: ${{ vars.PAYOUT_CRON_SCHEDULE }}
-          PAYOUT_CRON_TIMEZONE: ${{ vars.PAYOUT_CRON_TIMEZONE }}
-          # --- Application secrets (infra/env.manifest.json) ---
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_ACCESS_KEY_ID }}
-          CLOUDFLARE_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_SECRET_ACCESS_KEY }}
-          CLOUDFLARE_R2_BUCKET: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
-          JWT_SECRET: ${{ secrets.JWT_SECRET }}
-          THAIBULKSMS_API_KEY: ${{ secrets.THAIBULKSMS_API_KEY }}
-          THAIBULKSMS_API_SECRET: ${{ secrets.THAIBULKSMS_API_SECRET }}
-          TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
-          TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
-          TWILIO_PHONE_NUMBER: ${{ secrets.TWILIO_PHONE_NUMBER }}
-          OMISE_PUBLIC_KEY: ${{ secrets.OMISE_PUBLIC_KEY }}
-          OMISE_SECRET_KEY: ${{ secrets.OMISE_SECRET_KEY }}
-          OMISE_WEBHOOK_SECRET: ${{ secrets.OMISE_WEBHOOK_SECRET }}
-          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CONTAINER_IMAGE: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
         run: bash infra/render-ecs-task-definition.sh task-definition.json
 
       - name: Deploy Amazon ECS task definition
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: task-definition.json
-          service: ${{ vars.ECS_SERVICE }}
-          cluster: ${{ vars.ECS_CLUSTER }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
           wait-for-service-stability: true
