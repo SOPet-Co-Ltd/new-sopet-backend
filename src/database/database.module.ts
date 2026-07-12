@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule, TypeOrmModuleOptions } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { configurePgUtcTimestampParsing } from './pg-timestamp.util';
+import { getPostgresSslOptions } from './postgres-ssl.util';
 import * as repositories from './repositories';
 import {
   User,
@@ -87,12 +88,7 @@ const ENTITIES = [
         migrations: ['dist/database/migrations/*.js'],
         synchronize: false,
         logging: configService.get('NODE_ENV') === 'development',
-        ssl:
-          configService.get('DB_SSL') === 'true'
-            ? {
-                rejectUnauthorized: false,
-              }
-            : false,
+        ssl: getPostgresSslOptions(),
         extra: {
           max: configService.get('DB_POOL_MAX') || 20,
           idleTimeoutMillis: 30000,

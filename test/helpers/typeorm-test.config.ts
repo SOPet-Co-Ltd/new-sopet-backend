@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import type { DataSourceOptions } from 'typeorm';
 import { config } from 'dotenv';
 import { configurePgUtcTimestampParsing } from '../../src/database/pg-timestamp.util';
+import { getPostgresSslOptions } from '../../src/database/postgres-ssl.util';
 
 config();
 configurePgUtcTimestampParsing();
@@ -17,11 +18,6 @@ export function createTypeOrmTestOptions(): DataSourceOptions {
     entities: [join(process.cwd(), 'src/database/entities/*.entity.ts')],
     synchronize: false,
     logging: false,
-    ssl:
-      process.env.DB_SSL === 'true'
-        ? {
-            rejectUnauthorized: false,
-          }
-        : false,
+    ssl: getPostgresSslOptions(),
   };
 }
