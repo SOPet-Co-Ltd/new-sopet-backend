@@ -68,6 +68,7 @@ if [ "${#missing[@]}" -gt 0 ]; then
     echo "::error::  - $item" >&2
   done
   echo "::error::Add them under Settings → Environments → $ENVIRONMENT_NAME" >&2
+  echo "::error::If values are already set, check Environment → Deployment branches allows branch: $GITHUB_REF_NAME" >&2
   exit 1
 fi
 
