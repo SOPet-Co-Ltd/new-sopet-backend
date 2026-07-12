@@ -107,9 +107,6 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Apply ECR lifecycle policy
-        run: bash infra/apply-ecr-lifecycle-policy.sh
-
       - name: Check if image exists in ECR
         id: check-image
         env:

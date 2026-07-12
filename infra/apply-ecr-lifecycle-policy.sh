@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 # Apply ECR lifecycle policy (keep last 5 images; expire untagged after 7 days).
-# Run once per ECR repository (e.g. production and uat if separate).
+#
+# One-time setup (recommended): run with an admin AWS profile that can manage ECR.
+# The GitHub deploy role typically only has push/pull permissions, not PutLifecyclePolicy.
 #
 # Usage:
-#   AWS_REGION=ap-southeast-1 ECR_REPOSITORY=sopet-backend ./infra/apply-ecr-lifecycle-policy.sh
+#   AWS_REGION=ap-southeast-7 ECR_REPOSITORY=sopet/sopet-backend ./infra/apply-ecr-lifecycle-policy.sh
+#
+# Optional — allow GitHub deploy roles to manage lifecycle policies, attach:
+#   infra/iam/github-deploy-ecr-lifecycle-policy.json
+# to sopet-github-deploy-uat / sopet-github-deploy-production.
 
 set -euo pipefail
 
