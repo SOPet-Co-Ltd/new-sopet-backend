@@ -10,7 +10,12 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   constructor(private readonly configService: ConfigService) {}
 
   async onModuleInit(): Promise<void> {
-    const host = this.configService.get<string>('redis.host') || 'localhost';
+    if (!this.configService.get<boolean>('redis.enabled')) {
+      this.logger.log('Redis not configured (REDIS_HOST unset) — caching disabled');
+      return;
+    }
+
+    const host = this.configService.get<string>('redis.host')!;
     const port = this.configService.get<number>('redis.port') || 6379;
     const password = this.configService.get<string>('redis.password');
     const db = this.configService.get<number>('redis.db') ?? 0;

@@ -32,6 +32,7 @@ import { CartModule } from './modules/cart/cart.module';
 import { AppGraphqlModule } from './graphql/graphql.module';
 import { EmailModule } from './modules/email/email.module';
 import { RedisModule } from './modules/redis/redis.module';
+import { QueueModule } from './modules/queue/queue.module';
 import { StorageModule } from './modules/storage/storage.module';
 import { PlatformModule } from './modules/platform/platform.module';
 import { AdminTeamModule } from './modules/admin-team/admin-team.module';
@@ -76,6 +77,7 @@ import { SearchModule } from './modules/search/search.module';
     }),
 
     // Feature Modules
+    QueueModule.forRoot(),
     RedisModule,
     EmailModule,
     AuthModule,

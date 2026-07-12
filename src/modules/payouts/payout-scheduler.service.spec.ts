@@ -21,9 +21,9 @@ describe('PayoutSchedulerService', () => {
     service = new PayoutSchedulerService(
       payoutsService as never,
       configService as never,
-      payoutQueue as never,
       storeRepo as never,
       orderItemRepo as never,
+      payoutQueue as never,
     );
   });
 
@@ -92,6 +92,19 @@ describe('PayoutSchedulerService', () => {
   it('registers cron job on module init', async () => {
     await service.onModuleInit();
     expect(payoutQueue.add).toHaveBeenCalled();
+  });
+
+  it('skips cron registration when queue is unavailable', async () => {
+    const serviceWithoutQueue = new PayoutSchedulerService(
+      payoutsService as never,
+      configService as never,
+      storeRepo as never,
+      orderItemRepo as never,
+    );
+
+    await serviceWithoutQueue.onModuleInit();
+
+    expect(payoutQueue.add).not.toHaveBeenCalled();
   });
 
   it('evaluates weekly schedule on Monday', () => {

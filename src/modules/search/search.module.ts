@@ -1,7 +1,8 @@
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { isRedisConfigured } from '../../common/utils/is-redis-configured';
 import searchConfig from '../../config/search.config';
 import { SearchSynonym } from '../../database/entities/search-synonym.entity';
 import { SearchEvent } from '../../database/entities/search-event.entity';
@@ -27,33 +28,29 @@ import { SearchSynonymService } from './search-synonym.service';
 import { SearchSuggestionsService } from './search-suggestions.service';
 import { VectorSearchSupport } from './vector-search.support';
 
+const searchQueueImports = isRedisConfigured()
+  ? [
+      BullModule.registerQueue({
+        name: SEARCH_EMBEDDING_QUEUE,
+        defaultJobOptions: {
+          attempts: 3,
+          backoff: {
+            type: 'exponential',
+            delay: 5000,
+          },
+          removeOnComplete: true,
+        },
+      }),
+    ]
+  : [];
+
+const searchQueueProviders = isRedisConfigured() ? [SearchEmbeddingProcessor] : [];
+
 @Module({
   imports: [
     ConfigModule.forFeature(searchConfig),
     RedisModule,
-    BullModule.forRootAsync({
-      imports: [ConfigModule],
-      useFactory: (configService: ConfigService) => ({
-        connection: {
-          host: configService.get<string>('redis.host'),
-          port: configService.get<number>('redis.port'),
-          password: configService.get<string>('redis.password'),
-          db: configService.get<number>('redis.db'),
-        },
-      }),
-      inject: [ConfigService],
-    }),
-    BullModule.registerQueue({
-      name: SEARCH_EMBEDDING_QUEUE,
-      defaultJobOptions: {
-        attempts: 3,
-        backoff: {
-          type: 'exponential',
-          delay: 5000,
-        },
-        removeOnComplete: true,
-      },
-    }),
+    ...searchQueueImports,
     TypeOrmModule.forFeature([
       Product,
       Setting,
@@ -77,7 +74,7 @@ import { VectorSearchSupport } from './vector-search.support';
     VectorSearchSupport,
     EmbeddingService,
     SearchEmbeddingQueueService,
-    SearchEmbeddingProcessor,
+    ...searchQueueProviders,
     SearchResolver,
   ],
   exports: [

@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -17,15 +17,21 @@ export class PayoutSchedulerService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly payoutsService: PayoutsService,
     private readonly configService: ConfigService,
-    @InjectQueue(PAYOUT_SCHEDULER_QUEUE)
-    private readonly payoutQueue: Queue,
     @InjectRepository(Store)
     private readonly storeRepository: Repository<Store>,
     @InjectRepository(OrderItem)
     private readonly orderItemRepository: Repository<OrderItem>,
+    @Optional()
+    @InjectQueue(PAYOUT_SCHEDULER_QUEUE)
+    private readonly payoutQueue?: Queue,
   ) {}
 
   async onModuleInit(): Promise<void> {
+    if (!this.payoutQueue) {
+      this.logger.warn('Redis not configured — payout scheduler disabled');
+      return;
+    }
+
     const cronSchedule = this.configService.get<string>('payout.cronSchedule') ?? '0 2 * * *';
     const timezone = this.configService.get<string>('payout.cronTimezone') ?? 'Asia/Bangkok';
 
@@ -52,7 +58,7 @@ export class PayoutSchedulerService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy(): Promise<void> {
-    await this.payoutQueue.close();
+    await this.payoutQueue?.close();
   }
 
   async runScheduledPayouts(): Promise<void> {
