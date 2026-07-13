@@ -1147,6 +1147,7 @@ type Query {
   unreadNotificationsCount: Int!
   validatePromotion(input: ValidatePromotionInput!): PromotionValidationResult!
   vendorCustomer(id: String!): VendorCustomerType!
+  vendorCustomerDetail(id: String!): VendorCustomerDetailType!
   vendorCustomers(limit: Int! = 20, page: Int! = 1, search: String): VendorCustomerConnection!
   vendorOrders(storeId: String!): [OrderType!]!
   vendorProduct(id: String!): ProductType!
@@ -1830,6 +1831,42 @@ type VendorAuthPayload {
 type VendorCustomerConnection {
   items: [VendorCustomerType!]!
   pagination: PaginationMeta!
+}
+
+type VendorCustomerDetailType {
+  createdAt: DateTime!
+  email: String
+  fullName: String
+  id: String!
+  insights: VendorCustomerStoreInsightsType!
+  isVerified: Boolean!
+  lastLoginAt: DateTime
+  phone: String!
+}
+
+type VendorCustomerFavoriteProductSummary {
+  createdAt: DateTime!
+  productName: String!
+}
+
+type VendorCustomerStoreInsightsType {
+  averageOrderValue: Float!
+  favoriteCount: Int!
+  favoriteProducts: [VendorCustomerFavoriteProductSummary!]!
+  lastOrderAt: DateTime
+  orderCount: Int!
+  recentOrders: [AdminCustomerRecentOrder!]!
+  recentReviews: [VendorCustomerStoreReviewSummary!]!
+  reviewCount: Int!
+  totalSpent: Float!
+}
+
+type VendorCustomerStoreReviewSummary {
+  comment: String
+  createdAt: DateTime!
+  id: String!
+  productName: String!
+  rating: Int!
 }
 
 type VendorCustomerType {

@@ -5,11 +5,12 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, Repository } from 'typeorm';
+import { Brackets, In, Repository } from 'typeorm';
 import { Customer } from '../../database/entities/customer.entity';
 import { Favorite } from '../../database/entities/favorite.entity';
 import { Order } from '../../database/entities/order.entity';
 import { OrderItem } from '../../database/entities/order-item.entity';
+import { Review } from '../../database/entities/review.entity';
 import { SavedAddress } from '../../database/entities/saved-address.entity';
 import { OrderStatus } from '../../database/entities/enums/order.enums';
 import { PaginatedResponse } from '../../common/interfaces';
@@ -46,6 +47,27 @@ export type AdminCustomerInsightsResult = {
   }>;
 };
 
+export type VendorCustomerStoreInsightsResult = {
+  totalSpent: number;
+  orderCount: number;
+  averageOrderValue: number;
+  lastOrderAt: Date | null;
+  favoriteCount: number;
+  reviewCount: number;
+  recentOrders: AdminCustomerInsightsResult['recentOrders'];
+  recentReviews: Array<{
+    id: string;
+    productName: string;
+    rating: number;
+    comment: string | null;
+    createdAt: Date;
+  }>;
+  favoriteProducts: Array<{
+    productName: string;
+    createdAt: Date;
+  }>;
+};
+
 @Injectable()
 export class CustomersService {
   constructor(
@@ -59,6 +81,8 @@ export class CustomersService {
     private readonly savedAddressRepository: Repository<SavedAddress>,
     @InjectRepository(Favorite)
     private readonly favoriteRepository: Repository<Favorite>,
+    @InjectRepository(Review)
+    private readonly reviewRepository: Repository<Review>,
     private readonly ordersService: OrdersService,
     private readonly customerRepo: CustomerRepository,
   ) {}
@@ -289,6 +313,151 @@ export class CustomersService {
     }
 
     return customer;
+  }
+
+  async getInsightsForVendorStore(
+    storeId: string,
+    customerId: string,
+  ): Promise<VendorCustomerStoreInsightsResult> {
+    const customer = await this.findByIdForVendor(storeId, customerId);
+    const phoneVariants = guestPhoneLookupValues(normalizeThaiPhoneToLocal(customer.phone));
+
+    const statsQb = this.orderItemRepository
+      .createQueryBuilder('oi')
+      .select('COUNT(DISTINCT order.id)', 'orderCount')
+      .addSelect('COALESCE(SUM(oi.subtotal), 0)', 'totalSpent')
+      .addSelect('MAX(order.createdAt)', 'lastOrderAt')
+      .innerJoin('oi.order', 'order')
+      .where('oi.store_id = :storeId', { storeId });
+
+    this.applyVendorCustomerOrderMatch(statsQb, customerId, phoneVariants);
+    statsQb.andWhere('order.status NOT IN (:...excludedStatuses)', {
+      excludedStatuses: CUSTOMER_SPEND_EXCLUDED_STATUSES,
+    });
+
+    const statsResult = await statsQb.getRawOne<{
+      orderCount: string;
+      totalSpent: string;
+      lastOrderAt: Date | null;
+    }>();
+
+    const orderCount = Number(statsResult?.orderCount ?? 0);
+    const totalSpent = Number(statsResult?.totalSpent ?? 0);
+    const averageOrderValue = orderCount > 0 ? totalSpent / orderCount : 0;
+
+    const recentOrdersQb = this.orderRepository
+      .createQueryBuilder('order')
+      .innerJoin('order.items', 'oi', 'oi.store_id = :storeId', { storeId })
+      .orderBy('order.createdAt', 'DESC')
+      .distinct(true)
+      .take(10);
+
+    this.applyVendorCustomerOrderMatch(recentOrdersQb, customerId, phoneVariants);
+
+    const [favoriteCount, reviewCount, recentOrders, recentReviews, favoriteProducts] =
+      await Promise.all([
+        this.favoriteRepository
+          .createQueryBuilder('favorite')
+          .innerJoin('favorite.product', 'product')
+          .where('favorite.customer_id = :customerId', { customerId })
+          .andWhere('product.store_id = :storeId', { storeId })
+          .getCount(),
+        this.reviewRepository
+          .createQueryBuilder('review')
+          .innerJoin('review.product', 'product')
+          .where('review.customer_id = :customerId', { customerId })
+          .andWhere('product.store_id = :storeId', { storeId })
+          .andWhere('review.deleted_at IS NULL')
+          .getCount(),
+        recentOrdersQb.getMany(),
+        this.reviewRepository
+          .createQueryBuilder('review')
+          .innerJoinAndSelect('review.product', 'product')
+          .where('review.customer_id = :customerId', { customerId })
+          .andWhere('product.store_id = :storeId', { storeId })
+          .andWhere('review.deleted_at IS NULL')
+          .orderBy('review.createdAt', 'DESC')
+          .take(5)
+          .getMany(),
+        this.favoriteRepository
+          .createQueryBuilder('favorite')
+          .innerJoinAndSelect('favorite.product', 'product')
+          .where('favorite.customer_id = :customerId', { customerId })
+          .andWhere('product.store_id = :storeId', { storeId })
+          .orderBy('favorite.createdAt', 'DESC')
+          .take(5)
+          .getMany(),
+      ]);
+
+    const orderIds = recentOrders.map((order) => order.id);
+    const storeItems =
+      orderIds.length > 0
+        ? await this.orderItemRepository.find({
+            where: { orderId: In(orderIds), storeId },
+          })
+        : [];
+
+    const itemsByOrderId = new Map<string, OrderItem[]>();
+    for (const item of storeItems) {
+      const existing = itemsByOrderId.get(item.orderId) ?? [];
+      existing.push(item);
+      itemsByOrderId.set(item.orderId, existing);
+    }
+
+    return {
+      totalSpent,
+      orderCount,
+      averageOrderValue,
+      lastOrderAt: statsResult?.lastOrderAt ?? null,
+      favoriteCount,
+      reviewCount,
+      recentOrders: recentOrders.map((order) => {
+        const items = itemsByOrderId.get(order.id) ?? [];
+        return {
+          id: order.id,
+          orderNumber: order.orderNumber,
+          status: order.status,
+          total: items.reduce((sum, item) => sum + Number(item.subtotal), 0),
+          createdAt: order.createdAt,
+          items: items.map((item) => ({
+            productName: item.productName,
+            quantity: item.quantity,
+            unitPrice: Number(item.unitPrice),
+            subtotal: Number(item.subtotal),
+          })),
+        };
+      }),
+      recentReviews: recentReviews.map((review) => ({
+        id: review.id,
+        productName: review.product?.name ?? 'สินค้า',
+        rating: review.rating,
+        comment: review.comment,
+        createdAt: review.createdAt,
+      })),
+      favoriteProducts: favoriteProducts.map((favorite) => ({
+        productName: favorite.product?.name ?? 'สินค้า',
+        createdAt: favorite.createdAt,
+      })),
+    };
+  }
+
+  private applyVendorCustomerOrderMatch<T extends { andWhere: (...args: unknown[]) => T }>(
+    qb: T,
+    customerId: string,
+    phoneVariants: string[],
+    orderAlias = 'order',
+  ): T {
+    return qb.andWhere(
+      new Brackets((where) => {
+        where.where(`${orderAlias}.customer_id = :customerId`, { customerId });
+        if (phoneVariants.length > 0) {
+          where.orWhere(
+            `(${orderAlias}.customer_id IS NULL AND ${orderAlias}.guest_phone IN (:...phoneVariants))`,
+            { phoneVariants },
+          );
+        }
+      }),
+    );
   }
 
   async customerHasPurchasedFromStore(storeId: string, customerId: string): Promise<boolean> {

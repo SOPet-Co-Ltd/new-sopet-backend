@@ -1810,6 +1810,69 @@ export class VendorCustomerType {
 }
 
 @ObjectType()
+export class VendorCustomerStoreReviewSummary {
+  @Field()
+  id: string;
+
+  @Field()
+  productName: string;
+
+  @Field(() => Int)
+  rating: number;
+
+  @Field(() => String, { nullable: true })
+  comment?: string | null;
+
+  @Field()
+  createdAt: Date;
+}
+
+@ObjectType()
+export class VendorCustomerFavoriteProductSummary {
+  @Field()
+  productName: string;
+
+  @Field()
+  createdAt: Date;
+}
+
+@ObjectType()
+export class VendorCustomerStoreInsightsType {
+  @Field(() => Float)
+  totalSpent: number;
+
+  @Field(() => Int)
+  orderCount: number;
+
+  @Field(() => Float)
+  averageOrderValue: number;
+
+  @Field(() => Date, { nullable: true })
+  lastOrderAt?: Date | null;
+
+  @Field(() => Int)
+  favoriteCount: number;
+
+  @Field(() => Int)
+  reviewCount: number;
+
+  @Field(() => [AdminCustomerRecentOrder])
+  recentOrders: AdminCustomerRecentOrder[];
+
+  @Field(() => [VendorCustomerStoreReviewSummary])
+  recentReviews: VendorCustomerStoreReviewSummary[];
+
+  @Field(() => [VendorCustomerFavoriteProductSummary])
+  favoriteProducts: VendorCustomerFavoriteProductSummary[];
+}
+
+@ObjectType()
+export class VendorCustomerDetailType extends VendorCustomerType {
+  @Field(() => VendorCustomerStoreInsightsType)
+  insights: VendorCustomerStoreInsightsType;
+}
+
+@ObjectType()
 export class VendorCustomerConnection {
   @Field(() => [VendorCustomerType])
   items: VendorCustomerType[];

@@ -7,6 +7,7 @@ import {
   AdminCustomerDetailType,
   AdminCustomerType,
   VendorCustomerConnection,
+  VendorCustomerDetailType,
   VendorCustomerType,
 } from '../../graphql/models/types';
 import { CurrentUser, Roles } from '../../common/decorators';
@@ -168,5 +169,22 @@ export class CustomersResolver {
     await this.storesService.assertStoreOwner(userId, storeId);
     const customer = await this.customersService.findByIdForVendor(storeId, id);
     return mapVendorCustomer(customer);
+  }
+
+  @Query(() => VendorCustomerDetailType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('vendor')
+  async vendorCustomerDetail(
+    @CurrentUser('id') userId: string,
+    @CurrentUser('storeId') storeId: string,
+    @Args('id') id: string,
+  ): Promise<VendorCustomerDetailType> {
+    await this.storesService.assertStoreOwner(userId, storeId);
+    const customer = await this.customersService.findByIdForVendor(storeId, id);
+    const insights = await this.customersService.getInsightsForVendorStore(storeId, id);
+    return {
+      ...mapVendorCustomer(customer),
+      insights,
+    };
   }
 }
