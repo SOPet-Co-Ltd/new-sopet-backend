@@ -36,32 +36,9 @@ usermod -aG docker "$DEPLOY_USER" 2>/dev/null || usermod -aG docker ubuntu 2>/de
 
 mkdir -p "$SOPET_DIR"
 install -m 755 "$(dirname "$0")/deploy.sh" "$SOPET_DIR/deploy.sh"
+install -m 755 "$(dirname "$0")/setup-caddy.sh" "$SOPET_DIR/setup-caddy.sh"
 
-if ! command -v caddy >/dev/null 2>&1; then
-  if command -v dnf >/dev/null 2>&1; then
-    dnf install -y yum-utils
-    dnf copr enable -y @caddy/caddy epel-9-x86_64 || true
-    dnf install -y caddy || true
-  elif command -v apt-get >/dev/null 2>&1; then
-    apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
-    apt-get update -y
-    apt-get install -y caddy || true
-  fi
-fi
-
-if command -v caddy >/dev/null 2>&1; then
-  install -d -m 755 /etc/caddy
-  cat >/etc/caddy/Caddyfile <<'EOF'
-# Replace api.example.com with your Cloudflare hostname before enabling TLS.
-# Cloudflare orange-cloud proxy terminates TLS at the edge; use HTTP on origin.
-:80 {
-  reverse_proxy 127.0.0.1:3002
-}
-EOF
-  systemctl enable --now caddy
-fi
+echo "Caddy is configured automatically on each deploy (see infra/ec2/Caddyfile.template)."
 
 cat <<EOF
 
