@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { StoreRequestService } from './store-request.service';
 import { StoreRequestStatus } from '../../database/entities/store-request.entity';
 import { StoreStatus } from '../../database/entities/store.entity';
@@ -21,9 +21,15 @@ describe('StoreRequestService', () => {
     create: jest.Mock;
     save: jest.Mock;
   };
+  let userRepository: {
+    findOne: jest.Mock;
+  };
   let notificationsService: {
     notifyAdminAboutNewRequest: jest.Mock;
     notifyVendorAboutRequestStatus: jest.Mock;
+  };
+  let storageService: {
+    assertFolderImageUrl: jest.Mock;
   };
 
   beforeEach(() => {
@@ -42,16 +48,28 @@ describe('StoreRequestService', () => {
       create: jest.fn((data) => data),
       save: jest.fn(async (data) => data),
     };
+    userRepository = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'vendor-1',
+        emailVerified: true,
+        isActive: true,
+      }),
+    };
     notificationsService = {
       notifyAdminAboutNewRequest: jest.fn().mockResolvedValue({ id: 'notif-1' }),
       notifyVendorAboutRequestStatus: jest.fn().mockResolvedValue({ id: 'notif-2' }),
+    };
+    storageService = {
+      assertFolderImageUrl: jest.fn(),
     };
 
     service = new StoreRequestService(
       storeRequestRepository as never,
       storeRepository as never,
       storeMemberRepository as never,
+      userRepository as never,
       notificationsService as never,
+      storageService as never,
     );
   });
 
@@ -63,6 +81,19 @@ describe('StoreRequestService', () => {
 
     expect(result.storeName).toBe('New Shop');
     expect(storeRequestRepository.save).toHaveBeenCalled();
+  });
+
+  it('rejects store request when vendor email is not verified', async () => {
+    userRepository.findOne.mockResolvedValue({
+      id: 'vendor-1',
+      emailVerified: false,
+      isActive: true,
+    });
+
+    await expect(service.submit('vendor-1', { storeName: 'New Shop' })).rejects.toThrow(
+      ForbiddenException,
+    );
+    expect(storeRequestRepository.save).not.toHaveBeenCalled();
   });
 
   it('rejects duplicate pending requests', async () => {

@@ -11,12 +11,14 @@ import { OtpCode } from '../../database/entities/otp-code.entity';
 import { Store, StoreStatus } from '../../database/entities/store.entity';
 import { StoreMember } from '../../database/entities/store-member.entity';
 import { PasswordResetToken } from '../../database/entities/password-reset-token.entity';
+import { EmailVerificationToken } from '../../database/entities/email-verification-token.entity';
 import { CustomerRepository } from '../../database/repositories/customer.repository';
 import { SmsService } from '../sms/sms.service';
 import { CartService } from '../cart/cart.service';
 import { GuestOrderLinkService } from '../orders/guest-order-link.service';
 import { EmailDeliveryService } from '../email/email-delivery.service';
 import { StorageService } from '../storage/storage.service';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -69,6 +71,7 @@ describe('AuthService', () => {
         { provide: getRepositoryToken(Store), useValue: storeRepo },
         { provide: getRepositoryToken(StoreMember), useValue: storeMemberRepo },
         { provide: getRepositoryToken(PasswordResetToken), useValue: {} },
+        { provide: getRepositoryToken(EmailVerificationToken), useValue: {} },
         { provide: JwtService, useValue: jwtService },
         { provide: ConfigService, useValue: configService },
         { provide: SmsService, useValue: smsService },
@@ -81,6 +84,7 @@ describe('AuthService', () => {
             assertFolderImageUrl: jest.fn().mockResolvedValue(undefined),
           },
         },
+        { provide: AuditLogsService, useValue: { log: jest.fn() } },
       ],
     }).compile();
 

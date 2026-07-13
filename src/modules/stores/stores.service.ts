@@ -6,42 +6,133 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, ILike } from 'typeorm';
+import { In, Repository, ILike } from 'typeorm';
 import { Store, StoreStatus, OmiseRecipientStatus } from '../../database/entities/store.entity';
 import { User, UserRole } from '../../database/entities/user.entity';
 import { StoreMember, StoreMemberRole } from '../../database/entities/store-member.entity';
+import { Order } from '../../database/entities/order.entity';
+import { OrderItem } from '../../database/entities/order-item.entity';
+import { AuditLog, AuditActorType } from '../../database/entities/audit-log.entity';
+import { OrderStatus } from '../../database/entities/enums/order.enums';
 import { CreateStoreDto, UpdateStoreDto, ApproveStoreDto, RejectStoreDto } from './dto';
 import * as bcrypt from 'bcrypt';
-import { generateSlug as slugify } from '../../common/utils/slug.util';
+import { generateUniqueStoreSlug } from '../../common/utils/slug.util';
 import { OmiseService } from '../omise/omise.service';
 import { pickDefaultAccessibleStoreId } from './store-selection.util';
 import { NotificationsService } from '../notifications/notifications.service';
 import { StorageService } from '../storage/storage.service';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constants';
+
+const VENDOR_REVENUE_EXCLUDED_STATUSES = [
+  OrderStatus.CANCELLED,
+  OrderStatus.REFUNDED,
+  OrderStatus.PENDING_PAYMENT,
+];
+
+const AUDIT_ACTION_ACTIVITY_KIND: Partial<Record<string, string>> = {
+  [AuditAction.LOGIN]: 'last_login',
+  [AuditAction.PASSWORD_RESET_SENT]: 'password_reset_sent',
+  [AuditAction.VENDOR_UPDATED]: 'vendor_updated',
+  [AuditAction.STORE_CREATED]: 'store_created',
+  [AuditAction.STORE_APPROVED]: 'admin_store_approved',
+  [AuditAction.STORE_REJECTED]: 'admin_store_rejected',
+  [AuditAction.STORE_SUSPENDED]: 'admin_store_suspended',
+  [AuditAction.STORE_REACTIVATED]: 'store_reactivated',
+  [AuditAction.STORE_OWNER_CHANGED]: 'store_owner_changed',
+};
+
+export type AdminVendorInsightsResult = {
+  storeCount: number;
+  membershipCount: number;
+  totalRevenue: number;
+  orderCount: number;
+  averageOrderValue: number;
+  lastOrderAt: Date | null;
+  lastActivityAt: Date | null;
+  memberships: Array<{
+    storeId: string;
+    storeName: string;
+    storeSlug: string;
+    storeStatus: string;
+    role: string;
+    joinedAt: Date;
+  }>;
+  activities: Array<{
+    kind: string;
+    occurredAt: Date;
+    storeId?: string | null;
+    storeName?: string | null;
+    orderNumber?: string | null;
+  }>;
+  recentOrders: Array<{
+    id: string;
+    orderNumber: string;
+    status: string;
+    total: number;
+    createdAt: Date;
+    items: Array<{
+      productName: string;
+      quantity: number;
+      unitPrice: number;
+      subtotal: number;
+    }>;
+  }>;
+};
 
 @Injectable()
 export class StoresService {
   constructor(
     @InjectRepository(Store)
-    private storeRepository: Repository<Store>,
+    private readonly storeRepository: Repository<Store>,
     @InjectRepository(User)
-    private userRepository: Repository<User>,
+    private readonly userRepository: Repository<User>,
     @InjectRepository(StoreMember)
-    private storeMemberRepository: Repository<StoreMember>,
+    private readonly storeMemberRepository: Repository<StoreMember>,
+    @InjectRepository(Order)
+    private readonly orderRepository: Repository<Order>,
+    @InjectRepository(OrderItem)
+    private readonly orderItemRepository: Repository<OrderItem>,
+    @InjectRepository(AuditLog)
+    private readonly auditLogRepository: Repository<AuditLog>,
     private readonly omiseService: OmiseService,
     private readonly notificationsService: NotificationsService,
     private readonly storageService: StorageService,
+    private readonly auditLogsService: AuditLogsService,
   ) {}
 
-  // Generate slug from store name
-  private generateSlug(name: string): string {
-    return slugify(name, 'store');
+  private async logAdminStoreAction(
+    adminId: string,
+    action: string,
+    store: Store,
+    metadata: Record<string, unknown> = {},
+  ): Promise<void> {
+    const admin = await this.userRepository.findOne({
+      where: { id: adminId },
+      select: ['id', 'fullName', 'email'],
+    });
+
+    await this.auditLogsService.log({
+      actorType: AuditActorType.ADMIN,
+      actorId: adminId,
+      actorLabel: admin?.fullName || admin?.email || null,
+      action,
+      resourceType: AuditResourceType.STORE,
+      resourceId: store.id,
+      metadata: { storeName: store.name, ...metadata },
+    });
   }
 
-  // Register new store (vendor registration)
+  private async resolveUniqueStoreSlug(name: string): Promise<string> {
+    return generateUniqueStoreSlug(name, async (slug) => {
+      const existing = await this.storeRepository.findOne({ where: { slug } });
+      return !!existing;
+    });
+  }
+
   async create(createStoreDto: CreateStoreDto): Promise<Store> {
     const { ownerEmail, ownerPassword, ownerFullName, name, ...storeData } = createStoreDto;
 
-    // Check if email already exists
     const existingUser = await this.userRepository.findOne({
       where: { email: ownerEmail },
     });
@@ -53,7 +144,6 @@ export class StoresService {
       });
     }
 
-    // Create user account
     const passwordHash = await bcrypt.hash(ownerPassword, 12);
     const user = this.userRepository.create({
       email: ownerEmail,
@@ -63,17 +153,8 @@ export class StoresService {
     });
     await this.userRepository.save(user);
 
-    // Generate unique slug
-    let slug = this.generateSlug(name);
-    let slugExists = await this.storeRepository.findOne({ where: { slug } });
-    let counter = 1;
-    while (slugExists) {
-      slug = `${this.generateSlug(name)}-${counter}`;
-      slugExists = await this.storeRepository.findOne({ where: { slug } });
-      counter++;
-    }
+    const slug = await this.resolveUniqueStoreSlug(name);
 
-    // Create store
     const store = this.storeRepository.create({
       ...storeData,
       name,
@@ -85,7 +166,6 @@ export class StoresService {
     return this.storeRepository.save(store);
   }
 
-  // Get all stores (public)
   async findAll(status?: StoreStatus): Promise<Store[]> {
     const where = status ? { status } : { status: StoreStatus.APPROVED };
     return this.storeRepository.find({
@@ -95,7 +175,6 @@ export class StoresService {
     });
   }
 
-  // Get store by ID
   async findOne(id: string): Promise<Store> {
     const store = await this.storeRepository.findOne({
       where: { id },
@@ -157,6 +236,8 @@ export class StoresService {
       .notifyVendorAboutStoreStatus(store.ownerId, store, 'approved')
       .catch(() => {});
 
+    await this.logAdminStoreAction(approveStoreDto.adminId, AuditAction.STORE_APPROVED, store);
+
     return store;
   }
 
@@ -185,17 +266,22 @@ export class StoresService {
       )
       .catch(() => {});
 
+    await this.logAdminStoreAction(rejectStoreDto.adminId, AuditAction.STORE_REJECTED, store, {
+      rejectionReason: rejectStoreDto.rejectionReason ?? null,
+    });
+
     return store;
   }
 
-  // Suspend store (admin). adminId is kept for a future audit log entry.
+  // Suspend store (admin)
   async suspend(id: string, adminId: string): Promise<Store> {
-    void adminId;
     const store = await this.findOne(id);
 
     store.status = StoreStatus.SUSPENDED;
 
-    return this.storeRepository.save(store);
+    const saved = await this.storeRepository.save(store);
+    await this.logAdminStoreAction(adminId, AuditAction.STORE_SUSPENDED, saved);
+    return saved;
   }
 
   // Reactivate a suspended store (admin)
@@ -213,7 +299,9 @@ export class StoresService {
     store.approvedBy = adminId;
     store.approvedAt = new Date();
 
-    return this.storeRepository.save(store);
+    const saved = await this.storeRepository.save(store);
+    await this.logAdminStoreAction(adminId, AuditAction.STORE_REACTIVATED, saved);
+    return saved;
   }
 
   // Get pending stores (admin)
@@ -465,6 +553,13 @@ export class StoresService {
     bannerUrl?: string;
     status?: StoreStatus;
   }): Promise<Store> {
+    if (!input.ownerUserId?.trim()) {
+      throw new BadRequestException({
+        code: 'OWNER_REQUIRED',
+        message: 'Store owner is required',
+      });
+    }
+
     const owner = await this.userRepository.findOne({
       where: { id: input.ownerUserId, role: UserRole.VENDOR },
     });
@@ -475,14 +570,7 @@ export class StoresService {
       });
     }
 
-    let slug = this.generateSlug(input.name);
-    let slugExists = await this.storeRepository.findOne({ where: { slug } });
-    let counter = 1;
-    while (slugExists) {
-      slug = `${this.generateSlug(input.name)}-${counter}`;
-      slugExists = await this.storeRepository.findOne({ where: { slug } });
-      counter++;
-    }
+    const slug = await this.resolveUniqueStoreSlug(input.name);
 
     const store = this.storeRepository.create({
       name: input.name,
@@ -510,7 +598,7 @@ export class StoresService {
 
   async updateAsAdmin(input: {
     id: string;
-    ownerUserId?: string;
+    ownerUserId?: string | null;
     name?: string;
     slug?: string;
     description?: string;
@@ -522,7 +610,33 @@ export class StoresService {
     status?: StoreStatus;
   }): Promise<Store> {
     const store = await this.findOne(input.id);
-    if (input.ownerUserId !== undefined) store.ownerId = input.ownerUserId;
+
+    if (input.ownerUserId !== undefined) {
+      if (input.ownerUserId === null) {
+        throw new BadRequestException({
+          code: 'OWNER_REQUIRED',
+          message: 'Store owner is required',
+        });
+      }
+
+      if (input.ownerUserId !== store.ownerId) {
+        const owner = await this.userRepository.findOne({
+          where: { id: input.ownerUserId, role: UserRole.VENDOR },
+        });
+        if (!owner) {
+          throw new NotFoundException({
+            code: 'VENDOR_NOT_FOUND',
+            message: 'Vendor user not found',
+          });
+        }
+
+        const previousOwnerId = store.ownerId;
+        store.ownerId = owner.id;
+        store.owner = owner;
+        await this.syncStoreOwnerMembership(store.id, previousOwnerId, owner.id);
+      }
+    }
+
     if (input.name !== undefined) store.name = input.name;
     if (input.slug !== undefined) store.slug = input.slug;
     if (input.description !== undefined) store.description = input.description;
@@ -532,7 +646,43 @@ export class StoresService {
     if (input.logoUrl !== undefined) store.logoUrl = input.logoUrl;
     if (input.bannerUrl !== undefined) store.bannerUrl = input.bannerUrl;
     if (input.status !== undefined) store.status = input.status;
-    return this.storeRepository.save(store);
+
+    await this.storeRepository.save(store);
+    return this.findOne(input.id);
+  }
+
+  private async syncStoreOwnerMembership(
+    storeId: string,
+    previousOwnerId: string,
+    newOwnerId: string,
+  ): Promise<void> {
+    const existingNewMember = await this.storeMemberRepository.findOne({
+      where: { storeId, userId: newOwnerId },
+    });
+    if (existingNewMember) {
+      existingNewMember.role = StoreMemberRole.OWNER;
+      await this.storeMemberRepository.save(existingNewMember);
+    } else {
+      await this.storeMemberRepository.save(
+        this.storeMemberRepository.create({
+          storeId,
+          userId: newOwnerId,
+          role: StoreMemberRole.OWNER,
+        }),
+      );
+    }
+
+    if (previousOwnerId === newOwnerId) {
+      return;
+    }
+
+    const previousMember = await this.storeMemberRepository.findOne({
+      where: { storeId, userId: previousOwnerId },
+    });
+    if (previousMember?.role === StoreMemberRole.OWNER) {
+      previousMember.role = StoreMemberRole.STAFF;
+      await this.storeMemberRepository.save(previousMember);
+    }
   }
 
   async findVendors(search?: string): Promise<User[]> {
@@ -591,6 +741,195 @@ export class StoresService {
     if (input.fullName !== undefined) user.fullName = input.fullName;
     if (input.isActive !== undefined) user.isActive = input.isActive;
     return this.userRepository.save(user);
+  }
+
+  async getVendorInsightsForAdmin(vendorId: string): Promise<AdminVendorInsightsResult> {
+    const vendor = await this.findVendorById(vendorId);
+    const ownedStores = vendor.ownedStores ?? [];
+    const ownedStoreIds = ownedStores.map((store) => store.id);
+
+    let orderCount = 0;
+    let totalRevenue = 0;
+    let lastOrderAt: Date | null = null;
+    let recentOrders: AdminVendorInsightsResult['recentOrders'] = [];
+
+    if (ownedStoreIds.length > 0) {
+      const statsResult = await this.orderItemRepository
+        .createQueryBuilder('item')
+        .innerJoin('item.order', 'order')
+        .select('COUNT(DISTINCT order.id)', 'orderCount')
+        .addSelect('COALESCE(SUM(item.subtotal), 0)', 'totalRevenue')
+        .addSelect('MAX(order.createdAt)', 'lastOrderAt')
+        .where('item.storeId IN (:...storeIds)', { storeIds: ownedStoreIds })
+        .andWhere('order.status NOT IN (:...excludedStatuses)', {
+          excludedStatuses: VENDOR_REVENUE_EXCLUDED_STATUSES,
+        })
+        .getRawOne<{ orderCount: string; totalRevenue: string; lastOrderAt: Date | null }>();
+
+      orderCount = Number(statsResult?.orderCount ?? 0);
+      totalRevenue = Number(statsResult?.totalRevenue ?? 0);
+      lastOrderAt = statsResult?.lastOrderAt ?? null;
+
+      const recentOrderRows = await this.orderItemRepository
+        .createQueryBuilder('item')
+        .innerJoin('item.order', 'order')
+        .select('order.id', 'id')
+        .addSelect('MAX(order.createdAt)', 'createdAt')
+        .where('item.storeId IN (:...storeIds)', { storeIds: ownedStoreIds })
+        .groupBy('order.id')
+        .orderBy('MAX(order.createdAt)', 'DESC')
+        .limit(10)
+        .getRawMany<{ id: string }>();
+
+      const recentOrderIds = recentOrderRows.map((row) => row.id);
+      if (recentOrderIds.length > 0) {
+        const orders = await this.orderRepository.find({
+          where: { id: In(recentOrderIds) },
+          relations: ['items'],
+          order: { createdAt: 'DESC' },
+        });
+        recentOrders = orders.map((order) => ({
+          id: order.id,
+          orderNumber: order.orderNumber,
+          status: order.status,
+          total: Number(order.total),
+          createdAt: order.createdAt,
+          items: (order.items ?? []).map((item) => ({
+            productName: item.productName,
+            quantity: item.quantity,
+            unitPrice: Number(item.unitPrice),
+            subtotal: Number(item.subtotal),
+          })),
+        }));
+      }
+    }
+
+    const averageOrderValue = orderCount > 0 ? totalRevenue / orderCount : 0;
+
+    const storeMembers = await this.storeMemberRepository.find({
+      where: { userId: vendorId },
+      relations: ['store'],
+      order: { createdAt: 'DESC' },
+    });
+
+    const memberships = storeMembers
+      .filter(
+        (member) =>
+          member.store &&
+          (member.role !== StoreMemberRole.OWNER || member.store.ownerId !== vendorId),
+      )
+      .map((member) => ({
+        storeId: member.storeId,
+        storeName: member.store.name,
+        storeSlug: member.store.slug,
+        storeStatus: member.store.status,
+        role: member.role,
+        joinedAt: member.createdAt,
+      }));
+
+    const storeNameById = new Map(ownedStores.map((store) => [store.id, store.name]));
+    const activities: AdminVendorInsightsResult['activities'] = [
+      {
+        kind: 'account_created',
+        occurredAt: vendor.createdAt,
+      },
+    ];
+
+    if (vendor.lastLoginAt) {
+      activities.push({
+        kind: 'last_login',
+        occurredAt: vendor.lastLoginAt,
+      });
+    }
+
+    for (const store of ownedStores) {
+      activities.push({
+        kind: 'store_created',
+        occurredAt: store.createdAt,
+        storeId: store.id,
+        storeName: store.name,
+      });
+      storeNameById.set(store.id, store.name);
+    }
+
+    for (const membership of memberships) {
+      activities.push({
+        kind: 'membership_joined',
+        occurredAt: membership.joinedAt,
+        storeId: membership.storeId,
+        storeName: membership.storeName,
+      });
+    }
+
+    const auditLogQuery = this.auditLogRepository
+      .createQueryBuilder('log')
+      .orderBy('log.createdAt', 'DESC')
+      .take(30);
+
+    if (ownedStoreIds.length > 0) {
+      auditLogQuery.where(
+        '(log.resourceType = :storeType AND log.resourceId IN (:...storeIds)) OR (log.actorType = :vendorActor AND log.actorId = :vendorId) OR (log.resourceType = :vendorType AND log.resourceId = :vendorId)',
+        {
+          storeType: AuditResourceType.STORE,
+          storeIds: ownedStoreIds,
+          vendorActor: AuditActorType.VENDOR,
+          vendorId,
+          vendorType: AuditResourceType.VENDOR,
+        },
+      );
+    } else {
+      auditLogQuery.where(
+        '(log.actorType = :vendorActor AND log.actorId = :vendorId) OR (log.resourceType = :vendorType AND log.resourceId = :vendorId)',
+        {
+          vendorActor: AuditActorType.VENDOR,
+          vendorId,
+          vendorType: AuditResourceType.VENDOR,
+        },
+      );
+    }
+
+    const auditLogs = await auditLogQuery.getMany();
+
+    for (const log of auditLogs) {
+      const kind = AUDIT_ACTION_ACTIVITY_KIND[log.action];
+      if (!kind) continue;
+      const storeNameFromMeta =
+        typeof log.metadata?.storeName === 'string' ? log.metadata.storeName : null;
+      activities.push({
+        kind,
+        occurredAt: log.createdAt,
+        storeId: log.resourceType === AuditResourceType.STORE ? log.resourceId : undefined,
+        storeName:
+          storeNameFromMeta ??
+          (log.resourceId ? (storeNameById.get(log.resourceId) ?? null) : null),
+      });
+    }
+
+    for (const order of recentOrders.slice(0, 5)) {
+      activities.push({
+        kind: 'order_received',
+        occurredAt: order.createdAt,
+        orderNumber: order.orderNumber,
+      });
+    }
+
+    activities.sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime());
+    const trimmedActivities = activities.slice(0, 20);
+    const lastActivityAt =
+      trimmedActivities[0]?.occurredAt ?? vendor.lastLoginAt ?? vendor.createdAt;
+
+    return {
+      storeCount: ownedStores.length,
+      membershipCount: memberships.length,
+      totalRevenue,
+      orderCount,
+      averageOrderValue,
+      lastOrderAt,
+      lastActivityAt,
+      memberships,
+      activities: trimmedActivities,
+      recentOrders,
+    };
   }
 
   async registerVendor(input: {

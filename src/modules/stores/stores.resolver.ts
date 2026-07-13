@@ -8,6 +8,9 @@ import { StoreRequestService } from './store-request.service';
 import { StoreReactivationRequestService } from './store-reactivation-request.service';
 import { VendorInvitationService } from './vendor-invitation.service';
 import { AuthService } from '../auth/auth.service';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constants';
+import { AuditActorType } from '../../database/entities/audit-log.entity';
 import {
   StoreType,
   VendorAuthPayload,
@@ -24,6 +27,7 @@ import {
   VendorInvitationType,
   AdminStoreType,
   AdminVendorType,
+  AdminVendorDetailType,
 } from '../../graphql/models/types';
 import {
   mapStore,
@@ -32,12 +36,14 @@ import {
   mapAdminStore,
   mapStoreShippingOption,
   mapShippingProvider,
+  mapUserProfile,
 } from '../../graphql/models/mappers';
 import { Public, CurrentUser, Roles, AllowSuspendedStore } from '../../common/decorators';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { AuthRateLimitGuard } from '../auth/guards/auth-rate-limit.guard';
 import { Store, StoreStatus } from '../../database/entities/store.entity';
+import { User } from '../../database/entities/user.entity';
 import { IsOptional, IsString, IsUUID } from 'class-validator';
 import { RegisterStoreInput } from './register-store.input';
 import {
@@ -109,6 +115,24 @@ function mapStoreMemberInvitation(invitation: StoreMemberInvitation): StoreMembe
   };
 }
 
+function mapAdminVendor(vendor: User): AdminVendorType {
+  return {
+    id: vendor.id,
+    email: vendor.email,
+    fullName: vendor.fullName,
+    role: vendor.role,
+    isActive: vendor.isActive,
+    lastLoginAt: vendor.lastLoginAt,
+    createdAt: vendor.createdAt,
+    stores: (vendor.ownedStores ?? []).map((store) => ({
+      id: store.id,
+      name: store.name,
+      slug: store.slug,
+      status: store.status,
+    })),
+  };
+}
+
 function mapMyStore(store: Store, includePayout: boolean): MyStoreType {
   return {
     id: store.id,
@@ -142,7 +166,16 @@ export class StoresResolver {
     private readonly storeReactivationRequestService: StoreReactivationRequestService,
     private readonly vendorInvitationService: VendorInvitationService,
     private readonly authService: AuthService,
+    private readonly auditLogsService: AuditLogsService,
   ) {}
+
+  private adminActor(adminId: string, adminName?: string) {
+    return {
+      actorType: AuditActorType.ADMIN,
+      actorId: adminId,
+      actorLabel: adminName ?? null,
+    };
+  }
 
   @Query(() => [StoreType])
   @Public()
@@ -214,11 +247,13 @@ export class StoresResolver {
   @Public()
   @UseGuards(AuthRateLimitGuard)
   async registerVendor(@Args('input') input: RegisterVendorInput): Promise<VendorAuthPayload> {
-    await this.storesService.registerVendor({
+    const user = await this.storesService.registerVendor({
       email: input.email,
       password: input.password,
       fullName: input.fullName,
     });
+
+    await this.authService.sendEmailVerificationOnRegistration(user.id);
 
     const result = await this.authService.login({
       email: input.email,
@@ -230,7 +265,7 @@ export class StoresResolver {
         accessToken: result.accessToken,
         refreshToken: result.refreshToken,
       },
-      user: result.user as UserProfile,
+      user: mapUserProfile(result.user as User),
     };
   }
 
@@ -238,41 +273,26 @@ export class StoresResolver {
   @Public()
   @UseGuards(AuthRateLimitGuard)
   async registerStore(@Args('input') input: RegisterStoreInput): Promise<VendorAuthPayload> {
-    await this.storesService.registerVendor({
+    const user = await this.storesService.registerVendor({
       email: input.ownerEmail,
       password: input.ownerPassword,
       fullName: input.ownerFullName,
     });
+
+    await this.authService.sendEmailVerificationOnRegistration(user.id);
 
     const loginResult = await this.authService.login({
       email: input.ownerEmail,
       password: input.ownerPassword,
     });
 
-    let address: string | undefined;
-    if (input.address) {
-      try {
-        JSON.parse(input.address);
-        address = input.address;
-      } catch {
-        address = input.address;
-      }
-    }
-
-    await this.storeRequestService.submit(loginResult.user.id!, {
-      storeName: input.name,
-      description: input.description,
-      contactPhone: input.contactPhone,
-      contactEmail: input.contactEmail,
-      address,
-    });
-
+    // Store request submission requires verified email — use submitStoreRequest after verification.
     return {
       tokens: {
         accessToken: loginResult.accessToken,
         refreshToken: loginResult.refreshToken,
       },
-      user: loginResult.user as UserProfile,
+      user: mapUserProfile(loginResult.user as User),
     };
   }
 
@@ -368,6 +388,8 @@ export class StoresResolver {
       input.fullName,
     );
 
+    await this.authService.sendEmailVerificationOnRegistration(user.id);
+
     const result = await this.authService.login({
       email: user.email,
       password: input.password,
@@ -378,7 +400,7 @@ export class StoresResolver {
         accessToken: result.accessToken,
         refreshToken: result.refreshToken,
       },
-      user: result.user as UserProfile,
+      user: mapUserProfile(result.user as User),
     };
   }
 
@@ -415,7 +437,12 @@ export class StoresResolver {
   @Mutation(() => AdminStoreType)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
-  async updateStoreAsAdmin(@Args('input') input: UpdateStoreAsAdminInput): Promise<AdminStoreType> {
+  async updateStoreAsAdmin(
+    @Args('input') input: UpdateStoreAsAdminInput,
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail?: string,
+  ): Promise<AdminStoreType> {
+    const before = await this.storesService.findOne(input.id);
     const store = await this.storesService.updateAsAdmin({
       id: input.id,
       name: input.name,
@@ -429,13 +456,59 @@ export class StoresResolver {
       address: input.address,
       status: input.status as StoreStatus | undefined,
     });
+
+    const actor = this.adminActor(adminId, adminEmail);
+    await this.auditLogsService.log({
+      ...actor,
+      action: AuditAction.STORE_UPDATED,
+      resourceType: AuditResourceType.STORE,
+      resourceId: store.id,
+      metadata: {
+        storeName: store.name,
+        changes: {
+          name: input.name,
+          slug: input.slug,
+          status: input.status,
+          ownerId: input.ownerId,
+        },
+      },
+    });
+
+    if (input.ownerId && input.ownerId !== before.ownerId) {
+      await this.auditLogsService.log({
+        ...actor,
+        action: AuditAction.STORE_OWNER_CHANGED,
+        resourceType: AuditResourceType.STORE,
+        resourceId: store.id,
+        metadata: {
+          storeName: store.name,
+          previousOwnerId: before.ownerId,
+          newOwnerId: input.ownerId,
+        },
+      });
+    }
+
+    if (input.status === StoreStatus.SUSPENDED && before.status !== StoreStatus.SUSPENDED) {
+      await this.auditLogsService.log({
+        ...actor,
+        action: AuditAction.STORE_SUSPENDED,
+        resourceType: AuditResourceType.STORE,
+        resourceId: store.id,
+        metadata: { storeName: store.name },
+      });
+    }
+
     return mapAdminStore(store);
   }
 
   @Mutation(() => AdminStoreType)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
-  async createStoreAsAdmin(@Args('input') input: CreateStoreAsAdminInput): Promise<AdminStoreType> {
+  async createStoreAsAdmin(
+    @Args('input') input: CreateStoreAsAdminInput,
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail?: string,
+  ): Promise<AdminStoreType> {
     const store = await this.storesService.createAsAdmin({
       ownerUserId: input.ownerUserId,
       name: input.name,
@@ -447,6 +520,15 @@ export class StoresResolver {
       bannerUrl: input.bannerUrl,
       status: StoreStatus.APPROVED,
     });
+
+    await this.auditLogsService.log({
+      ...this.adminActor(adminId, adminEmail),
+      action: AuditAction.STORE_CREATED,
+      resourceType: AuditResourceType.STORE,
+      resourceId: store.id,
+      metadata: { storeName: store.name, ownerUserId: input.ownerUserId },
+    });
+
     return mapAdminStore(store);
   }
 
@@ -457,21 +539,7 @@ export class StoresResolver {
     @Args('search', { nullable: true }) search?: string,
   ): Promise<AdminVendorType[]> {
     const vendors = await this.storesService.findVendors(search);
-    return vendors.map((vendor) => ({
-      id: vendor.id,
-      email: vendor.email,
-      fullName: vendor.fullName,
-      role: vendor.role,
-      isActive: vendor.isActive,
-      lastLoginAt: vendor.lastLoginAt,
-      createdAt: vendor.createdAt,
-      stores: (vendor.ownedStores ?? []).map((store) => ({
-        id: store.id,
-        name: store.name,
-        slug: store.slug,
-        status: store.status,
-      })),
-    }));
+    return vendors.map(mapAdminVendor);
   }
 
   @Query(() => AdminVendorType)
@@ -479,20 +547,19 @@ export class StoresResolver {
   @Roles('admin')
   async adminVendor(@Args('id') id: string): Promise<AdminVendorType> {
     const vendor = await this.storesService.findVendorById(id);
+    return mapAdminVendor(vendor);
+  }
+
+  @Query(() => AdminVendorDetailType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async adminVendorDetail(@Args('id') id: string): Promise<AdminVendorDetailType> {
+    const vendor = await this.storesService.findVendorById(id);
+    const insights = await this.storesService.getVendorInsightsForAdmin(id);
     return {
-      id: vendor.id,
-      email: vendor.email,
-      fullName: vendor.fullName,
-      role: vendor.role,
-      isActive: vendor.isActive,
-      lastLoginAt: vendor.lastLoginAt,
-      createdAt: vendor.createdAt,
-      stores: (vendor.ownedStores ?? []).map((store) => ({
-        id: store.id,
-        name: store.name,
-        slug: store.slug,
-        status: store.status,
-      })),
+      ...mapAdminVendor(vendor),
+      emailVerified: vendor.emailVerified,
+      insights,
     };
   }
 
@@ -501,6 +568,8 @@ export class StoresResolver {
   @Roles('admin')
   async updateVendorAsAdmin(
     @Args('input') input: UpdateVendorAsAdminInput,
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail?: string,
   ): Promise<AdminVendorType> {
     const vendor = await this.storesService.updateVendorAsAdmin({
       id: input.id,
@@ -509,21 +578,20 @@ export class StoresResolver {
       isActive: input.isActive,
     });
     const withStores = await this.storesService.findVendorById(vendor.id);
-    return {
-      id: withStores.id,
-      email: withStores.email,
-      fullName: withStores.fullName,
-      role: withStores.role,
-      isActive: withStores.isActive,
-      lastLoginAt: withStores.lastLoginAt,
-      createdAt: withStores.createdAt,
-      stores: (withStores.ownedStores ?? []).map((store) => ({
-        id: store.id,
-        name: store.name,
-        slug: store.slug,
-        status: store.status,
-      })),
-    };
+
+    await this.auditLogsService.log({
+      ...this.adminActor(adminId, adminEmail),
+      action: AuditAction.VENDOR_UPDATED,
+      resourceType: AuditResourceType.VENDOR,
+      resourceId: vendor.id,
+      metadata: {
+        fullName: input.fullName,
+        email: input.email,
+        isActive: input.isActive,
+      },
+    });
+
+    return mapAdminVendor(withStores);
   }
 
   @Query(() => [StoreShippingOptionType])

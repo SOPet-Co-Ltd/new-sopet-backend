@@ -111,3 +111,11 @@ export class ResetPasswordInput {
   @Length(8, 128)
   newPassword: string;
 }
+
+@InputType()
+export class VerifyEmailInput {
+  @Field()
+  @IsNotEmpty()
+  @IsString()
+  token: string;
+}

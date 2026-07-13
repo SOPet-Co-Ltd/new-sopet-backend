@@ -41,9 +41,21 @@ Playground disabled when `NODE_ENV=production`.
 
 Check `sms.service.ts` delivery chain:
 
-1. ThaiBulkSMS (if `THAIBULKSMS_API_KEY` set)
-2. Twilio fallback
-3. Dev mode: OTP logged to console
+1. ThaiBulkSMS (if `THAIBULKSMS_API_KEY` and `THAIBULKSMS_API_SECRET` are set)
+2. Twilio fallback (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`)
+3. `NODE_ENV=development`: OTP logged to console (no SMS sent)
+4. `SMS_OTP_LOG_ONLY=true`: OTP logged to server logs (UAT/testing only)
+
+GraphQL error codes from `sendCustomerOtp`:
+
+| Code                  | Meaning                                                                             |
+| --------------------- | ----------------------------------------------------------------------------------- |
+| `SMS_NOT_CONFIGURED`  | No ThaiBulkSMS/Twilio credentials on the server                                     |
+| `SMS_DELIVERY_FAILED` | Provider API rejected the send (check backend logs for ThaiBulkSMS/Twilio response) |
+| `INVALID_PHONE`       | Provider rejected the phone number                                                  |
+| `TOO_MANY_ATTEMPTS`   | More than 3 OTP requests in 5 minutes for the same phone                            |
+
+UAT requires GitHub Environment secrets `THAIBULKSMS_API_KEY` and `THAIBULKSMS_API_SECRET` (see `infra/validate-deploy-env.sh`). Optional vars: `THAIBULKSMS_SENDER`, `THAIBULKSMS_FORCE`, `THAIBULKSMS_SHORTEN_URL`.
 
 ### JWT errors
 

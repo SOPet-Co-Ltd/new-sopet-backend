@@ -8,6 +8,7 @@ import {
   IsUUID,
   Length,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
 
 @InputType()
@@ -153,10 +154,11 @@ export class UpdateStoreAsAdminInput {
   @IsString()
   slug?: string;
 
-  @Field({ nullable: true })
+  @Field(() => String, { nullable: true })
   @IsOptional()
+  @ValidateIf((_, value) => value !== null)
   @IsUUID()
-  ownerId?: string;
+  ownerId?: string | null;
 
   @Field({ nullable: true })
   @IsOptional()

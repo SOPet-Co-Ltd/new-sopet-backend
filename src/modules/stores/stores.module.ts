@@ -21,6 +21,9 @@ import { StoreRequest } from '../../database/entities/store-request.entity';
 import { StoreReactivationRequest } from '../../database/entities/store-reactivation-request.entity';
 import { StoreReactivationRequestImage } from '../../database/entities/store-reactivation-request-image.entity';
 import { VendorInvitation } from '../../database/entities/vendor-invitation.entity';
+import { Order } from '../../database/entities/order.entity';
+import { OrderItem } from '../../database/entities/order-item.entity';
+import { AuditLog } from '../../database/entities/audit-log.entity';
 import { StoresResolver } from './stores.resolver';
 
 @Module({
@@ -40,6 +43,9 @@ import { StoresResolver } from './stores.resolver';
       StoreReactivationRequest,
       StoreReactivationRequestImage,
       VendorInvitation,
+      Order,
+      OrderItem,
+      AuditLog,
     ]),
   ],
   providers: [
