@@ -36,7 +36,7 @@ SCRIPT_B64=$(base64 <"$DEPLOY_SCRIPT_SRC" | tr -d '\n')
 SETUP_CADDY_B64=$(base64 <"$SETUP_CADDY_SRC" | tr -d '\n')
 
 BASE_COMMANDS='
-      "set -euxo pipefail",
+      "set -euo pipefail",
       "mkdir -p /opt/sopet",
       "command -v git >/dev/null || (command -v dnf >/dev/null && dnf install -y git || (apt-get update -y && apt-get install -y git))",
       ("echo " + ($script_b64 | @json) + " | base64 -d > /opt/sopet/deploy.sh"),
@@ -178,6 +178,12 @@ while [ "$SECONDS" -lt "$deadline" ]; do
     Failed | Cancelled | TimedOut)
       echo "::error::Deploy failed with status: $STATUS" >&2
       print_invocation >&2 || true
+      aws ssm get-command-invocation \
+        --region "$AWS_REGION" \
+        --command-id "$COMMAND_ID" \
+        --instance-id "$EC2_INSTANCE_ID" \
+        --query 'StandardErrorContent' \
+        --output text >&2 || true
       exit 1
       ;;
     *)
