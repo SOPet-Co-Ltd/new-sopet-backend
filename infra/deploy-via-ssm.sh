@@ -7,7 +7,9 @@ set -euo pipefail
 : "${AWS_REGION:?AWS_REGION is required}"
 
 ENV_FILE="${1:-.env.deploy}"
+CADDYFILE="${2:-.caddy.deploy}"
 DEPLOY_SCRIPT_SRC="${DEPLOY_SCRIPT_SRC:-infra/ec2/deploy.sh}"
+SETUP_CADDY_SRC="${SETUP_CADDY_SRC:-infra/ec2/setup-caddy.sh}"
 SSM_TIMEOUT_SECONDS="${SSM_TIMEOUT_SECONDS:-1800}"
 POLL_INTERVAL_SECONDS="${POLL_INTERVAL_SECONDS:-15}"
 
@@ -16,17 +18,31 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 
+if [ ! -f "$CADDYFILE" ]; then
+  echo "::error::Caddyfile not found: $CADDYFILE" >&2
+  exit 1
+fi
+
 if [ ! -f "$DEPLOY_SCRIPT_SRC" ]; then
   echo "::error::Deploy script not found: $DEPLOY_SCRIPT_SRC" >&2
   exit 1
 fi
 
+if [ ! -f "$SETUP_CADDY_SRC" ]; then
+  echo "::error::Caddy setup script not found: $SETUP_CADDY_SRC" >&2
+  exit 1
+fi
+
 ENV_B64=$(base64 <"$ENV_FILE" | tr -d '\n')
+CADDY_B64=$(base64 <"$CADDYFILE" | tr -d '\n')
 SCRIPT_B64=$(base64 <"$DEPLOY_SCRIPT_SRC" | tr -d '\n')
+SETUP_CADDY_B64=$(base64 <"$SETUP_CADDY_SRC" | tr -d '\n')
 
 PARAMS=$(jq -n \
   --arg env_b64 "$ENV_B64" \
+  --arg caddy_b64 "$CADDY_B64" \
   --arg script_b64 "$SCRIPT_B64" \
+  --arg setup_caddy_b64 "$SETUP_CADDY_B64" \
   --arg image "$IMAGE_URI" \
   --arg region "$AWS_REGION" \
   '{
@@ -35,12 +51,17 @@ PARAMS=$(jq -n \
       "mkdir -p /opt/sopet",
       ("echo " + ($script_b64 | @json) + " | base64 -d > /opt/sopet/deploy.sh"),
       "chmod +x /opt/sopet/deploy.sh",
+      ("echo " + ($setup_caddy_b64 | @json) + " | base64 -d > /opt/sopet/setup-caddy.sh"),
+      "chmod +x /opt/sopet/setup-caddy.sh",
       ("echo " + ($env_b64 | @json) + " | base64 -d > /opt/sopet/.env"),
       "chmod 600 /opt/sopet/.env",
+      ("echo " + ($caddy_b64 | @json) + " | base64 -d > /opt/sopet/Caddyfile"),
+      "chmod 644 /opt/sopet/Caddyfile",
       ("export IMAGE_URI=" + ($image | @sh)),
       "export ENV_FILE=/opt/sopet/.env",
       ("export AWS_REGION=" + ($region | @sh)),
-      "/opt/sopet/deploy.sh"
+      "/opt/sopet/deploy.sh",
+      "/opt/sopet/setup-caddy.sh"
     ]
   }')
 

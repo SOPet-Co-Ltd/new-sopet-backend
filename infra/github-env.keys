@@ -8,6 +8,14 @@ AWS_ROLE_ARN
 AWS_REGION
 ECR_REPOSITORY
 EC2_INSTANCE_ID
+# Optional: linux/arm64 (Graviton) or linux/amd64 (t3). Default in workflow: linux/arm64
+DOCKER_PLATFORM
+# Caddy reverse proxy (variables)
+CADDY_HOSTNAME
+CADDY_ADMIN_EMAIL
+CADDY_TLS_CERT
+CADDY_TLS_KEY
+CADDY_TLS_ENABLED
 
 # Application variables (infra/env.manifest.json → variables)
 NODE_ENV
