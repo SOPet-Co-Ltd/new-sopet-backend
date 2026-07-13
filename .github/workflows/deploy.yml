@@ -134,27 +134,32 @@ jobs:
           fi
 
       - name: Set up QEMU
+        if: vars.DOCKER_PLATFORM != 'linux/arm64' && steps.check-image.outputs.exists != 'true'
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
+        if: vars.DOCKER_PLATFORM != 'linux/arm64' && steps.check-image.outputs.exists != 'true'
         uses: docker/setup-buildx-action@v3
 
-      - name: Build, tag, and push image to Amazon ECR
-        if: steps.check-image.outputs.exists != 'true'
+      - name: Build, tag, and push image to Amazon ECR (GHA — amd64 only)
+        if: vars.DOCKER_PLATFORM != 'linux/arm64' && steps.check-image.outputs.exists != 'true'
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
           DOCKER_PLATFORM: ${{ vars.DOCKER_PLATFORM }}
         run: |
-          # EC2 Graviton (aarch64) needs linux/arm64; t3/x86 instances need linux/amd64.
-          # On EC2: uname -m  →  aarch64 | x86_64
-          PLATFORM="${DOCKER_PLATFORM:-linux/arm64}"
-          echo "Building image for platform: $PLATFORM"
+          PLATFORM="${DOCKER_PLATFORM:-linux/amd64}"
+          echo "Building image on GHA for platform: $PLATFORM"
           docker buildx build \
             --platform "$PLATFORM" \
             --tag "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" \
             --push \
             .
+
+      - name: Note arm64 build on EC2
+        if: vars.DOCKER_PLATFORM == 'linux/arm64' && steps.check-image.outputs.exists != 'true'
+        run: |
+          echo "linux/arm64: image will be built natively on EC2 (QEMU cross-build is unreliable for yarn install)."
 
       - name: Render runtime env file
         run: bash infra/render-env-file.sh .env.deploy
@@ -170,6 +175,10 @@ jobs:
         env:
           IMAGE_URI: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
           SSM_TIMEOUT_SECONDS: 1800
+          BUILD_ON_HOST: ${{ vars.DOCKER_PLATFORM == 'linux/arm64' && steps.check-image.outputs.exists != 'true' }}
+          GIT_COMMIT: ${{ github.sha }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           chmod +x infra/deploy-via-ssm.sh
           infra/deploy-via-ssm.sh .env.deploy .caddy.deploy

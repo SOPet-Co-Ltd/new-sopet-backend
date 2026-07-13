@@ -10,27 +10,24 @@ ENV_FILE="${1:-.env.deploy}"
 CADDYFILE="${2:-.caddy.deploy}"
 DEPLOY_SCRIPT_SRC="${DEPLOY_SCRIPT_SRC:-infra/ec2/deploy.sh}"
 SETUP_CADDY_SRC="${SETUP_CADDY_SRC:-infra/ec2/setup-caddy.sh}"
+BUILD_ON_HOST_SRC="${BUILD_ON_HOST_SRC:-infra/ec2/build-on-host.sh}"
 SSM_TIMEOUT_SECONDS="${SSM_TIMEOUT_SECONDS:-1800}"
 POLL_INTERVAL_SECONDS="${POLL_INTERVAL_SECONDS:-15}"
+BUILD_ON_HOST="${BUILD_ON_HOST:-false}"
 
-if [ ! -f "$ENV_FILE" ]; then
-  echo "::error::Env file not found: $ENV_FILE" >&2
+if [ ! -f "$ENV_FILE" ] || [ ! -f "$CADDYFILE" ] || [ ! -f "$DEPLOY_SCRIPT_SRC" ] || [ ! -f "$SETUP_CADDY_SRC" ]; then
+  echo "::error::Missing deploy input files" >&2
   exit 1
 fi
 
-if [ ! -f "$CADDYFILE" ]; then
-  echo "::error::Caddyfile not found: $CADDYFILE" >&2
-  exit 1
-fi
-
-if [ ! -f "$DEPLOY_SCRIPT_SRC" ]; then
-  echo "::error::Deploy script not found: $DEPLOY_SCRIPT_SRC" >&2
-  exit 1
-fi
-
-if [ ! -f "$SETUP_CADDY_SRC" ]; then
-  echo "::error::Caddy setup script not found: $SETUP_CADDY_SRC" >&2
-  exit 1
+if [ "$BUILD_ON_HOST" = "true" ]; then
+  : "${GIT_COMMIT:?GIT_COMMIT is required when BUILD_ON_HOST=true}"
+  : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required when BUILD_ON_HOST=true}"
+  : "${GITHUB_TOKEN:?GITHUB_TOKEN is required when BUILD_ON_HOST=true}"
+  if [ ! -f "$BUILD_ON_HOST_SRC" ]; then
+    echo "::error::Build script not found: $BUILD_ON_HOST_SRC" >&2
+    exit 1
+  fi
 fi
 
 ENV_B64=$(base64 <"$ENV_FILE" | tr -d '\n')
@@ -38,17 +35,10 @@ CADDY_B64=$(base64 <"$CADDYFILE" | tr -d '\n')
 SCRIPT_B64=$(base64 <"$DEPLOY_SCRIPT_SRC" | tr -d '\n')
 SETUP_CADDY_B64=$(base64 <"$SETUP_CADDY_SRC" | tr -d '\n')
 
-PARAMS=$(jq -n \
-  --arg env_b64 "$ENV_B64" \
-  --arg caddy_b64 "$CADDY_B64" \
-  --arg script_b64 "$SCRIPT_B64" \
-  --arg setup_caddy_b64 "$SETUP_CADDY_B64" \
-  --arg image "$IMAGE_URI" \
-  --arg region "$AWS_REGION" \
-  '{
-    commands: [
+BASE_COMMANDS='
       "set -euxo pipefail",
       "mkdir -p /opt/sopet",
+      "command -v git >/dev/null || (command -v dnf >/dev/null && dnf install -y git || (apt-get update -y && apt-get install -y git))",
       ("echo " + ($script_b64 | @json) + " | base64 -d > /opt/sopet/deploy.sh"),
       "chmod +x /opt/sopet/deploy.sh",
       ("echo " + ($setup_caddy_b64 | @json) + " | base64 -d > /opt/sopet/setup-caddy.sh"),
@@ -56,14 +46,63 @@ PARAMS=$(jq -n \
       ("echo " + ($env_b64 | @json) + " | base64 -d > /opt/sopet/.env"),
       "chmod 600 /opt/sopet/.env",
       ("echo " + ($caddy_b64 | @json) + " | base64 -d > /opt/sopet/Caddyfile"),
-      "chmod 644 /opt/sopet/Caddyfile",
+      "chmod 644 /opt/sopet/Caddyfile"
+'
+
+BUILD_COMMANDS='
+      ,("echo " + ($build_b64 | @json) + " | base64 -d > /opt/sopet/build-on-host.sh"),
+      "chmod +x /opt/sopet/build-on-host.sh",
       ("export IMAGE_URI=" + ($image | @sh)),
+      ("export GIT_COMMIT=" + ($git_commit | @sh)),
+      ("export GITHUB_REPOSITORY=" + ($github_repo | @sh)),
+      ("export GITHUB_TOKEN=" + ($github_token | @sh)),
+      "/opt/sopet/build-on-host.sh"
+'
+
+TAIL_COMMANDS='
+      ,("export IMAGE_URI=" + ($image | @sh)),
       "export ENV_FILE=/opt/sopet/.env",
       ("export AWS_REGION=" + ($region | @sh)),
       "/opt/sopet/deploy.sh",
       "/opt/sopet/setup-caddy.sh"
-    ]
-  }')
+'
+
+if [ "$BUILD_ON_HOST" = "true" ]; then
+  BUILD_B64=$(base64 <"$BUILD_ON_HOST_SRC" | tr -d '\n')
+  echo "Build on EC2 enabled — native arm64 build (avoids QEMU cross-compile on GitHub Actions)"
+  PARAMS=$(jq -n \
+    --arg env_b64 "$ENV_B64" \
+    --arg caddy_b64 "$CADDY_B64" \
+    --arg script_b64 "$SCRIPT_B64" \
+    --arg setup_caddy_b64 "$SETUP_CADDY_B64" \
+    --arg build_b64 "$BUILD_B64" \
+    --arg image "$IMAGE_URI" \
+    --arg region "$AWS_REGION" \
+    --arg git_commit "$GIT_COMMIT" \
+    --arg github_repo "$GITHUB_REPOSITORY" \
+    --arg github_token "$GITHUB_TOKEN" \
+    "{
+      commands: [
+        ${BASE_COMMANDS}
+        ${BUILD_COMMANDS}
+        ${TAIL_COMMANDS}
+      ]
+    }")
+else
+  PARAMS=$(jq -n \
+    --arg env_b64 "$ENV_B64" \
+    --arg caddy_b64 "$CADDY_B64" \
+    --arg script_b64 "$SCRIPT_B64" \
+    --arg setup_caddy_b64 "$SETUP_CADDY_B64" \
+    --arg image "$IMAGE_URI" \
+    --arg region "$AWS_REGION" \
+    "{
+      commands: [
+        ${BASE_COMMANDS}
+        ${TAIL_COMMANDS}
+      ]
+    }")
+fi
 
 echo "Sending SSM deploy to $EC2_INSTANCE_ID (region $AWS_REGION, timeout ${SSM_TIMEOUT_SECONDS}s)"
 
