@@ -48,10 +48,6 @@ export class CustomerRepository {
     return existing;
   }
 
-  async findByPhone(phone: string): Promise<Customer | null> {
-    return this.findActiveByPhone(phone);
-  }
-
   async findById(id: string): Promise<Customer | null> {
     return this.repository.findOne({
       where: { id, deletedAt: IsNull() },
