@@ -7,20 +7,58 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, Repository } from 'typeorm';
 import { Customer } from '../../database/entities/customer.entity';
+import { Favorite } from '../../database/entities/favorite.entity';
+import { Order } from '../../database/entities/order.entity';
 import { OrderItem } from '../../database/entities/order-item.entity';
+import { SavedAddress } from '../../database/entities/saved-address.entity';
+import { OrderStatus } from '../../database/entities/enums/order.enums';
 import { PaginatedResponse } from '../../common/interfaces';
 import { UpdateCustomerAsAdminInput } from './customers.inputs';
 import { OrdersService } from '../orders/orders.service';
 import { CustomerRepository } from '../../database/repositories/customer.repository';
 import { guestPhoneLookupValues, normalizeThaiPhoneToLocal } from '../../common/utils/phone.util';
 
+const CUSTOMER_SPEND_EXCLUDED_STATUSES = [
+  OrderStatus.CANCELLED,
+  OrderStatus.REFUNDED,
+  OrderStatus.PENDING_PAYMENT,
+];
+
+export type AdminCustomerInsightsResult = {
+  totalSpent: number;
+  orderCount: number;
+  averageOrderValue: number;
+  lastOrderAt: Date | null;
+  addressCount: number;
+  favoriteCount: number;
+  recentOrders: Array<{
+    id: string;
+    orderNumber: string;
+    status: string;
+    total: number;
+    createdAt: Date;
+    items: Array<{
+      productName: string;
+      quantity: number;
+      unitPrice: number;
+      subtotal: number;
+    }>;
+  }>;
+};
+
 @Injectable()
 export class CustomersService {
   constructor(
     @InjectRepository(Customer)
     private readonly customerRepository: Repository<Customer>,
+    @InjectRepository(Order)
+    private readonly orderRepository: Repository<Order>,
     @InjectRepository(OrderItem)
     private readonly orderItemRepository: Repository<OrderItem>,
+    @InjectRepository(SavedAddress)
+    private readonly savedAddressRepository: Repository<SavedAddress>,
+    @InjectRepository(Favorite)
+    private readonly favoriteRepository: Repository<Favorite>,
     private readonly ordersService: OrdersService,
     private readonly customerRepo: CustomerRepository,
   ) {}
@@ -70,6 +108,58 @@ export class CustomersService {
       });
     }
     return customer;
+  }
+
+  async getInsightsForAdmin(customerId: string): Promise<AdminCustomerInsightsResult> {
+    await this.findByIdForAdmin(customerId);
+
+    const statsResult = await this.orderRepository
+      .createQueryBuilder('order')
+      .select('COUNT(order.id)', 'orderCount')
+      .addSelect('COALESCE(SUM(order.total), 0)', 'totalSpent')
+      .addSelect('MAX(order.createdAt)', 'lastOrderAt')
+      .where('order.customerId = :customerId', { customerId })
+      .andWhere('order.status NOT IN (:...excludedStatuses)', {
+        excludedStatuses: CUSTOMER_SPEND_EXCLUDED_STATUSES,
+      })
+      .getRawOne<{ orderCount: string; totalSpent: string; lastOrderAt: Date | null }>();
+
+    const orderCount = Number(statsResult?.orderCount ?? 0);
+    const totalSpent = Number(statsResult?.totalSpent ?? 0);
+    const averageOrderValue = orderCount > 0 ? totalSpent / orderCount : 0;
+
+    const [addressCount, favoriteCount, recentOrders] = await Promise.all([
+      this.savedAddressRepository.count({ where: { customerId } }),
+      this.favoriteRepository.count({ where: { customerId } }),
+      this.orderRepository.find({
+        where: { customerId },
+        relations: ['items'],
+        order: { createdAt: 'DESC' },
+        take: 10,
+      }),
+    ]);
+
+    return {
+      totalSpent,
+      orderCount,
+      averageOrderValue,
+      lastOrderAt: statsResult?.lastOrderAt ?? null,
+      addressCount,
+      favoriteCount,
+      recentOrders: recentOrders.map((order) => ({
+        id: order.id,
+        orderNumber: order.orderNumber,
+        status: order.status,
+        total: Number(order.total),
+        createdAt: order.createdAt,
+        items: (order.items ?? []).map((item) => ({
+          productName: item.productName,
+          quantity: item.quantity,
+          unitPrice: Number(item.unitPrice),
+          subtotal: Number(item.subtotal),
+        })),
+      })),
+    };
   }
 
   async updateAsAdmin(input: UpdateCustomerAsAdminInput): Promise<Customer> {

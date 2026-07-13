@@ -64,6 +64,9 @@ export class UserProfile {
 
   @Field(() => String, { nullable: true })
   profilePhotoUrl?: string | null;
+
+  @Field(() => Boolean, { defaultValue: false })
+  emailVerified: boolean;
 }
 
 @ObjectType()
@@ -1414,6 +1417,87 @@ export class AdminVendorType {
 }
 
 @ObjectType()
+export class AdminVendorMembershipType {
+  @Field()
+  storeId: string;
+
+  @Field()
+  storeName: string;
+
+  @Field()
+  storeSlug: string;
+
+  @Field()
+  storeStatus: string;
+
+  @Field()
+  role: string;
+
+  @Field()
+  joinedAt: Date;
+}
+
+@ObjectType()
+export class AdminVendorActivityType {
+  @Field()
+  kind: string;
+
+  @Field()
+  occurredAt: Date;
+
+  @Field(() => String, { nullable: true })
+  storeId?: string | null;
+
+  @Field(() => String, { nullable: true })
+  storeName?: string | null;
+
+  @Field(() => String, { nullable: true })
+  orderNumber?: string | null;
+}
+
+@ObjectType()
+export class AdminVendorInsightsType {
+  @Field(() => Int)
+  storeCount: number;
+
+  @Field(() => Int)
+  membershipCount: number;
+
+  @Field(() => Float)
+  totalRevenue: number;
+
+  @Field(() => Int)
+  orderCount: number;
+
+  @Field(() => Float)
+  averageOrderValue: number;
+
+  @Field(() => Date, { nullable: true })
+  lastOrderAt?: Date | null;
+
+  @Field(() => Date, { nullable: true })
+  lastActivityAt?: Date | null;
+
+  @Field(() => [AdminVendorMembershipType])
+  memberships: AdminVendorMembershipType[];
+
+  @Field(() => [AdminVendorActivityType])
+  activities: AdminVendorActivityType[];
+
+  @Field(() => [AdminCustomerRecentOrder])
+  recentOrders: AdminCustomerRecentOrder[];
+}
+
+@ObjectType()
+export class AdminVendorDetailType extends AdminVendorType {
+  @Field()
+  emailVerified: boolean;
+
+  @Field(() => AdminVendorInsightsType)
+  insights: AdminVendorInsightsType;
+}
+
+@ObjectType()
 export class ReviewImageType {
   @Field()
   id: string;
@@ -1636,6 +1720,72 @@ export class AdminCustomerConnection {
 }
 
 @ObjectType()
+export class AdminCustomerOrderItemSummary {
+  @Field()
+  productName: string;
+
+  @Field(() => Int)
+  quantity: number;
+
+  @Field(() => Float)
+  unitPrice: number;
+
+  @Field(() => Float)
+  subtotal: number;
+}
+
+@ObjectType()
+export class AdminCustomerRecentOrder {
+  @Field()
+  id: string;
+
+  @Field()
+  orderNumber: string;
+
+  @Field()
+  status: string;
+
+  @Field(() => Float)
+  total: number;
+
+  @Field()
+  createdAt: Date;
+
+  @Field(() => [AdminCustomerOrderItemSummary])
+  items: AdminCustomerOrderItemSummary[];
+}
+
+@ObjectType()
+export class AdminCustomerInsightsType {
+  @Field(() => Float)
+  totalSpent: number;
+
+  @Field(() => Int)
+  orderCount: number;
+
+  @Field(() => Float)
+  averageOrderValue: number;
+
+  @Field(() => Date, { nullable: true })
+  lastOrderAt?: Date | null;
+
+  @Field(() => Int)
+  addressCount: number;
+
+  @Field(() => Int)
+  favoriteCount: number;
+
+  @Field(() => [AdminCustomerRecentOrder])
+  recentOrders: AdminCustomerRecentOrder[];
+}
+
+@ObjectType()
+export class AdminCustomerDetailType extends AdminCustomerType {
+  @Field(() => AdminCustomerInsightsType)
+  insights: AdminCustomerInsightsType;
+}
+
+@ObjectType()
 export class VendorCustomerType {
   @Field()
   id: string;
@@ -1663,6 +1813,48 @@ export class VendorCustomerType {
 export class VendorCustomerConnection {
   @Field(() => [VendorCustomerType])
   items: VendorCustomerType[];
+
+  @Field(() => PaginationMeta)
+  pagination: PaginationMeta;
+}
+
+@ObjectType()
+export class AdminAuditLogType {
+  @Field()
+  id: string;
+
+  @Field()
+  actorType: string;
+
+  @Field(() => String, { nullable: true })
+  actorId?: string | null;
+
+  @Field(() => String, { nullable: true })
+  actorLabel?: string | null;
+
+  @Field()
+  action: string;
+
+  @Field()
+  resourceType: string;
+
+  @Field(() => String, { nullable: true })
+  resourceId?: string | null;
+
+  @Field(() => String, { nullable: true })
+  metadata?: string | null;
+
+  @Field(() => String, { nullable: true })
+  ipAddress?: string | null;
+
+  @Field()
+  createdAt: Date;
+}
+
+@ObjectType()
+export class AdminAuditLogConnection {
+  @Field(() => [AdminAuditLogType])
+  items: AdminAuditLogType[];
 
   @Field(() => PaginationMeta)
   pagination: PaginationMeta;

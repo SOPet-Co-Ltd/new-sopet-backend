@@ -36,9 +36,77 @@ input AddToCartInput {
   variantId: String!
 }
 
+type AdminAuditLogConnection {
+  items: [AdminAuditLogType!]!
+  pagination: PaginationMeta!
+}
+
+input AdminAuditLogFilterInput {
+  action: String
+  actorId: String
+  actorType: String
+  fromDate: DateTime
+  resourceType: String
+  search: String
+  toDate: DateTime
+}
+
+type AdminAuditLogType {
+  action: String!
+  actorId: String
+  actorLabel: String
+  actorType: String!
+  createdAt: DateTime!
+  id: String!
+  ipAddress: String
+  metadata: String
+  resourceId: String
+  resourceType: String!
+}
+
 type AdminCustomerConnection {
   items: [AdminCustomerType!]!
   pagination: PaginationMeta!
+}
+
+type AdminCustomerDetailType {
+  createdAt: DateTime!
+  dateOfBirth: String
+  email: String
+  fullName: String
+  id: String!
+  insights: AdminCustomerInsightsType!
+  isActive: Boolean!
+  isVerified: Boolean!
+  lastLoginAt: DateTime
+  phone: String!
+  updatedAt: DateTime!
+}
+
+type AdminCustomerInsightsType {
+  addressCount: Int!
+  averageOrderValue: Float!
+  favoriteCount: Int!
+  lastOrderAt: DateTime
+  orderCount: Int!
+  recentOrders: [AdminCustomerRecentOrder!]!
+  totalSpent: Float!
+}
+
+type AdminCustomerOrderItemSummary {
+  productName: String!
+  quantity: Int!
+  subtotal: Float!
+  unitPrice: Float!
+}
+
+type AdminCustomerRecentOrder {
+  createdAt: DateTime!
+  id: String!
+  items: [AdminCustomerOrderItemSummary!]!
+  orderNumber: String!
+  status: String!
+  total: Float!
 }
 
 type AdminCustomerType {
@@ -90,6 +158,49 @@ type AdminTeamMemberType {
   fullName: String!
   id: String!
   isActive: Boolean!
+}
+
+type AdminVendorActivityType {
+  kind: String!
+  occurredAt: DateTime!
+  orderNumber: String
+  storeId: String
+  storeName: String
+}
+
+type AdminVendorDetailType {
+  createdAt: DateTime!
+  email: String!
+  emailVerified: Boolean!
+  fullName: String!
+  id: String!
+  insights: AdminVendorInsightsType!
+  isActive: Boolean!
+  lastLoginAt: DateTime
+  role: String!
+  stores: [AdminVendorStoreType!]!
+}
+
+type AdminVendorInsightsType {
+  activities: [AdminVendorActivityType!]!
+  averageOrderValue: Float!
+  lastActivityAt: DateTime
+  lastOrderAt: DateTime
+  membershipCount: Int!
+  memberships: [AdminVendorMembershipType!]!
+  orderCount: Int!
+  recentOrders: [AdminCustomerRecentOrder!]!
+  storeCount: Int!
+  totalRevenue: Float!
+}
+
+type AdminVendorMembershipType {
+  joinedAt: DateTime!
+  role: String!
+  storeId: String!
+  storeName: String!
+  storeSlug: String!
+  storeStatus: String!
 }
 
 type AdminVendorStoreType {
@@ -473,8 +584,10 @@ type Mutation {
   adminCreateStoreShippingOption(input: CreateShippingOptionInput!, storeId: String!): StoreShippingOptionType!
   adminDeleteStoreShippingOption(id: String!): Boolean!
   adminLogin(input: VendorLoginInput!): VendorAuthPayload!
+  adminResendVendorEmailVerification(vendorId: String!): MessagePayload!
   adminTriggerVendorPasswordReset(vendorId: String!): MessagePayload!
   adminUpdateStoreShippingOption(id: String!, input: UpdateShippingOptionInput!): StoreShippingOptionType!
+  adminVerifyVendorEmail(vendorId: String!): MessagePayload!
   approveBrand(id: String!): BrandType!
   approveCategory(id: String!): CategoryType!
   approvePetType(id: String!): PetTypeType!
@@ -553,6 +666,7 @@ type Mutation {
   requestAccountDeletion: Boolean!
   requestPasswordReset(input: RequestPasswordResetInput!): MessagePayload!
   requestPayout: PayoutType!
+  resendEmailVerification: MessagePayload!
   resetPassword(input: ResetPasswordInput!): MessagePayload!
   revokeAdminInvitation(invitationId: String!): AdminInvitationType!
   revokeStoreApiKey(id: String!, storeId: String!): Boolean!
@@ -600,6 +714,7 @@ type Mutation {
   uploadImage(base64: String!, folder: String): UploadResultType!
   vendorLogin(input: VendorLoginInput!): VendorAuthPayload!
   verifyCustomerOtp(input: VerifyCustomerOtpInput!): CustomerAuthPayload!
+  verifyEmail(input: VerifyEmailInput!): MessagePayload!
 }
 
 type MyStoreType {
@@ -924,7 +1039,9 @@ type Query {
   activePlatformPromotions: [PromotionType!]!
   activeStorePromotions(storeId: String!): [PromotionType!]!
   addresses: [SavedAddressType!]!
+  adminAuditLogs(filter: AdminAuditLogFilterInput, limit: Int! = 20, page: Int! = 1): AdminAuditLogConnection!
   adminCustomer(id: String!): AdminCustomerType!
+  adminCustomerDetail(id: String!): AdminCustomerDetailType!
   adminCustomers(limit: Int! = 20, page: Int! = 1, search: String): AdminCustomerConnection!
   adminStore(id: String!): AdminStoreType!
   adminStorePayoutSummary(storeId: String!): PayoutSummaryType!
@@ -934,6 +1051,7 @@ type Query {
   adminStores: [AdminStoreType!]!
   adminTeamMembers: [AdminTeamMemberType!]!
   adminVendor(id: String!): AdminVendorType!
+  adminVendorDetail(id: String!): AdminVendorDetailType!
   adminVendors(search: String): [AdminVendorType!]!
   allPlatformAds: [PlatformAdType!]!
   allPlatformBanners: [PlatformBannerType!]!
@@ -1690,6 +1808,7 @@ type UploadResultType {
 
 type UserProfile {
   email: String!
+  emailVerified: Boolean!
   fullName: String!
   id: String!
   profilePhotoUrl: String
@@ -1745,4 +1864,8 @@ input VerifyCustomerOtpInput {
   code: String!
   phone: String!
   sessionId: String
+}
+
+input VerifyEmailInput {
+  token: String!
 }

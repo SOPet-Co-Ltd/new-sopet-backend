@@ -3,12 +3,14 @@ import {
   NotFoundException,
   BadRequestException,
   ConflictException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { StoreRequest, StoreRequestStatus } from '../../database/entities/store-request.entity';
 import { Store, StoreStatus } from '../../database/entities/store.entity';
 import { StoreMember, StoreMemberRole } from '../../database/entities/store-member.entity';
+import { User } from '../../database/entities/user.entity';
 import { generateUniqueStoreSlug } from '../../common/utils/slug.util';
 import { NotificationsService } from '../notifications/notifications.service';
 import { StorageService } from '../storage/storage.service';
@@ -31,11 +33,31 @@ export class StoreRequestService {
     private readonly storeRepository: Repository<Store>,
     @InjectRepository(StoreMember)
     private readonly storeMemberRepository: Repository<StoreMember>,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
     private readonly notificationsService: NotificationsService,
     private readonly storageService: StorageService,
   ) {}
 
   async submit(vendorUserId: string, data: SubmitStoreRequestData): Promise<StoreRequest> {
+    const vendor = await this.userRepository.findOne({
+      where: { id: vendorUserId, isActive: true },
+    });
+
+    if (!vendor) {
+      throw new NotFoundException({
+        code: 'VENDOR_NOT_FOUND',
+        message: 'Vendor not found',
+      });
+    }
+
+    if (!vendor.emailVerified) {
+      throw new ForbiddenException({
+        code: 'EMAIL_NOT_VERIFIED',
+        message: 'กรุณายืนยันอีเมลก่อนขอเปิดร้านใหม่',
+      });
+    }
+
     const pending = await this.storeRequestRepository.findOne({
       where: {
         vendorUserId,

@@ -11,12 +11,14 @@ import { OtpCode } from '../../database/entities/otp-code.entity';
 import { Store } from '../../database/entities/store.entity';
 import { StoreMember } from '../../database/entities/store-member.entity';
 import { PasswordResetToken } from '../../database/entities/password-reset-token.entity';
+import { EmailVerificationToken } from '../../database/entities/email-verification-token.entity';
 import { SmsService } from '../sms/sms.service';
 import { CartService } from '../cart/cart.service';
 import { EmailDeliveryService } from '../email/email-delivery.service';
 import { CustomerRepository } from '../../database/repositories/customer.repository';
 import { GuestOrderLinkService } from '../orders/guest-order-link.service';
 import { StorageService } from '../storage/storage.service';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
 
 describe('AuthService password reset', () => {
   let service: AuthService;
@@ -49,6 +51,7 @@ describe('AuthService password reset', () => {
           provide: getRepositoryToken(PasswordResetToken),
           useValue: passwordResetRepo,
         },
+        { provide: getRepositoryToken(EmailVerificationToken), useValue: {} },
         { provide: JwtService, useValue: {} },
         { provide: ConfigService, useValue: { get: jest.fn() } },
         { provide: SmsService, useValue: {} },
@@ -62,6 +65,7 @@ describe('AuthService password reset', () => {
             assertFolderImageUrl: jest.fn().mockResolvedValue(undefined),
           },
         },
+        { provide: AuditLogsService, useValue: { log: jest.fn() } },
       ],
     }).compile();
 

@@ -27,6 +27,7 @@ export { Cart } from './cart.entity';
 export { CartItem } from './cart-item.entity';
 export { Notification, NotificationType, NotificationChannel } from './notification.entity';
 export { AdminLog, AdminAction } from './admin-log.entity';
+export { AuditLog, AuditActorType } from './audit-log.entity';
 export { Setting } from './setting.entity';
 export { Favorite } from './favorite.entity';
 export { StoreShippingOption } from './store-shipping-option.entity';
@@ -54,4 +55,5 @@ export {
 export { StoreReactivationRequestImage } from './store-reactivation-request-image.entity';
 export { VendorInvitation, VendorInvitationStatus } from './vendor-invitation.entity';
 export { PasswordResetToken } from './password-reset-token.entity';
+export { EmailVerificationToken } from './email-verification-token.entity';
 export { AdminInvitation, AdminInvitationStatus } from './admin-invitation.entity';

@@ -19,6 +19,7 @@ import { StoreMember } from '../../database/entities/store-member.entity';
 import { pickDefaultAccessibleStoreId } from '../stores/store-selection.util';
 import { OtpCode } from '../../database/entities/otp-code.entity';
 import { PasswordResetToken } from '../../database/entities/password-reset-token.entity';
+import { EmailVerificationToken } from '../../database/entities/email-verification-token.entity';
 import { CustomerRepository } from '../../database/repositories/customer.repository';
 import { SendOtpDto, VerifyOtpDto, LoginDto } from './dto';
 import { JwtPayload } from '../../common/interfaces';
@@ -28,6 +29,9 @@ import { CartService } from '../cart/cart.service';
 import { GuestOrderLinkService } from '../orders/guest-order-link.service';
 import { EmailDeliveryService } from '../email/email-delivery.service';
 import { StorageService } from '../storage/storage.service';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constants';
+import { AuditActorType } from '../../database/entities/audit-log.entity';
 import {
   finalizeCustomerDeletion,
   isAdminSuspended,
@@ -58,6 +62,8 @@ export class AuthService {
     private storeMemberRepository: Repository<StoreMember>,
     @InjectRepository(PasswordResetToken)
     private passwordResetTokenRepository: Repository<PasswordResetToken>,
+    @InjectRepository(EmailVerificationToken)
+    private emailVerificationTokenRepository: Repository<EmailVerificationToken>,
     private jwtService: JwtService,
     private configService: ConfigService,
     private smsService: SmsService,
@@ -65,6 +71,7 @@ export class AuthService {
     private guestOrderLinkService: GuestOrderLinkService,
     private emailDeliveryService: EmailDeliveryService,
     private readonly storageService: StorageService,
+    private readonly auditLogsService: AuditLogsService,
   ) {}
 
   // Generate random 6-digit OTP
@@ -269,6 +276,23 @@ export class AuthService {
 
     const { accessToken, refreshToken } = await this.generateTokens(payload);
 
+    const actorType =
+      user.role === UserRole.ADMIN
+        ? AuditActorType.ADMIN
+        : user.role === UserRole.VENDOR
+          ? AuditActorType.VENDOR
+          : AuditActorType.SYSTEM;
+
+    await this.auditLogsService.log({
+      actorType,
+      actorId: user.id,
+      actorLabel: user.fullName || user.email,
+      action: AuditAction.LOGIN,
+      resourceType: AuditResourceType.USER,
+      resourceId: user.id,
+      metadata: { role: user.role },
+    });
+
     return {
       accessToken,
       refreshToken,
@@ -278,6 +302,7 @@ export class AuthService {
         fullName: user.fullName,
         role: user.role,
         profilePhotoUrl: user.profilePhotoUrl,
+        emailVerified: user.emailVerified,
       },
     };
   }
@@ -590,7 +615,10 @@ export class AuthService {
     return { message: 'Password reset successfully' };
   }
 
-  async adminTriggerVendorPasswordReset(vendorId: string): Promise<{ message: string }> {
+  async adminTriggerVendorPasswordReset(
+    vendorId: string,
+    admin?: { id: string; fullName?: string },
+  ): Promise<{ message: string }> {
     const vendor = await this.userRepository.findOne({
       where: { id: vendorId, role: UserRole.VENDOR, isActive: true },
     });
@@ -602,14 +630,21 @@ export class AuthService {
       });
     }
 
-    await this.createAndSendPasswordResetToken(vendor);
+    await this.createAndSendPasswordResetToken(vendor, {
+      actorType: AuditActorType.ADMIN,
+      actorId: admin?.id,
+      actorLabel: admin?.fullName,
+    });
 
     return {
       message: 'Password reset email sent to vendor',
     };
   }
 
-  private async createAndSendPasswordResetToken(user: User): Promise<void> {
+  private async createAndSendPasswordResetToken(
+    user: User,
+    triggeredBy?: { actorType: AuditActorType; actorId?: string; actorLabel?: string },
+  ): Promise<void> {
     const token = randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
 
@@ -620,5 +655,209 @@ export class AuthService {
     });
     await this.passwordResetTokenRepository.save(resetToken);
     await this.emailDeliveryService.sendPasswordReset(user.email, token);
+
+    await this.auditLogsService.log({
+      actorType: triggeredBy?.actorType ?? AuditActorType.SYSTEM,
+      actorId: triggeredBy?.actorId ?? null,
+      actorLabel: triggeredBy?.actorLabel ?? null,
+      action: AuditAction.PASSWORD_RESET_SENT,
+      resourceType:
+        user.role === UserRole.VENDOR ? AuditResourceType.VENDOR : AuditResourceType.USER,
+      resourceId: user.id,
+      metadata: { email: user.email },
+    });
+  }
+
+  async sendEmailVerificationOnRegistration(userId: string): Promise<void> {
+    const user = await this.userRepository.findOne({
+      where: { id: userId, isActive: true },
+    });
+
+    if (!user || user.emailVerified) {
+      return;
+    }
+
+    await this.createAndSendEmailVerificationToken(user);
+  }
+
+  async resendEmailVerification(userId: string): Promise<{ message: string }> {
+    const user = await this.userRepository.findOne({
+      where: { id: userId, isActive: true },
+    });
+
+    if (!user) {
+      throw new NotFoundException({
+        code: 'USER_NOT_FOUND',
+        message: 'User not found',
+      });
+    }
+
+    if (user.emailVerified) {
+      throw new BadRequestException({
+        code: 'EMAIL_ALREADY_VERIFIED',
+        message: 'Email is already verified',
+      });
+    }
+
+    await this.createAndSendEmailVerificationToken(user, {
+      actorType: AuditActorType.VENDOR,
+      actorId: user.id,
+      actorLabel: user.fullName || user.email,
+    });
+
+    return {
+      message: 'Email verification sent',
+    };
+  }
+
+  async adminResendVendorEmailVerification(
+    vendorId: string,
+    admin?: { id: string; fullName?: string },
+  ): Promise<{ message: string }> {
+    const vendor = await this.userRepository.findOne({
+      where: { id: vendorId, role: UserRole.VENDOR, isActive: true },
+    });
+
+    if (!vendor) {
+      throw new NotFoundException({
+        code: 'VENDOR_NOT_FOUND',
+        message: 'Vendor not found',
+      });
+    }
+
+    if (vendor.emailVerified) {
+      throw new BadRequestException({
+        code: 'EMAIL_ALREADY_VERIFIED',
+        message: 'Vendor email is already verified',
+      });
+    }
+
+    await this.createAndSendEmailVerificationToken(vendor, {
+      actorType: AuditActorType.ADMIN,
+      actorId: admin?.id,
+      actorLabel: admin?.fullName,
+    });
+
+    return {
+      message: 'Email verification sent to vendor',
+    };
+  }
+
+  async adminVerifyVendorEmail(
+    vendorId: string,
+    admin?: { id: string; fullName?: string },
+  ): Promise<{ message: string }> {
+    const vendor = await this.userRepository.findOne({
+      where: { id: vendorId, role: UserRole.VENDOR, isActive: true },
+    });
+
+    if (!vendor) {
+      throw new NotFoundException({
+        code: 'VENDOR_NOT_FOUND',
+        message: 'Vendor not found',
+      });
+    }
+
+    if (vendor.emailVerified) {
+      throw new BadRequestException({
+        code: 'EMAIL_ALREADY_VERIFIED',
+        message: 'Vendor email is already verified',
+      });
+    }
+
+    vendor.emailVerified = true;
+    await this.userRepository.save(vendor);
+
+    await this.auditLogsService.log({
+      actorType: AuditActorType.ADMIN,
+      actorId: admin?.id ?? null,
+      actorLabel: admin?.fullName ?? null,
+      action: AuditAction.EMAIL_VERIFIED,
+      resourceType: AuditResourceType.VENDOR,
+      resourceId: vendor.id,
+      metadata: { email: vendor.email, method: 'admin_override' },
+    });
+
+    return {
+      message: 'Vendor email verified',
+    };
+  }
+
+  async verifyEmail(token: string): Promise<{ message: string }> {
+    const verificationToken = await this.emailVerificationTokenRepository.findOne({
+      where: { token },
+    });
+
+    if (!verificationToken || verificationToken.usedAt) {
+      throw new BadRequestException({
+        code: 'INVALID_TOKEN',
+        message: 'Invalid or expired verification token',
+      });
+    }
+
+    if (verificationToken.expiresAt < new Date()) {
+      throw new BadRequestException({
+        code: 'TOKEN_EXPIRED',
+        message: 'Verification token has expired',
+      });
+    }
+
+    const user = await this.userRepository.findOne({
+      where: { email: verificationToken.email, isActive: true },
+    });
+    if (!user) {
+      throw new BadRequestException({
+        code: 'INVALID_TOKEN',
+        message: 'Invalid or expired verification token',
+      });
+    }
+
+    if (!user.emailVerified) {
+      user.emailVerified = true;
+      await this.userRepository.save(user);
+
+      await this.auditLogsService.log({
+        actorType: AuditActorType.SYSTEM,
+        actorId: null,
+        actorLabel: null,
+        action: AuditAction.EMAIL_VERIFIED,
+        resourceType:
+          user.role === UserRole.VENDOR ? AuditResourceType.VENDOR : AuditResourceType.USER,
+        resourceId: user.id,
+        metadata: { email: user.email, method: 'token' },
+      });
+    }
+
+    verificationToken.usedAt = new Date();
+    await this.emailVerificationTokenRepository.save(verificationToken);
+
+    return { message: 'Email verified successfully' };
+  }
+
+  private async createAndSendEmailVerificationToken(
+    user: User,
+    triggeredBy?: { actorType: AuditActorType; actorId?: string; actorLabel?: string },
+  ): Promise<void> {
+    const token = randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    const verificationToken = this.emailVerificationTokenRepository.create({
+      email: user.email,
+      token,
+      expiresAt,
+    });
+    await this.emailVerificationTokenRepository.save(verificationToken);
+    await this.emailDeliveryService.sendEmailVerification(user.email, token);
+
+    await this.auditLogsService.log({
+      actorType: triggeredBy?.actorType ?? AuditActorType.SYSTEM,
+      actorId: triggeredBy?.actorId ?? null,
+      actorLabel: triggeredBy?.actorLabel ?? null,
+      action: AuditAction.EMAIL_VERIFICATION_SENT,
+      resourceType:
+        user.role === UserRole.VENDOR ? AuditResourceType.VENDOR : AuditResourceType.USER,
+      resourceId: user.id,
+      metadata: { email: user.email },
+    });
   }
 }

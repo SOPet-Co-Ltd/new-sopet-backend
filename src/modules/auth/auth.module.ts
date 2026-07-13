@@ -14,6 +14,7 @@ import { OtpCode } from '../../database/entities/otp-code.entity';
 import { Store } from '../../database/entities/store.entity';
 import { StoreMember } from '../../database/entities/store-member.entity';
 import { PasswordResetToken } from '../../database/entities/password-reset-token.entity';
+import { EmailVerificationToken } from '../../database/entities/email-verification-token.entity';
 import { CustomerRepository } from '../../database/repositories/customer.repository';
 import { EmailModule } from '../email/email.module';
 import { SmsModule } from '../sms/sms.module';
@@ -27,7 +28,15 @@ import { StoreStatusGuard } from './guards/store-status.guard';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Customer, User, OtpCode, Store, StoreMember, PasswordResetToken]),
+    TypeOrmModule.forFeature([
+      Customer,
+      User,
+      OtpCode,
+      Store,
+      StoreMember,
+      PasswordResetToken,
+      EmailVerificationToken,
+    ]),
     EmailModule,
     SmsModule,
     CartModule,

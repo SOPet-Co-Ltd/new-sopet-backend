@@ -362,6 +362,31 @@ export function passwordResetTemplate(
   return { subject, html, text };
 }
 
+export function emailVerificationTemplate(
+  brand: EmailTemplateBrand,
+  params: { verifyUrl: string },
+): EmailTemplateResult {
+  const subject = 'ยืนยันอีเมล SOPet';
+  const text = `กรุณาเปิดลิงก์นี้เพื่อยืนยันอีเมลของคุณ: ${params.verifyUrl}`;
+  const html = layout(
+    brand,
+    `
+    ${heroBadge('ยืนยันอีเมล', 'info')}
+    ${sectionTitle('ยืนยันอีเมลของคุณ', 'กรุณายืนยันอีเมลเพื่อใช้งานบัญชีผู้ขายบน SOPet')}
+    ${highlightBox('หากคุณเป็นผู้ร้องขอ กรุณากดปุ่มด้านล่างเพื่อยืนยันอีเมล หากไม่ใช่ กรุณาเพิกเฉยอีเมลนี้')}
+    ${infoPanel([
+      { label: 'การดำเนินการ', value: 'ยืนยันอีเมล' },
+      { label: 'อายุลิงก์', value: '24 ชั่วโมง' },
+      { label: 'คำแนะนำ', value: 'ใช้ลิงก์เพียงครั้งเดียว' },
+    ])}
+    ${cta(params.verifyUrl, 'ยืนยันอีเมล', 'ลิงก์นี้จะหมดอายุภายใน 24 ชั่วโมง')}
+  `,
+    subject,
+  );
+
+  return { subject, html, text };
+}
+
 export function orderPaidTemplate(
   brand: EmailTemplateBrand,
   params: {

@@ -4,6 +4,7 @@ import { EmailService } from './email.service';
 import {
   adminInviteTemplate,
   EmailTemplateBrand,
+  emailVerificationTemplate,
   orderPaidTemplate,
   orderStatusChangedTemplate,
   passwordResetTemplate,
@@ -94,6 +95,16 @@ export class EmailDeliveryService {
       passwordResetTemplate(this.brand, { resetUrl }),
       'Password reset',
       resetUrl,
+    );
+  }
+
+  async sendEmailVerification(email: string, token: string): Promise<void> {
+    const verifyUrl = `${this.adminPanelUrl}/verify-email?token=${token}`;
+    await this.sendTemplate(
+      email,
+      emailVerificationTemplate(this.brand, { verifyUrl }),
+      'Email verification',
+      verifyUrl,
     );
   }
 

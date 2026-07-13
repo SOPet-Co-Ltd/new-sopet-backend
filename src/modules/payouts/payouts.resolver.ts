@@ -15,6 +15,9 @@ import { CurrentUser, Roles } from '../../common/decorators';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import type { JwtPayload } from '../../common/interfaces';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constants';
+import { AuditActorType } from '../../database/entities/audit-log.entity';
 
 @ObjectType()
 export class PayoutType {
@@ -88,7 +91,10 @@ export class TriggerPayoutInput {
 
 @Resolver()
 export class PayoutsResolver {
-  constructor(private readonly payoutsService: PayoutsService) {}
+  constructor(
+    private readonly payoutsService: PayoutsService,
+    private readonly auditLogsService: AuditLogsService,
+  ) {}
 
   @Query(() => PayoutSummaryType)
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -147,25 +153,53 @@ export class PayoutsResolver {
   @Roles('admin')
   async triggerPayout(
     @Args('input') input: TriggerPayoutInput,
-    @CurrentUser('sub') adminId: string,
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail?: string,
   ): Promise<PayoutType> {
     const payout = await this.payoutsService.triggerPayout(input.storeId, {
       amount: input.amount,
       processedBy: adminId,
       bypassMinimum: true,
     });
+
+    await this.auditLogsService.log({
+      actorType: AuditActorType.ADMIN,
+      actorId: adminId,
+      actorLabel: adminEmail ?? null,
+      action: AuditAction.PAYOUT_TRIGGERED,
+      resourceType: AuditResourceType.PAYOUT,
+      resourceId: payout.id,
+      metadata: { storeId: input.storeId, amount: payout.amount },
+    });
+
     return mapPayout(payout);
   }
 
   @Mutation(() => PayoutType)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
-  async createPayout(@Args('input') input: CreatePayoutInput): Promise<PayoutType> {
+  async createPayout(
+    @Args('input') input: CreatePayoutInput,
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail?: string,
+  ): Promise<PayoutType> {
     const payout = await this.payoutsService.triggerPayout(input.storeId, {
       amount: input.amount,
+      processedBy: adminId,
       bypassMinimum: true,
       notes: 'Admin created payout',
     });
+
+    await this.auditLogsService.log({
+      actorType: AuditActorType.ADMIN,
+      actorId: adminId,
+      actorLabel: adminEmail ?? null,
+      action: AuditAction.PAYOUT_TRIGGERED,
+      resourceType: AuditResourceType.PAYOUT,
+      resourceId: payout.id,
+      metadata: { storeId: input.storeId, amount: payout.amount, source: 'createPayout' },
+    });
+
     return mapPayout(payout);
   }
 }

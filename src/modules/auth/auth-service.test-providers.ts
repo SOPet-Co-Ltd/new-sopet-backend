@@ -7,6 +7,7 @@ import { OtpCode } from '../../database/entities/otp-code.entity';
 import { Store } from '../../database/entities/store.entity';
 import { StoreMember } from '../../database/entities/store-member.entity';
 import { PasswordResetToken } from '../../database/entities/password-reset-token.entity';
+import { EmailVerificationToken } from '../../database/entities/email-verification-token.entity';
 import { CustomerRepository } from '../../database/repositories/customer.repository';
 import { SmsService } from '../sms/sms.service';
 import { CartService } from '../cart/cart.service';
@@ -79,6 +80,10 @@ export function createAuthServiceTestProviders(mocks: AuthServiceTestMocks) {
     {
       provide: getRepositoryToken(PasswordResetToken),
       useValue: { findOne: jest.fn(), save: jest.fn(), delete: jest.fn() },
+    },
+    {
+      provide: getRepositoryToken(EmailVerificationToken),
+      useValue: { findOne: jest.fn(), save: jest.fn(), create: jest.fn() },
     },
     {
       provide: JwtService,

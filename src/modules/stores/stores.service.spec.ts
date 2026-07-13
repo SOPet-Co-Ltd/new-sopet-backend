@@ -18,8 +18,18 @@ describe('StoresService', () => {
   };
   let storeMemberRepository: {
     findOne: jest.Mock;
+    find: jest.Mock;
     create: jest.Mock;
     save: jest.Mock;
+  };
+  let orderRepository: {
+    find: jest.Mock;
+  };
+  let orderItemRepository: {
+    createQueryBuilder: jest.Mock;
+  };
+  let auditLogRepository: {
+    createQueryBuilder: jest.Mock;
   };
 
   beforeEach(() => {
@@ -35,14 +45,32 @@ describe('StoresService', () => {
     };
     storeMemberRepository = {
       findOne: jest.fn().mockResolvedValue(null),
+      find: jest.fn().mockResolvedValue([]),
       create: jest.fn((data) => data),
       save: jest.fn(async (data) => data),
+    };
+    orderRepository = {
+      find: jest.fn().mockResolvedValue([]),
+    };
+    orderItemRepository = {
+      createQueryBuilder: jest.fn(),
+    };
+    auditLogRepository = {
+      createQueryBuilder: jest.fn(() => ({
+        orderBy: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+      })),
     };
 
     service = new StoresService(
       storeRepository as never,
       userRepository as never,
       storeMemberRepository as never,
+      orderRepository as never,
+      orderItemRepository as never,
+      auditLogRepository as never,
       {
         hasCredentials: jest.fn().mockReturnValue(false),
         createRecipient: jest.fn(),
@@ -53,6 +81,9 @@ describe('StoresService', () => {
       } as never,
       {
         deleteObject: jest.fn(),
+      } as never,
+      {
+        log: jest.fn().mockResolvedValue(undefined),
       } as never,
     );
   });
@@ -264,5 +295,96 @@ describe('StoresService', () => {
         ownerUserId: 'missing-vendor',
       }),
     ).rejects.toThrow(NotFoundException);
+  });
+
+  describe('getVendorInsightsForAdmin', () => {
+    it('returns revenue stats, memberships, and synthesized activities', async () => {
+      const vendor = {
+        id: 'vendor-1',
+        createdAt: new Date('2025-01-01T00:00:00Z'),
+        lastLoginAt: new Date('2026-01-10T08:00:00Z'),
+        ownedStores: [
+          {
+            id: 'store-1',
+            name: 'Pet Shop',
+            slug: 'pet-shop',
+            status: StoreStatus.APPROVED,
+            createdAt: new Date('2025-02-01T00:00:00Z'),
+          },
+        ],
+      };
+      userRepository.findOne.mockResolvedValue(vendor);
+
+      const statsQb = {
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        innerJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        getRawOne: jest.fn().mockResolvedValue({
+          orderCount: '3',
+          totalRevenue: '4500',
+          lastOrderAt: new Date('2026-01-08T12:00:00Z'),
+        }),
+        getRawMany: jest.fn().mockResolvedValue([{ id: 'order-1' }]),
+      };
+      orderItemRepository.createQueryBuilder.mockReturnValue(statsQb);
+
+      orderRepository.find.mockResolvedValue([
+        {
+          id: 'order-1',
+          orderNumber: 'ORD-001',
+          status: 'paid',
+          total: 1500,
+          createdAt: new Date('2026-01-08T12:00:00Z'),
+          items: [
+            {
+              productName: 'Dog Food',
+              quantity: 1,
+              unitPrice: 1500,
+              subtotal: 1500,
+            },
+          ],
+        },
+      ]);
+
+      storeMemberRepository.find.mockResolvedValue([
+        {
+          storeId: 'store-2',
+          role: StoreMemberRole.STAFF,
+          createdAt: new Date('2025-06-01T00:00:00Z'),
+          store: {
+            id: 'store-2',
+            name: 'Partner Store',
+            slug: 'partner-store',
+            status: StoreStatus.APPROVED,
+            ownerId: 'other-vendor',
+          },
+        },
+      ]);
+
+      const result = await service.getVendorInsightsForAdmin('vendor-1');
+
+      expect(result.storeCount).toBe(1);
+      expect(result.membershipCount).toBe(1);
+      expect(result.totalRevenue).toBe(4500);
+      expect(result.orderCount).toBe(3);
+      expect(result.averageOrderValue).toBe(1500);
+      expect(result.memberships[0].storeName).toBe('Partner Store');
+      expect(result.recentOrders).toHaveLength(1);
+      expect(result.activities.some((activity) => activity.kind === 'store_created')).toBe(true);
+      expect(result.activities.some((activity) => activity.kind === 'membership_joined')).toBe(
+        true,
+      );
+    });
+
+    it('throws NotFound when vendor does not exist', async () => {
+      userRepository.findOne.mockResolvedValue(null);
+
+      await expect(service.getVendorInsightsForAdmin('missing')).rejects.toThrow(NotFoundException);
+    });
   });
 });

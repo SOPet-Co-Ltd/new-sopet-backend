@@ -26,6 +26,7 @@ import {
   ChangePasswordInput,
   RequestPasswordResetInput,
   ResetPasswordInput,
+  VerifyEmailInput,
 } from './auth.inputs';
 
 @Resolver()
@@ -199,7 +200,54 @@ export class AuthResolver {
   @Roles('admin')
   async adminTriggerVendorPasswordReset(
     @Args('vendorId') vendorId: string,
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail?: string,
   ): Promise<MessagePayload> {
-    return this.authService.adminTriggerVendorPasswordReset(vendorId);
+    return this.authService.adminTriggerVendorPasswordReset(vendorId, {
+      id: adminId,
+      fullName: adminEmail,
+    });
+  }
+
+  @Mutation(() => MessagePayload)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async adminResendVendorEmailVerification(
+    @Args('vendorId') vendorId: string,
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail?: string,
+  ): Promise<MessagePayload> {
+    return this.authService.adminResendVendorEmailVerification(vendorId, {
+      id: adminId,
+      fullName: adminEmail,
+    });
+  }
+
+  @Mutation(() => MessagePayload)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async adminVerifyVendorEmail(
+    @Args('vendorId') vendorId: string,
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail?: string,
+  ): Promise<MessagePayload> {
+    return this.authService.adminVerifyVendorEmail(vendorId, {
+      id: adminId,
+      fullName: adminEmail,
+    });
+  }
+
+  @Mutation(() => MessagePayload)
+  @Public()
+  async verifyEmail(@Args('input') input: VerifyEmailInput): Promise<MessagePayload> {
+    return this.authService.verifyEmail(input.token);
+  }
+
+  @Mutation(() => MessagePayload)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('vendor')
+  @AllowSuspendedStore()
+  async resendEmailVerification(@CurrentUser('id') userId: string): Promise<MessagePayload> {
+    return this.authService.resendEmailVerification(userId);
   }
 }

@@ -1,8 +1,23 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, IsNull, In, type QueryDeepPartialEntity } from 'typeorm';
+import { Repository, IsNull, In } from 'typeorm';
 import { Customer } from '../entities/customer.entity';
 import { guestPhoneLookupValues, normalizeThaiPhoneToLocal } from '../../common/utils/phone.util';
+
+type CustomerUpdatableFields = Partial<
+  Pick<
+    Customer,
+    | 'fullName'
+    | 'email'
+    | 'dateOfBirth'
+    | 'profilePhotoUrl'
+    | 'isVerified'
+    | 'isActive'
+    | 'deletionRequestedAt'
+    | 'lastLoginAt'
+    | 'omiseCustomerId'
+  >
+>;
 
 @Injectable()
 export class CustomerRepository {
@@ -57,7 +72,7 @@ export class CustomerRepository {
     });
   }
 
-  async createOrUpdate(phone: string, data: Partial<Customer>): Promise<Customer> {
+  async createOrUpdate(phone: string, data: CustomerUpdatableFields): Promise<Customer> {
     const normalizedPhone = normalizeThaiPhoneToLocal(phone);
     const existing = await this.findActiveByPhone(normalizedPhone);
 

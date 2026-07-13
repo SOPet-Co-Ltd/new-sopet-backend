@@ -129,6 +129,70 @@ Both registered globally in `app.module.ts`.
 
 Entity: `password-reset-token.entity.ts`
 
+## Vendor email verification
+
+Vendors (`User` with `role: vendor`) have `emailVerified` (default `false`). Verification is required **only before creating a new store** — not for joining existing stores as a team member.
+
+### When verification is required (product flow)
+
+| Step                                                           | Verification required?                                             |
+| -------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Vendor self-registration (`registerVendor`)                    | No — account created; verification email sent                      |
+| Vendor login                                                   | No                                                                 |
+| Accept vendor platform invite (`acceptVendorInvitation`)       | No — account created; verification email sent                      |
+| Accept **store member** invite (`acceptStoreMemberInvitation`) | **No** — can join team without verified email                      |
+| Submit **new store** request (`submitStoreRequest`)            | **Yes** — blocked with `EMAIL_NOT_VERIFIED`                        |
+| Legacy `registerStore` (register + store in one call)          | Registers only; store request must be submitted after verification |
+| Admin creates store for vendor (`createStoreAsAdmin`)          | **No** — admin bypass                                              |
+| Admin approves pending store request                           | No — approval is admin action                                      |
+
+### Verified vs unverified behavior
+
+| Capability                           | Unverified                    | Verified               |
+| ------------------------------------ | ----------------------------- | ---------------------- |
+| Login / dashboard access             | Yes                           | Yes                    |
+| Join store via member invitation     | Yes                           | Yes                    |
+| Switch between stores (member/owner) | Yes                           | Yes                    |
+| Submit new store request             | **No** (`EMAIL_NOT_VERIFIED`) | Yes                    |
+| Admin manual verify / resend         | Available                     | N/A (already verified) |
+
+No other features are gated by `emailVerified` today (products, orders, payouts, etc. use store membership and store status instead).
+
+### GraphQL
+
+| Operation                                      | Auth       | Purpose                    |
+| ---------------------------------------------- | ---------- | -------------------------- |
+| `verifyEmail(input: { token })`                | Public     | Confirm email via link     |
+| `resendEmailVerification`                      | Vendor JWT | Self-service resend        |
+| `adminResendVendorEmailVerification(vendorId)` | Admin      | Resend on behalf of vendor |
+| `adminVerifyVendorEmail(vendorId)`             | Admin      | Manual override            |
+
+`UserProfile.emailVerified` is returned on login, `me`, and registration payloads.
+
+### Local development
+
+1. **Seed vendors** — `yarn seed` sets `emailVerified: true` for seeded vendors (`vendor@sopet.org`).
+2. **Dev email logging** — In `NODE_ENV=development`, `EmailService` logs email body to the backend console (not sent via Resend). `EmailDeliveryService` also logs actionable URLs, e.g. `[dev] Email verification -> vendor@test.com | http://localhost:3001/verify-email?token=...`
+3. **Verify via link** — Copy the `verify-email?token=` URL from backend logs into the browser (admin app port **3001**).
+4. **Admin manual verify** — Admin → Vendors → vendor detail → “ยืนยันอีเมลด้วยตนเอง”.
+5. **Admin resend** — Same page → “ส่งอีเมลยืนยันอีกครั้ง”.
+6. **Vendor self resend** — Vendor stores page → store request section → “ส่งอีเมลยืนยันอีกครั้ง”.
+
+**Environment variables**
+
+| Variable                           | Default (local)                             | Used for                          |
+| ---------------------------------- | ------------------------------------------- | --------------------------------- |
+| `ADMIN_PANEL_URL`                  | `http://localhost:3001`                     | Verification, reset, invite links |
+| `STOREFRONT_URL`                   | `http://localhost:3000`                     | Email logo asset URL              |
+| `RESEND_API_KEY`                   | unset in dev                                | Production email delivery         |
+| `RESEND_FROM` / `RESEND_FROM_NAME` | `noreply@sopet.co.th` / `SOPet Marketplace` | From address                      |
+
+Registration and admin resend call `AuthService.createAndSendEmailVerificationToken()` (24h expiry, single use).
+
+### Email templates
+
+All transactional emails go through `EmailDeliveryService` → `email-templates.ts` shared `layout()` (SOPet header, logo, footer). Templates: vendor invite, admin invite, store member invite, password reset, email verification, order paid, order status changed.
+
 ## Store API keys
 
 For vendor REST API (`public-api` module):
