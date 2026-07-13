@@ -15,12 +15,12 @@ fi
 install_packages() {
   if command -v dnf >/dev/null 2>&1; then
     dnf update -y
-    dnf install -y docker jq awscli amazon-ssm-agent
+    dnf install -y docker jq awscli git amazon-ssm-agent
     systemctl enable --now docker
     systemctl enable --now amazon-ssm-agent
   elif command -v apt-get >/dev/null 2>&1; then
     apt-get update -y
-    apt-get install -y docker.io jq awscli
+    apt-get install -y docker.io jq awscli git
     systemctl enable --now docker
     snap install amazon-ssm-agent --classic || apt-get install -y amazon-ssm-agent
     systemctl enable --now snap.amazon-ssm-agent.amazon-ssm-agent.service 2>/dev/null || systemctl enable --now amazon-ssm-agent
