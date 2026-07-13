@@ -27,12 +27,13 @@
     {
       "Sid": "SsmDeploy",
       "Effect": "Allow",
-      "Action": ["ssm:SendCommand", "ssm:GetCommandInvocation", "ssm:ListCommandInvocations"],
-      "Resource": [
-        "arn:aws:ec2:*:*:instance/*",
-        "arn:aws:ssm:*:*:document/AWS-RunShellScript",
-        "arn:aws:ssm:*:*:command/*"
-      ]
+      "Action": [
+        "ssm:SendCommand",
+        "ssm:GetCommandInvocation",
+        "ssm:ListCommandInvocations",
+        "ssm:ListCommands"
+      ],
+      "Resource": "*"
     }
   ]
 }

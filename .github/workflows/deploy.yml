@@ -142,6 +142,7 @@ jobs:
       - name: Deploy to EC2 via SSM
         env:
           IMAGE_URI: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          SSM_TIMEOUT_SECONDS: 1800
         run: |
           chmod +x infra/deploy-via-ssm.sh
           infra/deploy-via-ssm.sh .env.deploy
