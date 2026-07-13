@@ -1,4 +1,4 @@
-# SOPET Backend — Deploy to AWS ECS (Fargate)
+# SOPET Backend — Build to ECR, deploy on EC2 via SSM
 # Triggers on push to deploy/production or deploy/uat.
 #
 # GitHub Environment vars/secrets are mapped once in "Load GitHub Environment"
@@ -33,15 +33,7 @@ jobs:
           AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
           AWS_REGION: ${{ vars.AWS_REGION }}
           ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
-          ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
-          ECS_SERVICE: ${{ vars.ECS_SERVICE }}
-          ECS_TASK_DEFINITION_FAMILY: ${{ vars.ECS_TASK_DEFINITION_FAMILY }}
-          ECS_CONTAINER_NAME: ${{ vars.ECS_CONTAINER_NAME }}
-          ECS_EXECUTION_ROLE_ARN: ${{ vars.ECS_EXECUTION_ROLE_ARN }}
-          ECS_TASK_ROLE_ARN: ${{ vars.ECS_TASK_ROLE_ARN }}
-          ECS_LOG_GROUP: ${{ vars.ECS_LOG_GROUP }}
-          ECS_CPU: ${{ vars.ECS_CPU }}
-          ECS_MEMORY: ${{ vars.ECS_MEMORY }}
+          EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
           NODE_ENV: ${{ vars.NODE_ENV }}
           PORT: ${{ vars.PORT }}
           DB_HOST: ${{ vars.DB_HOST }}
@@ -144,15 +136,12 @@ jobs:
           docker build -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" .
           docker push "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
 
-      - name: Render ECS task definition from GitHub Environment
-        env:
-          CONTAINER_IMAGE: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
-        run: bash infra/render-ecs-task-definition.sh task-definition.json
+      - name: Render runtime env file
+        run: bash infra/render-env-file.sh .env.deploy
 
-      - name: Deploy Amazon ECS task definition
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: task-definition.json
-          service: ${{ env.ECS_SERVICE }}
-          cluster: ${{ env.ECS_CLUSTER }}
-          wait-for-service-stability: true
+      - name: Deploy to EC2 via SSM
+        env:
+          IMAGE_URI: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+        run: |
+          chmod +x infra/deploy-via-ssm.sh
+          infra/deploy-via-ssm.sh .env.deploy

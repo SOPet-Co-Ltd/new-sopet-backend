@@ -47,12 +47,79 @@ Dummy env vars: `JWT_SECRET`, `OMISE_*`.
 
 `.github/workflows/deploy.yml` — triggered on push to `deploy/uat` or `deploy/production`:
 
-1. Load GitHub Environment (`DB_*`, secrets, ECS config)
+1. Load GitHub Environment (`DB_*`, secrets, EC2/ECR config)
 2. **Run pending TypeORM migrations** (`yarn migration:run`) against the target database
-3. Build/push Docker image (if not already in ECR for this commit)
-4. Deploy to ECS
+3. Build/push Docker image to ECR (if not already present for this commit)
+4. Render runtime `.env` from GitHub Environment
+5. **Deploy on EC2** via AWS Systems Manager (`infra/deploy-via-ssm.sh` → `/opt/sopet/deploy.sh`)
 
-Migrations run **before** the new task is deployed so the schema matches the code being rolled out. The GitHub Actions runner must be able to reach `DB_HOST` (managed Postgres firewall / allowlist). Extensions that require superuser (e.g. `vector`) must be pre-installed on the database once by an admin.
+Migrations run **before** the new container is started so the schema matches the code being rolled out. The GitHub Actions runner must be able to reach `DB_HOST` (managed Postgres firewall / allowlist). Extensions that require superuser (e.g. `vector`) must be pre-installed on the database once by an admin.
+
+## EC2 + ECR deploy (production / UAT)
+
+### Architecture
+
+```text
+GitHub Actions → ECR (push image) → SSM Run Command → EC2 (docker pull + run)
+Cloudflare DNS (A record) → EC2 :80 (Caddy) → localhost:3002 (API container)
+```
+
+Storefront and admin stay on Vercel; only the backend API runs on EC2.
+
+### One-time AWS setup
+
+1. **ECR repository** — e.g. `sopet/backend-uat` / `sopet/backend-production`
+
+   ```bash
+   aws ecr create-repository --repository-name sopet/backend-uat
+   bash infra/apply-ecr-lifecycle-policy.sh sopet/backend-uat
+   ```
+
+2. **EC2 instance profile** — attach a role with `infra/iam/ec2-instance-ecr-policy.json` (ECR pull + SSM agent).
+
+3. **GitHub OIDC deploy role** — trust GitHub Actions; attach `infra/iam/github-deploy-ec2-policy.json` (ECR push + `ssm:SendCommand`). Store role ARN as GitHub secret `AWS_ROLE_ARN`.
+
+4. **Security group** (minimum):
+   - TCP **80** from `0.0.0.0/0` (or [Cloudflare IP ranges](https://www.cloudflare.com/ips/) if restricting origin)
+   - TCP **22** from your admin IP only (optional if you use SSM Session Manager exclusively)
+   - Outbound **all** (ECR, RDS, Redis, external APIs)
+
+5. **Bootstrap the instance** (SSH or SSM Session Manager):
+   ```bash
+   git clone <repo> && cd sopet-backend
+   sudo AWS_REGION=ap-southeast-1 bash infra/ec2/bootstrap.sh
+   ```
+   Confirm the instance is **Online** in AWS Console → Systems Manager → Fleet Manager.
+
+### GitHub Environment variables
+
+| Variable                             | Example                     | Purpose                                   |
+| ------------------------------------ | --------------------------- | ----------------------------------------- |
+| `AWS_REGION`                         | `ap-southeast-1`            | ECR + SSM region                          |
+| `ECR_REPOSITORY`                     | `sopet/backend-uat`         | Image repository name                     |
+| `EC2_INSTANCE_ID`                    | `i-0abc123...`              | Target EC2 instance                       |
+| `CORS_ORIGINS`                       | `https://uat.sopet.org,...` | Must include Vercel storefront/admin URLs |
+| `STOREFRONT_URL` / `ADMIN_PANEL_URL` | `https://...`               | Public frontend URLs                      |
+
+Plus all application vars/secrets listed in `infra/env.manifest.json`.
+
+Remove legacy ECS variables (`ECS_CLUSTER`, `ECS_SERVICE`, etc.) from GitHub Environments if still present.
+
+### Cloudflare DNS
+
+1. Add an **A record** for your API hostname (e.g. `api-uat.sopet.org`) → EC2 **public IPv4**.
+2. Enable **Proxied** (orange cloud) so Cloudflare terminates TLS for clients.
+3. Origin serves HTTP on port **80** (Caddy from `bootstrap.sh` reverse-proxies to `127.0.0.1:3002`).
+4. Set SSL/TLS mode to **Full** (not Strict unless you add a valid origin certificate).
+5. Update `CORS_ORIGINS`, Omise webhook URL, and frontend `NEXT_PUBLIC_GRAPHQL_URL` / admin API URL to the Cloudflare hostname.
+
+### Manual deploy test (on EC2)
+
+```bash
+export IMAGE_URI=<account>.dkr.ecr.<region>.amazonaws.com/sopet/backend-uat:<tag>
+export ENV_FILE=/opt/sopet/.env   # copy from rendered .env.deploy
+/opt/sopet/deploy.sh
+```
 
 ## Environment (production)
 
