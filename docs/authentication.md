@@ -22,7 +22,7 @@ sequenceDiagram
   R->>S: sendOtp(phone)
   S->>DB: Create OTP record
   S->>SMS: sendOtpSms(phone, code)
-  Note over SMS: ThaiBulkSMS → Twilio → dev console
+  Note over SMS: ThaiBulkSMS → Twilio → dev/log-only
 
   R->>S: verifyOtp(phone, code, sessionId?)
   S->>DB: Validate OTP
@@ -39,7 +39,19 @@ sequenceDiagram
 - `src/database/entities/otp-code.entity.ts`
 - `src/common/utils/phone.util.ts`
 
-## Vendor/admin login
+### SMS configuration
+
+`SmsService` delivery order:
+
+1. **Development** (`NODE_ENV=development`) — logs OTP to server console; no provider call
+2. **Log-only** (`SMS_OTP_LOG_ONLY=true`) — same as dev; for UAT when real SMS is unavailable
+3. **ThaiBulkSMS** — when `THAIBULKSMS_API_KEY` and `THAIBULKSMS_API_SECRET` are set
+4. **Twilio** — fallback when `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` are set
+5. Otherwise throws `SMS_NOT_CONFIGURED`
+
+UAT deploy requires `THAIBULKSMS_API_KEY` and `THAIBULKSMS_API_SECRET` (GitHub Environment secrets). Optional: `THAIBULKSMS_SENDER`, `THAIBULKSMS_FORCE` (default `corporate`), `THAIBULKSMS_SHORTEN_URL` (default `false`).
+
+Provider failures return `SMS_DELIVERY_FAILED` (not a generic 500). See `docs/troubleshooting.md` for error codes.
 
 ```typescript
 // auth.service.ts — login()

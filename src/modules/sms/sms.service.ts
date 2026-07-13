@@ -1,22 +1,34 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+
+interface ThaiBulkSmsResponse {
+  bad_phone_number_list?: Array<{ message: string; number: string }>;
+  phone_number_list?: Array<unknown>;
+}
 
 @Injectable()
 export class SmsService {
   private readonly logger = new Logger(SmsService.name);
   private readonly isDev: boolean;
+  private readonly otpLogOnly: boolean;
 
   constructor(private readonly configService: ConfigService) {
     this.isDev =
       (this.configService.get<string>('app.environment') ??
         process.env.NODE_ENV ??
         'development') === 'development';
+    this.otpLogOnly = this.configService.get<boolean>('thaibulksms.otpLogOnly') ?? false;
   }
 
   async sendOtp(phone: string, code: string): Promise<void> {
     const message = `Your SOPet verification code is ${code}. Valid for 5 minutes.`;
 
-    if (this.isDev) {
+    if (this.isDev || this.otpLogOnly) {
       this.logDevSms(phone, code, message);
       return;
     }
@@ -41,14 +53,19 @@ export class SmsService {
       return;
     }
 
-    this.logger.log(`[dev] OTP for ${phone}: ${code}`);
+    this.logger.error('SMS delivery skipped: no ThaiBulkSMS or Twilio credentials configured');
+    throw new ServiceUnavailableException({
+      code: 'SMS_NOT_CONFIGURED',
+      message: 'SMS delivery is not configured. Please contact support.',
+    });
   }
 
   private logDevSms(phone: string, code: string, message: string): void {
+    const mode = this.isDev ? 'development mode' : 'SMS_OTP_LOG_ONLY';
     this.logger.log(
       '\n' +
         '========================================\n' +
-        '[DEV SMS] not sent (development mode)\n' +
+        `[DEV SMS] not sent (${mode})\n` +
         `  To:      ${phone}\n` +
         `  Code:    ${code}\n` +
         `  Message: ${message}\n` +
@@ -66,25 +83,47 @@ export class SmsService {
     shortenUrl: boolean,
   ): Promise<void> {
     const msisdn = phone.replace(/^\+66/, '0').replace(/\D/g, '');
+    const body = new URLSearchParams({
+      msisdn,
+      message,
+      sender,
+      force,
+      shorten_url: shortenUrl ? 'true' : 'false',
+    });
+
     const response = await fetch('https://api-v2.thaibulksms.com/sms', {
       method: 'POST',
       headers: {
+        Accept: 'application/json',
         Authorization: `Basic ${Buffer.from(`${apiKey}:${apiSecret}`).toString('base64')}`,
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded',
       },
-      body: JSON.stringify({
-        msisdn,
-        message,
-        sender,
-        force,
-        shorten_url: shortenUrl ? 'true' : 'false',
-      }),
+      body: body.toString(),
     });
 
+    const responseText = await response.text();
+    let parsed: ThaiBulkSmsResponse | null = null;
+    try {
+      parsed = responseText ? (JSON.parse(responseText) as ThaiBulkSmsResponse) : null;
+    } catch {
+      parsed = null;
+    }
+
     if (!response.ok) {
-      const errorText = await response.text();
-      this.logger.error(`ThaiBulkSMS failed: ${errorText}`);
-      throw new Error('Failed to send OTP SMS');
+      this.logger.error(`ThaiBulkSMS failed (${response.status}): ${responseText}`);
+      throw new ServiceUnavailableException({
+        code: 'SMS_DELIVERY_FAILED',
+        message: 'Unable to send OTP SMS. Please try again later.',
+      });
+    }
+
+    if (parsed?.bad_phone_number_list?.length && !parsed.phone_number_list?.length) {
+      const providerMessage = parsed.bad_phone_number_list[0]?.message ?? 'Invalid phone number';
+      this.logger.error(`ThaiBulkSMS rejected phone ${msisdn}: ${providerMessage}`);
+      throw new BadRequestException({
+        code: 'INVALID_PHONE',
+        message: 'Invalid phone number for SMS delivery.',
+      });
     }
   }
 
@@ -113,7 +152,10 @@ export class SmsService {
     if (!response.ok) {
       const errorText = await response.text();
       this.logger.error(`Twilio SMS failed: ${errorText}`);
-      throw new Error('Failed to send OTP SMS');
+      throw new ServiceUnavailableException({
+        code: 'SMS_DELIVERY_FAILED',
+        message: 'Unable to send OTP SMS. Please try again later.',
+      });
     }
   }
 }

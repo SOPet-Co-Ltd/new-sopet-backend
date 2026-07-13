@@ -12,7 +12,7 @@ import { User, UserRole } from '../../database/entities/user.entity';
 import { StoreMember, StoreMemberRole } from '../../database/entities/store-member.entity';
 import { CreateStoreDto, UpdateStoreDto, ApproveStoreDto, RejectStoreDto } from './dto';
 import * as bcrypt from 'bcrypt';
-import { generateSlug as slugify } from '../../common/utils/slug.util';
+import { generateUniqueStoreSlug } from '../../common/utils/slug.util';
 import { OmiseService } from '../omise/omise.service';
 import { pickDefaultAccessibleStoreId } from './store-selection.util';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -32,9 +32,11 @@ export class StoresService {
     private readonly storageService: StorageService,
   ) {}
 
-  // Generate slug from store name
-  private generateSlug(name: string): string {
-    return slugify(name, 'store');
+  private async resolveUniqueStoreSlug(name: string): Promise<string> {
+    return generateUniqueStoreSlug(name, async (slug) => {
+      const existing = await this.storeRepository.findOne({ where: { slug } });
+      return !!existing;
+    });
   }
 
   // Register new store (vendor registration)
@@ -63,15 +65,7 @@ export class StoresService {
     });
     await this.userRepository.save(user);
 
-    // Generate unique slug
-    let slug = this.generateSlug(name);
-    let slugExists = await this.storeRepository.findOne({ where: { slug } });
-    let counter = 1;
-    while (slugExists) {
-      slug = `${this.generateSlug(name)}-${counter}`;
-      slugExists = await this.storeRepository.findOne({ where: { slug } });
-      counter++;
-    }
+    const slug = await this.resolveUniqueStoreSlug(name);
 
     // Create store
     const store = this.storeRepository.create({
@@ -465,6 +459,13 @@ export class StoresService {
     bannerUrl?: string;
     status?: StoreStatus;
   }): Promise<Store> {
+    if (!input.ownerUserId?.trim()) {
+      throw new BadRequestException({
+        code: 'OWNER_REQUIRED',
+        message: 'Store owner is required',
+      });
+    }
+
     const owner = await this.userRepository.findOne({
       where: { id: input.ownerUserId, role: UserRole.VENDOR },
     });
@@ -475,14 +476,7 @@ export class StoresService {
       });
     }
 
-    let slug = this.generateSlug(input.name);
-    let slugExists = await this.storeRepository.findOne({ where: { slug } });
-    let counter = 1;
-    while (slugExists) {
-      slug = `${this.generateSlug(input.name)}-${counter}`;
-      slugExists = await this.storeRepository.findOne({ where: { slug } });
-      counter++;
-    }
+    const slug = await this.resolveUniqueStoreSlug(input.name);
 
     const store = this.storeRepository.create({
       name: input.name,
@@ -510,7 +504,7 @@ export class StoresService {
 
   async updateAsAdmin(input: {
     id: string;
-    ownerUserId?: string;
+    ownerUserId?: string | null;
     name?: string;
     slug?: string;
     description?: string;
@@ -522,7 +516,33 @@ export class StoresService {
     status?: StoreStatus;
   }): Promise<Store> {
     const store = await this.findOne(input.id);
-    if (input.ownerUserId !== undefined) store.ownerId = input.ownerUserId;
+
+    if (input.ownerUserId !== undefined) {
+      if (input.ownerUserId === null) {
+        throw new BadRequestException({
+          code: 'OWNER_REQUIRED',
+          message: 'Store owner is required',
+        });
+      }
+
+      if (input.ownerUserId !== store.ownerId) {
+        const owner = await this.userRepository.findOne({
+          where: { id: input.ownerUserId, role: UserRole.VENDOR },
+        });
+        if (!owner) {
+          throw new NotFoundException({
+            code: 'VENDOR_NOT_FOUND',
+            message: 'Vendor user not found',
+          });
+        }
+
+        const previousOwnerId = store.ownerId;
+        store.ownerId = owner.id;
+        store.owner = owner;
+        await this.syncStoreOwnerMembership(store.id, previousOwnerId, owner.id);
+      }
+    }
+
     if (input.name !== undefined) store.name = input.name;
     if (input.slug !== undefined) store.slug = input.slug;
     if (input.description !== undefined) store.description = input.description;
@@ -532,7 +552,43 @@ export class StoresService {
     if (input.logoUrl !== undefined) store.logoUrl = input.logoUrl;
     if (input.bannerUrl !== undefined) store.bannerUrl = input.bannerUrl;
     if (input.status !== undefined) store.status = input.status;
-    return this.storeRepository.save(store);
+
+    await this.storeRepository.save(store);
+    return this.findOne(input.id);
+  }
+
+  private async syncStoreOwnerMembership(
+    storeId: string,
+    previousOwnerId: string,
+    newOwnerId: string,
+  ): Promise<void> {
+    const existingNewMember = await this.storeMemberRepository.findOne({
+      where: { storeId, userId: newOwnerId },
+    });
+    if (existingNewMember) {
+      existingNewMember.role = StoreMemberRole.OWNER;
+      await this.storeMemberRepository.save(existingNewMember);
+    } else {
+      await this.storeMemberRepository.save(
+        this.storeMemberRepository.create({
+          storeId,
+          userId: newOwnerId,
+          role: StoreMemberRole.OWNER,
+        }),
+      );
+    }
+
+    if (previousOwnerId === newOwnerId) {
+      return;
+    }
+
+    const previousMember = await this.storeMemberRepository.findOne({
+      where: { storeId, userId: previousOwnerId },
+    });
+    if (previousMember?.role === StoreMemberRole.OWNER) {
+      previousMember.role = StoreMemberRole.STAFF;
+      await this.storeMemberRepository.save(previousMember);
+    }
   }
 
   async findVendors(search?: string): Promise<User[]> {

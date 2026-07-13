@@ -552,6 +552,7 @@ type Mutation {
   reorderProductImages(imageIds: [ID!]!, productId: String!): [ProductImageType!]!
   requestAccountDeletion: Boolean!
   requestPasswordReset(input: RequestPasswordResetInput!): MessagePayload!
+  requestPayout: PayoutType!
   resetPassword(input: ResetPasswordInput!): MessagePayload!
   revokeAdminInvitation(invitationId: String!): AdminInvitationType!
   revokeStoreApiKey(id: String!, storeId: String!): Boolean!
@@ -570,6 +571,7 @@ type Mutation {
   switchStore(input: SwitchStoreInput!): VendorAuthPayload!
   syncProductVariants(productId: String!, variants: [SyncProductVariantItemInput!]!): [ProductVariantType!]!
   togglePromotion(id: String!, isActive: Boolean!): PromotionType!
+  triggerPayout(input: TriggerPayoutInput!): PayoutType!
   updateAddress(id: String!, input: UpdateAddressInput!): SavedAddressType!
   updateCartItem(input: UpdateCartItemInput!): CartType!
   updateCategory(input: UpdateCategoryInput!): CategoryType!
@@ -744,8 +746,19 @@ type PaymentType {
   status: String!
 }
 
+type PayoutSummaryType {
+  availableBalance: Float!
+  canRequestPayout: Boolean!
+  grossRevenue: Float!
+  minimumPayoutAmount: Float!
+  pendingPayoutAmount: Float!
+  storeId: String!
+  totalPaidOut: Float!
+}
+
 type PayoutType {
   amount: Float!
+  createdAt: DateTime!
   id: String!
   netAmount: Float!
   status: String!
@@ -914,6 +927,8 @@ type Query {
   adminCustomer(id: String!): AdminCustomerType!
   adminCustomers(limit: Int! = 20, page: Int! = 1, search: String): AdminCustomerConnection!
   adminStore(id: String!): AdminStoreType!
+  adminStorePayoutSummary(storeId: String!): PayoutSummaryType!
+  adminStorePayouts(storeId: String!): [PayoutType!]!
   adminStoreReactivationRequests(status: String): [StoreReactivationRequestType!]!
   adminStoreShippingOptions(storeId: String!): [StoreShippingOptionType!]!
   adminStores: [AdminStoreType!]!
@@ -1000,6 +1015,7 @@ type Query {
   storeBySlug(slug: String!): StoreType!
   storeInvitations: [StoreMemberInvitationType!]!
   storeMembers: [StoreMemberType!]!
+  storePayoutSummary: PayoutSummaryType!
   storePayouts: [PayoutType!]!
   storeProductReviews(limit: Int = 20, page: Int = 1, ratingFilter: String, replyFilter: String, storeId: String!): StoreProductReviewConnection!
   storePromotions(storeId: String!): [PromotionType!]!
@@ -1443,6 +1459,11 @@ type TopStoreType {
   revenue: Float!
   storeId: String!
   storeName: String!
+}
+
+input TriggerPayoutInput {
+  amount: Float
+  storeId: String!
 }
 
 input UpdateAddressInput {

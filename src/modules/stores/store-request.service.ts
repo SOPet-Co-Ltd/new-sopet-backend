@@ -9,7 +9,7 @@ import { Repository } from 'typeorm';
 import { StoreRequest, StoreRequestStatus } from '../../database/entities/store-request.entity';
 import { Store, StoreStatus } from '../../database/entities/store.entity';
 import { StoreMember, StoreMemberRole } from '../../database/entities/store-member.entity';
-import { generateSlug as slugify } from '../../common/utils/slug.util';
+import { generateUniqueStoreSlug } from '../../common/utils/slug.util';
 import { NotificationsService } from '../notifications/notifications.service';
 import { StorageService } from '../storage/storage.service';
 
@@ -113,14 +113,10 @@ export class StoreRequestService {
       });
     }
 
-    let slug = slugify(request.storeName, 'store');
-    let slugExists = await this.storeRepository.findOne({ where: { slug } });
-    let counter = 1;
-    while (slugExists) {
-      slug = `${slugify(request.storeName, 'store')}-${counter}`;
-      slugExists = await this.storeRepository.findOne({ where: { slug } });
-      counter++;
-    }
+    const slug = await generateUniqueStoreSlug(request.storeName, async (candidate) => {
+      const existing = await this.storeRepository.findOne({ where: { slug: candidate } });
+      return !!existing;
+    });
 
     const store = this.storeRepository.create({
       ownerId: request.vendorUserId,

@@ -3,9 +3,17 @@ import { PayoutSchedule, StoreStatus } from '../../database/entities/store.entit
 
 describe('PayoutSchedulerService', () => {
   let service: PayoutSchedulerService;
-  const payoutsService = { createManualPayout: jest.fn() };
+  const payoutsService = {
+    getPayoutSummary: jest.fn(),
+    createManualPayout: jest.fn(),
+  };
   const configService = {
-    get: jest.fn((key: string) => (key.includes('cron') ? '0 2 * * *' : 'Asia/Bangkok')),
+    get: jest.fn((key: string) => {
+      if (key.includes('cronSchedule')) return '0 2 * * *';
+      if (key.includes('cronTimezone')) return 'Asia/Bangkok';
+      if (key === 'payout.minPayoutAmount') return 500;
+      return undefined;
+    }),
   };
   const payoutQueue = {
     getRepeatableJobs: jest.fn().mockResolvedValue([]),
@@ -14,7 +22,6 @@ describe('PayoutSchedulerService', () => {
     close: jest.fn(),
   };
   const storeRepo = { find: jest.fn() };
-  const orderItemRepo = { createQueryBuilder: jest.fn() };
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -22,7 +29,6 @@ describe('PayoutSchedulerService', () => {
       payoutsService as never,
       configService as never,
       storeRepo as never,
-      orderItemRepo as never,
       payoutQueue as never,
     );
   });
@@ -51,22 +57,20 @@ describe('PayoutSchedulerService', () => {
       },
     ]);
 
-    const qb = {
-      innerJoin: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      andWhere: jest.fn().mockReturnThis(),
-      select: jest.fn().mockReturnThis(),
-      getRawOne: jest.fn().mockResolvedValue({ total: '2500' }),
-    };
-    orderItemRepo.createQueryBuilder.mockReturnValue(qb);
+    payoutsService.getPayoutSummary.mockResolvedValue({
+      availableBalance: 2500,
+      pendingPayoutAmount: 0,
+    });
     payoutsService.createManualPayout.mockResolvedValue({ id: 'payout-1' });
 
     await service.runScheduledPayouts();
 
-    expect(payoutsService.createManualPayout).toHaveBeenCalledWith('store-2', 2500);
+    expect(payoutsService.createManualPayout).toHaveBeenCalledWith('store-2', 2500, {
+      notes: 'Scheduled payout',
+    });
   });
 
-  it('skips stores with zero balance', async () => {
+  it('skips stores with balance below minimum', async () => {
     storeRepo.find.mockResolvedValue([
       {
         id: 'store-3',
@@ -75,14 +79,29 @@ describe('PayoutSchedulerService', () => {
       },
     ]);
 
-    const qb = {
-      innerJoin: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      andWhere: jest.fn().mockReturnThis(),
-      select: jest.fn().mockReturnThis(),
-      getRawOne: jest.fn().mockResolvedValue({ total: '0' }),
-    };
-    orderItemRepo.createQueryBuilder.mockReturnValue(qb);
+    payoutsService.getPayoutSummary.mockResolvedValue({
+      availableBalance: 100,
+      pendingPayoutAmount: 0,
+    });
+
+    await service.runScheduledPayouts();
+
+    expect(payoutsService.createManualPayout).not.toHaveBeenCalled();
+  });
+
+  it('skips stores with pending payouts', async () => {
+    storeRepo.find.mockResolvedValue([
+      {
+        id: 'store-4',
+        payoutSchedule: PayoutSchedule.DAILY,
+        payoutSchedulePaused: false,
+      },
+    ]);
+
+    payoutsService.getPayoutSummary.mockResolvedValue({
+      availableBalance: 2500,
+      pendingPayoutAmount: 500,
+    });
 
     await service.runScheduledPayouts();
 
@@ -99,7 +118,6 @@ describe('PayoutSchedulerService', () => {
       payoutsService as never,
       configService as never,
       storeRepo as never,
-      orderItemRepo as never,
     );
 
     await serviceWithoutQueue.onModuleInit();

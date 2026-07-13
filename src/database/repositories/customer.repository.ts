@@ -62,7 +62,7 @@ export class CustomerRepository {
     const existing = await this.findActiveByPhone(normalizedPhone);
 
     if (existing) {
-      await this.repository.update(existing.id, data as QueryDeepPartialEntity<Customer>);
+      await this.repository.update(existing.id, data);
       const updated = await this.findById(existing.id);
       return updated!;
     }
