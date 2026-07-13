@@ -19,21 +19,6 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constants';
 import { AuditActorType } from '../../database/entities/audit-log.entity';
 
-function mapAdminCustomer(customer: Customer): AdminCustomerType {
-  return {
-    id: customer.id,
-    phone: customer.phone,
-    fullName: customer.fullName,
-    email: customer.email,
-    dateOfBirth: customer.dateOfBirth,
-    isVerified: customer.isVerified,
-    isActive: customer.isActive,
-    lastLoginAt: customer.lastLoginAt,
-    createdAt: customer.createdAt,
-    updatedAt: customer.updatedAt,
-  };
-}
-
 function mapVendorCustomer(customer: Customer): VendorCustomerType {
   return {
     id: customer.id,
@@ -43,6 +28,15 @@ function mapVendorCustomer(customer: Customer): VendorCustomerType {
     isVerified: customer.isVerified,
     lastLoginAt: customer.lastLoginAt,
     createdAt: customer.createdAt,
+  };
+}
+
+function mapAdminCustomer(customer: Customer): AdminCustomerType {
+  return {
+    ...mapVendorCustomer(customer),
+    dateOfBirth: customer.dateOfBirth,
+    isActive: customer.isActive,
+    updatedAt: customer.updatedAt,
   };
 }
 

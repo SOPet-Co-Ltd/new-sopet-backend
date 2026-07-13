@@ -46,7 +46,7 @@ import { StoreStatusGuard } from './guards/store-status.guard';
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
-      useFactory: async (configService: ConfigService) => ({
+      useFactory: (configService: ConfigService) => ({
         secret: configService.get<string>('jwt.secret'),
         signOptions: {
           expiresIn: configService.get<string>('jwt.accessTokenExpiresIn'),

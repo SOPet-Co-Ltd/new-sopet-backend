@@ -472,18 +472,9 @@ export class CustomersService {
     const qb = this.orderItemRepository
       .createQueryBuilder('oi')
       .innerJoin('oi.order', 'order')
-      .where('oi.store_id = :storeId', { storeId })
-      .andWhere(
-        new Brackets((where) => {
-          where.where('order.customer_id = :customerId', { customerId });
-          if (phoneVariants.length > 0) {
-            where.orWhere(
-              '(order.customer_id IS NULL AND order.guest_phone IN (:...phoneVariants))',
-              { phoneVariants },
-            );
-          }
-        }),
-      );
+      .where('oi.store_id = :storeId', { storeId });
+
+    this.applyVendorCustomerOrderMatch(qb, customerId, phoneVariants);
 
     const count = await qb.getCount();
     return count > 0;

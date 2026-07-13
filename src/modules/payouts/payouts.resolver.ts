@@ -204,7 +204,7 @@ export class PayoutsResolver {
   }
 }
 
-function mapPayout(p: {
+function mapPayout(payout: {
   id: string;
   storeId: string;
   amount: number;
@@ -213,11 +213,11 @@ function mapPayout(p: {
   createdAt: Date;
 }): PayoutType {
   return {
-    id: p.id,
-    storeId: p.storeId,
-    amount: Number(p.amount),
-    netAmount: Number(p.netAmount),
-    status: p.status,
-    createdAt: p.createdAt,
+    id: payout.id,
+    storeId: payout.storeId,
+    amount: Number(payout.amount),
+    netAmount: Number(payout.netAmount),
+    status: payout.status,
+    createdAt: payout.createdAt,
   };
 }

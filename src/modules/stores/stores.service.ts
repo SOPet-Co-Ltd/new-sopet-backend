@@ -84,17 +84,17 @@ export type AdminVendorInsightsResult = {
 export class StoresService {
   constructor(
     @InjectRepository(Store)
-    private storeRepository: Repository<Store>,
+    private readonly storeRepository: Repository<Store>,
     @InjectRepository(User)
-    private userRepository: Repository<User>,
+    private readonly userRepository: Repository<User>,
     @InjectRepository(StoreMember)
-    private storeMemberRepository: Repository<StoreMember>,
+    private readonly storeMemberRepository: Repository<StoreMember>,
     @InjectRepository(Order)
-    private orderRepository: Repository<Order>,
+    private readonly orderRepository: Repository<Order>,
     @InjectRepository(OrderItem)
-    private orderItemRepository: Repository<OrderItem>,
+    private readonly orderItemRepository: Repository<OrderItem>,
     @InjectRepository(AuditLog)
-    private auditLogRepository: Repository<AuditLog>,
+    private readonly auditLogRepository: Repository<AuditLog>,
     private readonly omiseService: OmiseService,
     private readonly notificationsService: NotificationsService,
     private readonly storageService: StorageService,
@@ -130,11 +130,9 @@ export class StoresService {
     });
   }
 
-  // Register new store (vendor registration)
   async create(createStoreDto: CreateStoreDto): Promise<Store> {
     const { ownerEmail, ownerPassword, ownerFullName, name, ...storeData } = createStoreDto;
 
-    // Check if email already exists
     const existingUser = await this.userRepository.findOne({
       where: { email: ownerEmail },
     });
@@ -146,7 +144,6 @@ export class StoresService {
       });
     }
 
-    // Create user account
     const passwordHash = await bcrypt.hash(ownerPassword, 12);
     const user = this.userRepository.create({
       email: ownerEmail,
@@ -158,7 +155,6 @@ export class StoresService {
 
     const slug = await this.resolveUniqueStoreSlug(name);
 
-    // Create store
     const store = this.storeRepository.create({
       ...storeData,
       name,
@@ -170,7 +166,6 @@ export class StoresService {
     return this.storeRepository.save(store);
   }
 
-  // Get all stores (public)
   async findAll(status?: StoreStatus): Promise<Store[]> {
     const where = status ? { status } : { status: StoreStatus.APPROVED };
     return this.storeRepository.find({
@@ -180,7 +175,6 @@ export class StoresService {
     });
   }
 
-  // Get store by ID
   async findOne(id: string): Promise<Store> {
     const store = await this.storeRepository.findOne({
       where: { id },

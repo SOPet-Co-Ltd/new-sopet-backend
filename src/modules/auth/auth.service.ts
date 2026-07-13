@@ -50,40 +50,38 @@ export class AuthService {
 
   constructor(
     @InjectRepository(Customer)
-    private customerRepository: Repository<Customer>,
+    private readonly customerRepository: Repository<Customer>,
     private readonly customerRepo: CustomerRepository,
     @InjectRepository(User)
-    private userRepository: Repository<User>,
+    private readonly userRepository: Repository<User>,
     @InjectRepository(OtpCode)
-    private otpRepository: Repository<OtpCode>,
+    private readonly otpRepository: Repository<OtpCode>,
     @InjectRepository(Store)
-    private storeRepository: Repository<Store>,
+    private readonly storeRepository: Repository<Store>,
     @InjectRepository(StoreMember)
-    private storeMemberRepository: Repository<StoreMember>,
+    private readonly storeMemberRepository: Repository<StoreMember>,
     @InjectRepository(PasswordResetToken)
-    private passwordResetTokenRepository: Repository<PasswordResetToken>,
+    private readonly passwordResetTokenRepository: Repository<PasswordResetToken>,
     @InjectRepository(EmailVerificationToken)
-    private emailVerificationTokenRepository: Repository<EmailVerificationToken>,
-    private jwtService: JwtService,
-    private configService: ConfigService,
-    private smsService: SmsService,
-    private cartService: CartService,
-    private guestOrderLinkService: GuestOrderLinkService,
-    private emailDeliveryService: EmailDeliveryService,
+    private readonly emailVerificationTokenRepository: Repository<EmailVerificationToken>,
+    private readonly jwtService: JwtService,
+    private readonly configService: ConfigService,
+    private readonly smsService: SmsService,
+    private readonly cartService: CartService,
+    private readonly guestOrderLinkService: GuestOrderLinkService,
+    private readonly emailDeliveryService: EmailDeliveryService,
     private readonly storageService: StorageService,
     private readonly auditLogsService: AuditLogsService,
   ) {}
 
-  // Generate random 6-digit OTP
   private generateOtp(): string {
     return Math.floor(100000 + Math.random() * 900000).toString();
   }
 
-  // Send OTP to customer phone
   async sendOtp(sendOtpDto: SendOtpDto): Promise<{ message: string }> {
     const phone = normalizeThaiPhoneToLocal(sendOtpDto.phone);
 
-    // Check for rate limiting (max 3 attempts per 5 minutes)
+    // Rate limit: max 3 attempts per 5 minutes
     const recentAttempts = await this.otpRepository.count({
       where: {
         phone,
@@ -98,11 +96,9 @@ export class AuthService {
       });
     }
 
-    // Generate OTP
     const code = this.generateOtp();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
 
-    // Save OTP to database
     const otp = this.otpRepository.create({
       phone,
       code,
@@ -117,7 +113,6 @@ export class AuthService {
     };
   }
 
-  // Verify OTP and return JWT tokens
   async verifyOtp(verifyOtpDto: VerifyOtpDto & { sessionId?: string }): Promise<{
     accessToken?: string;
     refreshToken?: string;
@@ -128,7 +123,6 @@ export class AuthService {
     const { code, sessionId } = verifyOtpDto;
     const phone = normalizeThaiPhoneToLocal(verifyOtpDto.phone);
 
-    // Find valid OTP
     const otp = await this.otpRepository.findOne({
       where: {
         phone,
@@ -145,11 +139,9 @@ export class AuthService {
       });
     }
 
-    // Mark OTP as used
     otp.isUsed = true;
     await this.otpRepository.save(otp);
 
-    // Find or create customer
     let customer = await this.customerRepo.findActiveByPhone(phone);
 
     if (customer) {
@@ -198,7 +190,6 @@ export class AuthService {
       await this.customerRepository.save(customer);
     }
 
-    // Generate tokens
     const { accessToken, refreshToken } = await this.generateTokens({
       sub: customer.id,
       phone: customer.phone,
@@ -225,7 +216,6 @@ export class AuthService {
     };
   }
 
-  // Vendor/Admin login with email + password
   async login(loginDto: LoginDto): Promise<{
     accessToken: string;
     refreshToken: string;
@@ -233,7 +223,6 @@ export class AuthService {
   }> {
     const { email, password } = loginDto;
 
-    // Find user
     const user = await this.userRepository.findOne({
       where: { email, isActive: true },
       relations: ['ownedStores'],
@@ -246,7 +235,6 @@ export class AuthService {
       });
     }
 
-    // Verify password
     const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
     if (!isPasswordValid) {
       throw new UnauthorizedException({
@@ -255,18 +243,16 @@ export class AuthService {
       });
     }
 
-    // Update last login
     user.lastLoginAt = new Date();
     await this.userRepository.save(user);
 
-    // Generate tokens
     const payload: Omit<JwtPayload, 'type'> = {
       sub: user.id,
       email: user.email,
       role: user.role,
     };
 
-    // Add storeId for vendors (owned store first, then team memberships)
+    // Vendors: prefer owned store, then team memberships
     if (user.role === UserRole.VENDOR) {
       const storeId = await this.resolveDefaultStoreId(user.id);
       if (storeId) {
@@ -307,7 +293,6 @@ export class AuthService {
     };
   }
 
-  // Refresh access token
   async refreshToken(token: string): Promise<{ accessToken: string; refreshToken: string }> {
     try {
       const payload = this.jwtService.verify<JwtPayload>(token);
@@ -346,7 +331,6 @@ export class AuthService {
     }
   }
 
-  // Generate access and refresh tokens
   private async generateTokens(
     payload: Omit<JwtPayload, 'type'>,
   ): Promise<{ accessToken: string; refreshToken: string }> {
@@ -368,7 +352,6 @@ export class AuthService {
     return { accessToken, refreshToken };
   }
 
-  // Hash password for user registration
   async hashPassword(password: string): Promise<string> {
     return bcrypt.hash(password, 12);
   }
