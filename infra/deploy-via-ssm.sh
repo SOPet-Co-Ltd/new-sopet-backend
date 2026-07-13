@@ -4,34 +4,50 @@ set -euo pipefail
 
 : "${EC2_INSTANCE_ID:?EC2_INSTANCE_ID is required}"
 : "${IMAGE_URI:?IMAGE_URI is required}"
+: "${AWS_REGION:?AWS_REGION is required}"
 
 ENV_FILE="${1:-.env.deploy}"
-DEPLOY_SCRIPT_PATH="${DEPLOY_SCRIPT_PATH:-/opt/sopet/deploy.sh}"
-SSM_TIMEOUT_SECONDS="${SSM_TIMEOUT_SECONDS:-600}"
+DEPLOY_SCRIPT_SRC="${DEPLOY_SCRIPT_SRC:-infra/ec2/deploy.sh}"
+SSM_TIMEOUT_SECONDS="${SSM_TIMEOUT_SECONDS:-1800}"
+POLL_INTERVAL_SECONDS="${POLL_INTERVAL_SECONDS:-15}"
 
 if [ ! -f "$ENV_FILE" ]; then
   echo "::error::Env file not found: $ENV_FILE" >&2
   exit 1
 fi
 
+if [ ! -f "$DEPLOY_SCRIPT_SRC" ]; then
+  echo "::error::Deploy script not found: $DEPLOY_SCRIPT_SRC" >&2
+  exit 1
+fi
+
 ENV_B64=$(base64 <"$ENV_FILE" | tr -d '\n')
+SCRIPT_B64=$(base64 <"$DEPLOY_SCRIPT_SRC" | tr -d '\n')
+
 PARAMS=$(jq -n \
-  --arg image "$IMAGE_URI" \
   --arg env_b64 "$ENV_B64" \
-  --arg script "$DEPLOY_SCRIPT_PATH" \
+  --arg script_b64 "$SCRIPT_B64" \
+  --arg image "$IMAGE_URI" \
+  --arg region "$AWS_REGION" \
   '{
     commands: [
-      "set -euo pipefail",
+      "set -euxo pipefail",
       "mkdir -p /opt/sopet",
-      "echo \($env_b64) | base64 -d > /opt/sopet/.env",
+      ("echo " + ($script_b64 | @json) + " | base64 -d > /opt/sopet/deploy.sh"),
+      "chmod +x /opt/sopet/deploy.sh",
+      ("echo " + ($env_b64 | @json) + " | base64 -d > /opt/sopet/.env"),
       "chmod 600 /opt/sopet/.env",
       ("export IMAGE_URI=" + ($image | @sh)),
       "export ENV_FILE=/opt/sopet/.env",
-      $script
+      ("export AWS_REGION=" + ($region | @sh)),
+      "/opt/sopet/deploy.sh"
     ]
   }')
 
+echo "Sending SSM deploy to $EC2_INSTANCE_ID (region $AWS_REGION, timeout ${SSM_TIMEOUT_SECONDS}s)"
+
 COMMAND_ID=$(aws ssm send-command \
+  --region "$AWS_REGION" \
   --instance-ids "$EC2_INSTANCE_ID" \
   --document-name "AWS-RunShellScript" \
   --timeout-seconds "$SSM_TIMEOUT_SECONDS" \
@@ -41,17 +57,57 @@ COMMAND_ID=$(aws ssm send-command \
 
 echo "SSM deploy command started: $COMMAND_ID"
 
-deadline=$((SECONDS + SSM_TIMEOUT_SECONDS))
-while [ "$SECONDS" -lt "$deadline" ]; do
-  STATUS=$(aws ssm get-command-invocation \
+print_invocation() {
+  aws ssm get-command-invocation \
+    --region "$AWS_REGION" \
+    --command-id "$COMMAND_ID" \
+    --instance-id "$EC2_INSTANCE_ID" \
+    --output json
+}
+
+get_status() {
+  local err_file
+  err_file=$(mktemp)
+  local status
+  if status=$(aws ssm get-command-invocation \
+    --region "$AWS_REGION" \
     --command-id "$COMMAND_ID" \
     --instance-id "$EC2_INSTANCE_ID" \
     --query 'Status' \
-    --output text 2>/dev/null || echo "Pending")
+    --output text 2>"$err_file"); then
+    rm -f "$err_file"
+    echo "$status"
+    return 0
+  fi
+
+  if grep -q 'InvocationDoesNotExist' "$err_file"; then
+    rm -f "$err_file"
+    echo "Pending"
+    return 0
+  fi
+
+  echo "::warning::get-command-invocation failed:" >&2
+  cat "$err_file" >&2
+  rm -f "$err_file"
+  echo "Unknown"
+  return 1
+}
+
+deadline=$((SECONDS + SSM_TIMEOUT_SECONDS))
+last_status=""
+
+while [ "$SECONDS" -lt "$deadline" ]; do
+  STATUS=$(get_status || echo "Unknown")
+
+  if [ "$STATUS" != "$last_status" ]; then
+    echo "SSM status: $STATUS (elapsed: $((SECONDS))s)"
+    last_status="$STATUS"
+  fi
 
   case "$STATUS" in
     Success)
       aws ssm get-command-invocation \
+        --region "$AWS_REGION" \
         --command-id "$COMMAND_ID" \
         --instance-id "$EC2_INSTANCE_ID" \
         --query 'StandardOutputContent' \
@@ -61,17 +117,15 @@ while [ "$SECONDS" -lt "$deadline" ]; do
       ;;
     Failed | Cancelled | TimedOut)
       echo "::error::Deploy failed with status: $STATUS" >&2
-      aws ssm get-command-invocation \
-        --command-id "$COMMAND_ID" \
-        --instance-id "$EC2_INSTANCE_ID" \
-        --output json >&2 || true
+      print_invocation >&2 || true
       exit 1
       ;;
     *)
-      sleep 5
+      sleep "$POLL_INTERVAL_SECONDS"
       ;;
   esac
 done
 
-echo "::error::Timed out waiting for SSM command $COMMAND_ID" >&2
+echo "::error::Timed out after ${SSM_TIMEOUT_SECONDS}s waiting for SSM command $COMMAND_ID" >&2
+print_invocation >&2 || true
 exit 1
