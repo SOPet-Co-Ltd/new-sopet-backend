@@ -128,6 +128,7 @@ yarn lint              # ESLint with fix
 ```
 
 - Husky pre-commit → lint-staged → Prettier on `*.{ts,tsx,js,jsx,json,md,yml,yaml}`
+- Husky pre-push → `yarn test` (unit tests; e2e stays in CI)
 - ESLint flat config: `eslint.config.mjs`
 - `@typescript-eslint/no-explicit-any`: off
 

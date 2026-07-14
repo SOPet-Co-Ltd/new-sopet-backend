@@ -1,5 +1,5 @@
 # SOPET Backend CI
-# Triggers on pull request open, update, and reopen.
+# Triggers on every pull request (any base branch): open, update, reopen, ready for review.
 # Runs: yarn build → yarn test (unit) → yarn test:e2e
 # E2E tests use mocked repositories/services — no PostgreSQL, Redis, or MinIO required.
 
@@ -7,8 +7,7 @@ name: CI
 
 on:
   pull_request:
-    branches: [main, uat]
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 jobs:
   test:
