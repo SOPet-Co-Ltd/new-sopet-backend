@@ -26,9 +26,10 @@ yarn docker:reset    # Remove volumes
 
 1. `yarn install`
 2. `yarn build`
-3. `node dist/main.js`
+3. Copy `dist/`, `node_modules/`, and `public/` (email/brand static assets)
+4. `node dist/src/main.js`
 
-Exposes port **3002**.
+Exposes port **3002**. Confirm `API_URL` is the public HTTPS API host so transactional emails reference `https://<api>/images/email/sopet-logo-white.png`.
 
 ## CI/CD
 
@@ -99,7 +100,8 @@ Storefront and admin stay on Vercel; only the backend API runs on EC2.
 | `ECR_REPOSITORY`                     | `sopet/backend-uat`         | Image repository name                     |
 | `EC2_INSTANCE_ID`                    | `i-0abc123...`              | Target EC2 instance                       |
 | `CORS_ORIGINS`                       | `https://uat.sopet.org,...` | Must include Vercel storefront/admin URLs |
-| `STOREFRONT_URL` / `ADMIN_PANEL_URL` | `https://...`               | Public frontend URLs                      |
+| `API_URL`                            | `https://api-uat.sopet.org` | Public API base (email logo absolute URL) |
+| `STOREFRONT_URL` / `ADMIN_PANEL_URL` | `https://...`               | Public frontend URLs (links in emails)    |
 
 Plus all application vars/secrets listed in `infra/env.manifest.json`.
 
@@ -111,7 +113,7 @@ Remove legacy ECS variables (`ECS_CLUSTER`, `ECS_SERVICE`, etc.) from GitHub Env
 2. Enable **Proxied** (orange cloud) so Cloudflare terminates TLS for clients.
 3. Origin serves HTTP on port **80** (Caddy from `bootstrap.sh` reverse-proxies to `127.0.0.1:3002`).
 4. Set SSL/TLS mode to **Full** (not Strict unless you add a valid origin certificate).
-5. Update `CORS_ORIGINS`, Omise webhook URL, and frontend `NEXT_PUBLIC_GRAPHQL_URL` / admin API URL to the Cloudflare hostname.
+5. Update `API_URL`, `CORS_ORIGINS`, Omise webhook URL, and frontend `NEXT_PUBLIC_GRAPHQL_URL` / admin API URL to the Cloudflare hostname.
 
 ### Manual deploy test (on EC2)
 
@@ -125,15 +127,15 @@ export ENV_FILE=/opt/sopet/.env   # copy from rendered .env.deploy
 
 Key variables from `.env.example`:
 
-| Group    | Variables                                          |
-| -------- | -------------------------------------------------- |
-| App      | `NODE_ENV=production`, `PORT=3002`, `CORS_ORIGINS` |
-| Database | `DB_*`, `DB_SSL=true` for managed Postgres         |
-| JWT      | `JWT_SECRET` (long random string)                  |
-| Storage  | Real AWS S3 or Cloudflare R2 (not MinIO)           |
-| Payments | `OMISE_*`, `OMISE_WEBHOOK_SECRET` (required)       |
-| SMS      | `THAIBULKSMS_*` or `TWILIO_*`                      |
-| Email    | `RESEND_API_KEY`                                   |
+| Group    | Variables                                                     |
+| -------- | ------------------------------------------------------------- |
+| App      | `NODE_ENV=production`, `PORT=3002`, `API_URL`, `CORS_ORIGINS` |
+| Database | `DB_*`, `DB_SSL=true` for managed Postgres                    |
+| JWT      | `JWT_SECRET` (long random string)                             |
+| Storage  | Real AWS S3 or Cloudflare R2 (not MinIO)                      |
+| Payments | `OMISE_*`, `OMISE_WEBHOOK_SECRET` (required)                  |
+| SMS      | `THAIBULKSMS_*` or `TWILIO_*`                                 |
+| Email    | `RESEND_API_KEY`, `EMAIL_FROM`, `EMAIL_FROM_NAME`             |
 
 ### Production bootstrap
 

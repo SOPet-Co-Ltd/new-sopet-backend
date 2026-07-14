@@ -35,10 +35,15 @@ yarn start:dev    # http://localhost:3002/graphql
 
 ## Key entry points
 
-| File                            | Purpose                                               |
-| ------------------------------- | ----------------------------------------------------- |
-| `src/main.ts`                   | Bootstrap, CORS, body parser (rawBody for Omise HMAC) |
-| `src/app.module.ts`             | Root module, TypeORM, global guards/pipes/filters     |
-| `src/graphql/graphql.module.ts` | Apollo Server, schema generation, DataLoaders         |
-| `src/schema.gql`                | Auto-generated GraphQL schema (do not edit manually)  |
-| `ormconfig.ts`                  | TypeORM CLI for migrations                            |
+| File                            | Purpose                                                                 |
+| ------------------------------- | ----------------------------------------------------------------------- |
+| `src/main.ts`                   | Bootstrap, CORS, static `public/`, body parser (rawBody for Omise HMAC) |
+| `src/app.module.ts`             | Root module, TypeORM, global guards/pipes/filters                       |
+| `src/graphql/graphql.module.ts` | Apollo Server, schema generation, DataLoaders                           |
+| `src/schema.gql`                | Auto-generated GraphQL schema (do not edit manually)                    |
+| `public/images/email/`          | Brand assets for transactional emails (e.g. `sopet-logo-white.png`)     |
+| `ormconfig.ts`                  | TypeORM CLI for migrations                                              |
+
+## Email
+
+Transactional mail: Resend via `modules/email/`. Logo URL is `${API_URL}/images/email/sopet-logo-white.png` (PNG for client compatibility). Local previews: `yarn email:previews` → `temp/email-previews/`. See [Authentication — email templates](authentication.md#email-templates).

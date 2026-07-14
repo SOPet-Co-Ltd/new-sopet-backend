@@ -63,34 +63,34 @@ flowchart TB
 
 ## Feature modules
 
-| Module        | Path                     | GraphQL | REST      | Primary responsibility                                            |
-| ------------- | ------------------------ | ------- | --------- | ----------------------------------------------------------------- |
-| auth          | `modules/auth/`          | ✓       | —         | OTP, JWT, login, password reset                                   |
-| users         | `modules/users/`         | ✓       | —         | Customer account, addresses, favorites                            |
-| customers     | `modules/customers/`     | ✓       | —         | Admin customer management                                         |
-| stores        | `modules/stores/`        | ✓       | —         | Store CRUD, team, shipping, invitations                           |
-| products      | `modules/products/`      | ✓       | —         | Product catalog, variants, images                                 |
-| taxonomy      | `modules/taxonomy/`      | ✓       | —         | Categories, pet types, brands                                     |
-| cart          | `modules/cart/`          | ✓       | —         | Guest + auth carts, merge on login                                |
-| orders        | `modules/orders/`        | ✓       | —         | Order creation, fulfillment, status                               |
-| payments      | `modules/payments/`      | ✓       | ✓ webhook | Omise charges, subscriptions                                      |
-| payouts       | `modules/payouts/`       | ✓       | —         | Vendor payout scheduling (BullMQ)                                 |
-| promotions    | `modules/promotions/`    | ✓       | —         | Platform + store promotions                                       |
-| reviews       | `modules/reviews/`       | ✓       | —         | Product reviews, vendor replies                                   |
-| disputes      | `modules/disputes/`      | ✓       | —         | Per-store returns; resolve syncs order status when fully refunded |
-| analytics     | `modules/analytics/`     | ✓       | —         | Dashboard metrics                                                 |
-| platform      | `modules/platform/`      | ✓       | —         | Banners, sponsors, ads                                            |
-| admin-team    | `modules/admin-team/`    | ✓       | —         | Admin team invitations                                            |
-| notifications | `modules/notifications/` | ✓       | —         | In-app + email notifications                                      |
-| storage       | `modules/storage/`       | ✓       | —         | Image upload (S3/MinIO/R2)                                        |
-| search        | `modules/search/`        | ✓       | —         | Smart search, synonyms, analytics                                 |
-| api-keys      | `modules/api-keys/`      | ✓       | —         | Store API key management                                          |
-| public-api    | `modules/public-api/`    | —       | ✓         | `POST /api/v1/stores/:id/products`                                |
-| email         | `modules/email/`         | —       | —         | `@Global()` Resend email                                          |
-| sms           | `modules/sms/`           | —       | —         | OTP SMS delivery                                                  |
-| redis         | `modules/redis/`         | —       | —         | `@Global()` Redis client                                          |
-| omise         | `modules/omise/`         | —       | —         | Omise SDK wrapper                                                 |
-| inventory     | `modules/inventory/`     | —       | —         | Inventory transactions (service only)                             |
+| Module        | Path                     | GraphQL | REST      | Primary responsibility                                                |
+| ------------- | ------------------------ | ------- | --------- | --------------------------------------------------------------------- |
+| auth          | `modules/auth/`          | ✓       | —         | OTP, JWT, login, password reset                                       |
+| users         | `modules/users/`         | ✓       | —         | Customer account, addresses, favorites                                |
+| customers     | `modules/customers/`     | ✓       | —         | Admin customer management                                             |
+| stores        | `modules/stores/`        | ✓       | —         | Store CRUD, team, shipping, invitations                               |
+| products      | `modules/products/`      | ✓       | —         | Product catalog, variants, images                                     |
+| taxonomy      | `modules/taxonomy/`      | ✓       | —         | Categories, pet types, brands                                         |
+| cart          | `modules/cart/`          | ✓       | —         | Guest + auth carts, merge on login                                    |
+| orders        | `modules/orders/`        | ✓       | —         | Order creation, fulfillment, status                                   |
+| payments      | `modules/payments/`      | ✓       | ✓ webhook | Omise charges, subscriptions                                          |
+| payouts       | `modules/payouts/`       | ✓       | —         | Vendor payout scheduling (BullMQ)                                     |
+| promotions    | `modules/promotions/`    | ✓       | —         | Platform + store promotions                                           |
+| reviews       | `modules/reviews/`       | ✓       | —         | Product reviews, vendor replies                                       |
+| disputes      | `modules/disputes/`      | ✓       | —         | Per-store returns; resolve syncs order status when fully refunded     |
+| analytics     | `modules/analytics/`     | ✓       | —         | Dashboard metrics                                                     |
+| platform      | `modules/platform/`      | ✓       | —         | Banners, sponsors, ads                                                |
+| admin-team    | `modules/admin-team/`    | ✓       | —         | Admin team invitations                                                |
+| notifications | `modules/notifications/` | ✓       | —         | In-app + email notifications                                          |
+| storage       | `modules/storage/`       | ✓       | —         | Image upload (S3/MinIO/R2)                                            |
+| search        | `modules/search/`        | ✓       | —         | Smart search, synonyms, analytics                                     |
+| api-keys      | `modules/api-keys/`      | ✓       | —         | Store API key management                                              |
+| public-api    | `modules/public-api/`    | —       | ✓         | `POST /api/v1/stores/:id/products`                                    |
+| email         | `modules/email/`         | —       | —         | `@Global()` Resend; templates use logo at `${API_URL}/images/email/…` |
+| sms           | `modules/sms/`           | —       | —         | OTP SMS delivery                                                      |
+| redis         | `modules/redis/`         | —       | —         | `@Global()` Redis client                                              |
+| omise         | `modules/omise/`         | —       | —         | Omise SDK wrapper                                                     |
+| inventory     | `modules/inventory/`     | —       | —         | Inventory transactions (service only)                                 |
 
 **Not wired:** `modules/health/` exists but is not imported in `AppModule`. `modules/authorization/` is an empty directory.
 

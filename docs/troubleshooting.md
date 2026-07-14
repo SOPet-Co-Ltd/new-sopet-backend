@@ -89,6 +89,26 @@ UAT requires GitHub Environment secrets `THAIBULKSMS_API_KEY` and `THAIBULKSMS_A
 - `main.ts` requires `rawBody: true` for HMAC
 - Secret must match Omise dashboard (base64)
 
+## Email
+
+### Logo missing in received emails
+
+- Templates use `${API_URL}/images/email/sopet-logo-white.png` (PNG, not SVG).
+- Locally, open `http://localhost:3002/images/email/sopet-logo-white.png` while `yarn start:dev` is running.
+- In UAT/production, set `API_URL` to the **public** HTTPS API hostname (same host clients use for GraphQL). Without it, the logo URL may point at `localhost` and fail for recipients.
+- Confirm the Docker image includes `public/` (see `Dockerfile`).
+
+### Emails not sent in development
+
+Expected: `NODE_ENV=development` logs the email body to the backend console instead of calling Resend. Look for `[DEV EMAIL]` / `[dev] …` lines. Set `RESEND_API_KEY` and use a non-development `NODE_ENV` to send for real.
+
+### Local HTML previews
+
+```bash
+yarn email:previews
+# Open temp/email-previews/*.html in a browser
+```
+
 ## Redis / BullMQ
 
 ### Jobs not processing

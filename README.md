@@ -6,7 +6,7 @@ NestJS GraphQL API for the SOPET multi-vendor e-commerce platform.
 
 Custom-built backend replacing Medusa.js. Serves the customer storefront and admin/vendor dashboard through a single GraphQL endpoint at `/graphql`.
 
-**Key capabilities:** multi-vendor stores, phone OTP customer auth, email/password vendor/admin auth, Omise payments (PromptPay, credit card), smart search, reviews, promotions, payouts, image uploads (S3/MinIO/R2).
+**Key capabilities:** multi-vendor stores, phone OTP customer auth, email/password vendor/admin auth (vendor email verification), Omise payments (PromptPay, credit card), smart search, reviews, promotions, payouts, image uploads (S3/MinIO/R2), transactional email (Resend).
 
 ## Tech stack
 
@@ -50,14 +50,17 @@ cp .env.example .env
 
 Key variables (full list in `.env.example`):
 
-| Variable                     | Purpose               |
-| ---------------------------- | --------------------- |
-| `DB_*`                       | PostgreSQL connection |
-| `JWT_SECRET`                 | Token signing         |
-| `REDIS_*`                    | Cache and job queues  |
-| `AWS_*` / `STORAGE_PROVIDER` | Image storage         |
-| `OMISE_*`                    | Payment gateway       |
-| `THAIBULKSMS_*` / `TWILIO_*` | OTP SMS               |
+| Variable                             | Purpose                                       |
+| ------------------------------------ | --------------------------------------------- |
+| `DB_*`                               | PostgreSQL connection                         |
+| `JWT_SECRET`                         | Token signing                                 |
+| `REDIS_*`                            | Cache and job queues                          |
+| `AWS_*` / `STORAGE_PROVIDER`         | Image storage                                 |
+| `OMISE_*`                            | Payment gateway                               |
+| `THAIBULKSMS_*` / `TWILIO_*`         | OTP SMS                                       |
+| `API_URL`                            | Public API base URL (email logo assets, logs) |
+| `STOREFRONT_URL` / `ADMIN_PANEL_URL` | Links in transactional emails                 |
+| `RESEND_API_KEY` / `EMAIL_FROM`      | Email delivery (Resend)                       |
 
 ## Running locally
 
@@ -101,8 +104,10 @@ yarn format:check      # CI check
 ## Project structure
 
 ```text
+public/                     # Static assets (email brand logo, served at /images/…)
+scripts/                    # Utilities (email HTML previews, schema checks)
 src/
-├── main.ts                 # Bootstrap
+├── main.ts                 # Bootstrap + static asset mount
 ├── app.module.ts           # Root module, global guards
 ├── schema.gql              # Auto-generated GraphQL schema
 ├── common/                 # Decorators, filters, pipes, utils
@@ -141,6 +146,7 @@ src/
 | `yarn docker:up`        | Start local infrastructure                                              |
 | `yarn docker:check`     | Verify Postgres, Redis, MinIO                                           |
 | `yarn graphql:schema`   | Verify schema.gql exists                                                |
+| `yarn email:previews`   | Generate HTML previews under `temp/email-previews/`                     |
 
 ## Contributing
 

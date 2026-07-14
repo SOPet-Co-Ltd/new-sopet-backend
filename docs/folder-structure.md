@@ -5,12 +5,13 @@
 ```text
 sopet-backend/
 ├── src/                    # Application source
+├── public/                 # Static files mounted at / (email brand assets)
 ├── test/                   # E2E and integration tests
-├── scripts/                # Build utilities (graphql schema check)
+├── scripts/                # Utilities (email previews, graphql schema check)
 ├── docs/                   # This documentation
 ├── ormconfig.ts            # TypeORM CLI configuration
 ├── docker-compose.yml      # Local Postgres, Redis, MinIO
-├── Dockerfile              # Production container
+├── Dockerfile              # Production container (copies public/)
 ├── .github/workflows/ci.yml
 └── .env.example
 ```
@@ -19,7 +20,7 @@ sopet-backend/
 
 ```text
 src/
-├── main.ts                 # Entry point
+├── main.ts                 # Entry point (also mounts public/ static assets)
 ├── app.module.ts           # Root NestJS module
 ├── schema.gql              # Auto-generated (do not edit)
 ├── common/                 # Cross-cutting utilities
@@ -28,6 +29,16 @@ src/
 ├── graphql/                # GraphQL aggregation + loaders
 └── modules/                # Feature modules (28 domains)
 ```
+
+## `public/`
+
+**Purpose:** Static files served at the site root (Nest `useStaticAssets` in `main.ts`).
+
+| Path                                | Purpose                                                           |
+| ----------------------------------- | ----------------------------------------------------------------- |
+| `images/email/sopet-logo-white.png` | Brand logo in transactional emails (PNG for client compatibility) |
+
+Referenced as `${API_URL}/images/email/sopet-logo-white.png` from `EmailDeliveryService`. Copied into the production Docker image. Local HTML samples: `yarn email:previews` → `temp/email-previews/`.
 
 ---
 
@@ -58,14 +69,15 @@ src/
 
 **Purpose:** `@nestjs/config` `registerAs()` factories.
 
-| File                | Env prefix                                  |
-| ------------------- | ------------------------------------------- |
-| `app.config.ts`     | `PORT`, `CORS_ORIGINS`, rate limits         |
-| `jwt.config.ts`     | `JWT_SECRET`, expiry                        |
-| `omise.config.ts`   | `OMISE_*`                                   |
-| `storage.config.ts` | `AWS_*`, `CLOUDFLARE_*`, `STORAGE_PROVIDER` |
-| `redis.config.ts`   | `REDIS_*`                                   |
-| `search.config.ts`  | `SEARCH_SMART_ENABLED`, `OPENAI_API_KEY`    |
+| File                | Env prefix                                                                          |
+| ------------------- | ----------------------------------------------------------------------------------- |
+| `app.config.ts`     | `PORT`, `API_URL`, `STOREFRONT_URL`, `ADMIN_PANEL_URL`, `CORS_ORIGINS`, rate limits |
+| `jwt.config.ts`     | `JWT_SECRET`, expiry                                                                |
+| `omise.config.ts`   | `OMISE_*`                                                                           |
+| `storage.config.ts` | `AWS_*`, `CLOUDFLARE_*`, `STORAGE_PROVIDER`                                         |
+| `redis.config.ts`   | `REDIS_*`                                                                           |
+| `resend.config.ts`  | `RESEND_API_KEY`, `EMAIL_FROM`, `EMAIL_FROM_NAME`                                   |
+| `search.config.ts`  | `SEARCH_SMART_ENABLED`, `OPENAI_API_KEY`                                            |
 
 **Add here:** New environment variable groups. **Do not** read `process.env` directly in services — inject `ConfigService`.
 

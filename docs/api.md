@@ -129,6 +129,16 @@ Unknown, malformed, or whitespace-only `orderNumber` all throw the identical `No
 
 There are **no** `/v1/*` REST routes for application features. Admin and storefront use GraphQL exclusively.
 
+## Static assets
+
+`main.ts` mounts `public/` via Nest `useStaticAssets`. Used for email brand assets:
+
+| Path                                     | File                                       |
+| ---------------------------------------- | ------------------------------------------ |
+| `GET /images/email/sopet-logo-white.png` | `public/images/email/sopet-logo-white.png` |
+
+Absolute URL in templates: `${API_URL}/images/email/sopet-logo-white.png` (`app.apiUrl` / env `API_URL`). See [Authentication — email templates](authentication.md#email-templates).
+
 ### Omise webhook
 
 1. Configure URL in Omise dashboard: `https://<host>/webhooks/omise`
