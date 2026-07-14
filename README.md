@@ -132,8 +132,6 @@ src/
 | [Deployment](docs/deployment.md)                   | Docker, CI, production     |
 | [Troubleshooting](docs/troubleshooting.md)         | Common issues              |
 
-**Cross-repo:** [Workspace developer docs](../new-sopet-workspace/docs/developer/README.md)
-
 ## Common commands
 
 | Command                 | Description                                                             |
@@ -157,4 +155,4 @@ src/
 5. Coordinate frontend codegen if schema changes
 6. Open a pull request (CI runs on PR)
 
-Cross-repo features: see [workspace cross-repo workflow](../new-sopet-workspace/docs/developer/cross-repo-workflow.md).
+Schema changes: regenerate `src/schema.gql` here, then run `yarn graphql:codegen` in sibling repos `../sopet-storefront` and `../sopet-admin`. Commit each repo separately; merge backend before frontends that depend on the new schema.

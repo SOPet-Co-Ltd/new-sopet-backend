@@ -89,8 +89,8 @@ Referenced as `${API_URL}/images/email/sopet-logo-white.png` from `EmailDelivery
 
 | Subfolder       | Contents                   | When to add                           |
 | --------------- | -------------------------- | ------------------------------------- |
-| `entities/`     | 56 entity files + `enums/` | New database tables                   |
-| `migrations/`   | 33 migration files         | Schema changes (always via migration) |
+| `entities/`     | 59 entity files + `enums/` | New database tables                   |
+| `migrations/`   | 38 migration files         | Schema changes (always via migration) |
 | `repositories/` | 6 custom repositories      | Complex query patterns needing reuse  |
 | `seeds/`        | Dev/prod seed scripts      | Demo data, bootstrap accounts         |
 

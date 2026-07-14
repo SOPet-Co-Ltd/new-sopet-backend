@@ -14,7 +14,7 @@ PostgreSQL 15+ with TypeORM. Database name: `sopet_ecommerce` (from `.env.exampl
 
 ## Entities
 
-**56 entities** in `src/database/entities/`.
+**59 entities** in `src/database/entities/`.
 
 Enums in `src/database/entities/enums/`.
 
@@ -41,22 +41,25 @@ export class Order {
 
 ### Entity groups
 
-| Group      | Entities                                                                              |
-| ---------- | ------------------------------------------------------------------------------------- |
-| Auth       | `user`, `customer`, `otp-code`, `password-reset-token`                                |
-| Stores     | `store`, `store-member`, `store-shipping-*`, `vendor-invitation`                      |
-| Catalog    | `product`, `product-variant`, `product-image`, `category`, `brand`, `pet-type`, `tag` |
-| Orders     | `order`, `order-item`, `order-status-history`, `order-shipping-address`               |
-| Cart       | `cart`, `cart-item`                                                                   |
-| Payments   | `saved-payment-method`                                                                |
-| Promotions | `promotion`, `promotion-usage`                                                        |
-| Reviews    | `review`, `review-image`                                                              |
-| Search     | `search-synonym`, `product-embedding`, `search-analytics-*`                           |
-| System     | `notification`, `admin-log`, `setting`, `api-key`                                     |
+| Group      | Entities                                                                                                                                                                                            |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Auth       | `user`, `customer`, `otp-code`, `password-reset-token`, `email-verification-token`                                                                                                                  |
+| Stores     | `store`, `store-member(-invitation)`, `store-request`, `store-shipping-option`, `store-reactivation-request(-image)`, `vendor-invitation`, `admin-invitation`, `store-api-key`, `shipping-provider` |
+| Catalog    | `product`, `product-variant`, `product-image`, `category`, `brand`, `pet-type`, `tag`                                                                                                               |
+| Orders     | `order`, `order-item`, `order-status-history`, `order-shipping-address`, `order-store-shipping`                                                                                                     |
+| Cart       | `cart`, `cart-item`                                                                                                                                                                                 |
+| Payments   | `payment`, `saved-payment-method`, `payout`, `payout-item`                                                                                                                                          |
+| Promotions | `promotion`, `promotion-usage`                                                                                                                                                                      |
+| Reviews    | `review`, `review-image`, `review-reply`                                                                                                                                                            |
+| Search     | `search-synonym`, `product-embedding`, `search-event`, `search-suggestion-event`, `user-search-profile`                                                                                             |
+| Platform   | `platform-banner`, `platform-sponsor`, `platform-ad`                                                                                                                                                |
+| System     | `notification`, `user-notification`, `admin-log`, `audit-log`, `setting`, `favorite`, `saved-address`, `inventory-transaction`                                                                      |
+
+**Reserved (unused):** `dispute`, `dispute-item`, `dispute-message`, `dispute-image` — schema and relations exist (migrations `1700000000034-DisputeStoreAndItems`, `1700000000035-ReplacementOrders`), but no module/service/resolver reads or writes them today. See [Architecture](architecture.md#feature-modules).
 
 ## Migrations
 
-**33 migrations** in `src/database/migrations/`.
+**38 migrations** in `src/database/migrations/`.
 
 ### Commands
 
@@ -151,4 +154,3 @@ Configured in `app.module.ts`:
 
 - [Folder structure — database](folder-structure.md#srcdatabase)
 - [Feature development](feature-development.md)
-- Legacy detail: `src/database/README.md` (entity list; migration count may be stale)

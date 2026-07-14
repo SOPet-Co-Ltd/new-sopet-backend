@@ -16,11 +16,11 @@ NestJS GraphQL API for the SOPET multi-vendor e-commerce platform.
 | [Deployment](deployment.md)                   | Docker, CI, production                      |
 | [Troubleshooting](troubleshooting.md)         | Common issues                               |
 
-## Cross-repo docs
+## Related repos
 
-- [Workspace developer docs](../../new-sopet-workspace/docs/developer/README.md)
-- [Returns and disputes](../../new-sopet-workspace/docs/developer/returns-and-disputes.md)
-- [System architecture](../../new-sopet-workspace/docs/developer/architecture.md)
+- Storefront: sibling `../sopet-storefront` — runs `yarn graphql:codegen` against this repo’s `src/schema.gql`
+- Admin: sibling `../sopet-admin` — same codegen flow
+- See [Architecture](architecture.md) for this API’s module design
 
 ## Quick start
 

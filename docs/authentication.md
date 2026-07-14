@@ -238,5 +238,4 @@ JWT_REFRESH_EXPIRES_IN=7d
 
 ## Related docs
 
-- [Workspace authentication](../../new-sopet-workspace/docs/developer/authentication.md)
 - [API layer](api.md)

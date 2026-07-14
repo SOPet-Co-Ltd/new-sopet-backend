@@ -22,7 +22,7 @@ yarn docker:reset    # Remove volumes
 
 ### Production image
 
-`Dockerfile` — multi-stage Node 20 Alpine:
+`Dockerfile` — multi-stage Node 22 Alpine:
 
 1. `yarn install`
 2. `yarn build`
@@ -159,10 +159,10 @@ Images converted to WebP before upload (`StorageService` + `sharp`).
 
 ## Health checks
 
-`HealthModule` exists at `src/modules/health/` but is **not wired** into `AppModule`. GraphQL health query available via `src/graphql/app.resolver.ts`.
+`HealthModule` (`src/modules/health/`) is wired into `AppModule` and exposes REST checks at `GET /health`, `/health/ready` (Terminus: Postgres ping, plus Redis when configured), and `/health/live` (static liveness). A separate GraphQL `health` query is available via `src/graphql/app.resolver.ts`.
 
 ## Related docs
 
-- [Getting started](../../new-sopet-workspace/docs/developer/getting-started.md)
 - [Database — seeds](database.md#seeds)
 - [API — Omise webhook](api.md#omise-webhook)
+- Root [README](../README.md) for local setup
