@@ -14,21 +14,21 @@ import { Review } from './review.entity';
 @Index(['reviewId'])
 export class ReviewImage {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'review_id', type: 'uuid' })
   @IsNotEmpty()
-  reviewId: string;
+  reviewId!: string;
 
   @Column({ name: 'url', type: 'varchar', length: 500 })
   @IsNotEmpty()
-  url: string;
+  url!: string;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 
   // Relations
   @ManyToOne(() => Review, (review) => review.images, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'review_id' })
-  review: Review;
+  review!: Review;
 }

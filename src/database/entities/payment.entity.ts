@@ -18,47 +18,47 @@ export type PaymentStatus = 'pending' | 'paid' | 'failed' | 'refunded';
 @Index(['status'])
 export class Payment {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'order_id', type: 'uuid' })
   @IsNotEmpty()
-  orderId: string;
+  orderId!: string;
 
   @Column({ name: 'amount', type: 'decimal', precision: 10, scale: 2 })
   @IsNumber()
   @Min(0)
-  amount: number;
+  amount!: number;
 
   @Column({ name: 'currency', type: 'varchar', length: 10, default: 'THB' })
-  currency: string;
+  currency!: string;
 
   @Column({
     name: 'payment_method',
     type: 'enum',
     enum: PaymentMethod,
   })
-  paymentMethod: PaymentMethod;
+  paymentMethod!: PaymentMethod;
 
   @Column({ name: 'status', type: 'varchar', length: 20, default: 'pending' })
-  status: PaymentStatus;
+  status!: PaymentStatus;
 
   @Column({ name: 'authorize_uri', type: 'varchar', length: 2048, nullable: true })
-  authorizeUri: string | null;
+  authorizeUri!: string | null;
 
   @Column({ name: 'qr_code_url', type: 'varchar', length: 2048, nullable: true })
-  qrCodeUrl: string | null;
+  qrCodeUrl!: string | null;
 
   @Column({ name: 'expires_at', type: 'timestamp', nullable: true })
-  expiresAt: Date | null;
+  expiresAt!: Date | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamp' })
-  updatedAt: Date;
+  updatedAt!: Date;
 
   // Relations
   @ManyToOne(() => Order)
   @JoinColumn({ name: 'order_id' })
-  order: Order;
+  order!: Order;
 }

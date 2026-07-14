@@ -27,11 +27,11 @@ export enum AdminAction {
 @Index(['entityType', 'entityId'])
 export class AdminLog {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'admin_id', type: 'uuid' })
   @IsNotEmpty()
-  adminId: string;
+  adminId!: string;
 
   @Column({
     name: 'action',
@@ -39,27 +39,27 @@ export class AdminLog {
     enum: AdminAction,
   })
   @IsEnum(AdminAction)
-  action: AdminAction;
+  action!: AdminAction;
 
   @Column({ name: 'entity_type', type: 'varchar', length: 50 })
   @IsNotEmpty()
-  entityType: string;
+  entityType!: string;
 
   @Column({ name: 'entity_id', type: 'uuid' })
   @IsNotEmpty()
-  entityId: string;
+  entityId!: string;
 
   @Column({ name: 'details', type: 'jsonb', default: {} })
-  details: Record<string, any>;
+  details!: Record<string, any>;
 
   @Column({ name: 'ip_address', type: 'varchar', length: 45, nullable: true })
-  ipAddress: string | null;
+  ipAddress!: string | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 
   // Relations
   @ManyToOne(() => User, (user) => user.adminLogs)
   @JoinColumn({ name: 'admin_id' })
-  admin: User;
+  admin!: User;
 }

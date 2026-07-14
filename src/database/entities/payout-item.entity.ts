@@ -16,30 +16,30 @@ import { Order } from './order.entity';
 @Index(['orderId'])
 export class PayoutItem {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'payout_id', type: 'uuid' })
   @IsNotEmpty()
-  payoutId: string;
+  payoutId!: string;
 
   @Column({ name: 'order_id', type: 'uuid' })
   @IsNotEmpty()
-  orderId: string;
+  orderId!: string;
 
   @Column({ name: 'amount', type: 'decimal', precision: 10, scale: 2 })
   @IsNumber()
   @Min(0)
-  amount: number;
+  amount!: number;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 
   // Relations
   @ManyToOne(() => Payout, (payout) => payout.items)
   @JoinColumn({ name: 'payout_id' })
-  payout: Payout;
+  payout!: Payout;
 
   @ManyToOne(() => Order, (order) => order.payoutItems)
   @JoinColumn({ name: 'order_id' })
-  order: Order;
+  order!: Order;
 }

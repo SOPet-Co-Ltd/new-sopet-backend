@@ -14,24 +14,24 @@ import { StoreReactivationRequest } from './store-reactivation-request.entity';
 @Index(['requestId', 'sortOrder'])
 export class StoreReactivationRequestImage {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'request_id', type: 'uuid' })
-  requestId: string;
+  requestId!: string;
 
   @Column({ name: 'image_url', type: 'varchar', length: 500 })
   @IsNotEmpty()
-  imageUrl: string;
+  imageUrl!: string;
 
   @Column({ name: 'sort_order', type: 'integer', default: 0 })
-  sortOrder: number;
+  sortOrder!: number;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 
   @ManyToOne(() => StoreReactivationRequest, (request) => request.images, {
     onDelete: 'CASCADE',
   })
   @JoinColumn({ name: 'request_id' })
-  request: StoreReactivationRequest;
+  request!: StoreReactivationRequest;
 }

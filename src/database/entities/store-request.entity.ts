@@ -23,35 +23,35 @@ export enum StoreRequestStatus {
 @Index(['status'])
 export class StoreRequest {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'vendor_user_id', type: 'uuid' })
   @IsNotEmpty()
-  vendorUserId: string;
+  vendorUserId!: string;
 
   @Column({ name: 'store_name', type: 'varchar', length: 255 })
   @IsNotEmpty()
-  storeName: string;
+  storeName!: string;
 
   @Column({ name: 'description', type: 'text', nullable: true })
   @IsOptional()
-  description: string | null;
+  description!: string | null;
 
   @Column({ name: 'contact_phone', type: 'varchar', length: 20, nullable: true })
   @IsOptional()
-  contactPhone: string | null;
+  contactPhone!: string | null;
 
   @Column({ name: 'contact_email', type: 'varchar', length: 255, nullable: true })
   @IsOptional()
-  contactEmail: string | null;
+  contactEmail!: string | null;
 
   @Column({ name: 'address', type: 'text', nullable: true })
   @IsOptional()
-  address: string | null;
+  address!: string | null;
 
   @Column({ name: 'logo_url', type: 'varchar', length: 500, nullable: true })
   @IsOptional()
-  logoUrl: string | null;
+  logoUrl!: string | null;
 
   @Column({
     name: 'status',
@@ -60,32 +60,32 @@ export class StoreRequest {
     default: StoreRequestStatus.PENDING,
   })
   @IsEnum(StoreRequestStatus)
-  status: StoreRequestStatus;
+  status!: StoreRequestStatus;
 
   @Column({ name: 'rejection_reason', type: 'text', nullable: true })
   @IsOptional()
-  rejectionReason: string | null;
+  rejectionReason!: string | null;
 
   @Column({ name: 'reviewed_by', type: 'uuid', nullable: true })
-  reviewedBy: string | null;
+  reviewedBy!: string | null;
 
   @Column({ name: 'reviewed_at', type: 'timestamp', nullable: true })
-  reviewedAt: Date | null;
+  reviewedAt!: Date | null;
 
   @Column({ name: 'created_store_id', type: 'uuid', nullable: true })
-  createdStoreId: string | null;
+  createdStoreId!: string | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamp' })
-  updatedAt: Date;
+  updatedAt!: Date;
 
   @ManyToOne(() => User)
   @JoinColumn({ name: 'vendor_user_id' })
-  vendorUser: User;
+  vendorUser!: User;
 
   @ManyToOne(() => Store, { nullable: true })
   @JoinColumn({ name: 'created_store_id' })
-  createdStore: Store | null;
+  createdStore!: Store | null;
 }

@@ -20,11 +20,11 @@ export enum DisputeMessageSender {
 @Index(['disputeId', 'createdAt'])
 export class DisputeMessage {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'dispute_id', type: 'uuid' })
   @IsNotEmpty()
-  disputeId: string;
+  disputeId!: string;
 
   @Column({
     name: 'sender_type',
@@ -32,24 +32,24 @@ export class DisputeMessage {
     enum: DisputeMessageSender,
   })
   @IsEnum(DisputeMessageSender)
-  senderType: DisputeMessageSender;
+  senderType!: DisputeMessageSender;
 
   @Column({ name: 'sender_id', type: 'uuid' })
   @IsNotEmpty()
-  senderId: string;
+  senderId!: string;
 
   @Column({ name: 'message', type: 'text' })
   @IsNotEmpty()
-  message: string;
+  message!: string;
 
   @Column({ name: 'attachments', type: 'text', array: true, default: [] })
-  attachments: string[];
+  attachments!: string[];
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 
   // Relations
   @ManyToOne(() => Dispute, (dispute) => dispute.messages)
   @JoinColumn({ name: 'dispute_id' })
-  dispute: Dispute;
+  dispute!: Dispute;
 }

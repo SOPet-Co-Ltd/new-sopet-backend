@@ -13,43 +13,43 @@ import { IsNotEmpty, IsOptional, Length } from 'class-validator';
 @Index(['isActive', 'sortOrder'])
 export class PlatformBanner {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'title', type: 'varchar', length: 255 })
   @IsNotEmpty()
   @Length(1, 255)
-  title: string;
+  title!: string;
 
   @Column({ name: 'image_url', type: 'varchar', length: 500 })
   @IsNotEmpty()
-  imageUrl: string;
+  imageUrl!: string;
 
   @Column({ name: 'mobile_image_url', type: 'varchar', length: 500, nullable: true })
   @IsOptional()
-  mobileImageUrl: string | null;
+  mobileImageUrl!: string | null;
 
   @Column({ name: 'link_url', type: 'varchar', length: 500, nullable: true })
   @IsOptional()
-  linkUrl: string | null;
+  linkUrl!: string | null;
 
   @Column({ name: 'sort_order', type: 'integer', default: 0 })
-  sortOrder: number;
+  sortOrder!: number;
 
   @Column({ name: 'is_active', type: 'boolean', default: true })
-  isActive: boolean;
+  isActive!: boolean;
 
   @Column({ name: 'starts_at', type: 'timestamp', nullable: true })
-  startsAt: Date | null;
+  startsAt!: Date | null;
 
   @Column({ name: 'ends_at', type: 'timestamp', nullable: true })
-  endsAt: Date | null;
+  endsAt!: Date | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamp' })
-  updatedAt: Date;
+  updatedAt!: Date;
 
   @DeleteDateColumn({ name: 'deleted_at', type: 'timestamp', nullable: true })
-  deletedAt: Date | null;
+  deletedAt!: Date | null;
 }

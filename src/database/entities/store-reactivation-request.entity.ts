@@ -26,23 +26,23 @@ export enum StoreReactivationRequestStatus {
 @Index(['submittedByUserId'])
 export class StoreReactivationRequest {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'store_id', type: 'uuid' })
   @IsNotEmpty()
-  storeId: string;
+  storeId!: string;
 
   @Column({ name: 'submitted_by_user_id', type: 'uuid' })
   @IsNotEmpty()
-  submittedByUserId: string;
+  submittedByUserId!: string;
 
   @Column({ name: 'title', type: 'varchar', length: 255 })
   @IsNotEmpty()
-  title: string;
+  title!: string;
 
   @Column({ name: 'content', type: 'text' })
   @IsNotEmpty()
-  content: string;
+  content!: string;
 
   @Column({
     name: 'status',
@@ -51,36 +51,36 @@ export class StoreReactivationRequest {
     default: StoreReactivationRequestStatus.PENDING,
   })
   @IsEnum(StoreReactivationRequestStatus)
-  status: StoreReactivationRequestStatus;
+  status!: StoreReactivationRequestStatus;
 
   @Column({ name: 'review_note', type: 'text', nullable: true })
   @IsOptional()
-  reviewNote: string | null;
+  reviewNote!: string | null;
 
   @Column({ name: 'reviewed_by', type: 'uuid', nullable: true })
-  reviewedBy: string | null;
+  reviewedBy!: string | null;
 
   @Column({ name: 'reviewed_at', type: 'timestamp', nullable: true })
-  reviewedAt: Date | null;
+  reviewedAt!: Date | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamp' })
-  updatedAt: Date;
+  updatedAt!: Date;
 
   @ManyToOne(() => Store)
   @JoinColumn({ name: 'store_id' })
-  store: Store;
+  store!: Store;
 
   @ManyToOne(() => User)
   @JoinColumn({ name: 'submitted_by_user_id' })
-  submittedBy: User;
+  submittedBy!: User;
 
   @ManyToOne(() => User, { nullable: true })
   @JoinColumn({ name: 'reviewed_by' })
-  reviewer: User | null;
+  reviewer!: User | null;
 
   @OneToMany(() => StoreReactivationRequestImage, (image) => image.request, { cascade: true })
-  images: StoreReactivationRequestImage[];
+  images!: StoreReactivationRequestImage[];
 }

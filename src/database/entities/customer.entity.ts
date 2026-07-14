@@ -22,75 +22,75 @@ import { Favorite } from './favorite.entity';
 @Index(['phone'], { unique: true, where: 'deleted_at IS NULL' })
 export class Customer {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'phone', type: 'varchar', length: 20 })
   @IsPhoneNumber('TH')
-  phone: string;
+  phone!: string;
 
   @Column({ name: 'full_name', type: 'varchar', length: 255, nullable: true })
   @IsOptional()
   @Length(1, 255)
-  fullName: string | null;
+  fullName!: string | null;
 
   @Column({ name: 'email', type: 'varchar', length: 255, nullable: true })
   @IsOptional()
-  email: string | null;
+  email!: string | null;
 
   @Column({ name: 'date_of_birth', type: 'date', nullable: true })
   @IsOptional()
-  dateOfBirth: string | null;
+  dateOfBirth!: string | null;
 
   @Column({ name: 'profile_photo_url', type: 'varchar', length: 500, nullable: true })
   @IsOptional()
-  profilePhotoUrl: string | null;
+  profilePhotoUrl!: string | null;
 
   @Column({ name: 'is_verified', type: 'boolean', default: false })
-  isVerified: boolean;
+  isVerified!: boolean;
 
   @Column({ name: 'is_active', type: 'boolean', default: true })
-  isActive: boolean;
+  isActive!: boolean;
 
   @Column({ name: 'deletion_requested_at', type: 'timestamp', nullable: true })
-  deletionRequestedAt: Date | null;
+  deletionRequestedAt!: Date | null;
 
   @Column({ name: 'last_login_at', type: 'timestamp', nullable: true })
-  lastLoginAt: Date | null;
+  lastLoginAt!: Date | null;
 
   @Column({ name: 'omise_customer_id', type: 'varchar', length: 255, nullable: true })
-  omiseCustomerId: string | null;
+  omiseCustomerId!: string | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamp' })
-  updatedAt: Date;
+  updatedAt!: Date;
 
   @DeleteDateColumn({ name: 'deleted_at', type: 'timestamp', nullable: true })
-  deletedAt: Date | null;
+  deletedAt!: Date | null;
 
   // Relations
   @OneToMany(() => Order, (order) => order.customer)
-  orders: Order[];
+  orders!: Order[];
 
   @OneToMany(() => Review, (review) => review.customer)
-  reviews: Review[];
+  reviews!: Review[];
 
   @OneToMany(() => Dispute, (dispute) => dispute.customer)
-  disputes: Dispute[];
+  disputes!: Dispute[];
 
   @OneToMany(() => SavedAddress, (address) => address.customer)
-  savedAddresses: SavedAddress[];
+  savedAddresses!: SavedAddress[];
 
   @OneToMany(() => SavedPaymentMethod, (method) => method.customer)
-  savedPaymentMethods: SavedPaymentMethod[];
+  savedPaymentMethods!: SavedPaymentMethod[];
 
   @OneToMany(() => Cart, (cart) => cart.customer)
-  carts: Cart[];
+  carts!: Cart[];
 
   @OneToMany(() => Notification, (notification) => notification.customer)
-  notifications: Notification[];
+  notifications!: Notification[];
 
   @OneToMany(() => Favorite, (favorite) => favorite.customer)
-  favorites: Favorite[];
+  favorites!: Favorite[];
 }

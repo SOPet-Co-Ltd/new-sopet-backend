@@ -23,15 +23,15 @@ export enum StoreMemberRole {
 @Index(['storeId'])
 export class StoreMember {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'store_id', type: 'uuid' })
   @IsNotEmpty()
-  storeId: string;
+  storeId!: string;
 
   @Column({ name: 'user_id', type: 'uuid' })
   @IsNotEmpty()
-  userId: string;
+  userId!: string;
 
   @Column({
     name: 'role',
@@ -40,23 +40,23 @@ export class StoreMember {
     default: StoreMemberRole.STAFF,
   })
   @IsEnum(StoreMemberRole)
-  role: StoreMemberRole;
+  role!: StoreMemberRole;
 
   @Column({ name: 'permissions', type: 'jsonb', default: {} })
-  permissions: Record<string, boolean>;
+  permissions!: Record<string, boolean>;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamp' })
-  updatedAt: Date;
+  updatedAt!: Date;
 
   // Relations
   @ManyToOne(() => Store, (store) => store.members)
   @JoinColumn({ name: 'store_id' })
-  store: Store;
+  store!: Store;
 
   @ManyToOne(() => User, (user) => user.storeMembers)
   @JoinColumn({ name: 'user_id' })
-  user: User;
+  user!: User;
 }
