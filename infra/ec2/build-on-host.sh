@@ -22,7 +22,22 @@ git remote set-url origin "$CLONE_URL"
 git fetch --depth 1 origin "$GIT_COMMIT"
 git checkout "$GIT_COMMIT"
 
+ECR_REGISTRY="${IMAGE_URI%%/*}"
+AWS_REGION_FROM_IMAGE=$(echo "$ECR_REGISTRY" | sed -n 's/.*\.ecr\.\([^.]*\)\.amazonaws\.com/\1/p')
+AWS_REGION="${AWS_REGION_FROM_IMAGE:-${AWS_REGION:-ap-southeast-7}}"
+
 echo "Building ${IMAGE_URI} on $(uname -m)..."
 docker build -t "$IMAGE_URI" .
+
+# Fresh login immediately before push — ECR tokens expire after ~12h; stale
+# docker credentials on the host otherwise fail with "authorization token has expired".
+echo "Logging in to ECR registry $ECR_REGISTRY (region $AWS_REGION)"
+ECR_PASSWORD=$(aws ecr get-login-password --region "$AWS_REGION")
+if [ -z "$ECR_PASSWORD" ]; then
+  echo "aws ecr get-login-password returned empty — check EC2 instance IAM role (ecr:GetAuthorizationToken)" >&2
+  exit 1
+fi
+printf '%s' "$ECR_PASSWORD" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+
 docker push "$IMAGE_URI"
 echo "Pushed ${IMAGE_URI}"
