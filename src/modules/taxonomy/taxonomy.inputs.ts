@@ -27,6 +27,12 @@ export class UpdateCategoryInput {
   @IsNotEmpty()
   @Length(1, 255)
   name!: string;
+
+  @Field({ nullable: true })
+  @IsOptional()
+  @IsString()
+  @Length(1, 255)
+  slug?: string;
 }
 
 @InputType()
@@ -49,6 +55,26 @@ export class CreateTagInput {
   @IsNotEmpty()
   @Length(1, 255)
   name!: string;
+}
+
+@InputType()
+export class UpdateTagInput {
+  @Field()
+  @IsString()
+  @IsNotEmpty()
+  tagId!: string;
+
+  @Field()
+  @IsString()
+  @IsNotEmpty()
+  @Length(1, 255)
+  name!: string;
+
+  @Field({ nullable: true })
+  @IsOptional()
+  @IsString()
+  @Length(1, 255)
+  slug?: string;
 }
 
 @InputType()
@@ -77,6 +103,12 @@ export class UpdatePetTypeInput {
   @IsNotEmpty()
   @Length(1, 255)
   name!: string;
+
+  @Field({ nullable: true })
+  @IsOptional()
+  @IsString()
+  @Length(1, 255)
+  slug?: string;
 }
 
 @InputType()
@@ -99,6 +131,26 @@ export class CreateBrandInput {
   @IsNotEmpty()
   @Length(1, 255)
   name!: string;
+}
+
+@InputType()
+export class UpdateBrandInput {
+  @Field()
+  @IsString()
+  @IsNotEmpty()
+  brandId!: string;
+
+  @Field()
+  @IsString()
+  @IsNotEmpty()
+  @Length(1, 255)
+  name!: string;
+
+  @Field({ nullable: true })
+  @IsOptional()
+  @IsString()
+  @Length(1, 255)
+  slug?: string;
 }
 
 @InputType()

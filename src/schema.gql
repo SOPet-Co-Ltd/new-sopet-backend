@@ -687,6 +687,7 @@ type Mutation {
   togglePromotion(id: String!, isActive: Boolean!): PromotionType!
   triggerPayout(input: TriggerPayoutInput!): PayoutType!
   updateAddress(id: String!, input: UpdateAddressInput!): SavedAddressType!
+  updateBrand(input: UpdateBrandInput!): BrandType!
   updateCartItem(input: UpdateCartItemInput!): CartType!
   updateCategory(input: UpdateCategoryInput!): CategoryType!
   updateCustomerAsAdmin(input: UpdateCustomerAsAdminInput!): AdminCustomerType!
@@ -709,6 +710,7 @@ type Mutation {
   updateStoreAsAdmin(input: UpdateStoreAsAdminInput!): AdminStoreType!
   updateStoreMemberRole(input: UpdateStoreMemberRoleInput!): StoreMemberType!
   updateStorePayout(input: UpdateStorePayoutInput!): MyStoreType!
+  updateTag(input: UpdateTagInput!): TagType!
   updateUserProfile(input: UpdateUserProfileInput!): UserProfile!
   updateVendorAsAdmin(input: UpdateVendorAsAdminInput!): AdminVendorType!
   uploadImage(base64: String!, folder: String): UploadResultType!
@@ -1116,7 +1118,9 @@ type Query {
   productReviews(productId: String!): [ReviewType!]!
   products(brandIds: [String!], category: String, limit: Int = 20, maxPrice: Int, minPrice: Int, page: Int = 1, petTypeIds: [String!], search: String, searchContext: SearchContextInput, sessionId: String, sortBy: String, sortOrder: String, storeId: String, tag: String): ProductConnection!
   recommendedProducts(excludeProductIds: [String!], limit: Int = 50, searchContext: SearchContextInput, sessionId: String, shuffleSeed: String): [ProductType!]!
+  rejectedBrands: [BrandType!]!
   rejectedCategories: [CategoryType!]!
+  rejectedPetTypes: [PetTypeType!]!
   rejectedTags: [TagType!]!
   searchAnalyticsSuggestionCtr(fromDate: DateTime, toDate: DateTime): [SearchSuggestionCtrRowType!]!
   searchAnalyticsSummary(fromDate: DateTime, toDate: DateTime): SearchAnalyticsSummaryType!
@@ -1599,6 +1603,12 @@ input UpdateAddressInput {
   tumbon: String
 }
 
+input UpdateBrandInput {
+  brandId: String!
+  name: String!
+  slug: String
+}
+
 input UpdateCartItemInput {
   itemId: String!
   quantity: Int!
@@ -1608,6 +1618,7 @@ input UpdateCartItemInput {
 input UpdateCategoryInput {
   categoryId: String!
   name: String!
+  slug: String
 }
 
 input UpdateCustomerAsAdminInput {
@@ -1626,6 +1637,7 @@ input UpdateOrderStatusInput {
 input UpdatePetTypeInput {
   name: String!
   petTypeId: String!
+  slug: String
 }
 
 input UpdatePlatformAdInput {
@@ -1788,6 +1800,12 @@ input UpdateStoreSettingsInput {
   description: String
   logoUrl: String
   name: String
+}
+
+input UpdateTagInput {
+  name: String!
+  slug: String
+  tagId: String!
 }
 
 input UpdateUserProfileInput {

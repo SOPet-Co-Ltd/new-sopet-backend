@@ -83,6 +83,42 @@ export class TaxonomyService {
     });
   }
 
+  private slugExistsError(): ConflictException {
+    return new ConflictException({
+      code: 'SLUG_EXISTS',
+      message: 'ชื่อย่อ (slug) นี้ถูกใช้งานแล้ว',
+    });
+  }
+
+  private invalidSlugError(): BadRequestException {
+    return new BadRequestException({
+      code: 'INVALID_SLUG',
+      message: 'รูปแบบ slug ไม่ถูกต้อง',
+    });
+  }
+
+  /**
+   * Normalize an admin-provided slug. Empty / unusable input is rejected.
+   */
+  private normalizeProvidedSlug(slug: string): string {
+    const normalized = generateSlug(slug.trim(), '');
+    if (!normalized) {
+      throw this.invalidSlugError();
+    }
+    return normalized;
+  }
+
+  private async assertUniqueSlug(
+    repository: TaxonomyRepository,
+    slug: string,
+    excludeId: string,
+  ): Promise<void> {
+    const existing = await repository.findOne({ where: { slug } });
+    if (existing && existing.id !== excludeId) {
+      throw this.slugExistsError();
+    }
+  }
+
   /**
    * Backstop for the partial unique index (`idx_*_name_lower`): when a
    * concurrent request slips past `assertUniqueName`, Postgres raises a unique
@@ -158,6 +194,20 @@ export class TaxonomyService {
     });
   }
 
+  async findRejectedPetTypes(): Promise<PetType[]> {
+    return this.petTypeRepository.find({
+      where: { approvalStatus: TaxonomyApprovalStatus.REJECTED },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async findRejectedBrands(): Promise<Brand[]> {
+    return this.brandRepository.find({
+      where: { approvalStatus: TaxonomyApprovalStatus.REJECTED },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
   async createCategory(
     name: string,
     createdBy: string,
@@ -213,7 +263,67 @@ export class TaxonomyService {
     }
   }
 
-  async updateCategory(categoryId: string, name: string): Promise<Category> {
+  async updateTag(tagId: string, name: string, slug?: string | null): Promise<Tag> {
+    const tag = await this.tagRepository.findOne({ where: { id: tagId } });
+
+    if (!tag) {
+      throw new NotFoundException({
+        code: 'TAG_NOT_FOUND',
+        message: 'Tag not found',
+      });
+    }
+
+    const trimmedName = name.trim();
+    const nameChanged = trimmedName !== tag.name;
+
+    let nextSlug = tag.slug;
+    if (slug !== undefined && slug !== null) {
+      nextSlug = this.normalizeProvidedSlug(slug);
+    } else if (nameChanged) {
+      nextSlug = await this.ensureUniqueSlugForEntity(
+        this.tagRepository,
+        trimmedName,
+        'tag',
+        tagId,
+      );
+    }
+
+    const slugChanged = nextSlug !== tag.slug;
+    if (!nameChanged && !slugChanged) {
+      return tag;
+    }
+
+    if (nameChanged) {
+      const duplicate = await this.tagRepository.findOne({
+        where: {
+          name: ILike(trimmedName),
+          approvalStatus: Not(TaxonomyApprovalStatus.REJECTED),
+        },
+      });
+
+      if (duplicate && duplicate.id !== tagId) {
+        throw this.duplicateNameError('แท็ก');
+      }
+    }
+
+    if (slugChanged) {
+      await this.assertUniqueSlug(this.tagRepository, nextSlug, tagId);
+    }
+
+    tag.name = trimmedName;
+    tag.slug = nextSlug;
+
+    try {
+      return await this.tagRepository.save(tag);
+    } catch (error) {
+      if (this.isUniqueViolation(error)) {
+        throw this.duplicateNameError('แท็ก');
+      }
+      throw error;
+    }
+  }
+
+  async updateCategory(categoryId: string, name: string, slug?: string | null): Promise<Category> {
     const category = await this.categoryRepository.findOne({ where: { id: categoryId } });
 
     if (!category) {
@@ -224,30 +334,44 @@ export class TaxonomyService {
     }
 
     const trimmedName = name.trim();
-    if (trimmedName === category.name) {
+    const nameChanged = trimmedName !== category.name;
+
+    let nextSlug = category.slug;
+    if (slug !== undefined && slug !== null) {
+      nextSlug = this.normalizeProvidedSlug(slug);
+    } else if (nameChanged) {
+      nextSlug = await this.ensureUniqueSlugForEntity(
+        this.categoryRepository,
+        trimmedName,
+        'category',
+        categoryId,
+      );
+    }
+
+    const slugChanged = nextSlug !== category.slug;
+    if (!nameChanged && !slugChanged) {
       return category;
     }
 
-    const duplicate = await this.categoryRepository.findOne({
-      where: {
-        name: ILike(trimmedName),
-        approvalStatus: Not(TaxonomyApprovalStatus.REJECTED),
-      },
-    });
+    if (nameChanged) {
+      const duplicate = await this.categoryRepository.findOne({
+        where: {
+          name: ILike(trimmedName),
+          approvalStatus: Not(TaxonomyApprovalStatus.REJECTED),
+        },
+      });
 
-    if (duplicate && duplicate.id !== categoryId) {
-      throw this.duplicateNameError('หมวดหมู่');
+      if (duplicate && duplicate.id !== categoryId) {
+        throw this.duplicateNameError('หมวดหมู่');
+      }
     }
 
-    const slug = await this.ensureUniqueSlugForEntity(
-      this.categoryRepository,
-      trimmedName,
-      'category',
-      categoryId,
-    );
+    if (slugChanged) {
+      await this.assertUniqueSlug(this.categoryRepository, nextSlug, categoryId);
+    }
 
     category.name = trimmedName;
-    category.slug = slug;
+    category.slug = nextSlug;
 
     try {
       return await this.categoryRepository.save(category);
@@ -572,7 +696,12 @@ export class TaxonomyService {
     });
   }
 
-  async createPetType(name: string, createdBy: string, imageUrl?: string | null): Promise<PetType> {
+  async createPetType(
+    name: string,
+    createdBy: string,
+    role: UserRole,
+    imageUrl?: string | null,
+  ): Promise<PetType> {
     await this.assertUniqueName(this.petTypeRepository, name, 'ประเภทสัตว์เลี้ยง');
 
     const slug = await this.ensureUniqueSlug(this.petTypeRepository, name, 'pet-type');
@@ -586,7 +715,7 @@ export class TaxonomyService {
       name: name.trim(),
       slug,
       createdBy,
-      approvalStatus: TaxonomyApprovalStatus.PENDING,
+      approvalStatus: this.resolveApprovalStatus(role),
       imageUrl: trimmedImageUrl,
     });
 
@@ -622,7 +751,67 @@ export class TaxonomyService {
     }
   }
 
-  async updatePetType(petTypeId: string, name: string): Promise<PetType> {
+  async updateBrand(brandId: string, name: string, slug?: string | null): Promise<Brand> {
+    const brand = await this.brandRepository.findOne({ where: { id: brandId } });
+
+    if (!brand) {
+      throw new NotFoundException({
+        code: 'BRAND_NOT_FOUND',
+        message: 'Brand not found',
+      });
+    }
+
+    const trimmedName = name.trim();
+    const nameChanged = trimmedName !== brand.name;
+
+    let nextSlug = brand.slug;
+    if (slug !== undefined && slug !== null) {
+      nextSlug = this.normalizeProvidedSlug(slug);
+    } else if (nameChanged) {
+      nextSlug = await this.ensureUniqueSlugForEntity(
+        this.brandRepository,
+        trimmedName,
+        'brand',
+        brandId,
+      );
+    }
+
+    const slugChanged = nextSlug !== brand.slug;
+    if (!nameChanged && !slugChanged) {
+      return brand;
+    }
+
+    if (nameChanged) {
+      const duplicate = await this.brandRepository.findOne({
+        where: {
+          name: ILike(trimmedName),
+          approvalStatus: Not(TaxonomyApprovalStatus.REJECTED),
+        },
+      });
+
+      if (duplicate && duplicate.id !== brandId) {
+        throw this.duplicateNameError('แบรนด์');
+      }
+    }
+
+    if (slugChanged) {
+      await this.assertUniqueSlug(this.brandRepository, nextSlug, brandId);
+    }
+
+    brand.name = trimmedName;
+    brand.slug = nextSlug;
+
+    try {
+      return await this.brandRepository.save(brand);
+    } catch (error) {
+      if (this.isUniqueViolation(error)) {
+        throw this.duplicateNameError('แบรนด์');
+      }
+      throw error;
+    }
+  }
+
+  async updatePetType(petTypeId: string, name: string, slug?: string | null): Promise<PetType> {
     const petType = await this.petTypeRepository.findOne({ where: { id: petTypeId } });
 
     if (!petType) {
@@ -633,30 +822,44 @@ export class TaxonomyService {
     }
 
     const trimmedName = name.trim();
-    if (trimmedName === petType.name) {
+    const nameChanged = trimmedName !== petType.name;
+
+    let nextSlug = petType.slug;
+    if (slug !== undefined && slug !== null) {
+      nextSlug = this.normalizeProvidedSlug(slug);
+    } else if (nameChanged) {
+      nextSlug = await this.ensureUniqueSlugForEntity(
+        this.petTypeRepository,
+        trimmedName,
+        'pet-type',
+        petTypeId,
+      );
+    }
+
+    const slugChanged = nextSlug !== petType.slug;
+    if (!nameChanged && !slugChanged) {
       return petType;
     }
 
-    const duplicate = await this.petTypeRepository.findOne({
-      where: {
-        name: ILike(trimmedName),
-        approvalStatus: Not(TaxonomyApprovalStatus.REJECTED),
-      },
-    });
+    if (nameChanged) {
+      const duplicate = await this.petTypeRepository.findOne({
+        where: {
+          name: ILike(trimmedName),
+          approvalStatus: Not(TaxonomyApprovalStatus.REJECTED),
+        },
+      });
 
-    if (duplicate && duplicate.id !== petTypeId) {
-      throw this.duplicateNameError('ประเภทสัตว์เลี้ยง');
+      if (duplicate && duplicate.id !== petTypeId) {
+        throw this.duplicateNameError('ประเภทสัตว์เลี้ยง');
+      }
     }
 
-    const slug = await this.ensureUniqueSlugForEntity(
-      this.petTypeRepository,
-      trimmedName,
-      'pet-type',
-      petTypeId,
-    );
+    if (slugChanged) {
+      await this.assertUniqueSlug(this.petTypeRepository, nextSlug, petTypeId);
+    }
 
     petType.name = trimmedName;
-    petType.slug = slug;
+    petType.slug = nextSlug;
 
     try {
       return await this.petTypeRepository.save(petType);

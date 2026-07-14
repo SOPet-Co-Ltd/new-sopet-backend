@@ -144,6 +144,25 @@ describe('TaxonomyService', () => {
     expect(tag.approvalStatus).toBe(TaxonomyApprovalStatus.APPROVED);
   });
 
+  it('creates approved pet type for admin', async () => {
+    petTypeRepository.findOne.mockResolvedValue(null);
+
+    const petType = await service.createPetType('Dogs', 'admin-1', UserRole.ADMIN);
+
+    expect(petType.approvalStatus).toBe(TaxonomyApprovalStatus.APPROVED);
+    expect(petType.imageUrl ?? null).toBeNull();
+    expect(petType.slug).toBe('dogs');
+    expect(petTypeRepository.save).toHaveBeenCalled();
+  });
+
+  it('creates pending pet type for vendor', async () => {
+    petTypeRepository.findOne.mockResolvedValue(null);
+
+    const petType = await service.createPetType('Cats', 'vendor-1', UserRole.VENDOR);
+
+    expect(petType.approvalStatus).toBe(TaxonomyApprovalStatus.PENDING);
+  });
+
   it('rejects duplicate category name (case-insensitive) with a conflict', async () => {
     categoryRepository.findOne.mockResolvedValue({ id: 'existing', name: 'Cat Food' });
 
@@ -346,7 +365,7 @@ describe('TaxonomyService', () => {
     });
   });
 
-  describe('findRejectedCategories / findRejectedTags', () => {
+  describe('findRejectedCategories / findRejectedTags / findRejectedPetTypes / findRejectedBrands', () => {
     it('returns only rejected taxonomy with expected ordering', async () => {
       categoryRepository.find.mockResolvedValue([
         { id: 'cat-r2', name: 'B', approvalStatus: TaxonomyApprovalStatus.REJECTED },
@@ -356,9 +375,17 @@ describe('TaxonomyService', () => {
         { id: 'tag-r2', createdAt: new Date('2024-02-02') },
         { id: 'tag-r1', createdAt: new Date('2024-02-01') },
       ]);
+      petTypeRepository.find.mockResolvedValue([
+        { id: 'pet-r1', createdAt: new Date('2024-03-01') },
+      ]);
+      brandRepository.find.mockResolvedValue([
+        { id: 'brand-r1', createdAt: new Date('2024-04-01') },
+      ]);
 
       await service.findRejectedCategories();
       await service.findRejectedTags();
+      await service.findRejectedPetTypes();
+      await service.findRejectedBrands();
 
       expect(categoryRepository.find).toHaveBeenCalledWith({
         where: { approvalStatus: TaxonomyApprovalStatus.REJECTED },
@@ -368,14 +395,26 @@ describe('TaxonomyService', () => {
         where: { approvalStatus: TaxonomyApprovalStatus.REJECTED },
         order: { createdAt: 'DESC' },
       });
+      expect(petTypeRepository.find).toHaveBeenCalledWith({
+        where: { approvalStatus: TaxonomyApprovalStatus.REJECTED },
+        order: { createdAt: 'DESC' },
+      });
+      expect(brandRepository.find).toHaveBeenCalledWith({
+        where: { approvalStatus: TaxonomyApprovalStatus.REJECTED },
+        order: { createdAt: 'DESC' },
+      });
     });
 
     it('returns empty arrays when no rejected rows exist', async () => {
       categoryRepository.find.mockResolvedValue([]);
       tagRepository.find.mockResolvedValue([]);
+      petTypeRepository.find.mockResolvedValue([]);
+      brandRepository.find.mockResolvedValue([]);
 
       await expect(service.findRejectedCategories()).resolves.toEqual([]);
       await expect(service.findRejectedTags()).resolves.toEqual([]);
+      await expect(service.findRejectedPetTypes()).resolves.toEqual([]);
+      await expect(service.findRejectedBrands()).resolves.toEqual([]);
     });
   });
 
@@ -533,6 +572,114 @@ describe('TaxonomyService', () => {
 
       expect(previewQb.andWhere).toHaveBeenCalledWith('product.deleted_at IS NULL');
       expect(countQb.andWhere).toHaveBeenCalledWith('product.deleted_at IS NULL');
+    });
+  });
+
+  describe('updateCategory', () => {
+    const existing = {
+      id: 'cat-1',
+      name: 'Pet Food',
+      slug: 'pet-food',
+      approvalStatus: TaxonomyApprovalStatus.APPROVED,
+    };
+
+    it('updates slug without changing name', async () => {
+      categoryRepository.findOne.mockResolvedValueOnce(existing).mockResolvedValueOnce(null);
+
+      const result = await service.updateCategory('cat-1', 'Pet Food', 'pet-foods');
+
+      expect(result.slug).toBe('pet-foods');
+      expect(result.name).toBe('Pet Food');
+      expect(categoryRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({ slug: 'pet-foods', name: 'Pet Food' }),
+      );
+    });
+
+    it('rejects duplicate slug', async () => {
+      categoryRepository.findOne
+        .mockResolvedValueOnce(existing)
+        .mockResolvedValueOnce({ id: 'cat-2', slug: 'toys' });
+
+      await expect(service.updateCategory('cat-1', 'Pet Food', 'toys')).rejects.toThrow(
+        ConflictException,
+      );
+    });
+
+    it('rejects invalid slug', async () => {
+      categoryRepository.findOne.mockResolvedValueOnce(existing);
+
+      await expect(service.updateCategory('cat-1', 'Pet Food', '---')).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('auto-generates slug when name changes and slug omitted', async () => {
+      categoryRepository.findOne
+        .mockResolvedValueOnce(existing)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null);
+
+      const result = await service.updateCategory('cat-1', 'Dog Food');
+
+      expect(result.name).toBe('Dog Food');
+      expect(result.slug).toBe('dog-food');
+    });
+  });
+
+  describe('updatePetType', () => {
+    const existing = {
+      id: 'pet-1',
+      name: 'Dog',
+      slug: 'dog',
+      approvalStatus: TaxonomyApprovalStatus.APPROVED,
+    };
+
+    it('updates slug without changing name', async () => {
+      petTypeRepository.findOne.mockResolvedValueOnce(existing).mockResolvedValueOnce(null);
+
+      const result = await service.updatePetType('pet-1', 'Dog', 'dogs');
+
+      expect(result.slug).toBe('dogs');
+      expect(result.name).toBe('Dog');
+    });
+  });
+
+  describe('updateTag', () => {
+    const existing = {
+      id: 'tag-1',
+      name: 'Organic',
+      slug: 'organic',
+      approvalStatus: TaxonomyApprovalStatus.APPROVED,
+    };
+
+    it('updates name and slug', async () => {
+      tagRepository.findOne
+        .mockResolvedValueOnce(existing)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null);
+
+      const result = await service.updateTag('tag-1', 'Natural', 'natural');
+
+      expect(result.name).toBe('Natural');
+      expect(result.slug).toBe('natural');
+    });
+  });
+
+  describe('updateBrand', () => {
+    const existing = {
+      id: 'brand-1',
+      name: 'Acme',
+      slug: 'acme',
+      approvalStatus: TaxonomyApprovalStatus.APPROVED,
+    };
+
+    it('updates slug without changing name', async () => {
+      brandRepository.findOne.mockResolvedValueOnce(existing).mockResolvedValueOnce(null);
+
+      const result = await service.updateBrand('brand-1', 'Acme', 'acme-pets');
+
+      expect(result.slug).toBe('acme-pets');
+      expect(result.name).toBe('Acme');
     });
   });
 });
