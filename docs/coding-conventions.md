@@ -15,7 +15,7 @@ Conventions observed in the `sopet-backend` codebase.
 
 ## Module structure
 
-Every feature module follows:
+Typical feature module layout:
 
 ```
 modules/<feature>/
@@ -24,8 +24,11 @@ modules/<feature>/
 ├── <feature>.resolver.ts      # if GraphQL
 ├── <feature>.inputs.ts        # GraphQL inputs
 ├── dto/                       # REST DTOs only
+├── guards/                    # module-specific (e.g. auth, api-keys)
 └── <feature>.service.spec.ts
 ```
+
+Infrastructure-only modules (`email`, `sms`, `redis`, `queue`, `omise`, `inventory`, `health`) may omit resolvers/inputs.
 
 ## Imports
 
@@ -128,10 +131,16 @@ yarn lint              # ESLint with fix
 - ESLint flat config: `eslint.config.mjs`
 - `@typescript-eslint/no-explicit-any`: off
 
+## Authorization
+
+- Global: `JwtAuthGuard`, `StoreStatusGuard`, `CustomerStatusGuard`
+- `@Public()` skips required auth (token still parsed when present)
+- Role checks: `@UseGuards(RolesGuard)` + `@Roles(...)` (RolesGuard is not global)
+
 ## Git
 
 - Yarn only (`preinstall: npx only-allow yarn`)
-- CI on PR: format → build → test → e2e
+- CI on PR to `main` / `uat`: format → build → test → e2e (Node 22)
 
 ## Related docs
 

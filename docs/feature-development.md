@@ -5,7 +5,7 @@ How to implement a new backend feature following existing patterns.
 ## Checklist
 
 ```
-1. Planning doc (workspace docs/ if large feature)
+1. Planning doc (`docs/design/` if large feature)
 2. Database entity + migration
 3. Service (business logic)
 4. GraphQL input types + resolver
@@ -121,7 +121,7 @@ src/modules/my-feature/
 └── my-feature.service.spec.ts
 
 src/database/entities/my-entity.entity.ts
-src/database/migrations/17xxxxx-AddMyEntity.ts
+src/database/migrations/<timestamp>-AddMyEntity.ts
 ```
 
 **Module file:**
@@ -177,5 +177,5 @@ Prefer `@InjectRepository(Entity)` in services. Add `database/repositories/` onl
 - [API](api.md)
 - [Database](database.md)
 - [Coding conventions](coding-conventions.md)
-- [Returns and disputes](../../new-sopet-workspace/docs/developer/returns-and-disputes.md)
-- [Cross-repo workflow](../../new-sopet-workspace/docs/developer/cross-repo-workflow.md)
+
+After schema changes, regenerate `src/schema.gql`, then run `yarn graphql:codegen` in `../sopet-storefront` and/or `../sopet-admin`. Commit each repo separately.

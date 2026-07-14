@@ -16,7 +16,6 @@ import {
 export class EmailDeliveryService {
   private readonly logger = new Logger(EmailDeliveryService.name);
   private readonly adminPanelUrl: string;
-  private readonly storefrontUrl: string;
   private readonly brand: EmailTemplateBrand;
 
   constructor(
@@ -27,12 +26,12 @@ export class EmailDeliveryService {
       this.configService.get<string>('app.adminPanelUrl') ||
       process.env.ADMIN_PANEL_URL ||
       'http://localhost:3001';
-    this.storefrontUrl =
-      this.configService.get<string>('app.storefrontUrl') ||
-      process.env.STOREFRONT_URL ||
-      'http://localhost:3000';
+    const apiUrl =
+      this.configService.get<string>('app.apiUrl') ||
+      process.env.API_URL?.replace(/\/$/, '') ||
+      'http://localhost:3002';
     this.brand = {
-      logoUrl: `${this.storefrontUrl}/images/email/sopet-logo-white.svg`,
+      logoUrl: `${apiUrl}/images/email/sopet-logo-white.png`,
     };
   }
 

@@ -39,12 +39,12 @@ Playground disabled when `NODE_ENV=production`.
 
 ### OTP not received
 
-Check `sms.service.ts` delivery chain:
+Check `sms.service.ts` delivery chain (order matters):
 
-1. ThaiBulkSMS (if `THAIBULKSMS_API_KEY` and `THAIBULKSMS_API_SECRET` are set)
-2. Twilio fallback (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`)
-3. `NODE_ENV=development`: OTP logged to console (no SMS sent)
-4. `SMS_OTP_LOG_ONLY=true`: OTP logged to server logs (UAT/testing only)
+1. `NODE_ENV=development` **or** `SMS_OTP_LOG_ONLY=true` — OTP logged to console; no provider call
+2. ThaiBulkSMS when `THAIBULKSMS_API_KEY` and `THAIBULKSMS_API_SECRET` are set
+3. Twilio fallback when `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_PHONE_NUMBER` are set
+4. Otherwise `SMS_NOT_CONFIGURED`
 
 GraphQL error codes from `sendCustomerOtp`:
 
@@ -88,6 +88,26 @@ UAT requires GitHub Environment secrets `THAIBULKSMS_API_KEY` and `THAIBULKSMS_A
 
 - `main.ts` requires `rawBody: true` for HMAC
 - Secret must match Omise dashboard (base64)
+
+## Email
+
+### Logo missing in received emails
+
+- Templates use `${API_URL}/images/email/sopet-logo-white.png` (PNG, not SVG).
+- Locally, open `http://localhost:3002/images/email/sopet-logo-white.png` while `yarn start:dev` is running.
+- In UAT/production, set `API_URL` to the **public** HTTPS API hostname (same host clients use for GraphQL). Without it, the logo URL may point at `localhost` and fail for recipients.
+- Confirm the Docker image includes `public/` (see `Dockerfile`).
+
+### Emails not sent in development
+
+Expected: `NODE_ENV=development` logs the email body to the backend console instead of calling Resend. Look for `[DEV EMAIL]` / `[dev] …` lines. Set `RESEND_API_KEY` and use a non-development `NODE_ENV` to send for real.
+
+### Local HTML previews
+
+```bash
+yarn email:previews
+# Open temp/email-previews/*.html in a browser
+```
 
 ## Redis / BullMQ
 

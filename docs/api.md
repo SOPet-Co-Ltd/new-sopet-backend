@@ -10,13 +10,13 @@
 
 Auto-generated code-first schema at `src/schema.gql`. Regenerated on `yarn start:dev`.
 
-Root types:
+Root types (line numbers from current `src/schema.gql`, ~1907 lines):
 
-| Type           | Line in schema.gql (approx) | Contents                                        |
-| -------------- | --------------------------- | ----------------------------------------------- |
-| `Query`        | ~900                        | Catalog, cart, orders, search, admin, analytics |
-| `Mutation`     | ~484                        | Auth, CRUD, checkout, taxonomy, reviews         |
-| `Subscription` | ~1376                       | `paymentStatusUpdated`                          |
+| Type           | Line in schema.gql | Contents                                        |
+| -------------- | ------------------ | ----------------------------------------------- |
+| `Mutation`     | 575                | Auth, CRUD, checkout, taxonomy, reviews         |
+| `Query`        | 1038               | Catalog, cart, orders, search, admin, analytics |
+| `Subscription` | 1531               | `paymentStatusUpdated`                          |
 
 Do not edit `schema.gql` manually. Change resolvers/entities and restart the server.
 
@@ -93,24 +93,9 @@ Client receives:
 
 WebSocket endpoint: same `/graphql` path via `graphql-ws`.
 
-Used by: `PaymentsResolver.paymentStatusUpdated`, `DisputesResolver.disputeMessageAdded`
+Used by: `PaymentsResolver.paymentStatusUpdated`.
 
 Storefront connects via `getGraphqlWsUrl()` in `sopet-storefront/src/lib/config.ts`.
-
-### Disputes module (returns)
-
-| Operation                 | Role          | Notes                                                               |
-| ------------------------- | ------------- | ------------------------------------------------------------------- |
-| `createDisputes`          | customer      | Per-store split; does **not** change `orders.status`                |
-| `myDisputes`              | customer      | List with `items`, `resolution`                                     |
-| `openDisputes`            | admin         | Queue                                                               |
-| `vendorDisputes(storeId)` | vendor        | Store-scoped                                                        |
-| `resolveDispute`          | admin         | Sets `resolved`; may sync order to `refunded` if all items refunded |
-| `sendDisputeMessage`      | admin, vendor | Blocked when dispute resolved                                       |
-
-Order sync on resolve: `src/modules/disputes/dispute-order-sync.util.ts`. Cancel guard: `ORDER_HAS_ACTIVE_DISPUTE`.
-
-Runtime reference: [workspace returns-and-disputes](../../new-sopet-workspace/docs/developer/returns-and-disputes.md).
 
 ### Order tracking (public, no auth)
 
@@ -122,12 +107,24 @@ Unknown, malformed, or whitespace-only `orderNumber` all throw the identical `No
 
 ## REST endpoints (limited)
 
-| Method | Path                               | Auth                          | Module                           |
-| ------ | ---------------------------------- | ----------------------------- | -------------------------------- |
-| `POST` | `/webhooks/omise`                  | HMAC (`OMISE_WEBHOOK_SECRET`) | `payments-webhook.controller.ts` |
-| `POST` | `/api/v1/stores/:storeId/products` | API key (`ApiKeyGuard`)       | `public-api.controller.ts`       |
+| Method | Path                               | Auth                          | Module                                                                   |
+| ------ | ---------------------------------- | ----------------------------- | ------------------------------------------------------------------------ |
+| `POST` | `/webhooks/omise`                  | HMAC (`OMISE_WEBHOOK_SECRET`) | `payments-webhook.controller.ts`                                         |
+| `POST` | `/api/v1/stores/:storeId/products` | API key (`ApiKeyGuard`)       | `public-api.controller.ts`                                               |
+| `GET`  | `/health`, `/health/ready`         | `@Public()`                   | `health.controller.ts` (Terminus: Postgres ping + Redis when configured) |
+| `GET`  | `/health/live`                     | `@Public()`                   | `health.controller.ts` (static liveness, no dependency checks)           |
 
 There are **no** `/v1/*` REST routes for application features. Admin and storefront use GraphQL exclusively.
+
+## Static assets
+
+`main.ts` mounts `public/` via Nest `useStaticAssets`. Used for email brand assets:
+
+| Path                                     | File                                       |
+| ---------------------------------------- | ------------------------------------------ |
+| `GET /images/email/sopet-logo-white.png` | `public/images/email/sopet-logo-white.png` |
+
+Absolute URL in templates: `${API_URL}/images/email/sopet-logo-white.png` (`app.apiUrl` / env `API_URL`). See [Authentication — email templates](authentication.md#email-templates).
 
 ### Omise webhook
 
@@ -159,4 +156,3 @@ After schema changes, frontends run `yarn graphql:codegen`.
 
 - [Authentication](authentication.md)
 - [Feature development](feature-development.md)
-- [Workspace data flow](../../new-sopet-workspace/docs/developer/data-flow.md)

@@ -22,7 +22,7 @@ sequenceDiagram
   R->>S: sendOtp(phone)
   S->>DB: Create OTP record
   S->>SMS: sendOtpSms(phone, code)
-  Note over SMS: ThaiBulkSMS → Twilio → dev/log-only
+  Note over SMS: Dev/log-only → ThaiBulkSMS → Twilio
 
   R->>S: verifyOtp(phone, code, sessionId?)
   S->>DB: Validate OTP
@@ -51,7 +51,9 @@ sequenceDiagram
 
 UAT deploy requires `THAIBULKSMS_API_KEY` and `THAIBULKSMS_API_SECRET` (GitHub Environment secrets). Optional: `THAIBULKSMS_SENDER`, `THAIBULKSMS_FORCE` (default `corporate`), `THAIBULKSMS_SHORTEN_URL` (default `false`).
 
-Provider failures return `SMS_DELIVERY_FAILED` (not a generic 500). See `docs/troubleshooting.md` for error codes.
+Provider failures return `SMS_DELIVERY_FAILED` (not a generic 500). See [troubleshooting](troubleshooting.md) for error codes.
+
+## Vendor / admin password login
 
 ```typescript
 // auth.service.ts — login()
@@ -61,7 +63,7 @@ const valid = await bcrypt.compare(password, user.passwordHash);
 return this.generateTokens({ sub: user.id, role: user.role, storeId });
 ```
 
-Password hashing: bcrypt cost 12.
+Password hashing: bcrypt cost 12. Mutations: `vendorLogin`, `adminLogin`.
 
 ## JWT infrastructure
 
@@ -85,6 +87,8 @@ super({
 - Attaches user to request for `@CurrentUser()`
 
 ### Role guard
+
+`RolesGuard` is **not** registered as a global `APP_GUARD`. Pair it with `@Roles(...)` on the handler (or class):
 
 ```typescript
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -180,18 +184,29 @@ No other features are gated by `emailVerified` today (products, orders, payouts,
 
 **Environment variables**
 
-| Variable                           | Default (local)                             | Used for                          |
-| ---------------------------------- | ------------------------------------------- | --------------------------------- |
-| `ADMIN_PANEL_URL`                  | `http://localhost:3001`                     | Verification, reset, invite links |
-| `STOREFRONT_URL`                   | `http://localhost:3000`                     | Email logo asset URL              |
-| `RESEND_API_KEY`                   | unset in dev                                | Production email delivery         |
-| `RESEND_FROM` / `RESEND_FROM_NAME` | `noreply@sopet.co.th` / `SOPet Marketplace` | From address                      |
+| Variable                         | Default (local)                             | Used for                                     |
+| -------------------------------- | ------------------------------------------- | -------------------------------------------- |
+| `ADMIN_PANEL_URL`                | `http://localhost:3001`                     | Verification, reset, invite links            |
+| `API_URL`                        | `http://localhost:3002`                     | Public base URL for email logo (`/images/…`) |
+| `STOREFRONT_URL`                 | `http://localhost:3000`                     | Customer-facing links in emails / redirects  |
+| `RESEND_API_KEY`                 | unset in dev                                | Production email delivery                    |
+| `EMAIL_FROM` / `EMAIL_FROM_NAME` | `noreply@sopet.co.th` / `SOPet Marketplace` | From address                                 |
 
 Registration and admin resend call `AuthService.createAndSendEmailVerificationToken()` (24h expiry, single use).
 
 ### Email templates
 
-All transactional emails go through `EmailDeliveryService` → `email-templates.ts` shared `layout()` (SOPet header, logo, footer). Templates: vendor invite, admin invite, store member invite, password reset, email verification, order paid, order status changed.
+All transactional emails go through `EmailDeliveryService` → `email-templates.ts` shared `layout()` (SOPet header, logo, footer).
+
+| Piece            | Detail                                                                                                                 |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Templates        | Vendor invite, admin invite, store member invite, password reset, email verification, order paid, order status changed |
+| Logo asset       | `public/images/email/sopet-logo-white.png` — served by Nest as a static file                                           |
+| Logo URL in HTML | `${API_URL}/images/email/sopet-logo-white.png` (PNG — SVG is unreliable in many clients)                               |
+| Local previews   | `yarn email:previews` writes HTML + assets to `temp/email-previews/`                                                   |
+| Docker           | Production image includes `public/` (see [Deployment](deployment.md))                                                  |
+
+Set `API_URL` to the **public** HTTPS API hostname in UAT/production so recipients can load the logo.
 
 ## Store API keys
 
@@ -227,5 +242,4 @@ JWT_REFRESH_EXPIRES_IN=7d
 
 ## Related docs
 
-- [Workspace authentication](../../new-sopet-workspace/docs/developer/authentication.md)
 - [API layer](api.md)

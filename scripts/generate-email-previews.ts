@@ -12,13 +12,13 @@ import {
 const outDir = join(__dirname, '../temp/email-previews');
 const assetsDir = join(outDir, 'assets');
 const brand = {
-  logoUrl: './assets/sopet-logo-white.svg',
+  logoUrl: './assets/sopet-logo-white.png',
 };
 
 mkdirSync(assetsDir, { recursive: true });
 copyFileSync(
-  join(__dirname, '../../sopet-storefront/public/images/email/sopet-logo-white.svg'),
-  join(assetsDir, 'sopet-logo-white.svg'),
+  join(__dirname, '../public/images/email/sopet-logo-white.png'),
+  join(assetsDir, 'sopet-logo-white.png'),
 );
 mkdirSync(outDir, { recursive: true });
 

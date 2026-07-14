@@ -4,7 +4,7 @@
 **Date**: 2026-07-11  
 **Status**: Proposed  
 **Repository**: `sopet-backend`  
-**PRD**: [search-taxonomy-fixes-prd.md](../../../new-sopet-workspace/docs/product/search-taxonomy-fixes-prd.md)
+**PRD**: Search, Taxonomy & Category Fixes (external planning doc; not stored in this repository)
 
 ## Overview
 
@@ -51,8 +51,8 @@ No project ADRs exist under `docs/adr/` at design time. This initiative does not
 | ----------------------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
 | GraphQL schema (code-first)         | `src/modules/products/products.resolver.ts`, `src/modules/taxonomy/taxonomy.resolver.ts` | Schema generated from NestJS decorators; no external SDL file                       |
 | PostgreSQL schema                   | `src/database/entities/product.entity.ts`, `src/database/entities/category.entity.ts`    | `products.category_id` FK exists since migration `1700000000006-ProductTaxonomy.ts` |
-| Smart Search PRD                    | `docs/prd/smart-search-prd.md` (workspace)                                               | Semantic leg filter parity reference                                                |
-| Storefront design (tag ID contract) | `docs/design/search-taxonomy-fixes-frontend-design.md` (workspace)                       | Conflict-001: `tag` URL param is tag UUID                                           |
+| Smart Search PRD                    | External Smart Search product requirements                                               | Semantic leg filter parity reference                                                |
+| Storefront design (tag ID contract) | External frontend design for this initiative                                             | Conflict-001: `tag` URL param is tag UUID                                           |
 | S3 / image upload                   | `StorageService.assertFolderImageUrl`                                                    | Category image validation on approve (existing; unchanged in this bundle)           |
 
 ### Agreement Checklist
@@ -1029,10 +1029,8 @@ yarn format:check
 
 ## References
 
-- [PRD: Search, Taxonomy & Category Fixes](../../../new-sopet-workspace/docs/product/search-taxonomy-fixes-prd.md)
 - [Backend Architecture](../architecture.md)
 - [Coding Conventions](../coding-conventions.md)
-- [Smart Search PRD](../../../new-sopet-workspace/docs/prd/smart-search-prd.md) (workspace)
 
 ## Update History
 

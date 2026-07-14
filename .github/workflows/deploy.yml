@@ -62,6 +62,7 @@ jobs:
           PAYMENT_EXPIRY_CHECK_INTERVAL_MS: ${{ vars.PAYMENT_EXPIRY_CHECK_INTERVAL_MS }}
           EMAIL_FROM: ${{ vars.EMAIL_FROM }}
           EMAIL_FROM_NAME: ${{ vars.EMAIL_FROM_NAME }}
+          API_URL: ${{ vars.API_URL }}
           STOREFRONT_URL: ${{ vars.STOREFRONT_URL }}
           ADMIN_PANEL_URL: ${{ vars.ADMIN_PANEL_URL }}
           CORS_ORIGINS: ${{ vars.CORS_ORIGINS }}

@@ -16,11 +16,19 @@ NestJS GraphQL API for the SOPET multi-vendor e-commerce platform.
 | [Deployment](deployment.md)                   | Docker, CI, production                      |
 | [Troubleshooting](troubleshooting.md)         | Common issues                               |
 
-## Cross-repo docs
+## Design notes
 
-- [Workspace developer docs](../../new-sopet-workspace/docs/developer/README.md)
-- [Returns and disputes](../../new-sopet-workspace/docs/developer/returns-and-disputes.md)
-- [System architecture](../../new-sopet-workspace/docs/developer/architecture.md)
+Planning / design docs (not day-to-day how-to) live under [`design/`](design/):
+
+| Document                                                          | Description                             |
+| ----------------------------------------------------------------- | --------------------------------------- |
+| [Search & taxonomy fixes](design/search-taxonomy-fixes-design.md) | Backend design for search/taxonomy work |
+
+## Related repos
+
+- Storefront: sibling `../sopet-storefront` — runs `yarn graphql:codegen` against this repo’s `src/schema.gql`
+- Admin: sibling `../sopet-admin` — same codegen flow
+- See [Architecture](architecture.md) for this API’s module design
 
 ## Quick start
 
@@ -35,10 +43,15 @@ yarn start:dev    # http://localhost:3002/graphql
 
 ## Key entry points
 
-| File                            | Purpose                                               |
-| ------------------------------- | ----------------------------------------------------- |
-| `src/main.ts`                   | Bootstrap, CORS, body parser (rawBody for Omise HMAC) |
-| `src/app.module.ts`             | Root module, TypeORM, global guards/pipes/filters     |
-| `src/graphql/graphql.module.ts` | Apollo Server, schema generation, DataLoaders         |
-| `src/schema.gql`                | Auto-generated GraphQL schema (do not edit manually)  |
-| `ormconfig.ts`                  | TypeORM CLI for migrations                            |
+| File                            | Purpose                                                                 |
+| ------------------------------- | ----------------------------------------------------------------------- |
+| `src/main.ts`                   | Bootstrap, CORS, static `public/`, body parser (rawBody for Omise HMAC) |
+| `src/app.module.ts`             | Root module, TypeORM, global guards/pipes/filters                       |
+| `src/graphql/graphql.module.ts` | Apollo Server, schema generation, DataLoaders                           |
+| `src/schema.gql`                | Auto-generated GraphQL schema (do not edit manually)                    |
+| `public/images/email/`          | Brand assets for transactional emails (e.g. `sopet-logo-white.png`)     |
+| `ormconfig.ts`                  | TypeORM CLI for migrations                                              |
+
+## Email
+
+Transactional mail: Resend via `modules/email/`. Logo URL is `${API_URL}/images/email/sopet-logo-white.png` (PNG for client compatibility). Local previews: `yarn email:previews` → `temp/email-previews/`. See [Authentication — email templates](authentication.md#email-templates).

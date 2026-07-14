@@ -6,35 +6,46 @@
 
 `docker-compose.yml` provides:
 
-| Service  | Port      | Purpose                       |
-| -------- | --------- | ----------------------------- |
-| postgres | 5432      | Database                      |
-| redis    | 6379      | Cache, BullMQ                 |
-| minio    | 9000/9001 | S3-compatible storage         |
-| api      | 3002      | Backend (profile `full` only) |
+| Service    | Port      | Purpose                                         |
+| ---------- | --------- | ----------------------------------------------- |
+| postgres   | 5432      | Database                                        |
+| redis      | 6379      | Cache, BullMQ                                   |
+| minio      | 9000/9001 | S3-compatible storage                           |
+| minio-init | —         | Creates bucket + public download policy         |
+| api        | 3002      | Backend container (Compose profile `full` only) |
 
 ```bash
-yarn docker:up       # Start infra
+yarn docker:up       # Start infra (postgres, redis, minio, minio-init)
 yarn docker:check    # Verify health
 yarn docker:down     # Stop
 yarn docker:reset    # Remove volumes
+yarn docker:ps       # Service status
+yarn docker:logs     # Follow logs
 ```
 
 ### Production image
 
-`Dockerfile` — multi-stage Node 20 Alpine:
+`Dockerfile` — multi-stage Node **22** Alpine:
 
-1. `yarn install`
+1. `yarn install --frozen-lockfile`
 2. `yarn build`
-3. `node dist/main.js`
+3. Copy `dist/`, production `node_modules/`, and `public/` (email/brand static assets)
+4. `CMD ["node", "dist/src/main.js"]`
 
-Exposes port **3002**.
+Exposes port **3002**. Local production-equivalent:
+
+```bash
+yarn build
+yarn start:prod          # node dist/src/main.js
+```
+
+Confirm `API_URL` is the public HTTPS API host so transactional emails reference `https://<api>/images/email/sopet-logo-white.png`.
 
 ## CI/CD
 
-`.github/workflows/ci.yml` — triggered on pull requests:
+`.github/workflows/ci.yml` — pull requests to `main` or `uat` (Node 22):
 
-```yaml
+```bash
 yarn format:check
 yarn build
 yarn test
@@ -45,15 +56,15 @@ E2E tests use mocked repositories — no Postgres/Redis/MinIO in CI.
 
 Dummy env vars: `JWT_SECRET`, `OMISE_*`.
 
-`.github/workflows/deploy.yml` — triggered on push to `deploy/uat` or `deploy/production`:
+`.github/workflows/deploy.yml` — push to `deploy/uat` or `deploy/production` (also `workflow_dispatch`):
 
-1. Load GitHub Environment (`DB_*`, secrets, EC2/ECR config)
+1. Load GitHub Environment (`DB_*`, secrets, EC2/ECR config) via keys in `infra/github-env.keys`
 2. **Run pending TypeORM migrations** (`yarn migration:run`) against the target database
 3. Build/push Docker image to ECR (if not already present for this commit)
 4. Render runtime `.env` from GitHub Environment
 5. **Deploy on EC2** via AWS Systems Manager (`infra/deploy-via-ssm.sh` → `/opt/sopet/deploy.sh`)
 
-Migrations run **before** the new container is started so the schema matches the code being rolled out. The GitHub Actions runner must be able to reach `DB_HOST` (managed Postgres firewall / allowlist). Extensions that require superuser (e.g. `vector`) must be pre-installed on the database once by an admin.
+Migrations run **before** the new container is started so the schema matches the code being rolled out. The GitHub Actions runner must be able to reach `DB_HOST`. Extensions that require superuser (e.g. `vector`) must be pre-installed on the database once by an admin.
 
 ## EC2 + ECR deploy (production / UAT)
 
@@ -99,11 +110,12 @@ Storefront and admin stay on Vercel; only the backend API runs on EC2.
 | `ECR_REPOSITORY`                     | `sopet/backend-uat`         | Image repository name                     |
 | `EC2_INSTANCE_ID`                    | `i-0abc123...`              | Target EC2 instance                       |
 | `CORS_ORIGINS`                       | `https://uat.sopet.org,...` | Must include Vercel storefront/admin URLs |
-| `STOREFRONT_URL` / `ADMIN_PANEL_URL` | `https://...`               | Public frontend URLs                      |
+| `API_URL`                            | `https://api-uat.sopet.org` | Public API base (email logo absolute URL) |
+| `STOREFRONT_URL` / `ADMIN_PANEL_URL` | `https://...`               | Public frontend URLs (links in emails)    |
 
 Plus all application vars/secrets listed in `infra/env.manifest.json`.
 
-Remove legacy ECS variables (`ECS_CLUSTER`, `ECS_SERVICE`, etc.) from GitHub Environments if still present.
+Remove legacy ECS variables (`ECS_CLUSTER`, `ECS_SERVICE`, etc.) from GitHub Environments if still present. The `ecs/` folder retains a historical task-definition fragment; deploy.yml targets EC2.
 
 ### Cloudflare DNS
 
@@ -111,7 +123,7 @@ Remove legacy ECS variables (`ECS_CLUSTER`, `ECS_SERVICE`, etc.) from GitHub Env
 2. Enable **Proxied** (orange cloud) so Cloudflare terminates TLS for clients.
 3. Origin serves HTTP on port **80** (Caddy from `bootstrap.sh` reverse-proxies to `127.0.0.1:3002`).
 4. Set SSL/TLS mode to **Full** (not Strict unless you add a valid origin certificate).
-5. Update `CORS_ORIGINS`, Omise webhook URL, and frontend `NEXT_PUBLIC_GRAPHQL_URL` / admin API URL to the Cloudflare hostname.
+5. Update `API_URL`, `CORS_ORIGINS`, Omise webhook URL, and frontend GraphQL base URLs to the Cloudflare hostname.
 
 ### Manual deploy test (on EC2)
 
@@ -125,15 +137,18 @@ export ENV_FILE=/opt/sopet/.env   # copy from rendered .env.deploy
 
 Key variables from `.env.example`:
 
-| Group    | Variables                                          |
-| -------- | -------------------------------------------------- |
-| App      | `NODE_ENV=production`, `PORT=3002`, `CORS_ORIGINS` |
-| Database | `DB_*`, `DB_SSL=true` for managed Postgres         |
-| JWT      | `JWT_SECRET` (long random string)                  |
-| Storage  | Real AWS S3 or Cloudflare R2 (not MinIO)           |
-| Payments | `OMISE_*`, `OMISE_WEBHOOK_SECRET` (required)       |
-| SMS      | `THAIBULKSMS_*` or `TWILIO_*`                      |
-| Email    | `RESEND_API_KEY`                                   |
+| Group    | Variables                                                           |
+| -------- | ------------------------------------------------------------------- |
+| App      | `NODE_ENV=production`, `PORT=3002`, `API_URL`, `CORS_ORIGINS`       |
+| Database | `DB_*`, `DB_SSL=true` for managed Postgres                          |
+| JWT      | `JWT_SECRET` (long random string)                                   |
+| Storage  | Real AWS S3 or Cloudflare R2 (not MinIO)                            |
+| Payments | `OMISE_*`, `OMISE_WEBHOOK_SECRET` (required)                        |
+| SMS      | `THAIBULKSMS_*` or `TWILIO_*`                                       |
+| Email    | `RESEND_API_KEY`, `EMAIL_FROM`, `EMAIL_FROM_NAME`                   |
+| Redis    | `REDIS_HOST` (omit to disable cache and BullMQ queues)              |
+| Search   | `SEARCH_SMART_ENABLED`, `OPENAI_API_KEY` (embeddings worker)        |
+| Payouts  | `PAYOUT_CRON_SCHEDULE`, `PAYOUT_CRON_TIMEZONE`, `PAYOUT_MIN_AMOUNT` |
 
 ### Production bootstrap
 
@@ -157,10 +172,10 @@ Images converted to WebP before upload (`StorageService` + `sharp`).
 
 ## Health checks
 
-`HealthModule` exists at `src/modules/health/` but is **not wired** into `AppModule`. GraphQL health query available via `src/graphql/app.resolver.ts`.
+`HealthModule` (`src/modules/health/`) is wired into `AppModule` and exposes REST checks at `GET /health`, `/health/ready` (Postgres ping, plus Redis when configured), and `/health/live` (static liveness). A separate GraphQL `health` query is available via `src/graphql/app.resolver.ts`.
 
 ## Related docs
 
-- [Getting started](../../new-sopet-workspace/docs/developer/getting-started.md)
 - [Database — seeds](database.md#seeds)
 - [API — Omise webhook](api.md#omise-webhook)
+- Root [README](../README.md) for local setup
