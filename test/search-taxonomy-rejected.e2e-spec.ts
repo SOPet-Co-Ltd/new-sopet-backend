@@ -29,6 +29,9 @@ import { Category } from '../src/database/entities/category.entity';
 import { Tag } from '../src/database/entities/tag.entity';
 import { PetType } from '../src/database/entities/pet-type.entity';
 import { Brand } from '../src/database/entities/brand.entity';
+import { Order } from '../src/database/entities/order.entity';
+import { OrderItem } from '../src/database/entities/order-item.entity';
+import { AuditLog } from '../src/database/entities/audit-log.entity';
 import { AppGraphqlResolver } from '../src/graphql/app.resolver';
 import { GraphqlContextFactory } from '../src/graphql/loaders/graphql-context.factory';
 import { ProductsResolver } from '../src/modules/products/products.resolver';
@@ -108,6 +111,9 @@ async function createRejectedTaxonomyHarness(): Promise<INestApplication> {
         Tag,
         PetType,
         Brand,
+        Order,
+        OrderItem,
+        AuditLog,
       ]),
       GraphQLModule.forRoot<ApolloDriverConfig>({
         driver: ApolloDriver,
