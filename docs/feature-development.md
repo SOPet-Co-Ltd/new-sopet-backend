@@ -174,6 +174,7 @@ Prefer `@InjectRepository(Entity)` in services. Add `database/repositories/` onl
 
 ## Related docs
 
+- [File types](file-types.md)
 - [API](api.md)
 - [Database](database.md)
 - [Coding conventions](coding-conventions.md)

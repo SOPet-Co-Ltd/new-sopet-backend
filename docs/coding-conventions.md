@@ -13,6 +13,8 @@ Conventions observed in the `sopet-backend` codebase.
 | DB columns  | snake_case                | `created_at`         |
 | Error codes | SCREAMING_SNAKE           | `INSUFFICIENT_STOCK` |
 
+For every suffix (`.entity`, `.inputs`, `.resolver`, `.guard`, …) — what it is, when to edit, and how it is wired — see [file-types.md](file-types.md).
+
 ## Module structure
 
 Typical feature module layout:
