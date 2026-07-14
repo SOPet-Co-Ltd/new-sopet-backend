@@ -39,12 +39,12 @@ Playground disabled when `NODE_ENV=production`.
 
 ### OTP not received
 
-Check `sms.service.ts` delivery chain:
+Check `sms.service.ts` delivery chain (order matters):
 
-1. ThaiBulkSMS (if `THAIBULKSMS_API_KEY` and `THAIBULKSMS_API_SECRET` are set)
-2. Twilio fallback (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`)
-3. `NODE_ENV=development`: OTP logged to console (no SMS sent)
-4. `SMS_OTP_LOG_ONLY=true`: OTP logged to server logs (UAT/testing only)
+1. `NODE_ENV=development` **or** `SMS_OTP_LOG_ONLY=true` — OTP logged to console; no provider call
+2. ThaiBulkSMS when `THAIBULKSMS_API_KEY` and `THAIBULKSMS_API_SECRET` are set
+3. Twilio fallback when `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_PHONE_NUMBER` are set
+4. Otherwise `SMS_NOT_CONFIGURED`
 
 GraphQL error codes from `sendCustomerOtp`:
 

@@ -22,7 +22,7 @@ sequenceDiagram
   R->>S: sendOtp(phone)
   S->>DB: Create OTP record
   S->>SMS: sendOtpSms(phone, code)
-  Note over SMS: ThaiBulkSMS → Twilio → dev/log-only
+  Note over SMS: Dev/log-only → ThaiBulkSMS → Twilio
 
   R->>S: verifyOtp(phone, code, sessionId?)
   S->>DB: Validate OTP
@@ -51,7 +51,9 @@ sequenceDiagram
 
 UAT deploy requires `THAIBULKSMS_API_KEY` and `THAIBULKSMS_API_SECRET` (GitHub Environment secrets). Optional: `THAIBULKSMS_SENDER`, `THAIBULKSMS_FORCE` (default `corporate`), `THAIBULKSMS_SHORTEN_URL` (default `false`).
 
-Provider failures return `SMS_DELIVERY_FAILED` (not a generic 500). See `docs/troubleshooting.md` for error codes.
+Provider failures return `SMS_DELIVERY_FAILED` (not a generic 500). See [troubleshooting](troubleshooting.md) for error codes.
+
+## Vendor / admin password login
 
 ```typescript
 // auth.service.ts — login()
@@ -61,7 +63,7 @@ const valid = await bcrypt.compare(password, user.passwordHash);
 return this.generateTokens({ sub: user.id, role: user.role, storeId });
 ```
 
-Password hashing: bcrypt cost 12.
+Password hashing: bcrypt cost 12. Mutations: `vendorLogin`, `adminLogin`.
 
 ## JWT infrastructure
 
@@ -85,6 +87,8 @@ super({
 - Attaches user to request for `@CurrentUser()`
 
 ### Role guard
+
+`RolesGuard` is **not** registered as a global `APP_GUARD`. Pair it with `@Roles(...)` on the handler (or class):
 
 ```typescript
 @UseGuards(JwtAuthGuard, RolesGuard)

@@ -121,7 +121,7 @@ src/modules/my-feature/
 └── my-feature.service.spec.ts
 
 src/database/entities/my-entity.entity.ts
-src/database/migrations/17xxxxx-AddMyEntity.ts
+src/database/migrations/<timestamp>-AddMyEntity.ts
 ```
 
 **Module file:**

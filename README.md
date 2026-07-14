@@ -4,7 +4,7 @@ NestJS GraphQL API for the SOPET multi-vendor e-commerce platform.
 
 ## Overview
 
-Custom-built backend replacing Medusa.js. Serves the customer storefront and admin/vendor dashboard through a single GraphQL endpoint at `/graphql`.
+Custom-built backend serving the customer storefront and admin/vendor dashboard through a single GraphQL endpoint at `/graphql`, plus a small REST surface for Omise webhooks, health checks, and the vendor public product API.
 
 **Key capabilities:** multi-vendor stores, phone OTP customer auth, email/password vendor/admin auth (vendor email verification), Omise payments (PromptPay, credit card), smart search, reviews, promotions, payouts, image uploads (S3/MinIO/R2), transactional email (Resend).
 
@@ -35,8 +35,8 @@ Modular monolith: 28 feature modules under `src/modules/`. See [docs/architectur
 
 ## Prerequisites
 
-- Node.js 20+
-- Yarn 1.22+
+- Node.js 20+ (CI and Dockerfile use Node 22)
+- Yarn 1.22+ (`packageManager`: yarn@1.22.22; `preinstall` enforces Yarn)
 - Docker (for local Postgres, Redis, MinIO)
 
 ## Installation
@@ -50,17 +50,18 @@ cp .env.example .env
 
 Key variables (full list in `.env.example`):
 
-| Variable                             | Purpose                                       |
-| ------------------------------------ | --------------------------------------------- |
-| `DB_*`                               | PostgreSQL connection                         |
-| `JWT_SECRET`                         | Token signing                                 |
-| `REDIS_*`                            | Cache and job queues                          |
-| `AWS_*` / `STORAGE_PROVIDER`         | Image storage                                 |
-| `OMISE_*`                            | Payment gateway                               |
-| `THAIBULKSMS_*` / `TWILIO_*`         | OTP SMS                                       |
-| `API_URL`                            | Public API base URL (email logo assets, logs) |
-| `STOREFRONT_URL` / `ADMIN_PANEL_URL` | Links in transactional emails                 |
-| `RESEND_API_KEY` / `EMAIL_FROM`      | Email delivery (Resend)                       |
+| Variable                             | Purpose                                             |
+| ------------------------------------ | --------------------------------------------------- |
+| `DB_*`                               | PostgreSQL connection                               |
+| `JWT_SECRET`                         | Token signing                                       |
+| `REDIS_*`                            | Cache and job queues (omit `REDIS_HOST` to disable) |
+| `AWS_*` / `STORAGE_PROVIDER`         | Image storage                                       |
+| `OMISE_*`                            | Payment gateway                                     |
+| `THAIBULKSMS_*` / `TWILIO_*`         | OTP SMS                                             |
+| `API_URL`                            | Public API base URL (email logo assets, logs)       |
+| `STOREFRONT_URL` / `ADMIN_PANEL_URL` | Links in transactional emails                       |
+| `RESEND_API_KEY` / `EMAIL_FROM`      | Email delivery (Resend)                             |
+| `CORS_ORIGINS`                       | Allowed browser origins                             |
 
 ## Running locally
 
@@ -82,14 +83,14 @@ yarn start:dev          # http://localhost:3002/graphql
 
 ```bash
 yarn build
-yarn start:prod
+yarn start:prod         # node dist/src/main.js (same entry as Dockerfile)
 ```
 
 ## Testing
 
 ```bash
-yarn test              # Unit tests
-yarn test:cov          # Coverage (80% threshold on key services)
+yarn test              # Unit tests (src/**/*.spec.ts)
+yarn test:cov          # Coverage (threshold on key services)
 yarn test:e2e          # E2E (mocked infra, no Docker required)
 ```
 
@@ -106,6 +107,7 @@ yarn format:check      # CI check
 ```text
 public/                     # Static assets (email brand logo, served at /images/…)
 scripts/                    # Utilities (email HTML previews, schema checks)
+infra/                      # EC2/ECR deploy scripts and env tooling
 src/
 ├── main.ts                 # Bootstrap + static asset mount
 ├── app.module.ts           # Root module, global guards
@@ -137,6 +139,7 @@ src/
 | Command                 | Description                                                             |
 | ----------------------- | ----------------------------------------------------------------------- |
 | `yarn start:dev`        | Dev server with hot reload                                              |
+| `yarn start:prod`       | Run compiled app (`node dist/src/main.js`)                              |
 | `yarn migration:run`    | Apply database migrations                                               |
 | `yarn db:reset:migrate` | Drop, migrate, no seed (local; prod with `DB_RESET_ALLOW_PRODUCTION=1`) |
 | `yarn db:reset:dev`     | Drop, migrate, seed (local only)                                        |
@@ -153,6 +156,6 @@ src/
 3. Add tests for service changes
 4. Run `yarn format:check && yarn build && yarn test && yarn test:e2e`
 5. Coordinate frontend codegen if schema changes
-6. Open a pull request (CI runs on PR)
+6. Open a pull request (CI runs on PRs to `main` / `uat`)
 
-Schema changes: regenerate `src/schema.gql` here, then run `yarn graphql:codegen` in sibling repos `../sopet-storefront` and `../sopet-admin`. Commit each repo separately; merge backend before frontends that depend on the new schema.
+Schema changes: regenerate `src/schema.gql` here (`yarn start:dev`), then run `yarn graphql:codegen` in sibling repos `../sopet-storefront` and `../sopet-admin`. Commit each repo separately; merge backend before frontends that depend on the new schema.

@@ -10,13 +10,13 @@
 
 Auto-generated code-first schema at `src/schema.gql`. Regenerated on `yarn start:dev`.
 
-Root types:
+Root types (line numbers from current `src/schema.gql`, ~1907 lines):
 
-| Type           | Line in schema.gql (approx) | Contents                                        |
-| -------------- | --------------------------- | ----------------------------------------------- |
-| `Mutation`     | ~575                        | Auth, CRUD, checkout, taxonomy, reviews         |
-| `Query`        | ~1038                       | Catalog, cart, orders, search, admin, analytics |
-| `Subscription` | ~1531                       | `paymentStatusUpdated`                          |
+| Type           | Line in schema.gql | Contents                                        |
+| -------------- | ------------------ | ----------------------------------------------- |
+| `Mutation`     | 575                | Auth, CRUD, checkout, taxonomy, reviews         |
+| `Query`        | 1038               | Catalog, cart, orders, search, admin, analytics |
+| `Subscription` | 1531               | `paymentStatusUpdated`                          |
 
 Do not edit `schema.gql` manually. Change resolvers/entities and restart the server.
 
