@@ -11,21 +11,21 @@ export enum OtpPurpose {
 @Index(['email', 'purpose'])
 export class OtpCode {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'phone', type: 'varchar', length: 20, nullable: true })
   @IsOptional()
   @IsPhoneNumber('TH')
-  phone: string | null;
+  phone!: string | null;
 
   @Column({ name: 'email', type: 'varchar', length: 255, nullable: true })
   @IsOptional()
   @IsEmail()
-  email: string | null;
+  email!: string | null;
 
   @Column({ name: 'code', type: 'varchar', length: 6 })
   @Length(6, 6)
-  code: string;
+  code!: string;
 
   @Column({
     name: 'purpose',
@@ -34,14 +34,14 @@ export class OtpCode {
     default: OtpPurpose.LOGIN,
   })
   @IsEnum(OtpPurpose)
-  purpose: OtpPurpose;
+  purpose!: OtpPurpose;
 
   @Column({ name: 'is_used', type: 'boolean', default: false })
-  isUsed: boolean;
+  isUsed!: boolean;
 
   @Column({ name: 'expires_at', type: 'timestamp' })
-  expiresAt: Date;
+  expiresAt!: Date;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 }

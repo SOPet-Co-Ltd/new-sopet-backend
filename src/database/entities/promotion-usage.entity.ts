@@ -16,30 +16,30 @@ import { Order } from './order.entity';
 @Index(['orderId'])
 export class PromotionUsage {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'promotion_id', type: 'uuid' })
   @IsNotEmpty()
-  promotionId: string;
+  promotionId!: string;
 
   @Column({ name: 'order_id', type: 'uuid' })
   @IsNotEmpty()
-  orderId: string;
+  orderId!: string;
 
   @Column({ name: 'discount_amount', type: 'decimal', precision: 10, scale: 2 })
   @IsNumber()
   @Min(0)
-  discountAmount: number;
+  discountAmount!: number;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 
   // Relations
   @ManyToOne(() => Promotion, (promotion) => promotion.usages)
   @JoinColumn({ name: 'promotion_id' })
-  promotion: Promotion;
+  promotion!: Promotion;
 
   @ManyToOne(() => Order, (order) => order.promotionUsages)
   @JoinColumn({ name: 'order_id' })
-  order: Order;
+  order!: Order;
 }

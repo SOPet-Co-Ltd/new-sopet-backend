@@ -6,7 +6,7 @@ export class SendCustomerOtpInput {
   @Field()
   @IsNotEmpty()
   @IsString()
-  phone: string;
+  phone!: string;
 }
 
 @InputType()
@@ -14,13 +14,13 @@ export class VerifyCustomerOtpInput {
   @Field()
   @IsNotEmpty()
   @IsString()
-  phone: string;
+  phone!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
   @Length(6, 6)
-  code: string;
+  code!: string;
 
   @Field({ nullable: true })
   @IsOptional()
@@ -32,12 +32,12 @@ export class VerifyCustomerOtpInput {
 export class VendorLoginInput {
   @Field()
   @IsEmail()
-  email: string;
+  email!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
-  password: string;
+  password!: string;
 }
 
 @InputType()
@@ -45,14 +45,14 @@ export class RefreshTokenInput {
   @Field()
   @IsNotEmpty()
   @IsString()
-  refreshToken: string;
+  refreshToken!: string;
 }
 
 @InputType()
 export class SwitchStoreInput {
   @Field()
   @IsUUID()
-  storeId: string;
+  storeId!: string;
 }
 
 @InputType()
@@ -74,20 +74,20 @@ export class ChangePasswordInput {
   @Field()
   @IsNotEmpty()
   @IsString()
-  currentPassword: string;
+  currentPassword!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
   @Length(8, 128)
-  newPassword: string;
+  newPassword!: string;
 }
 
 @InputType()
 export class RequestPasswordResetInput {
   @Field()
   @IsEmail()
-  email: string;
+  email!: string;
 }
 
 @InputType()
@@ -95,7 +95,7 @@ export class ReactivateAccountInput {
   @Field()
   @IsNotEmpty()
   @IsString()
-  reactivationToken: string;
+  reactivationToken!: string;
 }
 
 @InputType()
@@ -103,13 +103,13 @@ export class ResetPasswordInput {
   @Field()
   @IsNotEmpty()
   @IsString()
-  token: string;
+  token!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
   @Length(8, 128)
-  newPassword: string;
+  newPassword!: string;
 }
 
 @InputType()
@@ -117,5 +117,5 @@ export class VerifyEmailInput {
   @Field()
   @IsNotEmpty()
   @IsString()
-  token: string;
+  token!: string;
 }

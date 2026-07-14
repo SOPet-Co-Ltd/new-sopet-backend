@@ -22,65 +22,65 @@ import { AuditActorType } from '../../database/entities/audit-log.entity';
 @ObjectType()
 export class PayoutType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  storeId: string;
+  storeId!: string;
 
   @Field(() => Float)
-  amount: number;
+  amount!: number;
 
   @Field(() => Float)
-  netAmount: number;
+  netAmount!: number;
 
   @Field()
-  status: string;
+  status!: string;
 
   @Field()
-  createdAt: Date;
+  createdAt!: Date;
 }
 
 @ObjectType()
 export class PayoutSummaryType {
   @Field()
-  storeId: string;
+  storeId!: string;
 
   @Field(() => Float)
-  grossRevenue: number;
+  grossRevenue!: number;
 
   @Field(() => Float)
-  totalPaidOut: number;
+  totalPaidOut!: number;
 
   @Field(() => Float)
-  availableBalance: number;
+  availableBalance!: number;
 
   @Field(() => Float)
-  pendingPayoutAmount: number;
+  pendingPayoutAmount!: number;
 
   @Field(() => Float)
-  minimumPayoutAmount: number;
+  minimumPayoutAmount!: number;
 
   @Field()
-  canRequestPayout: boolean;
+  canRequestPayout!: boolean;
 }
 
 @InputType()
 export class CreatePayoutInput {
   @Field()
   @IsUUID()
-  storeId: string;
+  storeId!: string;
 
   @Field(() => Float)
   @IsNumber()
   @Min(0)
-  amount: number;
+  amount!: number;
 }
 
 @InputType()
 export class TriggerPayoutInput {
   @Field()
   @IsUUID()
-  storeId: string;
+  storeId!: string;
 
   @Field(() => Float, { nullable: true })
   @IsOptional()

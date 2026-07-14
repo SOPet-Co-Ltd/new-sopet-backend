@@ -21,18 +21,18 @@ import { CartItem } from './cart-item.entity';
 @Index(['sku'])
 export class ProductVariant {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'product_id', type: 'uuid' })
   @IsNotEmpty()
-  productId: string;
+  productId!: string;
 
   @Column({ name: 'sku', type: 'varchar', length: 100 })
   @IsNotEmpty()
-  sku: string;
+  sku!: string;
 
   @Column({ name: 'options', type: 'jsonb', default: {} })
-  options: Record<string, string>; // e.g., { "size": "M", "color": "Red" }
+  options!: Record<string, string>; // e.g., { "size": "M", "color": "Red" }
 
   @Column({
     name: 'price_adjustment',
@@ -42,12 +42,12 @@ export class ProductVariant {
     default: 0,
   })
   @IsNumber()
-  priceAdjustment: number;
+  priceAdjustment!: number;
 
   @Column({ name: 'stock_quantity', type: 'integer', default: 0 })
   @IsNumber()
   @Min(0)
-  stockQuantity: number;
+  stockQuantity!: number;
 
   @Column({
     name: 'low_stock_threshold',
@@ -57,39 +57,39 @@ export class ProductVariant {
   })
   @IsOptional()
   @IsNumber()
-  lowStockThreshold: number | null;
+  lowStockThreshold!: number | null;
 
   @Column({ name: 'image_url', type: 'varchar', length: 500, nullable: true })
   @IsOptional()
-  imageUrl: string | null;
+  imageUrl!: string | null;
 
   @Column({ name: 'weight', type: 'decimal', precision: 10, scale: 2, nullable: true })
   @IsOptional()
   @IsNumber()
-  weight: number | null;
+  weight!: number | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamp' })
-  updatedAt: Date;
+  updatedAt!: Date;
 
   @DeleteDateColumn({ name: 'deleted_at', type: 'timestamp', nullable: true })
-  deletedAt: Date | null;
+  deletedAt!: Date | null;
 
   // Relations
   @ManyToOne(() => Product, (product) => product.variants, {
     onDelete: 'CASCADE',
   })
   @JoinColumn({ name: 'product_id' })
-  product: Product;
+  product!: Product;
 
   @OneToMany(() => InventoryTransaction, (transaction) => transaction.productVariant)
-  inventoryTransactions: InventoryTransaction[];
+  inventoryTransactions!: InventoryTransaction[];
 
   @OneToMany(() => OrderItem, (item) => item.productVariant)
-  orderItems: OrderItem[];
+  orderItems!: OrderItem[];
 
   @OneToMany(() => CartItem, (item) => item.productVariant)
-  cartItems: CartItem[];
+  cartItems!: CartItem[];
 }

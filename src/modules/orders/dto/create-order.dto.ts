@@ -19,7 +19,7 @@ export class OrderItemDto {
   })
   @IsNotEmpty()
   @IsString()
-  productId: string;
+  productId!: string;
 
   @ApiPropertyOptional({
     description: 'ID of the specific product variant, if applicable',
@@ -37,7 +37,7 @@ export class OrderItemDto {
   @IsNotEmpty()
   @IsNumber()
   @Min(1)
-  quantity: number;
+  quantity!: number;
 
   @ApiProperty({
     description: 'Unit price of the item in THB',
@@ -47,19 +47,19 @@ export class OrderItemDto {
   @IsNotEmpty()
   @IsNumber()
   @Min(0)
-  price: number;
+  price!: number;
 }
 
 export class ShippingAddressDto {
   @ApiProperty({ description: 'Recipient full name', example: 'Somchai Jaidee' })
   @IsNotEmpty()
   @IsString()
-  recipientName: string;
+  recipientName!: string;
 
   @ApiProperty({ description: 'Recipient phone number (local format)', example: '0812345678' })
   @IsNotEmpty()
   @IsString()
-  recipientPhone: string;
+  recipientPhone!: string;
 
   @ApiProperty({
     description: 'Primary address line',
@@ -67,7 +67,7 @@ export class ShippingAddressDto {
   })
   @IsNotEmpty()
   @IsString()
-  addressLine1: string;
+  addressLine1!: string;
 
   @ApiPropertyOptional({
     description: 'Secondary address line (unit, building, etc.)',
@@ -88,7 +88,7 @@ export class ShippingAddressDto {
   @ApiProperty({ description: 'District (amphoe)', example: 'Khlong Toei' })
   @IsNotEmpty()
   @IsString()
-  amphoe: string;
+  amphoe!: string;
 
   @ApiPropertyOptional({
     description: 'Deprecated alias for amphoe',
@@ -101,22 +101,22 @@ export class ShippingAddressDto {
   @ApiProperty({ description: 'Province', example: 'Bangkok' })
   @IsNotEmpty()
   @IsString()
-  province: string;
+  province!: string;
 
   @ApiProperty({ description: 'Postal code', example: '10110' })
   @IsNotEmpty()
   @IsString()
-  postalCode: string;
+  postalCode!: string;
 }
 
 export class StoreShippingSelectionDto {
   @IsNotEmpty()
   @IsString()
-  storeId: string;
+  storeId!: string;
 
   @IsNotEmpty()
   @IsUUID()
-  shippingOptionId: string;
+  shippingOptionId!: string;
 }
 
 export class CreateOrderDto {
@@ -127,7 +127,7 @@ export class CreateOrderDto {
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => OrderItemDto)
-  items: OrderItemDto[];
+  items!: OrderItemDto[];
 
   @ApiPropertyOptional({
     description: 'Saved address ID to snapshot at checkout',
@@ -206,7 +206,7 @@ export class CreateOrderDto {
   })
   @IsNotEmpty()
   @IsString()
-  paymentMethod: 'promptpay' | 'credit_card' | 'cod';
+  paymentMethod!: 'promptpay' | 'credit_card' | 'cod';
 
   @ApiPropertyOptional({
     description: 'Cart line item IDs to remove after the order is created',

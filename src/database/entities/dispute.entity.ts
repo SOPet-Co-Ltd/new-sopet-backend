@@ -45,23 +45,23 @@ export enum DisputeIssueType {
 @Index(['storeId', 'status'])
 export class Dispute {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'order_id', type: 'uuid' })
   @IsNotEmpty()
-  orderId: string;
+  orderId!: string;
 
   @Column({ name: 'customer_id', type: 'uuid' })
   @IsNotEmpty()
-  customerId: string;
+  customerId!: string;
 
   @Column({ name: 'store_id', type: 'uuid' })
   @IsNotEmpty()
-  storeId: string;
+  storeId!: string;
 
   @Column({ name: 'reason', type: 'text' })
   @IsNotEmpty()
-  reason: string;
+  reason!: string;
 
   @Column({
     name: 'issue_type',
@@ -70,7 +70,7 @@ export class Dispute {
     default: DisputeIssueType.OTHER,
   })
   @IsEnum(DisputeIssueType)
-  issueType: DisputeIssueType;
+  issueType!: DisputeIssueType;
 
   @Column({
     name: 'status',
@@ -79,7 +79,7 @@ export class Dispute {
     default: DisputeStatus.OPEN,
   })
   @IsEnum(DisputeStatus)
-  status: DisputeStatus;
+  status!: DisputeStatus;
 
   @Column({
     name: 'resolution',
@@ -89,50 +89,50 @@ export class Dispute {
   })
   @IsOptional()
   @IsEnum(DisputeResolution)
-  resolution: DisputeResolution | null;
+  resolution!: DisputeResolution | null;
 
   @Column({ name: 'resolved_by', type: 'uuid', nullable: true })
-  resolvedBy: string | null;
+  resolvedBy!: string | null;
 
   @Column({ name: 'resolved_at', type: 'timestamp', nullable: true })
-  resolvedAt: Date | null;
+  resolvedAt!: Date | null;
 
   @Column({ name: 'resolution_notes', type: 'text', nullable: true })
   @IsOptional()
-  resolutionNotes: string | null;
+  resolutionNotes!: string | null;
 
   @Column({ name: 'replacement_order_id', type: 'uuid', nullable: true })
-  replacementOrderId: string | null;
+  replacementOrderId!: string | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamp' })
-  updatedAt: Date;
+  updatedAt!: Date;
 
   // Relations
   @ManyToOne(() => Order, (order) => order.disputes)
   @JoinColumn({ name: 'order_id' })
-  order: Order;
+  order!: Order;
 
   @ManyToOne(() => Customer, (customer) => customer.disputes)
   @JoinColumn({ name: 'customer_id' })
-  customer: Customer;
+  customer!: Customer;
 
   @ManyToOne(() => Store)
   @JoinColumn({ name: 'store_id' })
-  store: Store;
+  store!: Store;
 
   @ManyToOne(() => Order, { nullable: true })
   @JoinColumn({ name: 'replacement_order_id' })
-  replacementOrder: Order | null;
+  replacementOrder!: Order | null;
 
   @OneToMany(() => DisputeItem, (item) => item.dispute, { cascade: true })
-  items: DisputeItem[];
+  items!: DisputeItem[];
 
   @OneToMany(() => DisputeMessage, (message) => message.dispute)
-  messages: DisputeMessage[];
+  messages!: DisputeMessage[];
 
   @OneToMany(() => DisputeImage, (image) => image.dispute, { cascade: true })
-  images: DisputeImage[];
+  images!: DisputeImage[];
 }

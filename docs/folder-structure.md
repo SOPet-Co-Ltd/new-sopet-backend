@@ -229,5 +229,6 @@ Relative imports are more common in practice; aliases are available.
 
 ## Related docs
 
+- [File types](file-types.md) — what each suffix means and when to add/edit it
 - [Architecture](architecture.md)
 - [Feature development](feature-development.md)

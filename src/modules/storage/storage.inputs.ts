@@ -19,7 +19,7 @@ export class UploadImageInput {
   @Field()
   @IsString()
   @IsNotEmpty()
-  base64: string;
+  base64!: string;
 
   @Field({ nullable: true })
   @IsOptional()

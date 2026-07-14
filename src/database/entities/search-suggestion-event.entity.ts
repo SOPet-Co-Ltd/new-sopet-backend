@@ -3,10 +3,10 @@ import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn } from 'typeor
 @Entity('search_suggestion_events')
 export class SearchSuggestionEvent {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'query_prefix', type: 'text' })
-  queryPrefix: string;
+  queryPrefix!: string;
 
   @Column({ name: 'suggestion_query', type: 'text', nullable: true })
   suggestionQuery?: string | null;
@@ -18,8 +18,8 @@ export class SearchSuggestionEvent {
   sessionId?: string | null;
 
   @Column({ type: 'boolean', default: false })
-  clicked: boolean;
+  clicked!: boolean;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 }

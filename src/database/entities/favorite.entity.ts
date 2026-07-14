@@ -16,28 +16,28 @@ import { Product } from './product.entity';
 @Index(['customerId', 'createdAt'])
 export class Favorite {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'customer_id', type: 'uuid' })
   @IsNotEmpty()
-  customerId: string;
+  customerId!: string;
 
   @Column({ name: 'product_id', type: 'uuid' })
   @IsNotEmpty()
-  productId: string;
+  productId!: string;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 
   @ManyToOne(() => Customer, (customer) => customer.favorites, {
     onDelete: 'CASCADE',
   })
   @JoinColumn({ name: 'customer_id' })
-  customer: Customer;
+  customer!: Customer;
 
   @ManyToOne(() => Product, (product) => product.favorites, {
     onDelete: 'CASCADE',
   })
   @JoinColumn({ name: 'product_id' })
-  product: Product;
+  product!: Product;
 }

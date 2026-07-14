@@ -23,19 +23,19 @@ export enum VendorInvitationStatus {
 @Index(['email'], { unique: true, where: "status = 'pending'" })
 export class VendorInvitation {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'email', type: 'varchar', length: 255 })
   @IsEmail()
-  email: string;
+  email!: string;
 
   @Column({ name: 'token', type: 'varchar', length: 64 })
   @IsNotEmpty()
-  token: string;
+  token!: string;
 
   @Column({ name: 'invited_by', type: 'uuid' })
   @IsNotEmpty()
-  invitedBy: string;
+  invitedBy!: string;
 
   @Column({
     name: 'status',
@@ -44,21 +44,21 @@ export class VendorInvitation {
     default: VendorInvitationStatus.PENDING,
   })
   @IsEnum(VendorInvitationStatus)
-  status: VendorInvitationStatus;
+  status!: VendorInvitationStatus;
 
   @Column({ name: 'expires_at', type: 'timestamp' })
-  expiresAt: Date;
+  expiresAt!: Date;
 
   @Column({ name: 'accepted_at', type: 'timestamp', nullable: true })
-  acceptedAt: Date | null;
+  acceptedAt!: Date | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamp' })
-  updatedAt: Date;
+  updatedAt!: Date;
 
   @ManyToOne(() => User)
   @JoinColumn({ name: 'invited_by' })
-  inviter: User;
+  inviter!: User;
 }

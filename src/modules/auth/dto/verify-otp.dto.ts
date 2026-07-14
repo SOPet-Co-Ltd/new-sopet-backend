@@ -8,7 +8,7 @@ export class VerifyOtpDto {
   })
   @IsNotEmpty({ message: 'Phone number is required' })
   @IsPhoneNumber('TH', { message: 'Invalid Thai phone number' })
-  phone: string;
+  phone!: string;
 
   @ApiProperty({
     description: '6-digit OTP code received via SMS',
@@ -19,5 +19,5 @@ export class VerifyOtpDto {
   @IsNotEmpty({ message: 'OTP code is required' })
   @IsString()
   @Length(6, 6, { message: 'OTP must be exactly 6 digits' })
-  code: string;
+  code!: string;
 }

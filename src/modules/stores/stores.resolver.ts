@@ -78,14 +78,14 @@ import { StoreReactivationRequestStatus } from '../../database/entities/store-re
 export class ApproveStoreInput {
   @Field()
   @IsUUID()
-  storeId: string;
+  storeId!: string;
 }
 
 @InputType()
 export class RejectStoreInput {
   @Field()
   @IsUUID()
-  storeId: string;
+  storeId!: string;
 
   @Field({ nullable: true })
   @IsOptional()

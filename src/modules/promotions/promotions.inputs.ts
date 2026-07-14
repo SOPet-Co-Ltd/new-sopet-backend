@@ -17,10 +17,10 @@ export class ValidatePromotionInput {
   @Field()
   @IsString()
   @IsNotEmpty()
-  code: string;
+  code!: string;
 
   @Field(() => Float)
-  subtotal: number;
+  subtotal!: number;
 
   @Field({ nullable: true })
   @IsOptional()
@@ -34,12 +34,12 @@ export class CreatePromotionInput {
   @IsString()
   @IsNotEmpty()
   @Length(1, 50)
-  code: string;
+  code!: string;
 
   @Field()
   @IsString()
   @IsNotEmpty()
-  name: string;
+  name!: string;
 
   @Field({ nullable: true })
   @IsOptional()
@@ -48,12 +48,12 @@ export class CreatePromotionInput {
 
   @Field()
   @IsEnum(PromotionType)
-  type: PromotionType;
+  type!: PromotionType;
 
   @Field(() => Float)
   @IsNumber()
   @Min(0, { message: 'มูลค่าส่วนลดต้องไม่ต่ำกว่า 0' })
-  discountValue: number;
+  discountValue!: number;
 
   @Field(() => Float, { nullable: true })
   @IsOptional()

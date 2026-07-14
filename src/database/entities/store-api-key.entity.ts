@@ -17,47 +17,47 @@ import { User } from './user.entity';
 @Index(['keyPrefix'])
 export class StoreApiKey {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'store_id', type: 'uuid' })
   @IsNotEmpty()
-  storeId: string;
+  storeId!: string;
 
   @Column({ name: 'name', type: 'varchar', length: 100 })
   @IsNotEmpty()
   @Length(1, 100)
-  name: string;
+  name!: string;
 
   @Column({ name: 'key_prefix', type: 'varchar', length: 24 })
   @IsNotEmpty()
   @Length(24, 24)
-  keyPrefix: string;
+  keyPrefix!: string;
 
   @Column({ name: 'key_hash', type: 'varchar' })
   @IsNotEmpty()
-  keyHash: string;
+  keyHash!: string;
 
   @Column({ name: 'created_by', type: 'uuid' })
   @IsNotEmpty()
-  createdBy: string;
+  createdBy!: string;
 
   @Column({ name: 'last_used_at', type: 'timestamp', nullable: true })
-  lastUsedAt: Date | null;
+  lastUsedAt!: Date | null;
 
   @Column({ name: 'revoked_at', type: 'timestamp', nullable: true })
-  revokedAt: Date | null;
+  revokedAt!: Date | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamp' })
-  updatedAt: Date;
+  updatedAt!: Date;
 
   @ManyToOne(() => Store)
   @JoinColumn({ name: 'store_id' })
-  store: Store;
+  store!: Store;
 
   @ManyToOne(() => User)
   @JoinColumn({ name: 'created_by' })
-  creator: User;
+  creator!: User;
 }

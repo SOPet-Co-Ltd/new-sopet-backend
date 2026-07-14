@@ -8,5 +8,5 @@ export class SendOtpDto {
   })
   @IsNotEmpty({ message: 'Phone number is required' })
   @IsPhoneNumber('TH', { message: 'Invalid Thai phone number' })
-  phone: string;
+  phone!: string;
 }

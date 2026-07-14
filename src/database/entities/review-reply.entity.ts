@@ -15,25 +15,25 @@ export const REVIEW_REPLY_MAX_LENGTH = 1000;
 @Entity('review_replies')
 export class ReviewReply {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'review_id', type: 'uuid', unique: true })
   @IsNotEmpty()
-  reviewId: string;
+  reviewId!: string;
 
   @Column({ name: 'body', type: 'text' })
   @IsString()
   @IsNotEmpty()
   @MaxLength(REVIEW_REPLY_MAX_LENGTH)
-  body: string;
+  body!: string;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamp' })
-  updatedAt: Date;
+  updatedAt!: Date;
 
   @OneToOne(() => Review, (review) => review.reply, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'review_id' })
-  review: Review;
+  review!: Review;
 }

@@ -17,22 +17,22 @@ export class CreateAddressInput {
   @IsNotEmpty()
   @IsString()
   @Length(1, 255)
-  label: string;
+  label!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
-  recipientName: string;
+  recipientName!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
-  recipientPhone: string;
+  recipientPhone!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
-  addressLine1: string;
+  addressLine1!: string;
 
   @Field({ nullable: true })
   @IsOptional()
@@ -47,7 +47,7 @@ export class CreateAddressInput {
   @Field()
   @IsNotEmpty()
   @IsString()
-  amphoe: string;
+  amphoe!: string;
 
   @Field({ nullable: true })
   @IsOptional()
@@ -57,12 +57,12 @@ export class CreateAddressInput {
   @Field()
   @IsNotEmpty()
   @IsString()
-  province: string;
+  province!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
-  postalCode: string;
+  postalCode!: string;
 
   @Field({ nullable: true })
   @IsOptional()
@@ -155,7 +155,7 @@ export class UpdateAddressInput {
 export class AddressIdInput {
   @Field()
   @IsUUID()
-  id: string;
+  id!: string;
 }
 
 @InputType()
@@ -163,28 +163,28 @@ export class AddPaymentMethodInput {
   @Field()
   @IsNotEmpty()
   @IsString()
-  omiseCardToken: string;
+  omiseCardToken!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
   @Length(4, 4)
-  lastFour: string;
+  lastFour!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
-  brand: string;
+  brand!: string;
 
   @Field(() => Int)
   @IsInt()
   @Min(1)
-  expiryMonth: number;
+  expiryMonth!: number;
 
   @Field(() => Int)
   @IsInt()
   @Min(2024)
-  expiryYear: number;
+  expiryYear!: number;
 
   @Field({ nullable: true })
   @IsOptional()
@@ -197,11 +197,11 @@ export class ChangeCustomerPhoneInput {
   @Field()
   @IsNotEmpty()
   @IsString()
-  phone: string;
+  phone!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
   @Length(6, 6)
-  code: string;
+  code!: string;
 }

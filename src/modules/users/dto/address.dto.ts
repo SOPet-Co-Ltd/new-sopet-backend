@@ -11,7 +11,7 @@ export class CreateAddressDto {
   @IsNotEmpty()
   @IsString()
   @Length(1, 255)
-  label: string;
+  label!: string;
 
   @ApiProperty({
     description: 'Name of the recipient',
@@ -22,7 +22,7 @@ export class CreateAddressDto {
   @IsNotEmpty()
   @IsString()
   @Length(1, 255)
-  recipientName: string;
+  recipientName!: string;
 
   @ApiProperty({
     description: 'Phone number of the recipient (local format)',
@@ -33,7 +33,7 @@ export class CreateAddressDto {
   @IsNotEmpty()
   @IsString()
   @Length(1, 20)
-  recipientPhone: string;
+  recipientPhone!: string;
 
   @ApiProperty({
     description: 'Primary address line',
@@ -41,7 +41,7 @@ export class CreateAddressDto {
   })
   @IsNotEmpty()
   @IsString()
-  addressLine1: string;
+  addressLine1!: string;
 
   @ApiPropertyOptional({
     description: 'Secondary address line',
@@ -68,7 +68,7 @@ export class CreateAddressDto {
   @IsNotEmpty()
   @IsString()
   @Length(1, 100)
-  amphoe: string;
+  amphoe!: string;
 
   @ApiPropertyOptional({
     description: 'Deprecated alias for amphoe',
@@ -90,7 +90,7 @@ export class CreateAddressDto {
   @IsNotEmpty()
   @IsString()
   @Length(1, 100)
-  province: string;
+  province!: string;
 
   @ApiProperty({
     description: 'Postal code',
@@ -101,7 +101,7 @@ export class CreateAddressDto {
   @IsNotEmpty()
   @IsString()
   @Length(5, 10)
-  postalCode: string;
+  postalCode!: string;
 
   @ApiPropertyOptional({
     description: 'Whether this is the default address',

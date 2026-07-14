@@ -21,7 +21,7 @@ export class CreateProductDto {
   @IsNotEmpty()
   @IsString()
   @Length(1, 255)
-  name: string;
+  name!: string;
 
   @ApiPropertyOptional({
     description: 'Long-form product description',
@@ -39,7 +39,7 @@ export class CreateProductDto {
   @IsNotEmpty()
   @IsNumber()
   @Min(0)
-  basePrice: number;
+  basePrice!: number;
 
   @ApiPropertyOptional({
     description: 'Original / compare-at price in THB (for strikethrough discount display)',

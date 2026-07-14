@@ -15,19 +15,19 @@ import {
 export class RegisterVendorInput {
   @Field()
   @IsEmail()
-  email: string;
+  email!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
   @MinLength(6)
-  password: string;
+  password!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
   @Length(1, 255)
-  fullName: string;
+  fullName!: string;
 }
 
 @InputType()
@@ -36,7 +36,7 @@ export class SubmitStoreRequestInput {
   @IsNotEmpty()
   @IsString()
   @Length(1, 255)
-  storeName: string;
+  storeName!: string;
 
   @Field({ nullable: true })
   @IsOptional()
@@ -68,30 +68,30 @@ export class SubmitStoreRequestInput {
 export class RejectStoreRequestInput {
   @Field()
   @IsUUID()
-  id: string;
+  id!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
-  reason: string;
+  reason!: string;
 }
 
 @InputType()
 export class SubmitStoreReactivationRequestInput {
   @Field()
   @IsUUID()
-  storeId: string;
+  storeId!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
   @Length(1, 255)
-  title: string;
+  title!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
-  content: string;
+  content!: string;
 
   @Field(() => [String], { nullable: true })
   @IsOptional()
@@ -102,7 +102,7 @@ export class SubmitStoreReactivationRequestInput {
 export class RejectStoreReactivationRequestInput {
   @Field()
   @IsUUID()
-  id: string;
+  id!: string;
 
   @Field({ nullable: true })
   @IsOptional()
@@ -114,7 +114,7 @@ export class RejectStoreReactivationRequestInput {
 export class InviteVendorInput {
   @Field()
   @IsEmail()
-  email: string;
+  email!: string;
 }
 
 @InputType()
@@ -122,26 +122,26 @@ export class AcceptVendorInvitationInput {
   @Field()
   @IsNotEmpty()
   @IsString()
-  token: string;
+  token!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
   @MinLength(6)
-  password: string;
+  password!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
   @Length(1, 255)
-  fullName: string;
+  fullName!: string;
 }
 
 @InputType()
 export class UpdateStoreAsAdminInput {
   @Field()
   @IsUUID()
-  id: string;
+  id!: string;
 
   @Field({ nullable: true })
   @IsOptional()
@@ -200,13 +200,13 @@ export class UpdateStoreAsAdminInput {
 export class CreateStoreAsAdminInput {
   @Field()
   @IsUUID()
-  ownerUserId: string;
+  ownerUserId!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
   @Length(1, 255)
-  name: string;
+  name!: string;
 
   @Field({ nullable: true })
   @IsOptional()
@@ -243,7 +243,7 @@ export class CreateStoreAsAdminInput {
 export class UpdateVendorAsAdminInput {
   @Field()
   @IsUUID()
-  id: string;
+  id!: string;
 
   @Field({ nullable: true })
   @IsOptional()

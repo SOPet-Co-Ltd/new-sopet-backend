@@ -21,11 +21,11 @@ export enum PaymentMethodType {
 @Index(['customerId', 'isDefault'])
 export class SavedPaymentMethod {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'customer_id', type: 'uuid' })
   @IsNotEmpty()
-  customerId: string;
+  customerId!: string;
 
   @Column({
     name: 'type',
@@ -33,46 +33,46 @@ export class SavedPaymentMethod {
     enum: PaymentMethodType,
   })
   @IsEnum(PaymentMethodType)
-  type: PaymentMethodType;
+  type!: PaymentMethodType;
 
   @Column({ name: 'omise_card_token', type: 'varchar', length: 255 })
   @IsNotEmpty()
-  omiseCardToken: string;
+  omiseCardToken!: string;
 
   @Column({ name: 'card_fingerprint', type: 'varchar', length: 255, nullable: true })
-  cardFingerprint: string | null;
+  cardFingerprint!: string | null;
 
   @Column({ name: 'last_four', type: 'varchar', length: 4 })
   @IsNotEmpty()
   @Length(4, 4)
-  lastFour: string;
+  lastFour!: string;
 
   @Column({ name: 'brand', type: 'varchar', length: 50 })
   @IsNotEmpty()
-  brand: string;
+  brand!: string;
 
   @Column({ name: 'expiry_month', type: 'integer' })
   @IsNotEmpty()
-  expiryMonth: number;
+  expiryMonth!: number;
 
   @Column({ name: 'expiry_year', type: 'integer' })
   @IsNotEmpty()
-  expiryYear: number;
+  expiryYear!: number;
 
   @Column({ name: 'is_default', type: 'boolean', default: false })
-  isDefault: boolean;
+  isDefault!: boolean;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamp' })
-  updatedAt: Date;
+  updatedAt!: Date;
 
   @DeleteDateColumn({ name: 'deleted_at', type: 'timestamp', nullable: true })
-  deletedAt: Date | null;
+  deletedAt!: Date | null;
 
   // Relations
   @ManyToOne(() => Customer, (customer) => customer.savedPaymentMethods)
   @JoinColumn({ name: 'customer_id' })
-  customer: Customer;
+  customer!: Customer;
 }

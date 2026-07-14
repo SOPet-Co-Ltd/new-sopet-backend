@@ -29,12 +29,12 @@ export class CreatePlatformBannerInput {
   @IsString()
   @IsNotEmpty()
   @Length(1, 255)
-  title: string;
+  title!: string;
 
   @Field()
   @IsString()
   @IsNotEmpty()
-  imageUrl: string;
+  imageUrl!: string;
 
   @Field(() => String, { nullable: true })
   @IsOptional()
@@ -69,7 +69,7 @@ export class CreatePlatformBannerInput {
 export class UpdatePlatformBannerInput {
   @Field()
   @IsUUID()
-  id: string;
+  id!: string;
 
   @Field({ nullable: true })
   @IsOptional()
@@ -117,12 +117,12 @@ export class CreatePlatformSponsorInput {
   @IsString()
   @IsNotEmpty()
   @Length(1, 255)
-  name: string;
+  name!: string;
 
   @Field()
   @IsString()
   @IsNotEmpty()
-  imageUrl: string;
+  imageUrl!: string;
 
   @Field(() => String, { nullable: true })
   @IsOptional()
@@ -152,7 +152,7 @@ export class CreatePlatformSponsorInput {
 export class UpdatePlatformSponsorInput {
   @Field()
   @IsUUID()
-  id: string;
+  id!: string;
 
   @Field({ nullable: true })
   @IsOptional()
@@ -195,12 +195,12 @@ export class CreatePlatformAdInput {
   @IsString()
   @IsNotEmpty()
   @Length(1, 255)
-  title: string;
+  title!: string;
 
   @Field()
   @IsString()
   @IsNotEmpty()
-  imageUrl: string;
+  imageUrl!: string;
 
   @Field(() => String, { nullable: true })
   @IsOptional()
@@ -225,7 +225,7 @@ export class CreatePlatformAdInput {
 export class UpdatePlatformAdInput {
   @Field()
   @IsUUID()
-  id: string;
+  id!: string;
 
   @Field({ nullable: true })
   @IsOptional()

@@ -32,31 +32,31 @@ export class SearchContextInput {
 @ObjectType()
 export class SearchRankingWeightsType {
   @Field(() => Float)
-  text: number;
+  text!: number;
 
   @Field(() => Float)
-  prefixBoost: number;
+  prefixBoost!: number;
 
   @Field(() => Float)
-  soldCount: number;
+  soldCount!: number;
 
   @Field(() => Float)
-  averageRating: number;
+  averageRating!: number;
 
   @Field(() => Float)
-  reviewCount: number;
+  reviewCount!: number;
 
   @Field(() => Float)
-  personalizationCap: number;
+  personalizationCap!: number;
 
   @Field(() => Int)
-  trigramFallbackThreshold: number;
+  trigramFallbackThreshold!: number;
 
   @Field(() => Float)
-  trigramMinSimilarity: number;
+  trigramMinSimilarity!: number;
 
   @Field(() => Int)
-  rrfK: number;
+  rrfK!: number;
 }
 
 @InputType()
@@ -120,13 +120,13 @@ export class UpdateSearchRankingWeightsInput {
 @ObjectType()
 export class SearchProductSuggestionType {
   @Field(() => String)
-  id: string;
+  id!: string;
 
   @Field(() => String)
-  name: string;
+  name!: string;
 
   @Field(() => String)
-  slug: string;
+  slug!: string;
 
   @Field(() => String, { nullable: true })
   thumbnailUrl?: string | null;
@@ -135,34 +135,34 @@ export class SearchProductSuggestionType {
 @ObjectType()
 export class SearchQuerySuggestionType {
   @Field(() => String)
-  query: string;
+  query!: string;
 }
 
 @ObjectType()
 export class SearchSuggestionsPayloadType {
   @Field(() => [SearchProductSuggestionType])
-  products: SearchProductSuggestionType[];
+  products!: SearchProductSuggestionType[];
 
   @Field(() => [SearchQuerySuggestionType])
-  queries: SearchQuerySuggestionType[];
+  queries!: SearchQuerySuggestionType[];
 }
 
 @ObjectType()
 export class SearchSynonymType {
   @Field(() => String)
-  id: string;
+  id!: string;
 
   @Field(() => [String])
-  terms: string[];
+  terms!: string[];
 
   @Field(() => String)
-  expansion: string;
+  expansion!: string;
 
   @Field(() => Boolean)
-  isActive: boolean;
+  isActive!: boolean;
 
   @Field(() => Date)
-  updatedAt: Date;
+  updatedAt!: Date;
 }
 
 @InputType()
@@ -172,12 +172,12 @@ export class CreateSearchSynonymInput {
   @ArrayMaxSize(20)
   @IsString({ each: true })
   @MaxLength(100, { each: true })
-  terms: string[];
+  terms!: string[];
 
   @Field(() => String)
   @IsString()
   @MaxLength(500)
-  expansion: string;
+  expansion!: string;
 
   @Field(() => Boolean, { nullable: true, defaultValue: true })
   @IsOptional()
@@ -208,44 +208,44 @@ export class UpdateSearchSynonymInput {
 @ObjectType()
 export class SearchAnalyticsSummaryType {
   @Field(() => Int)
-  totalSearches: number;
+  totalSearches!: number;
 
   @Field(() => Int)
-  uniqueQueries: number;
+  uniqueQueries!: number;
 
   @Field(() => Float)
-  zeroResultRate: number;
+  zeroResultRate!: number;
 
   @Field(() => Float)
-  avgResultsPerQuery: number;
+  avgResultsPerQuery!: number;
 
   @Field(() => Float)
-  avgLatencyMs: number;
+  avgLatencyMs!: number;
 }
 
 @ObjectType()
 export class SearchAnalyticsQueryRowType {
   @Field(() => String)
-  query: string;
+  query!: string;
 
   @Field(() => Int)
-  searchCount: number;
+  searchCount!: number;
 
   @Field(() => Float)
-  avgResultCount: number;
+  avgResultCount!: number;
 }
 
 @ObjectType()
 export class SearchSuggestionCtrRowType {
   @Field(() => String)
-  prefixBucket: string;
+  prefixBucket!: string;
 
   @Field(() => Int)
-  impressions: number;
+  impressions!: number;
 
   @Field(() => Int)
-  clicks: number;
+  clicks!: number;
 
   @Field(() => Float)
-  ctr: number;
+  ctr!: number;
 }

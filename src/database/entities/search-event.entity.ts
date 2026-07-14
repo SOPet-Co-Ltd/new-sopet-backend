@@ -3,19 +3,19 @@ import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn } from 'typeor
 @Entity('search_events')
 export class SearchEvent {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ type: 'text' })
-  query: string;
+  query!: string;
 
   @Column({ name: 'result_count', type: 'int', default: 0 })
-  resultCount: number;
+  resultCount!: number;
 
   @Column({ name: 'latency_ms', type: 'int', default: 0 })
-  latencyMs: number;
+  latencyMs!: number;
 
   @Column({ type: 'jsonb', default: {} })
-  filters: Record<string, unknown>;
+  filters!: Record<string, unknown>;
 
   @Column({ name: 'session_id', type: 'varchar', length: 64, nullable: true })
   sessionId?: string | null;
@@ -24,8 +24,8 @@ export class SearchEvent {
   userId?: string | null;
 
   @Column({ name: 'suggestion_clicked', type: 'boolean', default: false })
-  suggestionClicked: boolean;
+  suggestionClicked!: boolean;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 }

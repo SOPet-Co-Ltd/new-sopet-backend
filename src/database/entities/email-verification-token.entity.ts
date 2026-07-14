@@ -6,22 +6,22 @@ import { IsEmail, IsNotEmpty } from 'class-validator';
 @Index(['email'])
 export class EmailVerificationToken {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'email', type: 'varchar', length: 255 })
   @IsEmail()
-  email: string;
+  email!: string;
 
   @Column({ name: 'token', type: 'varchar', length: 64 })
   @IsNotEmpty()
-  token: string;
+  token!: string;
 
   @Column({ name: 'expires_at', type: 'timestamp' })
-  expiresAt: Date;
+  expiresAt!: Date;
 
   @Column({ name: 'used_at', type: 'timestamp', nullable: true })
-  usedAt: Date | null;
+  usedAt!: Date | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 }

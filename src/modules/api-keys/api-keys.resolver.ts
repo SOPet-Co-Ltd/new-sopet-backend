@@ -9,31 +9,31 @@ import { StoreApiKey } from '../../database/entities/store-api-key.entity';
 @ObjectType()
 export class StoreApiKeyType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  name: string;
+  name!: string;
 
   @Field()
-  keyPrefix: string;
+  keyPrefix!: string;
 
   @Field()
-  createdAt: Date;
+  createdAt!: Date;
 
   @Field(() => Date, { nullable: true })
-  lastUsedAt: Date | null;
+  lastUsedAt!: Date | null;
 
   @Field(() => Date, { nullable: true })
-  revokedAt: Date | null;
+  revokedAt!: Date | null;
 }
 
 @ObjectType()
 export class CreateStoreApiKeyPayload {
   @Field(() => StoreApiKeyType)
-  apiKey: StoreApiKeyType;
+  apiKey!: StoreApiKeyType;
 
   @Field()
-  secret: string;
+  secret!: string;
 }
 
 function mapStoreApiKey(apiKey: StoreApiKey): StoreApiKeyType {

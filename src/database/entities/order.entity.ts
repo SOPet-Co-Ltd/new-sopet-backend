@@ -31,27 +31,27 @@ export { OrderStatus, PaymentMethod } from './enums/order.enums';
 @Index(['status'])
 export class Order {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'order_number', type: 'varchar', length: 50 })
   @IsNotEmpty()
-  orderNumber: string;
+  orderNumber!: string;
 
   @Column({ name: 'customer_id', type: 'uuid', nullable: true })
-  customerId: string | null;
+  customerId!: string | null;
 
   @Column({ name: 'guest_phone', type: 'varchar', length: 20, nullable: true })
   @IsOptional()
   @IsPhoneNumber('TH')
-  guestPhone: string | null;
+  guestPhone!: string | null;
 
   @Column({ name: 'guest_name', type: 'varchar', length: 255, nullable: true })
   @IsOptional()
-  guestName: string | null;
+  guestName!: string | null;
 
   @Column({ name: 'guest_email', type: 'varchar', length: 255, nullable: true })
   @IsOptional()
-  guestEmail: string | null;
+  guestEmail!: string | null;
 
   @Column({
     name: 'status',
@@ -60,27 +60,27 @@ export class Order {
     default: OrderStatus.PENDING_PAYMENT,
   })
   @IsEnum(OrderStatus)
-  status: OrderStatus;
+  status!: OrderStatus;
 
   @Column({ name: 'subtotal', type: 'decimal', precision: 10, scale: 2 })
   @IsNumber()
   @Min(0)
-  subtotal: number;
+  subtotal!: number;
 
   @Column({ name: 'discount_amount', type: 'decimal', precision: 10, scale: 2, default: 0 })
   @IsNumber()
   @Min(0)
-  discountAmount: number;
+  discountAmount!: number;
 
   @Column({ name: 'shipping_fee', type: 'decimal', precision: 10, scale: 2, default: 0 })
   @IsNumber()
   @Min(0)
-  shippingFee: number;
+  shippingFee!: number;
 
   @Column({ name: 'total', type: 'decimal', precision: 10, scale: 2 })
   @IsNumber()
   @Min(0)
-  total: number;
+  total!: number;
 
   @Column({
     name: 'payment_method',
@@ -88,59 +88,59 @@ export class Order {
     enum: PaymentMethod,
   })
   @IsEnum(PaymentMethod)
-  paymentMethod: PaymentMethod;
+  paymentMethod!: PaymentMethod;
 
   @Column({ name: 'payment_reference', type: 'varchar', length: 255, nullable: true })
-  paymentReference: string | null;
+  paymentReference!: string | null;
 
   @Column({ name: 'paid_at', type: 'timestamp', nullable: true })
-  paidAt: Date | null;
+  paidAt!: Date | null;
 
   @Column({ name: 'notes', type: 'text', nullable: true })
   @IsOptional()
-  notes: string | null;
+  notes!: string | null;
 
   @Column({ name: 'source_dispute_id', type: 'uuid', nullable: true })
-  sourceDisputeId: string | null;
+  sourceDisputeId!: string | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamp' })
-  updatedAt: Date;
+  updatedAt!: Date;
 
   // Relations
   @ManyToOne(() => Customer, (customer) => customer.orders, {
     nullable: true,
   })
   @JoinColumn({ name: 'customer_id' })
-  customer: Customer | null;
+  customer!: Customer | null;
 
   @OneToMany(() => OrderItem, (item) => item.order, { cascade: true })
-  items: OrderItem[];
+  items!: OrderItem[];
 
   @OneToMany(() => OrderStatusHistory, (history) => history.order)
-  statusHistory: OrderStatusHistory[];
+  statusHistory!: OrderStatusHistory[];
 
   @OneToMany(() => PromotionUsage, (usage) => usage.order)
-  promotionUsages: PromotionUsage[];
+  promotionUsages!: PromotionUsage[];
 
   @OneToMany(() => PayoutItem, (item) => item.order)
-  payoutItems: PayoutItem[];
+  payoutItems!: PayoutItem[];
 
   @OneToMany(() => Dispute, (dispute) => dispute.order)
-  disputes: Dispute[];
+  disputes!: Dispute[];
 
   @OneToMany(() => Review, (review) => review.order)
-  reviews: Review[];
+  reviews!: Review[];
 
   @OneToMany(() => OrderStoreShipping, (shipping) => shipping.order, {
     cascade: true,
   })
-  storeShippings: OrderStoreShipping[];
+  storeShippings!: OrderStoreShipping[];
 
   @OneToOne(() => OrderShippingAddress, (address) => address.order, {
     cascade: true,
   })
-  shippingAddress: OrderShippingAddress;
+  shippingAddress!: OrderShippingAddress;
 }

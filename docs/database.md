@@ -145,5 +145,6 @@ MinIO console: http://localhost:9001 (minioadmin / minioadmin)
 
 ## Related docs
 
+- [File types](file-types.md) — `.entity`, migrations, repositories, seeds
 - [Folder structure — database](folder-structure.md#srcdatabase)
 - [Feature development](feature-development.md)

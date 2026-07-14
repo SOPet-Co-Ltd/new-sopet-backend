@@ -3,34 +3,34 @@ import { Field, Float, Int, ObjectType } from '@nestjs/graphql';
 @ObjectType()
 export class PaginationMeta {
   @Field(() => Int)
-  page: number;
+  page!: number;
 
   @Field(() => Int)
-  limit: number;
+  limit!: number;
 
   @Field(() => Int)
-  total: number;
+  total!: number;
 
   @Field(() => Int)
-  totalPages: number;
+  totalPages!: number;
 }
 
 @ObjectType()
 export class AuthTokens {
   @Field()
-  accessToken: string;
+  accessToken!: string;
 
   @Field()
-  refreshToken: string;
+  refreshToken!: string;
 }
 
 @ObjectType()
 export class CustomerProfile {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  phone: string;
+  phone!: string;
 
   @Field(() => String, { nullable: true })
   fullName?: string | null;
@@ -48,16 +48,16 @@ export class CustomerProfile {
 @ObjectType()
 export class UserProfile {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  email: string;
+  email!: string;
 
   @Field()
-  fullName: string;
+  fullName!: string;
 
   @Field()
-  role: string;
+  role!: string;
 
   @Field(() => String, { nullable: true })
   storeId?: string | null;
@@ -66,7 +66,7 @@ export class UserProfile {
   profilePhotoUrl?: string | null;
 
   @Field(() => Boolean, { defaultValue: false })
-  emailVerified: boolean;
+  emailVerified!: boolean;
 }
 
 @ObjectType()
@@ -96,28 +96,28 @@ export class CustomerAuthPayload {
 @ObjectType()
 export class VendorAuthPayload {
   @Field(() => AuthTokens)
-  tokens: AuthTokens;
+  tokens!: AuthTokens;
 
   @Field(() => UserProfile)
-  user: UserProfile;
+  user!: UserProfile;
 }
 
 @ObjectType()
 export class MessagePayload {
   @Field()
-  message: string;
+  message!: string;
 }
 
 @ObjectType()
 export class StoreType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  name: string;
+  name!: string;
 
   @Field()
-  slug: string;
+  slug!: string;
 
   @Field(() => String, { nullable: true })
   description?: string | null;
@@ -129,46 +129,46 @@ export class StoreType {
   bannerUrl?: string | null;
 
   @Field()
-  status: string;
+  status!: string;
 }
 
 @ObjectType()
 export class VendorStoreType {
   @Field(() => StoreType)
-  store: StoreType;
+  store!: StoreType;
 
   @Field()
-  membershipRole: string;
+  membershipRole!: string;
 }
 
 @ObjectType()
 export class ProductImageType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  imageUrl: string;
+  imageUrl!: string;
 
   @Field(() => Int)
-  sortOrder: number;
+  sortOrder!: number;
 
   @Field()
-  isThumbnail: boolean;
+  isThumbnail!: boolean;
 }
 
 @ObjectType()
 export class ProductVariantType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  sku: string;
+  sku!: string;
 
   @Field(() => Float)
-  price: number;
+  price!: number;
 
   @Field(() => Int)
-  stockQuantity: number;
+  stockQuantity!: number;
 
   @Field(() => String, { nullable: true })
   optionsJson?: string | null;
@@ -180,28 +180,28 @@ export class ProductVariantType {
 @ObjectType()
 export class ProductType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  storeId: string;
+  storeId!: string;
 
   @Field()
-  name: string;
+  name!: string;
 
   @Field()
-  slug: string;
+  slug!: string;
 
   @Field(() => String, { nullable: true })
   description?: string | null;
 
   @Field(() => Float)
-  basePrice: number;
+  basePrice!: number;
 
   @Field(() => Float, { nullable: true })
   compareAtPrice?: number | null;
 
   @Field()
-  status: string;
+  status!: string;
 
   @Field(() => String, { nullable: true })
   category?: string | null;
@@ -216,16 +216,16 @@ export class ProductType {
   brandId?: string | null;
 
   @Field(() => [String])
-  tags: string[];
+  tags!: string[];
 
   @Field(() => [String], { nullable: true })
   tagIds?: string[] | null;
 
   @Field(() => Float)
-  averageRating: number;
+  averageRating!: number;
 
   @Field(() => Int)
-  reviewCount: number;
+  reviewCount!: number;
 
   @Field(() => String, { nullable: true })
   warning?: string | null;
@@ -249,43 +249,43 @@ export class ProductType {
 @ObjectType()
 export class ProductConnection {
   @Field(() => [ProductType])
-  items: ProductType[];
+  items!: ProductType[];
 
   @Field(() => PaginationMeta)
-  pagination: PaginationMeta;
+  pagination!: PaginationMeta;
 }
 
 @ObjectType()
 export class ProductPublishChecklistItemType {
   @Field()
-  key: string;
+  key!: string;
 
   @Field()
-  complete: boolean;
+  complete!: boolean;
 }
 
 @ObjectType()
 export class ProductPublishChecklistType {
   @Field()
-  canPublish: boolean;
+  canPublish!: boolean;
 
   @Field(() => [ProductPublishChecklistItemType])
-  items: ProductPublishChecklistItemType[];
+  items!: ProductPublishChecklistItemType[];
 
   @Field(() => [String])
-  missingKeys: string[];
+  missingKeys!: string[];
 }
 
 @ObjectType()
 export class CartItemType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  variantId: string;
+  variantId!: string;
 
   @Field(() => Int)
-  quantity: number;
+  quantity!: number;
 
   @Field(() => ProductVariantType, { nullable: true })
   productVariant?: ProductVariantType | null;
@@ -294,7 +294,7 @@ export class CartItemType {
 @ObjectType()
 export class CartType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field(() => String, { nullable: true })
   customerId?: string | null;
@@ -303,25 +303,25 @@ export class CartType {
   sessionId?: string | null;
 
   @Field(() => [CartItemType])
-  items: CartItemType[];
+  items!: CartItemType[];
 }
 
 @ObjectType()
 export class SavedAddressType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field(() => String, { nullable: true })
   label?: string | null;
 
   @Field()
-  fullName: string;
+  fullName!: string;
 
   @Field()
-  phone: string;
+  phone!: string;
 
   @Field()
-  addressLine1: string;
+  addressLine1!: string;
 
   @Field(() => String, { nullable: true })
   addressLine2?: string | null;
@@ -330,28 +330,28 @@ export class SavedAddressType {
   tumbon?: string | null;
 
   @Field()
-  amphoe: string;
+  amphoe!: string;
 
   @Field()
-  province: string;
+  province!: string;
 
   @Field()
-  postalCode: string;
+  postalCode!: string;
 
   @Field()
-  isDefault: boolean;
+  isDefault!: boolean;
 }
 
 @ObjectType()
 export class OrderShippingAddressType {
   @Field()
-  fullName: string;
+  fullName!: string;
 
   @Field()
-  phone: string;
+  phone!: string;
 
   @Field()
-  addressLine1: string;
+  addressLine1!: string;
 
   @Field(() => String, { nullable: true })
   addressLine2?: string | null;
@@ -360,40 +360,40 @@ export class OrderShippingAddressType {
   tumbon?: string | null;
 
   @Field()
-  amphoe: string;
+  amphoe!: string;
 
   @Field()
-  province: string;
+  province!: string;
 
   @Field()
-  postalCode: string;
+  postalCode!: string;
 }
 
 @ObjectType()
 export class OrderStoreShippingType {
   @Field()
-  storeId: string;
+  storeId!: string;
 
   @Field()
-  optionName: string;
+  optionName!: string;
 
   @Field(() => Float)
-  shippingFee: number;
+  shippingFee!: number;
 }
 
 @ObjectType()
 export class OrderItemType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  storeId: string;
+  storeId!: string;
 
   @Field()
-  variantId: string;
+  variantId!: string;
 
   @Field()
-  productName: string;
+  productName!: string;
 
   @Field(() => String, { nullable: true })
   productId?: string | null;
@@ -402,16 +402,16 @@ export class OrderItemType {
   productImageUrl?: string | null;
 
   @Field(() => Float)
-  unitPrice: number;
+  unitPrice!: number;
 
   @Field(() => Int)
-  quantity: number;
+  quantity!: number;
 
   @Field(() => Float)
-  subtotal: number;
+  subtotal!: number;
 
   @Field()
-  fulfillmentStatus: string;
+  fulfillmentStatus!: string;
 
   @Field(() => String, { nullable: true })
   trackingNumber?: string | null;
@@ -426,28 +426,28 @@ export class OrderItemType {
 @ObjectType()
 export class OrderType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  orderNumber: string;
+  orderNumber!: string;
 
   @Field()
-  status: string;
+  status!: string;
 
   @Field(() => Float)
-  subtotal: number;
+  subtotal!: number;
 
   @Field(() => Float)
-  shippingFee: number;
+  shippingFee!: number;
 
   @Field(() => Float)
-  discountAmount: number;
+  discountAmount!: number;
 
   @Field(() => Float)
-  total: number;
+  total!: number;
 
   @Field()
-  paymentMethod: string;
+  paymentMethod!: string;
 
   @Field(() => String, { nullable: true })
   guestPhone?: string | null;
@@ -459,13 +459,13 @@ export class OrderType {
   guestEmail?: string | null;
 
   @Field(() => [OrderItemType])
-  items: OrderItemType[];
+  items!: OrderItemType[];
 
   @Field()
-  createdAt: Date;
+  createdAt!: Date;
 
   @Field(() => [OrderStoreShippingType])
-  storeShippings: OrderStoreShippingType[];
+  storeShippings!: OrderStoreShippingType[];
 
   @Field(() => OrderShippingAddressType, { nullable: true })
   shippingAddress?: OrderShippingAddressType | null;
@@ -474,40 +474,40 @@ export class OrderType {
 @ObjectType()
 export class OrderTrackingStoreShippingType {
   @Field()
-  storeId: string;
+  storeId!: string;
 
   @Field()
-  optionName: string;
+  optionName!: string;
 
   @Field(() => Float)
-  shippingFee: number;
+  shippingFee!: number;
 }
 
 @ObjectType()
 export class OrderTrackingItemType {
   @Field()
-  storeId: string;
+  storeId!: string;
 
   @Field(() => String, { nullable: true })
   productId?: string | null;
 
   @Field()
-  productName: string;
+  productName!: string;
 
   @Field(() => String, { nullable: true })
   productImageUrl?: string | null;
 
   @Field(() => Int)
-  quantity: number;
+  quantity!: number;
 
   @Field(() => Float)
-  unitPrice: number;
+  unitPrice!: number;
 
   @Field(() => Float)
-  subtotal: number;
+  subtotal!: number;
 
   @Field()
-  fulfillmentStatus: string;
+  fulfillmentStatus!: string;
 
   @Field(() => String, { nullable: true })
   trackingNumber?: string | null;
@@ -522,61 +522,61 @@ export class OrderTrackingItemType {
 @ObjectType()
 export class OrderTrackingType {
   @Field()
-  orderNumber: string;
+  orderNumber!: string;
 
   @Field()
-  status: string;
+  status!: string;
 
   @Field()
-  createdAt: Date;
+  createdAt!: Date;
 
   @Field(() => Float)
-  subtotal: number;
+  subtotal!: number;
 
   @Field(() => Float)
-  shippingFee: number;
+  shippingFee!: number;
 
   @Field(() => Float)
-  discountAmount: number;
+  discountAmount!: number;
 
   @Field(() => Float)
-  total: number;
+  total!: number;
 
   @Field(() => [OrderTrackingItemType])
-  items: OrderTrackingItemType[];
+  items!: OrderTrackingItemType[];
 
   @Field(() => [OrderTrackingStoreShippingType])
-  storeShippings: OrderTrackingStoreShippingType[];
+  storeShippings!: OrderTrackingStoreShippingType[];
 }
 
 @ObjectType()
 export class OrderConnection {
   @Field(() => [OrderType])
-  items: OrderType[];
+  items!: OrderType[];
 
   @Field(() => PaginationMeta)
-  pagination: PaginationMeta;
+  pagination!: PaginationMeta;
 }
 
 @ObjectType()
 export class PaymentType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  orderId: string;
+  orderId!: string;
 
   @Field(() => Float)
-  amount: number;
+  amount!: number;
 
   @Field()
-  currency: string;
+  currency!: string;
 
   @Field()
-  status: string;
+  status!: string;
 
   @Field()
-  paymentMethod: string;
+  paymentMethod!: string;
 
   @Field(() => String, { nullable: true })
   authorizeUri?: string | null;
@@ -591,10 +591,10 @@ export class PaymentType {
 @ObjectType()
 export class FavoriteType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  productId: string;
+  productId!: string;
 
   @Field(() => ProductType, { nullable: true })
   product?: ProductType | null;
@@ -603,16 +603,16 @@ export class FavoriteType {
 @ObjectType()
 export class StoreMemberType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  storeId: string;
+  storeId!: string;
 
   @Field()
-  userId: string;
+  userId!: string;
 
   @Field()
-  role: string;
+  role!: string;
 
   @Field(() => String, { nullable: true })
   email?: string | null;
@@ -624,82 +624,82 @@ export class StoreMemberType {
 @ObjectType()
 export class StoreMemberInvitationType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  storeId: string;
+  storeId!: string;
 
   @Field()
-  email: string;
+  email!: string;
 
   @Field()
-  role: string;
+  role!: string;
 
   @Field()
-  status: string;
+  status!: string;
 
   @Field()
-  expiresAt: string;
+  expiresAt!: string;
 }
 
 @ObjectType()
 export class StoreInvitationPreviewType {
   @Field()
-  storeName: string;
+  storeName!: string;
 
   @Field()
-  email: string;
+  email!: string;
 
   @Field()
-  role: string;
+  role!: string;
 
   @Field()
-  expiresAt: string;
+  expiresAt!: string;
 
   @Field()
-  userExists: boolean;
+  userExists!: boolean;
 }
 
 @ObjectType()
 export class ShippingProviderType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  name: string;
+  name!: string;
 
   @Field()
-  isActive: boolean;
+  isActive!: boolean;
 
   @Field()
-  createdAt: Date;
+  createdAt!: Date;
 
   @Field()
-  updatedAt: Date;
+  updatedAt!: Date;
 }
 
 @ObjectType()
 export class StoreShippingOptionType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  storeId: string;
+  storeId!: string;
 
   @Field()
-  name: string;
+  name!: string;
 
   @Field(() => String, { nullable: true })
   description?: string | null;
 
   @Field(() => Float)
-  price: number;
+  price!: number;
 
   @Field(() => Int)
-  sortOrder: number;
+  sortOrder!: number;
 
   @Field()
-  isActive: boolean;
+  isActive!: boolean;
 
   @Field(() => String, { nullable: true })
   providerId?: string | null;
@@ -708,13 +708,13 @@ export class StoreShippingOptionType {
 @ObjectType()
 export class PlatformBannerType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  title: string;
+  title!: string;
 
   @Field()
-  imageUrl: string;
+  imageUrl!: string;
 
   @Field(() => String, { nullable: true })
   mobileImageUrl?: string | null;
@@ -723,10 +723,10 @@ export class PlatformBannerType {
   linkUrl?: string | null;
 
   @Field(() => Int)
-  sortOrder: number;
+  sortOrder!: number;
 
   @Field()
-  isActive: boolean;
+  isActive!: boolean;
 
   @Field(() => Date, { nullable: true })
   startsAt?: Date | null;
@@ -738,22 +738,22 @@ export class PlatformBannerType {
 @ObjectType()
 export class PlatformSponsorType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  name: string;
+  name!: string;
 
   @Field()
-  imageUrl: string;
+  imageUrl!: string;
 
   @Field(() => String, { nullable: true })
   linkUrl?: string | null;
 
   @Field(() => Int)
-  sortOrder: number;
+  sortOrder!: number;
 
   @Field()
-  isActive: boolean;
+  isActive!: boolean;
 
   @Field(() => Date, { nullable: true })
   startsAt?: Date | null;
@@ -765,22 +765,22 @@ export class PlatformSponsorType {
 @ObjectType()
 export class PlatformAdType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  title: string;
+  title!: string;
 
   @Field()
-  imageUrl: string;
+  imageUrl!: string;
 
   @Field(() => String, { nullable: true })
   linkUrl?: string | null;
 
   @Field(() => Int)
-  sortOrder: number;
+  sortOrder!: number;
 
   @Field()
-  isActive: boolean;
+  isActive!: boolean;
 
   @Field(() => Date, { nullable: true })
   startsAt?: Date | null;
@@ -792,172 +792,172 @@ export class PlatformAdType {
 @ObjectType()
 export class PlatformSettingsType {
   @Field()
-  storefrontUrl: string;
+  storefrontUrl!: string;
 
   @Field()
-  currency: string;
+  currency!: string;
 
   @Field()
-  supportEmail: string;
+  supportEmail!: string;
 }
 
 @ObjectType()
 export class NotificationType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  type: string;
+  type!: string;
 
   @Field({ nullable: true })
-  title: string;
+  title!: string;
 
   @Field()
-  message: string;
+  message!: string;
 
   @Field(() => String, { nullable: true })
-  metadata: string;
+  metadata!: string;
 
   @Field()
-  isRead: boolean;
+  isRead!: boolean;
 
   @Field()
-  createdAt: Date;
+  createdAt!: Date;
 }
 
 @ObjectType()
 export class UploadResultType {
   @Field()
-  url: string;
+  url!: string;
 
   @Field()
-  key: string;
+  key!: string;
 }
 
 @ObjectType()
 export class StoreAnalyticsType {
   @Field(() => Int)
-  totalOrders: number;
+  totalOrders!: number;
 
   @Field(() => Float)
-  totalRevenue: number;
+  totalRevenue!: number;
 
   @Field(() => Int)
-  totalProducts: number;
+  totalProducts!: number;
 
   @Field(() => Int)
-  pendingOrders: number;
+  pendingOrders!: number;
 
   @Field(() => Int)
-  recentOrders: number;
+  recentOrders!: number;
 }
 
 @ObjectType()
 export class PlatformAnalyticsType {
   @Field(() => Int)
-  totalOrders: number;
+  totalOrders!: number;
 
   @Field(() => Float)
-  totalRevenue: number;
+  totalRevenue!: number;
 
   @Field(() => Float)
-  averageOrderValue: number;
+  averageOrderValue!: number;
 
   @Field(() => Int)
-  totalStores: number;
+  totalStores!: number;
 
   @Field(() => Int)
-  pendingStores: number;
+  pendingStores!: number;
 
   @Field(() => Int)
-  totalCustomers: number;
+  totalCustomers!: number;
 }
 
 @ObjectType()
 export class SalesTimePointType {
   @Field()
-  date: string;
+  date!: string;
 
   @Field(() => Float)
-  revenue: number;
+  revenue!: number;
 
   @Field(() => Int)
-  orderCount: number;
+  orderCount!: number;
 }
 
 @ObjectType()
 export class SalesBreakdownItemType {
   @Field()
-  label: string;
+  label!: string;
 
   @Field(() => Float)
-  revenue: number;
+  revenue!: number;
 
   @Field(() => Int)
-  orderCount: number;
+  orderCount!: number;
 }
 
 @ObjectType()
 export class TopStoreType {
   @Field()
-  storeId: string;
+  storeId!: string;
 
   @Field()
-  storeName: string;
+  storeName!: string;
 
   @Field(() => Float)
-  revenue: number;
+  revenue!: number;
 
   @Field(() => Int)
-  orderCount: number;
+  orderCount!: number;
 }
 
 @ObjectType()
 export class SavedPaymentMethodType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  type: string;
+  type!: string;
 
   @Field()
-  lastFour: string;
+  lastFour!: string;
 
   @Field()
-  brand: string;
+  brand!: string;
 
   @Field(() => Int)
-  expiryMonth: number;
+  expiryMonth!: number;
 
   @Field(() => Int)
-  expiryYear: number;
+  expiryYear!: number;
 
   @Field()
-  isDefault: boolean;
+  isDefault!: boolean;
 }
 
 @ObjectType()
 export class CategoryType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  name: string;
+  name!: string;
 
   @Field()
-  slug: string;
+  slug!: string;
 
   @Field()
-  approvalStatus: string;
+  approvalStatus!: string;
 
   @Field()
-  createdBy: string;
+  createdBy!: string;
 
   @Field()
-  createdAt: Date;
+  createdAt!: Date;
 
   @Field()
-  updatedAt: Date;
+  updatedAt!: Date;
 
   @Field(() => String, { nullable: true })
   imageUrl?: string | null;
@@ -966,49 +966,49 @@ export class CategoryType {
 @ObjectType()
 export class TagType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  name: string;
+  name!: string;
 
   @Field()
-  slug: string;
+  slug!: string;
 
   @Field()
-  approvalStatus: string;
+  approvalStatus!: string;
 
   @Field()
-  createdBy: string;
+  createdBy!: string;
 
   @Field()
-  createdAt: Date;
+  createdAt!: Date;
 
   @Field()
-  updatedAt: Date;
+  updatedAt!: Date;
 }
 
 @ObjectType()
 export class PetTypeType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  name: string;
+  name!: string;
 
   @Field()
-  slug: string;
+  slug!: string;
 
   @Field()
-  approvalStatus: string;
+  approvalStatus!: string;
 
   @Field()
-  createdBy: string;
+  createdBy!: string;
 
   @Field()
-  createdAt: Date;
+  createdAt!: Date;
 
   @Field()
-  updatedAt: Date;
+  updatedAt!: Date;
 
   @Field(() => String, { nullable: true })
   imageUrl?: string | null;
@@ -1017,61 +1017,61 @@ export class PetTypeType {
 @ObjectType()
 export class BrandType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  name: string;
+  name!: string;
 
   @Field()
-  slug: string;
+  slug!: string;
 
   @Field()
-  approvalStatus: string;
+  approvalStatus!: string;
 
   @Field()
-  createdBy: string;
+  createdBy!: string;
 
   @Field()
-  createdAt: Date;
+  createdAt!: Date;
 
   @Field()
-  updatedAt: Date;
+  updatedAt!: Date;
 }
 
 @ObjectType()
 export class TaxonomyDeleteImpactProductType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  name: string;
+  name!: string;
 
   @Field()
-  slug: string;
+  slug!: string;
 }
 
 @ObjectType()
 export class TaxonomyDeleteImpactType {
   @Field(() => Int)
-  productCount: number;
+  productCount!: number;
 
   @Field(() => [TaxonomyDeleteImpactProductType])
-  products: TaxonomyDeleteImpactProductType[];
+  products!: TaxonomyDeleteImpactProductType[];
 }
 
 @ObjectType()
 export class DeleteTaxonomyResultType {
   @Field()
-  success: boolean;
+  success!: boolean;
 
   @Field()
-  deletedId: string;
+  deletedId!: string;
 
   @Field(() => String, { nullable: true })
   deletedCategoryId?: string | null;
 
   @Field(() => Int)
-  detachedProductCount: number;
+  detachedProductCount!: number;
 
   @Field(() => Int, { nullable: true })
   reassignedProductCount?: number;
@@ -1080,34 +1080,34 @@ export class DeleteTaxonomyResultType {
   replacementCategoryId?: string | null;
 
   @Field(() => Int)
-  notifiedStoreCount: number;
+  notifiedStoreCount!: number;
 }
 
 @ObjectType()
 export class PromotionType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field(() => String, { nullable: true })
   storeId?: string | null;
 
   @Field()
-  code: string;
+  code!: string;
 
   @Field()
-  name: string;
+  name!: string;
 
   @Field(() => String, { nullable: true })
   description?: string | null;
 
   @Field()
-  type: string;
+  type!: string;
 
   @Field()
-  scope: string;
+  scope!: string;
 
   @Field(() => Float)
-  discountValue: number;
+  discountValue!: number;
 
   @Field(() => Float, { nullable: true })
   minPurchaseAmount?: number | null;
@@ -1119,19 +1119,19 @@ export class PromotionType {
   usageLimit?: number | null;
 
   @Field(() => Int)
-  usagePerCustomer: number;
+  usagePerCustomer!: number;
 
   @Field(() => Int)
-  usageCount: number;
+  usageCount!: number;
 
   @Field()
-  isActive: boolean;
+  isActive!: boolean;
 
   @Field()
-  autoApply: boolean;
+  autoApply!: boolean;
 
   @Field(() => Int)
-  priority: number;
+  priority!: number;
 
   @Field(() => String, { nullable: true })
   conditions?: string | null;
@@ -1143,34 +1143,34 @@ export class PromotionType {
   expiresAt?: Date | null;
 
   @Field()
-  createdAt: Date;
+  createdAt!: Date;
 
   @Field()
-  updatedAt: Date;
+  updatedAt!: Date;
 }
 
 @ObjectType()
 export class PromotionValidationResult {
   @Field()
-  code: string;
+  code!: string;
 
   @Field()
-  name: string;
+  name!: string;
 
   @Field(() => Float)
-  discountAmount: number;
+  discountAmount!: number;
 }
 
 @ObjectType()
 export class StoreRequestType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  vendorUserId: string;
+  vendorUserId!: string;
 
   @Field()
-  storeName: string;
+  storeName!: string;
 
   @Field(() => String, { nullable: true })
   description?: string | null;
@@ -1188,7 +1188,7 @@ export class StoreRequestType {
   logoUrl?: string | null;
 
   @Field()
-  status: string;
+  status!: string;
 
   @Field(() => String, { nullable: true })
   rejectionReason?: string | null;
@@ -1197,37 +1197,37 @@ export class StoreRequestType {
   createdStoreId?: string | null;
 
   @Field()
-  createdAt: Date;
+  createdAt!: Date;
 
   @Field()
-  updatedAt: Date;
+  updatedAt!: Date;
 }
 
 @ObjectType()
 export class StoreReactivationRequestImageType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  imageUrl: string;
+  imageUrl!: string;
 
   @Field(() => Int)
-  sortOrder: number;
+  sortOrder!: number;
 }
 
 @ObjectType()
 export class StoreReactivationRequestType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  storeId: string;
+  storeId!: string;
 
   @Field()
-  storeName: string;
+  storeName!: string;
 
   @Field()
-  submittedByUserId: string;
+  submittedByUserId!: string;
 
   @Field(() => String, { nullable: true })
   submittedByFullName?: string | null;
@@ -1236,25 +1236,25 @@ export class StoreReactivationRequestType {
   submittedByEmail?: string | null;
 
   @Field()
-  title: string;
+  title!: string;
 
   @Field()
-  content: string;
+  content!: string;
 
   @Field()
-  status: string;
+  status!: string;
 
   @Field(() => String, { nullable: true })
   reviewNote?: string | null;
 
   @Field(() => [StoreReactivationRequestImageType])
-  images: StoreReactivationRequestImageType[];
+  images!: StoreReactivationRequestImageType[];
 
   @Field()
-  createdAt: Date;
+  createdAt!: Date;
 
   @Field()
-  updatedAt: Date;
+  updatedAt!: Date;
 
   @Field(() => Date, { nullable: true })
   reviewedAt?: Date | null;
@@ -1263,67 +1263,67 @@ export class StoreReactivationRequestType {
 @ObjectType()
 export class VendorInvitationType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  email: string;
+  email!: string;
 
   @Field()
-  status: string;
+  status!: string;
 
   @Field()
-  token: string;
+  token!: string;
 
   @Field()
-  expiresAt: string;
+  expiresAt!: string;
 }
 
 @ObjectType()
 export class AdminTeamMemberType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  email: string;
+  email!: string;
 
   @Field()
-  fullName: string;
+  fullName!: string;
 
   @Field()
-  isActive: boolean;
+  isActive!: boolean;
 
   @Field()
-  createdAt: Date;
+  createdAt!: Date;
 }
 
 @ObjectType()
 export class AdminInvitationType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  email: string;
+  email!: string;
 
   @Field()
-  status: string;
+  status!: string;
 
   @Field()
-  expiresAt: string;
+  expiresAt!: string;
 }
 
 @ObjectType()
 export class AdminStoreType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  ownerId: string;
+  ownerId!: string;
 
   @Field()
-  name: string;
+  name!: string;
 
   @Field()
-  slug: string;
+  slug!: string;
 
   @Field(() => String, { nullable: true })
   description?: string | null;
@@ -1335,7 +1335,7 @@ export class AdminStoreType {
   bannerUrl?: string | null;
 
   @Field()
-  status: string;
+  status!: string;
 
   @Field(() => String, { nullable: true })
   contactPhone?: string | null;
@@ -1356,10 +1356,10 @@ export class AdminStoreType {
   bankName?: string | null;
 
   @Field()
-  payoutSchedule: string;
+  payoutSchedule!: string;
 
   @Field()
-  payoutSchedulePaused: boolean;
+  payoutSchedulePaused!: boolean;
 
   @Field(() => String, { nullable: true })
   ownerEmail?: string | null;
@@ -1368,82 +1368,82 @@ export class AdminStoreType {
   ownerFullName?: string | null;
 
   @Field()
-  createdAt: Date;
+  createdAt!: Date;
 
   @Field()
-  updatedAt: Date;
+  updatedAt!: Date;
 }
 
 @ObjectType()
 export class AdminVendorStoreType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  name: string;
+  name!: string;
 
   @Field()
-  slug: string;
+  slug!: string;
 
   @Field()
-  status: string;
+  status!: string;
 }
 
 @ObjectType()
 export class AdminVendorType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  email: string;
+  email!: string;
 
   @Field()
-  fullName: string;
+  fullName!: string;
 
   @Field()
-  role: string;
+  role!: string;
 
   @Field()
-  isActive: boolean;
+  isActive!: boolean;
 
   @Field(() => Date, { nullable: true })
   lastLoginAt?: Date | null;
 
   @Field()
-  createdAt: Date;
+  createdAt!: Date;
 
   @Field(() => [AdminVendorStoreType])
-  stores: AdminVendorStoreType[];
+  stores!: AdminVendorStoreType[];
 }
 
 @ObjectType()
 export class AdminVendorMembershipType {
   @Field()
-  storeId: string;
+  storeId!: string;
 
   @Field()
-  storeName: string;
+  storeName!: string;
 
   @Field()
-  storeSlug: string;
+  storeSlug!: string;
 
   @Field()
-  storeStatus: string;
+  storeStatus!: string;
 
   @Field()
-  role: string;
+  role!: string;
 
   @Field()
-  joinedAt: Date;
+  joinedAt!: Date;
 }
 
 @ObjectType()
 export class AdminVendorActivityType {
   @Field()
-  kind: string;
+  kind!: string;
 
   @Field()
-  occurredAt: Date;
+  occurredAt!: Date;
 
   @Field(() => String, { nullable: true })
   storeId?: string | null;
@@ -1458,19 +1458,19 @@ export class AdminVendorActivityType {
 @ObjectType()
 export class AdminVendorInsightsType {
   @Field(() => Int)
-  storeCount: number;
+  storeCount!: number;
 
   @Field(() => Int)
-  membershipCount: number;
+  membershipCount!: number;
 
   @Field(() => Float)
-  totalRevenue: number;
+  totalRevenue!: number;
 
   @Field(() => Int)
-  orderCount: number;
+  orderCount!: number;
 
   @Field(() => Float)
-  averageOrderValue: number;
+  averageOrderValue!: number;
 
   @Field(() => Date, { nullable: true })
   lastOrderAt?: Date | null;
@@ -1479,58 +1479,58 @@ export class AdminVendorInsightsType {
   lastActivityAt?: Date | null;
 
   @Field(() => [AdminVendorMembershipType])
-  memberships: AdminVendorMembershipType[];
+  memberships!: AdminVendorMembershipType[];
 
   @Field(() => [AdminVendorActivityType])
-  activities: AdminVendorActivityType[];
+  activities!: AdminVendorActivityType[];
 
   @Field(() => [AdminCustomerRecentOrder])
-  recentOrders: AdminCustomerRecentOrder[];
+  recentOrders!: AdminCustomerRecentOrder[];
 }
 
 @ObjectType()
 export class AdminVendorDetailType extends AdminVendorType {
   @Field()
-  emailVerified: boolean;
+  emailVerified!: boolean;
 
   @Field(() => AdminVendorInsightsType)
-  insights: AdminVendorInsightsType;
+  insights!: AdminVendorInsightsType;
 }
 
 @ObjectType()
 export class ReviewImageType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  url: string;
+  url!: string;
 }
 
 @ObjectType()
 export class ReviewReplyType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  body: string;
+  body!: string;
 
   @Field()
-  createdAt: Date;
+  createdAt!: Date;
 
   @Field()
-  updatedAt: Date;
+  updatedAt!: Date;
 }
 
 @ObjectType()
 export class StoreProductReviewType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  productId: string;
+  productId!: string;
 
   @Field()
-  productName: string;
+  productName!: string;
 
   @Field(() => String, { nullable: true })
   productSlug?: string | null;
@@ -1539,19 +1539,19 @@ export class StoreProductReviewType {
   productImageUrl?: string | null;
 
   @Field(() => Int)
-  rating: number;
+  rating!: number;
 
   @Field(() => String, { nullable: true })
   comment?: string | null;
 
   @Field()
-  customerName: string;
+  customerName!: string;
 
   @Field()
-  createdAt: Date;
+  createdAt!: Date;
 
   @Field(() => [ReviewImageType])
-  images: ReviewImageType[];
+  images!: ReviewImageType[];
 
   @Field(() => ReviewReplyType, { nullable: true })
   reply?: ReviewReplyType | null;
@@ -1560,79 +1560,79 @@ export class StoreProductReviewType {
 @ObjectType()
 export class StoreProductReviewConnection {
   @Field(() => [StoreProductReviewType])
-  items: StoreProductReviewType[];
+  items!: StoreProductReviewType[];
 
   @Field(() => PaginationMeta)
-  pagination: PaginationMeta;
+  pagination!: PaginationMeta;
 }
 
 @ObjectType()
 export class ProductReviewBreakdownType {
   @Field()
-  productId: string;
+  productId!: string;
 
   @Field()
-  productName: string;
+  productName!: string;
 
   @Field(() => Float)
-  averageRating: number;
+  averageRating!: number;
 
   @Field(() => Int)
-  reviewCount: number;
+  reviewCount!: number;
 }
 
 @ObjectType()
 export class StoreReviewSummaryType {
   @Field(() => Float)
-  averageRating: number;
+  averageRating!: number;
 
   @Field(() => Int)
-  totalCount: number;
+  totalCount!: number;
 
   @Field(() => Int)
-  rating5Count: number;
+  rating5Count!: number;
 
   @Field(() => Int)
-  rating4Count: number;
+  rating4Count!: number;
 
   @Field(() => Int)
-  rating3Count: number;
+  rating3Count!: number;
 
   @Field(() => Int)
-  rating2Count: number;
+  rating2Count!: number;
 
   @Field(() => Int)
-  rating1Count: number;
+  rating1Count!: number;
 
   @Field(() => [ProductReviewBreakdownType])
-  productBreakdown: ProductReviewBreakdownType[];
+  productBreakdown!: ProductReviewBreakdownType[];
 }
 
 @ObjectType()
 export class TopProductType {
   @Field()
-  productId: string;
+  productId!: string;
 
   @Field()
-  name: string;
+  name!: string;
 
   @Field(() => Int)
-  unitsSold: number;
+  unitsSold!: number;
 
   @Field(() => Float)
-  revenue: number;
+  revenue!: number;
 }
 
 @ObjectType()
 export class MyStoreType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  name: string;
+  name!: string;
 
   @Field()
-  slug: string;
+  slug!: string;
 
   @Field(() => String, { nullable: true })
   description?: string | null;
@@ -1668,22 +1668,22 @@ export class MyStoreType {
   omiseRecipientId?: string | null;
 
   @Field(() => String)
-  omiseRecipientStatus: string;
+  omiseRecipientStatus!: string;
 
   @Field(() => String, { nullable: true })
   omiseRecipientFailureMessage?: string | null;
 
   @Field()
-  status: string;
+  status!: string;
 }
 
 @ObjectType()
 export class AdminCustomerType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  phone: string;
+  phone!: string;
 
   @Field(() => String, { nullable: true })
   fullName?: string | null;
@@ -1695,103 +1695,103 @@ export class AdminCustomerType {
   dateOfBirth?: string | null;
 
   @Field()
-  isVerified: boolean;
+  isVerified!: boolean;
 
   @Field()
-  isActive: boolean;
+  isActive!: boolean;
 
   @Field(() => Date, { nullable: true })
   lastLoginAt?: Date | null;
 
   @Field()
-  createdAt: Date;
+  createdAt!: Date;
 
   @Field()
-  updatedAt: Date;
+  updatedAt!: Date;
 }
 
 @ObjectType()
 export class AdminCustomerConnection {
   @Field(() => [AdminCustomerType])
-  items: AdminCustomerType[];
+  items!: AdminCustomerType[];
 
   @Field(() => PaginationMeta)
-  pagination: PaginationMeta;
+  pagination!: PaginationMeta;
 }
 
 @ObjectType()
 export class AdminCustomerOrderItemSummary {
   @Field()
-  productName: string;
+  productName!: string;
 
   @Field(() => Int)
-  quantity: number;
+  quantity!: number;
 
   @Field(() => Float)
-  unitPrice: number;
+  unitPrice!: number;
 
   @Field(() => Float)
-  subtotal: number;
+  subtotal!: number;
 }
 
 @ObjectType()
 export class AdminCustomerRecentOrder {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  orderNumber: string;
+  orderNumber!: string;
 
   @Field()
-  status: string;
+  status!: string;
 
   @Field(() => Float)
-  total: number;
+  total!: number;
 
   @Field()
-  createdAt: Date;
+  createdAt!: Date;
 
   @Field(() => [AdminCustomerOrderItemSummary])
-  items: AdminCustomerOrderItemSummary[];
+  items!: AdminCustomerOrderItemSummary[];
 }
 
 @ObjectType()
 export class AdminCustomerInsightsType {
   @Field(() => Float)
-  totalSpent: number;
+  totalSpent!: number;
 
   @Field(() => Int)
-  orderCount: number;
+  orderCount!: number;
 
   @Field(() => Float)
-  averageOrderValue: number;
+  averageOrderValue!: number;
 
   @Field(() => Date, { nullable: true })
   lastOrderAt?: Date | null;
 
   @Field(() => Int)
-  addressCount: number;
+  addressCount!: number;
 
   @Field(() => Int)
-  favoriteCount: number;
+  favoriteCount!: number;
 
   @Field(() => [AdminCustomerRecentOrder])
-  recentOrders: AdminCustomerRecentOrder[];
+  recentOrders!: AdminCustomerRecentOrder[];
 }
 
 @ObjectType()
 export class AdminCustomerDetailType extends AdminCustomerType {
   @Field(() => AdminCustomerInsightsType)
-  insights: AdminCustomerInsightsType;
+  insights!: AdminCustomerInsightsType;
 }
 
 @ObjectType()
 export class VendorCustomerType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  phone: string;
+  phone!: string;
 
   @Field(() => String, { nullable: true })
   fullName?: string | null;
@@ -1800,94 +1800,94 @@ export class VendorCustomerType {
   email?: string | null;
 
   @Field()
-  isVerified: boolean;
+  isVerified!: boolean;
 
   @Field(() => Date, { nullable: true })
   lastLoginAt?: Date | null;
 
   @Field()
-  createdAt: Date;
+  createdAt!: Date;
 }
 
 @ObjectType()
 export class VendorCustomerStoreReviewSummary {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  productName: string;
+  productName!: string;
 
   @Field(() => Int)
-  rating: number;
+  rating!: number;
 
   @Field(() => String, { nullable: true })
   comment?: string | null;
 
   @Field()
-  createdAt: Date;
+  createdAt!: Date;
 }
 
 @ObjectType()
 export class VendorCustomerFavoriteProductSummary {
   @Field()
-  productName: string;
+  productName!: string;
 
   @Field()
-  createdAt: Date;
+  createdAt!: Date;
 }
 
 @ObjectType()
 export class VendorCustomerStoreInsightsType {
   @Field(() => Float)
-  totalSpent: number;
+  totalSpent!: number;
 
   @Field(() => Int)
-  orderCount: number;
+  orderCount!: number;
 
   @Field(() => Float)
-  averageOrderValue: number;
+  averageOrderValue!: number;
 
   @Field(() => Date, { nullable: true })
   lastOrderAt?: Date | null;
 
   @Field(() => Int)
-  favoriteCount: number;
+  favoriteCount!: number;
 
   @Field(() => Int)
-  reviewCount: number;
+  reviewCount!: number;
 
   @Field(() => [AdminCustomerRecentOrder])
-  recentOrders: AdminCustomerRecentOrder[];
+  recentOrders!: AdminCustomerRecentOrder[];
 
   @Field(() => [VendorCustomerStoreReviewSummary])
-  recentReviews: VendorCustomerStoreReviewSummary[];
+  recentReviews!: VendorCustomerStoreReviewSummary[];
 
   @Field(() => [VendorCustomerFavoriteProductSummary])
-  favoriteProducts: VendorCustomerFavoriteProductSummary[];
+  favoriteProducts!: VendorCustomerFavoriteProductSummary[];
 }
 
 @ObjectType()
 export class VendorCustomerDetailType extends VendorCustomerType {
   @Field(() => VendorCustomerStoreInsightsType)
-  insights: VendorCustomerStoreInsightsType;
+  insights!: VendorCustomerStoreInsightsType;
 }
 
 @ObjectType()
 export class VendorCustomerConnection {
   @Field(() => [VendorCustomerType])
-  items: VendorCustomerType[];
+  items!: VendorCustomerType[];
 
   @Field(() => PaginationMeta)
-  pagination: PaginationMeta;
+  pagination!: PaginationMeta;
 }
 
 @ObjectType()
 export class AdminAuditLogType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  actorType: string;
+  actorType!: string;
 
   @Field(() => String, { nullable: true })
   actorId?: string | null;
@@ -1896,10 +1896,10 @@ export class AdminAuditLogType {
   actorLabel?: string | null;
 
   @Field()
-  action: string;
+  action!: string;
 
   @Field()
-  resourceType: string;
+  resourceType!: string;
 
   @Field(() => String, { nullable: true })
   resourceId?: string | null;
@@ -1911,14 +1911,14 @@ export class AdminAuditLogType {
   ipAddress?: string | null;
 
   @Field()
-  createdAt: Date;
+  createdAt!: Date;
 }
 
 @ObjectType()
 export class AdminAuditLogConnection {
   @Field(() => [AdminAuditLogType])
-  items: AdminAuditLogType[];
+  items!: AdminAuditLogType[];
 
   @Field(() => PaginationMeta)
-  pagination: PaginationMeta;
+  pagination!: PaginationMeta;
 }

@@ -30,11 +30,11 @@ export enum NotificationChannel {
 @Index(['type'])
 export class Notification {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'customer_id', type: 'uuid' })
   @IsNotEmpty()
-  customerId: string;
+  customerId!: string;
 
   @Column({
     name: 'type',
@@ -42,7 +42,7 @@ export class Notification {
     enum: NotificationType,
   })
   @IsEnum(NotificationType)
-  type: NotificationType;
+  type!: NotificationType;
 
   @Column({
     name: 'channel',
@@ -50,32 +50,32 @@ export class Notification {
     enum: NotificationChannel,
   })
   @IsEnum(NotificationChannel)
-  channel: NotificationChannel;
+  channel!: NotificationChannel;
 
   @Column({ name: 'subject', type: 'varchar', length: 255, nullable: true })
-  subject: string | null;
+  subject!: string | null;
 
   @Column({ name: 'message', type: 'text' })
   @IsNotEmpty()
-  message: string;
+  message!: string;
 
   @Column({ name: 'metadata', type: 'jsonb', default: {} })
-  metadata: Record<string, any>;
+  metadata!: Record<string, any>;
 
   @Column({ name: 'is_sent', type: 'boolean', default: false })
-  isSent: boolean;
+  isSent!: boolean;
 
   @Column({ name: 'sent_at', type: 'timestamp', nullable: true })
-  sentAt: Date | null;
+  sentAt!: Date | null;
 
   @Column({ name: 'error_message', type: 'text', nullable: true })
-  errorMessage: string | null;
+  errorMessage!: string | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 
   // Relations
   @ManyToOne(() => Customer, (customer) => customer.notifications)
   @JoinColumn({ name: 'customer_id' })
-  customer: Customer;
+  customer!: Customer;
 }
