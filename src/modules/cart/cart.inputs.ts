@@ -5,12 +5,12 @@ import { IsInt, IsOptional, IsString, IsUUID, Min } from 'class-validator';
 export class AddToCartInput {
   @Field()
   @IsUUID()
-  variantId: string;
+  variantId!: string;
 
   @Field(() => Int)
   @IsInt()
   @Min(1)
-  quantity: number;
+  quantity!: number;
 
   @Field({ nullable: true })
   @IsOptional()
@@ -22,12 +22,12 @@ export class AddToCartInput {
 export class UpdateCartItemInput {
   @Field()
   @IsUUID()
-  itemId: string;
+  itemId!: string;
 
   @Field(() => Int)
   @IsInt()
   @Min(0)
-  quantity: number;
+  quantity!: number;
 
   @Field({ nullable: true })
   @IsOptional()
@@ -39,7 +39,7 @@ export class UpdateCartItemInput {
 export class RemoveCartItemInput {
   @Field()
   @IsUUID()
-  itemId: string;
+  itemId!: string;
 
   @Field({ nullable: true })
   @IsOptional()

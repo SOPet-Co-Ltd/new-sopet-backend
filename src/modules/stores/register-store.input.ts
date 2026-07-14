@@ -7,7 +7,7 @@ export class RegisterStoreInput {
   @IsNotEmpty()
   @IsString()
   @Length(1, 255)
-  name: string;
+  name!: string;
 
   @Field({ nullable: true })
   @IsOptional()
@@ -32,19 +32,19 @@ export class RegisterStoreInput {
   @Field()
   @IsNotEmpty()
   @IsEmail()
-  ownerEmail: string;
+  ownerEmail!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
   @MinLength(6)
-  ownerPassword: string;
+  ownerPassword!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
   @Length(1, 255)
-  ownerFullName: string;
+  ownerFullName!: string;
 
   @Field({ nullable: true })
   @IsOptional()

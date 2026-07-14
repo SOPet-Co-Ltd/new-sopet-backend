@@ -11,7 +11,7 @@ export class CreateStoreDto {
   @IsNotEmpty()
   @IsString()
   @Length(1, 255)
-  name: string;
+  name!: string;
 
   @ApiPropertyOptional({
     description: 'Store description',
@@ -52,7 +52,7 @@ export class CreateStoreDto {
   })
   @IsNotEmpty()
   @IsEmail()
-  ownerEmail: string;
+  ownerEmail!: string;
 
   @ApiProperty({
     description: 'Password for the store owner account',
@@ -62,7 +62,7 @@ export class CreateStoreDto {
   @IsNotEmpty()
   @IsString()
   @MinLength(6)
-  ownerPassword: string;
+  ownerPassword!: string;
 
   @ApiProperty({
     description: 'Full name of the store owner',
@@ -73,7 +73,7 @@ export class CreateStoreDto {
   @IsNotEmpty()
   @IsString()
   @Length(1, 255)
-  ownerFullName: string;
+  ownerFullName!: string;
 
   // Bank details
   @ApiPropertyOptional({

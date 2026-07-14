@@ -20,10 +20,10 @@ export class ValidatePromotionInput {
   @Field()
   @IsString()
   @IsNotEmpty()
-  code: string;
+  code!: string;
 
   @Field(() => Float)
-  subtotal: number;
+  subtotal!: number;
 
   @Field({ nullable: true })
   storeId?: string;

@@ -16,13 +16,13 @@ export class CreateProductVariantInput {
   @IsNotEmpty()
   @IsString()
   @Length(1, 255)
-  name: string;
+  name!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
   @Length(1, 100)
-  sku: string;
+  sku!: string;
 
   @Field(() => Float, { nullable: true })
   @IsOptional()
@@ -33,7 +33,7 @@ export class CreateProductVariantInput {
   @Field(() => Int)
   @IsNumber()
   @Min(0)
-  stockQuantity: number;
+  stockQuantity!: number;
 
   @Field(() => String, {
     nullable: true,
@@ -84,7 +84,7 @@ export class AddProductImageInput {
   @Field()
   @IsNotEmpty()
   @IsString()
-  url: string;
+  url!: string;
 
   @Field({ nullable: true })
   @IsOptional()
@@ -135,12 +135,12 @@ export class SyncProductVariantItemInput {
   @IsNotEmpty()
   @IsString()
   @Length(1, 100)
-  sku: string;
+  sku!: string;
 
   @Field(() => Int)
   @IsNumber()
   @Min(0)
-  stockQuantity: number;
+  stockQuantity!: number;
 
   @Field(() => Float, { nullable: true })
   @IsOptional()
@@ -152,5 +152,5 @@ export class SyncProductVariantItemInput {
   })
   @IsNotEmpty()
   @IsString()
-  attributes: string;
+  attributes!: string;
 }

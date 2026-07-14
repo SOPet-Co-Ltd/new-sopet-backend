@@ -16,7 +16,7 @@ export class CreateShippingOptionInput {
   @IsNotEmpty()
   @IsString()
   @Length(1, 100)
-  name: string;
+  name!: string;
 
   @Field({ nullable: true })
   @IsOptional()
@@ -26,7 +26,7 @@ export class CreateShippingOptionInput {
   @Field(() => Float)
   @IsNumber()
   @Min(0)
-  price: number;
+  price!: number;
 
   @Field(() => Int, { nullable: true })
   @IsOptional()

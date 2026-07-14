@@ -62,7 +62,7 @@ export class CreateProductInput {
   @Field()
   @IsString()
   @IsNotEmpty()
-  name: string;
+  name!: string;
 
   @Field({ nullable: true })
   @IsOptional()
@@ -72,7 +72,7 @@ export class CreateProductInput {
   @Field(() => Float)
   @IsNumber()
   @Min(0)
-  basePrice: number;
+  basePrice!: number;
 
   @Field(() => Float, { nullable: true })
   @IsOptional()

@@ -8,7 +8,7 @@ export class ApproveStoreDto {
   })
   @IsNotEmpty()
   @IsString()
-  adminId: string;
+  adminId!: string;
 }
 
 export class RejectStoreDto {
@@ -18,7 +18,7 @@ export class RejectStoreDto {
   })
   @IsNotEmpty()
   @IsString()
-  adminId: string;
+  adminId!: string;
 
   @ApiPropertyOptional({
     description: 'Reason the store application was rejected',

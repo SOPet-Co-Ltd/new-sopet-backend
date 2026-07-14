@@ -11,7 +11,7 @@ export class CreateVariantDto {
   @IsNotEmpty()
   @IsString()
   @Length(1, 255)
-  name: string;
+  name!: string;
 
   @ApiProperty({
     description: 'Stock keeping unit, unique per store',
@@ -22,7 +22,7 @@ export class CreateVariantDto {
   @IsNotEmpty()
   @IsString()
   @Length(1, 100)
-  sku: string;
+  sku!: string;
 
   @ApiPropertyOptional({
     description: 'Amount added to (or subtracted from) the base price (THB)',
@@ -42,7 +42,7 @@ export class CreateVariantDto {
   @IsNotEmpty()
   @IsNumber()
   @Min(0)
-  stockQuantity: number;
+  stockQuantity!: number;
 
   @ApiPropertyOptional({
     description: 'Arbitrary variant attributes (e.g. size, color)',

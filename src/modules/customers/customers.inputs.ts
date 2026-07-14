@@ -5,7 +5,7 @@ import { IsEmail, IsOptional, IsPhoneNumber, IsString, IsUUID, Length } from 'cl
 export class UpdateCustomerAsAdminInput {
   @Field()
   @IsUUID()
-  id: string;
+  id!: string;
 
   @Field({ nullable: true })
   @IsOptional()

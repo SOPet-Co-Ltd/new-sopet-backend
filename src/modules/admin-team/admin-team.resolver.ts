@@ -13,7 +13,7 @@ import { User } from '../../database/entities/user.entity';
 export class InviteAdminInput {
   @Field()
   @IsEmail()
-  email: string;
+  email!: string;
 }
 
 @Resolver()
