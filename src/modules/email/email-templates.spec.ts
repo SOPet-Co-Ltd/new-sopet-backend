@@ -8,7 +8,7 @@ import {
   vendorInviteTemplate,
 } from './email-templates';
 
-const brand = { logoUrl: 'https://example.com/logo.svg' };
+const brand = { logoUrl: 'https://example.com/logo.png' };
 
 const templates = [
   ['vendor invite', () => vendorInviteTemplate(brand, { inviteUrl: 'https://example.com/invite' })],

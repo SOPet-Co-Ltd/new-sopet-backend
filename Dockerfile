@@ -22,6 +22,7 @@ RUN mkdir -p src && chown -R node:node /app
 USER node
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
+COPY --from=build --chown=node:node /app/public ./public
 COPY --chown=node:node package.json yarn.lock ./
 EXPOSE 3002
 CMD ["node", "dist/src/main.js"]
