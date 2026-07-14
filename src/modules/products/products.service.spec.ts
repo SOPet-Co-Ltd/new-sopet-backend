@@ -51,6 +51,7 @@ describe('ProductsService', () => {
   beforeEach(() => {
     productRepository = {
       findOne: jest.fn(),
+      findOneOrFail: jest.fn(),
       create: jest.fn((data) => data),
       save: jest.fn(async (data) => ({ ...data, id: data.id ?? 'prod-1' })),
       createQueryBuilder: jest.fn(),
@@ -228,8 +229,9 @@ describe('ProductsService', () => {
 
     await expect(
       service.addVariant('prod-1', 'user-1', {
+        name: 'Default',
         sku: 'SKU-1',
-        price: 100,
+        priceModifier: 100,
         stockQuantity: 5,
       }),
     ).rejects.toMatchObject({ response: { code: 'SKU_EXISTS' } });
@@ -240,8 +242,9 @@ describe('ProductsService', () => {
     variantRepository.findOne.mockResolvedValue(null);
 
     const variant = await service.addVariant('prod-1', 'user-1', {
+      name: 'New Variant',
       sku: 'SKU-NEW',
-      price: 150,
+      priceModifier: 150,
       stockQuantity: 10,
     });
 
@@ -444,7 +447,7 @@ describe('ProductsService', () => {
       product: { storeId: 'store-other' },
     });
 
-    await expect(service.updateVariant('var-1', 'user-1', { price: 120 })).rejects.toThrow(
+    await expect(service.updateVariant('var-1', 'user-1', { priceModifier: 120 })).rejects.toThrow(
       ForbiddenException,
     );
   });
