@@ -1,4 +1,5 @@
 import { Field, Float, Int, ObjectType } from '@nestjs/graphql';
+import { VariantRemovalBlockReason } from '../../modules/products/variant-removal.types';
 
 @ObjectType()
 export class PaginationMeta {
@@ -401,6 +402,12 @@ export class OrderItemType {
   @Field(() => String, { nullable: true })
   productImageUrl?: string | null;
 
+  @Field(() => String, {
+    nullable: true,
+    description: 'JSON string of snapshot variant options from order create (e.g. {"ขนาด":"1kg"})',
+  })
+  variantOptions?: string | null;
+
   @Field(() => Float)
   unitPrice!: number;
 
@@ -496,6 +503,12 @@ export class OrderTrackingItemType {
 
   @Field(() => String, { nullable: true })
   productImageUrl?: string | null;
+
+  @Field(() => String, {
+    nullable: true,
+    description: 'JSON string of snapshot variant options from order create (e.g. {"ขนาด":"1kg"})',
+  })
+  variantOptions?: string | null;
 
   @Field(() => Int)
   quantity!: number;
@@ -1036,6 +1049,42 @@ export class BrandType {
 
   @Field()
   updatedAt!: Date;
+}
+
+@ObjectType()
+export class ProductVariantSyncImpactRemovedType {
+  @Field()
+  id!: string;
+
+  @Field()
+  sku!: string;
+
+  @Field(() => String, { nullable: true })
+  optionsJson?: string | null;
+
+  @Field()
+  optionKey!: string;
+
+  @Field(() => [VariantRemovalBlockReason])
+  reasons!: VariantRemovalBlockReason[];
+}
+
+@ObjectType()
+export class ProductVariantSyncImpactType {
+  @Field(() => Int)
+  kept!: number;
+
+  @Field(() => Int)
+  new!: number;
+
+  @Field(() => Int)
+  removed!: number;
+
+  @Field()
+  blocked!: boolean;
+
+  @Field(() => [ProductVariantSyncImpactRemovedType])
+  removedVariants!: ProductVariantSyncImpactRemovedType[];
 }
 
 @ObjectType()

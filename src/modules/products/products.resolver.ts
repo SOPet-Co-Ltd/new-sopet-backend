@@ -35,6 +35,7 @@ import {
   ProductImageType,
   ProductPublishChecklistType,
   ProductType,
+  ProductVariantSyncImpactType,
   ProductVariantType,
 } from '../../graphql/models/types';
 import { mapImage, mapProduct, mapVariant } from '../../graphql/models/mappers';
@@ -42,6 +43,7 @@ import { CurrentUser, Public, Roles } from '../../common/decorators';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { ProductStatus } from '../../database/entities/product.entity';
+import type { ProductVariantSyncImpact } from './variant-removal.types';
 
 const PUBLIC_PRODUCTS_MAX_LIMIT = 100;
 
@@ -49,12 +51,23 @@ function clampPublicProductsLimit(limit?: number): number {
   return Math.min(Math.max(limit ?? 20, 1), PUBLIC_PRODUCTS_MAX_LIMIT);
 }
 
-function parseVariantAttributes(attributes?: string): Record<string, any> | undefined {
+function parseVariantAttributes(attributes?: string): Record<string, string> | undefined {
   if (!attributes) {
     return undefined;
   }
 
-  return JSON.parse(attributes) as Record<string, any>;
+  const parsed: unknown = JSON.parse(attributes);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return {};
+  }
+
+  const options: Record<string, string> = {};
+  for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      options[key] = String(value);
+    }
+  }
+  return options;
 }
 
 @InputType()
@@ -413,6 +426,7 @@ export class ProductsResolver {
     @CurrentUser('storeId') storeId: string,
     @Args('search', { nullable: true }) search?: string,
     @Args('category', { nullable: true }) category?: string,
+    @Args('tag', { nullable: true }) tag?: string,
     @Args('petTypeIds', { type: () => [String], nullable: true }) petTypeIds?: string[],
     @Args('brandIds', { type: () => [String], nullable: true }) brandIds?: string[],
     @Args('minPrice', { type: () => Float, nullable: true }) minPrice?: number,
@@ -427,6 +441,7 @@ export class ProductsResolver {
       search,
       storeId: activeStoreId,
       category,
+      tag,
       petTypeIds,
       brandIds,
       minPrice,
@@ -561,6 +576,29 @@ export class ProductsResolver {
     return true;
   }
 
+  @Query(() => ProductVariantSyncImpactType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('vendor')
+  async productVariantSyncImpact(
+    @CurrentUser('id') userId: string,
+    @Args('productId') productId: string,
+    @Args('variants', { type: () => [SyncProductVariantItemInput] })
+    variants: SyncProductVariantItemInput[],
+  ): Promise<ProductVariantSyncImpactType> {
+    const impact = await this.productsService.getProductVariantSyncImpact(
+      productId,
+      userId,
+      variants.map((variant) => ({
+        id: variant.id,
+        sku: variant.sku,
+        stockQuantity: variant.stockQuantity,
+        priceModifier: variant.priceModifier,
+        attributes: parseVariantAttributes(variant.attributes) ?? {},
+      })),
+    );
+    return this.mapProductVariantSyncImpact(impact);
+  }
+
   @Mutation(() => [ProductVariantType])
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('vendor')
@@ -583,6 +621,25 @@ export class ProductsResolver {
       })),
     );
     return saved.map((variant) => mapVariant(variant, product.basePrice));
+  }
+
+  private mapProductVariantSyncImpact(
+    impact: ProductVariantSyncImpact,
+  ): ProductVariantSyncImpactType {
+    const mapped: ProductVariantSyncImpactType = {
+      kept: impact.kept,
+      new: impact.new,
+      removed: impact.removed,
+      blocked: impact.blocked,
+      removedVariants: impact.removedVariants.map((entry) => ({
+        id: entry.id,
+        sku: entry.sku,
+        optionsJson: entry.optionsJson,
+        optionKey: entry.optionKey,
+        reasons: entry.reasons,
+      })),
+    };
+    return mapped;
   }
 
   @Mutation(() => ProductImageType)

@@ -775,6 +775,11 @@ type OrderItemType {
   trackingUrl: String
   unitPrice: Float!
   variantId: String!
+
+  """
+  JSON string of snapshot variant options from order create (e.g. {"ขนาด":"1kg"})
+  """
+  variantOptions: String
 }
 
 type OrderShippingAddressType {
@@ -806,6 +811,11 @@ type OrderTrackingItemType {
   trackingNumber: String
   trackingUrl: String
   unitPrice: Float!
+
+  """
+  JSON string of snapshot variant options from order create (e.g. {"ขนาด":"1kg"})
+  """
+  variantOptions: String
 }
 
 type OrderTrackingStoreShippingType {
@@ -998,6 +1008,22 @@ type ProductType {
   warning: String
 }
 
+type ProductVariantSyncImpactRemovedType {
+  id: String!
+  optionKey: String!
+  optionsJson: String
+  reasons: [VariantRemovalBlockReason!]!
+  sku: String!
+}
+
+type ProductVariantSyncImpactType {
+  blocked: Boolean!
+  kept: Int!
+  new: Int!
+  removed: Int!
+  removedVariants: [ProductVariantSyncImpactRemovedType!]!
+}
+
 type ProductVariantType {
   id: String!
   optionsJson: String
@@ -1116,6 +1142,7 @@ type Query {
   productBySlug(slug: String!, storeId: String!): ProductType!
   productPublishChecklist(productId: String!): ProductPublishChecklistType!
   productReviews(productId: String!): [ReviewType!]!
+  productVariantSyncImpact(productId: String!, variants: [SyncProductVariantItemInput!]!): ProductVariantSyncImpactType!
   products(brandIds: [String!], category: String, limit: Int = 20, maxPrice: Int, minPrice: Int, page: Int = 1, petTypeIds: [String!], search: String, searchContext: SearchContextInput, sessionId: String, sortBy: String, sortOrder: String, storeId: String, tag: String): ProductConnection!
   recommendedProducts(excludeProductIds: [String!], limit: Int = 50, searchContext: SearchContextInput, sessionId: String, shuffleSeed: String): [ProductType!]!
   rejectedBrands: [BrandType!]!
@@ -1155,7 +1182,7 @@ type Query {
   vendorCustomers(limit: Int! = 20, page: Int! = 1, search: String): VendorCustomerConnection!
   vendorOrders(storeId: String!): [OrderType!]!
   vendorProduct(id: String!): ProductType!
-  vendorProducts(brandIds: [String!], category: String, limit: Int = 20, maxPrice: Float, minPrice: Float, page: Int = 1, petTypeIds: [String!], search: String): ProductConnection!
+  vendorProducts(brandIds: [String!], category: String, limit: Int = 20, maxPrice: Float, minPrice: Float, page: Int = 1, petTypeIds: [String!], search: String, tag: String): ProductConnection!
 }
 
 input ReactivateAccountInput {
@@ -1839,6 +1866,11 @@ input ValidatePromotionInput {
   code: String!
   storeId: String
   subtotal: Float!
+}
+
+enum VariantRemovalBlockReason {
+  HAS_OPEN_CARTS
+  HAS_ORDERS
 }
 
 type VendorAuthPayload {

@@ -129,12 +129,13 @@ describe('ProductsResolver', () => {
       });
     });
 
-    it('forwards petTypeIds, brandIds, minPrice, and maxPrice to findAll', async () => {
+    it('forwards petTypeIds, brandIds, tag, minPrice, and maxPrice to findAll', async () => {
       await resolver.vendorProducts(
         'user-1',
         'store-1',
         'treats',
         'cat-food',
+        'organic',
         ['pet-1'],
         ['brand-1'],
         100,
@@ -147,6 +148,7 @@ describe('ProductsResolver', () => {
         search: 'treats',
         storeId: 'store-1',
         category: 'cat-food',
+        tag: 'organic',
         petTypeIds: ['pet-1'],
         brandIds: ['brand-1'],
         minPrice: 100,
@@ -246,6 +248,7 @@ describe('ProductsResolver', () => {
       await resolver.vendorProducts(
         'user-1',
         'store-1',
+        undefined,
         undefined,
         undefined,
         undefined,
