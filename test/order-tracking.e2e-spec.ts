@@ -320,6 +320,8 @@ describe('Order tracking (e2e)', () => {
           'items.productVariant.product.images',
           'storeShippings',
         ],
+        // Soft-deleted variants remain joinable for extras (image / productId).
+        withDeleted: true,
       });
 
       const tracking = body.data.orderTracking;
