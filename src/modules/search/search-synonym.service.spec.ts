@@ -11,8 +11,10 @@ describe('SearchSynonymService', () => {
     rows?: SearchSynonym[];
     cached?: string | null;
   } = {}) => {
+    const find = jest.fn(async () => rows);
+    const set = jest.fn(async () => undefined);
     const synonymRepository = {
-      find: jest.fn(async () => rows),
+      find,
       findOne: jest.fn(
         async ({ where }: { where: { id: string } }) =>
           rows.find((row) => row.id === where.id) ?? null,
@@ -24,14 +26,14 @@ describe('SearchSynonymService', () => {
 
     const redisService = {
       get: jest.fn(async () => cached),
-      set: jest.fn(async () => undefined),
+      set,
       del: jest.fn(async () => undefined),
     };
 
     return {
       service: new SearchSynonymService(synonymRepository, redisService as never),
-      synonymRepository,
-      redisService,
+      find,
+      set,
     };
   };
 
@@ -56,7 +58,7 @@ describe('SearchSynonymService', () => {
   });
 
   it('loads synonyms from DB when Redis cache misses', async () => {
-    const { service, synonymRepository, redisService } = createService({
+    const { service, find, set } = createService({
       rows: [
         {
           id: 'syn-1',
@@ -70,7 +72,7 @@ describe('SearchSynonymService', () => {
     });
 
     await expect(service.expandQuery('dog food')).resolves.toBe('dog food Canine');
-    expect(synonymRepository.find).toHaveBeenCalled();
-    expect(redisService.set).toHaveBeenCalled();
+    expect(find).toHaveBeenCalled();
+    expect(set).toHaveBeenCalled();
   });
 });
