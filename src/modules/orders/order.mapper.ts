@@ -22,6 +22,13 @@ export function resolveOrderItemImageUrl(item: OrderItem): string | null {
   return thumbnail?.url ?? null;
 }
 
+/** Serialize order-line snapshot options (never recompute from live ProductVariant). */
+export function serializeVariantOptions(
+  variantOptions: Record<string, string> | null | undefined,
+): string {
+  return JSON.stringify(variantOptions ?? {});
+}
+
 export function mapOrderItem(item: OrderItem) {
   const productId = item.productVariant?.productId ?? null;
 
@@ -32,6 +39,7 @@ export function mapOrderItem(item: OrderItem) {
     productName: item.productName,
     productId,
     productImageUrl: productId ? resolveOrderItemImageUrl(item) : null,
+    variantOptions: serializeVariantOptions(item.variantOptions),
     unitPrice: Number(item.unitPrice),
     quantity: item.quantity,
     subtotal: Number(item.subtotal),
@@ -50,6 +58,7 @@ export function mapOrderTrackingItem(item: OrderItem): OrderTrackingItemType {
     productId,
     productName: item.productName,
     productImageUrl: productId ? resolveOrderItemImageUrl(item) : null,
+    variantOptions: serializeVariantOptions(item.variantOptions),
     quantity: item.quantity,
     unitPrice: Number(item.unitPrice),
     subtotal: Number(item.subtotal),

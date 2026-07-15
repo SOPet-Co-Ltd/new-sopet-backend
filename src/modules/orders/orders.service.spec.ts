@@ -17,7 +17,12 @@ describe('OrdersService', () => {
   let variantRepository: { findOne: jest.Mock };
   let shippingOptionRepository: { findOne: jest.Mock };
   let dataSource: { transaction: jest.Mock };
-  let notificationsService: { notifyOrderStatusChanged: jest.Mock };
+  let notificationsService: {
+    notifyOrderStatusChanged: jest.Mock;
+    notifyVendorAboutNewOrder: jest.Mock;
+    notifyVendorsAboutNewOrder: jest.Mock;
+    notifyVendorsAboutOrderStatus: jest.Mock;
+  };
   let promotionsService: { applyStackedPromotions: jest.Mock };
   let guestOrderLinkService: { mergeGuestOrders: jest.Mock };
   let inventoryService: { restoreOrderStock: jest.Mock };
@@ -452,6 +457,7 @@ describe('OrdersService', () => {
   describe('findLatestPurchaseProductId', () => {
     it('returns product id from latest order item', async () => {
       const queryBuilder = {
+        withDeleted: jest.fn().mockReturnThis(),
         innerJoin: jest.fn().mockReturnThis(),
         select: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
@@ -465,6 +471,7 @@ describe('OrdersService', () => {
       const productId = await service.findLatestPurchaseProductId('cust-1');
 
       expect(productId).toBe('prod-1');
+      expect(queryBuilder.withDeleted).toHaveBeenCalled();
     });
   });
 
@@ -509,6 +516,7 @@ describe('OrdersService', () => {
       expect(orderRepository.findOne).toHaveBeenCalledWith({
         where: { orderNumber: 'ORD-TRACK-001' },
         relations: trackingRelations,
+        withDeleted: true,
       });
     });
   });
@@ -610,6 +618,7 @@ describe('OrdersService', () => {
   describe('findLatestPurchaseProductIds', () => {
     it('returns unique product ids in recent order order', async () => {
       const queryBuilder = {
+        withDeleted: jest.fn().mockReturnThis(),
         innerJoin: jest.fn().mockReturnThis(),
         select: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
@@ -629,6 +638,7 @@ describe('OrdersService', () => {
       const productIds = await service.findLatestPurchaseProductIds('cust-1', 2);
 
       expect(productIds).toEqual(['prod-1', 'prod-2']);
+      expect(queryBuilder.withDeleted).toHaveBeenCalled();
     });
   });
 });

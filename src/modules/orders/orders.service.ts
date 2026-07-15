@@ -412,6 +412,8 @@ export class OrdersService {
         'storeShippings',
         'statusHistory',
       ],
+      // Soft-deleted variants remain joinable for extras (image / productId); options use snapshot.
+      withDeleted: true,
     });
 
     if (!order) {
@@ -436,6 +438,7 @@ export class OrdersService {
       where: { customerId },
       relations: ['items', 'items.productVariant', 'shippingAddress', 'storeShippings'],
       order: { createdAt: 'DESC' },
+      withDeleted: true,
     });
   }
 
@@ -476,6 +479,7 @@ export class OrdersService {
   async findLatestPurchaseProductId(customerId: string): Promise<string | null> {
     const row = await this.orderRepository
       .createQueryBuilder('order')
+      .withDeleted()
       .innerJoin('order.items', 'item')
       .innerJoin('item.productVariant', 'variant')
       .select('variant.productId', 'productId')
@@ -491,6 +495,7 @@ export class OrdersService {
   async findLatestPurchaseProductIds(customerId: string, limit: number): Promise<string[]> {
     const rows = await this.orderRepository
       .createQueryBuilder('order')
+      .withDeleted()
       .innerJoin('order.items', 'item')
       .innerJoin('item.productVariant', 'variant')
       .select('variant.productId', 'productId')
@@ -534,6 +539,7 @@ export class OrdersService {
         'items.productVariant.product.images',
         'storeShippings',
       ],
+      withDeleted: true,
     });
 
     if (!order) {
