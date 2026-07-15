@@ -63,8 +63,6 @@ if ! docker run -d \
   exit 1
 fi
 
-docker image prune -f >/dev/null 2>&1 || true
-
 echo "Waiting for container to stay up..."
 for _ in 1 2 3 4 5 6; do
   if docker ps --filter "name=$CONTAINER_NAME" --filter "status=running" -q | grep -q .; then
@@ -85,6 +83,13 @@ if ! curl -fsS --max-time 15 "http://127.0.0.1:${PORT}/graphql" -o /dev/null \
   echo "Warning: GraphQL health check failed (container is up — check app logs)." >&2
   docker logs "$CONTAINER_NAME" --tail 50 2>&1 || true
 fi
+
+# After the new container is confirmed running, drop unused tags + build cache.
+# Keeps only images still referenced by a container (the one we just started).
+echo "Cleaning unused Docker images and build cache..."
+docker image prune -af >/dev/null 2>&1 || true
+docker builder prune -af >/dev/null 2>&1 || true
+echo "Disk after cleanup: $(df -h / | awk 'NR==2{print $3" used / "$4" free ("$5")"}')"
 
 docker ps --filter "name=$CONTAINER_NAME"
 echo "=== deploy.sh: done ($IMAGE_URI) ==="
