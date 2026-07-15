@@ -168,8 +168,12 @@ export class NotificationsService {
       if (value === undefined || value === null) {
         continue;
       }
+      const metaValue =
+        typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
+          ? String(value)
+          : JSON.stringify(value);
       qb.andWhere(`notification.metadata->>'${key}' = :meta_${key}`, {
-        [`meta_${key}`]: String(value),
+        [`meta_${key}`]: metaValue,
       });
     }
 

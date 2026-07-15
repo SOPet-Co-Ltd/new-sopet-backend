@@ -2,13 +2,11 @@ const BRAND_PRIMARY = '#9C6ADE';
 const BRAND_PRIMARY_DARK = '#884ECF';
 const BRAND_PRIMARY_LIGHT = '#F2EBFC';
 const BRAND_PRIMARY_SOFT = '#F9F6FE';
-const BRAND_SECONDARY = '#FF6F61';
 const BRAND_TERTIARY = '#5587A0';
 const TEXT_PRIMARY = '#1A1A1A';
 const TEXT_SECONDARY = '#5C5C5C';
 const TEXT_MUTED = '#888888';
 const BORDER = '#E7DBF9';
-const SUCCESS = '#31B953';
 const SUCCESS_BG = '#EAF8EE';
 
 export interface EmailTemplateBrand {
