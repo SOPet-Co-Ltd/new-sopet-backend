@@ -17,6 +17,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { PaymentEventsService } from './payment-events.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { verifyOmiseWebhookSignature } from './omise-webhook.util';
+import { buildOmiseReturnUri } from './build-omise-return-uri';
 import { normalizeCheckoutPaymentMethod } from '../../common/utils/checkout-payment.util';
 
 interface OmiseCharge {
@@ -149,6 +150,23 @@ export class PaymentsService {
     }
 
     return this.finalizeExpiredPayment(payment);
+  }
+
+  /**
+   * Local abandon of pending payments for an order before creating a replacement charge.
+   * Does not cancel the order or restore stock. MVP does not call Omise reverse —
+   * superseded charges may remain open at Omise (ops orphan residual).
+   */
+  private async supersedePendingPaymentsForOrder(orderId: string): Promise<void> {
+    const pendingPayments = await this.paymentRepository.find({
+      where: { orderId, status: 'pending' },
+    });
+
+    for (const pending of pendingPayments) {
+      pending.status = 'failed';
+      await this.paymentRepository.save(pending);
+      await this.paymentEventsService.publishPaymentStatusUpdated(pending);
+    }
   }
 
   async expirePendingQrPayments(): Promise<number> {
@@ -479,6 +497,39 @@ export class PaymentsService {
 
     const order = await this.assertCanPayForOrder(orderId, customerId);
 
+    // Executable Supersede/Retry Rule (Design Doc § Executable steps; Q-PENDING-RETRY = A / I001).
+    // Step 1 — PromptPay resume carve-out: only intentional pending early-return.
+    if (paymentMethod === 'promptpay') {
+      const existingPromptPay = await this.paymentRepository.findOne({
+        where: {
+          orderId,
+          amount,
+          paymentMethod: paymentMethod as Payment['paymentMethod'],
+        },
+        order: { createdAt: 'DESC' },
+      });
+      if (existingPromptPay && existingPromptPay.status === 'pending') {
+        const activePayment = await this.expirePendingQrPaymentIfNeeded(existingPromptPay);
+        if (activePayment.status === 'pending') {
+          return {
+            paymentId: activePayment.id,
+            status: activePayment.status,
+            amount,
+            currency,
+            paymentMethod,
+            authorizeUri: activePayment.authorizeUri ?? undefined,
+            qrCodeUrl: activePayment.qrCodeUrl ?? undefined,
+            expiresAt: this.getEffectiveExpiresAt(activePayment) ?? undefined,
+          };
+        }
+      }
+    }
+
+    // Step 2 — Otherwise (all credit_card creates, method switches, COD, new PromptPay):
+    // supersede other pending for this order locally. Never early-return credit_card pending (step 3).
+    // MVP: no Omise reverse — superseded charge may remain open at Omise (ops orphan residual).
+    await this.supersedePendingPaymentsForOrder(orderId);
+
     if (paymentMethod === 'cod') {
       const payment = this.paymentRepository.create({
         orderId,
@@ -506,31 +557,6 @@ export class PaymentsService {
 
     const amountSatang = Math.round(Number(amount) * 100);
 
-    // Check for duplicate charge on this order (idempotency)
-    const existingPayment = await this.paymentRepository.findOne({
-      where: {
-        orderId,
-        amount,
-        paymentMethod: paymentMethod as Payment['paymentMethod'],
-      },
-      order: { createdAt: 'DESC' },
-    });
-    if (existingPayment && existingPayment.status === 'pending') {
-      const activePayment = await this.expirePendingQrPaymentIfNeeded(existingPayment);
-      if (activePayment.status === 'pending') {
-        return {
-          paymentId: activePayment.id,
-          status: activePayment.status,
-          amount,
-          currency,
-          paymentMethod,
-          authorizeUri: activePayment.authorizeUri ?? undefined,
-          qrCodeUrl: activePayment.qrCodeUrl ?? undefined,
-          expiresAt: this.getEffectiveExpiresAt(activePayment) ?? undefined,
-        };
-      }
-    }
-
     if (order.status !== OrderStatus.PENDING_PAYMENT) {
       throw new BadRequestException({
         code: 'ORDER_NOT_PAYABLE',
@@ -538,6 +564,7 @@ export class PaymentsService {
       });
     }
 
+    // Step 4 — Create new Payment + Omise charge (steps 3–5 continue below).
     const payment = this.paymentRepository.create({
       orderId,
       amount,
@@ -591,6 +618,22 @@ export class PaymentsService {
           message: 'Credit card payments require an Omise token or saved payment method',
         });
       }
+
+      const storefrontUrl = this.configService.get<string>('app.storefrontUrl');
+      if (!storefrontUrl?.trim()) {
+        throw new BadRequestException({
+          code: 'STOREFRONT_URL_NOT_CONFIGURED',
+          message: 'Storefront URL is not configured',
+        });
+      }
+      try {
+        chargeBody.return_uri = buildOmiseReturnUri(storefrontUrl, payment.id);
+      } catch {
+        throw new BadRequestException({
+          code: 'STOREFRONT_URL_NOT_CONFIGURED',
+          message: 'Storefront URL is not configured',
+        });
+      }
     }
 
     const charge = await this.omiseRequest<OmiseCharge>('/charges', chargeBody);
@@ -599,6 +642,7 @@ export class PaymentsService {
     const qrCodeUrl = charge.source?.scannable_code?.image?.download_uri ?? null;
     const expiresAt = paymentMethod === 'promptpay' ? this.computeQrExpiresAt() : null;
 
+    // Step 5 — latest charge is active UI/webhook target (paymentReference pointer).
     order.paymentReference = charge.id;
     await this.orderRepository.save(order);
 
@@ -700,16 +744,26 @@ export class PaymentsService {
     }
 
     if (payload.key === 'charge.fail' || chargeStatus === 'failed') {
+      const isCreditCard = payment.paymentMethod === PaymentMethod.CREDIT_CARD;
+
       await this.paymentRepository.manager.transaction(async (manager) => {
         payment.status = 'failed';
         await manager.save(payment);
 
-        order.status = OrderStatus.CANCELLED;
-        await manager.save(order);
+        // UD-001: card/3DS fail keeps PENDING_PAYMENT so same-order retry works; no stock restore.
+        if (!isCreditCard) {
+          order.status = OrderStatus.CANCELLED;
+          await manager.save(order);
 
-        await this.inventoryService.restoreOrderStock(order.id, manager, 'Payment failed');
+          await this.inventoryService.restoreOrderStock(order.id, manager, 'Payment failed');
+        }
       });
       await this.paymentEventsService.publishPaymentStatusUpdated(payment);
+      if (isCreditCard) {
+        this.logger.log(
+          `Credit card payment ${payment.id} failed; order ${order.id} left PENDING_PAYMENT`,
+        );
+      }
     }
   }
 
