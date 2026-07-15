@@ -26,6 +26,13 @@ ECR_REGISTRY="${IMAGE_URI%%/*}"
 AWS_REGION_FROM_IMAGE=$(echo "$ECR_REGISTRY" | sed -n 's/.*\.ecr\.\([^.]*\)\.amazonaws\.com/\1/p')
 AWS_REGION="${AWS_REGION_FROM_IMAGE:-${AWS_REGION:-ap-southeast-7}}"
 
+# Small root disks (e.g. 8G) fill up with build cache + old tags; prune before
+# build so yarn/docker don't hit ENOSPC mid-layer.
+echo "Disk before prune: $(df -h / | awk 'NR==2{print $3" used / "$4" free ("$5")"}')"
+docker builder prune -af >/dev/null 2>&1 || true
+docker image prune -af >/dev/null 2>&1 || true
+echo "Disk after prune: $(df -h / | awk 'NR==2{print $3" used / "$4" free ("$5")"}')"
+
 echo "Building ${IMAGE_URI} on $(uname -m)..."
 docker build -t "$IMAGE_URI" .
 
@@ -41,3 +48,8 @@ printf '%s' "$ECR_PASSWORD" | docker login --username AWS --password-stdin "$ECR
 
 docker push "$IMAGE_URI"
 echo "Pushed ${IMAGE_URI}"
+
+# Drop intermediate build cache after a successful push; keep the just-built tag
+# for deploy.sh on this host.
+docker builder prune -af >/dev/null 2>&1 || true
+echo "Disk after build: $(df -h / | awk 'NR==2{print $3" used / "$4" free ("$5")"}')"
