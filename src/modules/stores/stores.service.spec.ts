@@ -197,7 +197,7 @@ describe('StoresService', () => {
     });
 
     await expect(
-      service.reject('store-1', { rejectionReason: 'Invalid docs' }),
+      service.reject('store-1', { adminId: 'admin-1', rejectionReason: 'Invalid docs' }),
     ).rejects.toMatchObject({ response: { code: 'INVALID_STATUS' } });
   });
 
@@ -206,7 +206,10 @@ describe('StoresService', () => {
     storeRepository.findOne.mockResolvedValue(pending);
     storeRepository.save.mockImplementation(async (s) => s);
 
-    const result = await service.reject('store-1', { rejectionReason: 'Invalid docs' });
+    const result = await service.reject('store-1', {
+      adminId: 'admin-1',
+      rejectionReason: 'Invalid docs',
+    });
 
     expect(result.status).toBe(StoreStatus.REJECTED);
     expect(result.rejectionReason).toBe('Invalid docs');
