@@ -1060,6 +1060,8 @@ type PromotionType {
 type PromotionValidationResult {
   code: String!
   discountAmount: Float!
+  freeUnits: Int
+  ineligibilityReason: String
   name: String!
 }
 
@@ -1864,8 +1866,17 @@ type UserProfile {
 
 input ValidatePromotionInput {
   code: String!
+  lines: [ValidatePromotionLineInput!]
   storeId: String
   subtotal: Float!
+}
+
+input ValidatePromotionLineInput {
+  productId: String!
+  quantity: Int!
+  storeId: String
+  unitPrice: Float!
+  variantId: String
 }
 
 enum VariantRemovalBlockReason {

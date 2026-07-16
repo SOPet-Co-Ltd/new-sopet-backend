@@ -1208,6 +1208,12 @@ export class PromotionValidationResult {
 
   @Field(() => Float)
   discountAmount!: number;
+
+  @Field(() => String, { nullable: true })
+  ineligibilityReason?: string | null;
+
+  @Field(() => Int, { nullable: true })
+  freeUnits?: number | null;
 }
 
 @ObjectType()

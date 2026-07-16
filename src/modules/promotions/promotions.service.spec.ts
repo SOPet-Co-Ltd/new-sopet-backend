@@ -25,7 +25,8 @@ async function validateCodeExtended(
 type ApplyStackedResult = {
   promotions: unknown[];
   discountAmount: number;
-  freeUnits?: number;
+  discountsByPromotionId: Record<string, number>;
+  freeUnits: number;
 };
 
 /**
@@ -211,6 +212,42 @@ describe('PromotionsService', () => {
 
     expect(result.promotions).toHaveLength(2);
     expect(result.discountAmount).toBeGreaterThan(0);
+    // Platform 10% of 1000 = 100; store 5% of 500 = 25
+    expect(result.discountsByPromotionId).toEqual({
+      'promo-1': 100,
+      'promo-2': 25,
+    });
+    expect(result.discountAmount).toBe(125);
+  });
+
+  it('applyStackedPromotions skips BxGy freeUnits=0 without aborting (I001c)', async () => {
+    const bxgyPromo = {
+      ...mockPromotion,
+      id: 'promo-bxgy-skip',
+      code: 'BXGYSKIP',
+      type: PromotionType.BUY_X_GET_Y,
+      discountValue: 0,
+      conditions: { productId: 'product-p', buyQuantity: 2, getQuantity: 1 },
+    };
+    promotionRepository.findOne.mockResolvedValue(bxgyPromo);
+
+    const result = await applyStackedExtended(
+      service,
+      200,
+      new Map(),
+      'BXGYSKIP',
+      undefined,
+      undefined,
+      {
+        mode: 'apply',
+        lines: [{ productId: 'product-p', variantId: 'a', quantity: 2, unitPrice: 100 }],
+      },
+    );
+
+    expect(result.promotions).toHaveLength(0);
+    expect(result.discountAmount).toBe(0);
+    expect(result.discountsByPromotionId).toEqual({});
+    expect(result.freeUnits).toBe(0);
   });
 
   it('rejects expired promotion', async () => {
@@ -908,8 +945,7 @@ describe('PromotionsService', () => {
       );
     });
 
-    // Deferred to backend-task-05: applyStackedPromotions does not yet return freeUnits (AC-035).
-    it.skip('eligible validateCode(preview) and applyStackedPromotions agree on discountAmount and freeUnits (AC-035)', async () => {
+    it('eligible validateCode(preview) and applyStackedPromotions agree on discountAmount and freeUnits (AC-035)', async () => {
       const bxgyPromo = {
         ...mockPromotion,
         id: 'promo-agree',

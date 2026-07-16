@@ -1,5 +1,6 @@
 import { Field, Float, InputType, Int } from '@nestjs/graphql';
 import {
+  IsArray,
   IsBoolean,
   IsEnum,
   IsNotEmpty,
@@ -9,8 +10,39 @@ import {
   IsUUID,
   Length,
   Min,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { PromotionType } from '../../database/entities/promotion.entity';
+
+@InputType()
+export class ValidatePromotionLineInput {
+  @Field()
+  @IsString()
+  @IsNotEmpty()
+  @IsUUID()
+  productId!: string;
+
+  @Field(() => Int)
+  @IsNumber()
+  @Min(1)
+  quantity!: number;
+
+  @Field(() => Float)
+  @IsNumber()
+  @Min(0)
+  unitPrice!: number;
+
+  @Field({ nullable: true })
+  @IsOptional()
+  @IsUUID()
+  variantId?: string;
+
+  @Field({ nullable: true })
+  @IsOptional()
+  @IsUUID()
+  storeId?: string;
+}
 
 @InputType()
 export class ValidatePromotionInput {
@@ -26,6 +58,13 @@ export class ValidatePromotionInput {
   @IsOptional()
   @IsUUID()
   storeId?: string;
+
+  @Field(() => [ValidatePromotionLineInput], { nullable: true })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ValidatePromotionLineInput)
+  lines?: ValidatePromotionLineInput[];
 }
 
 @InputType()

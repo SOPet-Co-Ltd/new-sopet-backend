@@ -433,18 +433,40 @@ export class PromotionsService {
     storeCodes?: string[],
     customer?: PromotionCustomerIdentity,
     options?: ValidateCodeOptions,
-  ): Promise<{ promotions: Promotion[]; discountAmount: number }> {
+  ): Promise<{
+    promotions: Promotion[];
+    discountAmount: number;
+    discountsByPromotionId: Record<string, number>;
+    freeUnits: number;
+  }> {
     const mode = options?.mode ?? 'apply';
     const promotions: Promotion[] = [];
+    const discountsByPromotionId: Record<string, number> = {};
     let discountAmount = 0;
+    let freeUnits = 0;
+
+    const absorb = (result: ValidateCodeResult): void => {
+      // I001c: BxGy Rule A zero free on apply — skip contribution; do not abort stack
+      const isBxGyApplySkip =
+        mode === 'apply' &&
+        result.promotion.type === PromotionType.BUY_X_GET_Y &&
+        result.freeUnits === 0 &&
+        result.discountAmount === 0;
+      if (isBxGyApplySkip) {
+        return;
+      }
+      promotions.push(result.promotion);
+      discountsByPromotionId[result.promotion.id] = result.discountAmount;
+      discountAmount += result.discountAmount;
+      freeUnits += result.freeUnits;
+    };
 
     if (platformCode) {
       const platform = await this.validateCode(platformCode, subtotal, undefined, customer, {
         ...options,
         mode,
       });
-      promotions.push(platform.promotion);
-      discountAmount += platform.discountAmount;
+      absorb(platform);
     }
 
     if (storeCodes?.length) {
@@ -458,13 +480,12 @@ export class PromotionsService {
           ...options,
           mode,
         });
-        promotions.push(store.promotion);
-        discountAmount += store.discountAmount;
+        absorb(store);
       }
     }
 
     discountAmount = Math.min(discountAmount, subtotal);
-    return { promotions, discountAmount };
+    return { promotions, discountAmount, discountsByPromotionId, freeUnits };
   }
 
   /**
