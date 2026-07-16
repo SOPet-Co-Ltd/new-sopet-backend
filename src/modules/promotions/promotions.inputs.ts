@@ -1,19 +1,27 @@
 import { Field, Float, InputType, Int } from '@nestjs/graphql';
 import {
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsEnum,
+  IsInt,
   IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
   IsUUID,
   Length,
+  Max,
   Min,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PromotionType } from '../../database/entities/promotion.entity';
+
+/** Per-line and BxGy unit-expansion ceiling (public validatePromotion DoS guard). */
+export const MAX_VALIDATE_PROMOTION_LINE_QUANTITY = 999;
+/** Max cart lines accepted on validatePromotion. */
+export const MAX_VALIDATE_PROMOTION_LINES = 100;
 
 @InputType()
 export class ValidatePromotionLineInput {
@@ -24,8 +32,9 @@ export class ValidatePromotionLineInput {
   productId!: string;
 
   @Field(() => Int)
-  @IsNumber()
+  @IsInt()
   @Min(1)
+  @Max(MAX_VALIDATE_PROMOTION_LINE_QUANTITY)
   quantity!: number;
 
   @Field(() => Float)
@@ -62,6 +71,7 @@ export class ValidatePromotionInput {
   @Field(() => [ValidatePromotionLineInput], { nullable: true })
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(MAX_VALIDATE_PROMOTION_LINES)
   @ValidateNested({ each: true })
   @Type(() => ValidatePromotionLineInput)
   lines?: ValidatePromotionLineInput[];

@@ -504,6 +504,45 @@ describe('PromotionsService', () => {
       ).rejects.toMatchObject({ response: { code: 'ACCOUNT_AGE' } });
     });
 
+    it('enabled with invalid nDays fail-closes as ACCOUNT_AGE (preview)', async () => {
+      promotionRepository.findOne.mockResolvedValue({
+        ...mockPromotion,
+        code: 'NEWCUST10',
+        conditions: { newCustomer: { enabled: true, nDays: 0 } },
+      });
+
+      const result = await validateCodeExtended(
+        service,
+        'NEWCUST10',
+        1000,
+        undefined,
+        { customerId: 'cust-eligible' },
+        { mode: 'preview' },
+      );
+
+      expect(result.discountAmount).toBe(0);
+      expect(result.ineligibilityReason).toBe('ACCOUNT_AGE');
+    });
+
+    it('enabled with missing nDays fail-closes as ACCOUNT_AGE (apply)', async () => {
+      promotionRepository.findOne.mockResolvedValue({
+        ...mockPromotion,
+        code: 'NEWCUST10',
+        conditions: { newCustomer: { enabled: true } },
+      });
+
+      await expect(
+        validateCodeExtended(
+          service,
+          'NEWCUST10',
+          1000,
+          undefined,
+          { customerId: 'cust-eligible' },
+          { mode: 'apply' },
+        ),
+      ).rejects.toMatchObject({ response: { code: 'ACCOUNT_AGE' } });
+    });
+
     it('age window inclusive of end instant (createdAt + N×24h)', async () => {
       jest.useFakeTimers();
       const fixedNow = new Date('2026-07-16T12:00:00.000Z');
@@ -674,6 +713,37 @@ describe('PromotionsService', () => {
       expect(result.discountAmount).toBe(0);
       expect(result.freeUnits ?? 0).toBe(0);
       expect(result.ineligibilityReason).toBe('INSUFFICIENT_QTY');
+    });
+
+    it('rejects when matching BxGy unit quantity exceeds MAX (QUANTITY_TOO_LARGE)', async () => {
+      await expect(
+        validateCodeExtended(service, 'BXGY21', 1000, undefined, undefined, {
+          mode: 'preview',
+          lines: linesForQ([{ quantity: 1000, unitPrice: 100 }]),
+        }),
+      ).rejects.toMatchObject({ response: { code: 'QUANTITY_TOO_LARGE' } });
+    });
+
+    it('rejects when summed matching lines exceed MAX (QUANTITY_TOO_LARGE)', async () => {
+      await expect(
+        validateCodeExtended(service, 'BXGY21', 1000, undefined, undefined, {
+          mode: 'preview',
+          lines: [
+            { productId: 'product-p', variantId: 'a', quantity: 500, unitPrice: 100 },
+            { productId: 'product-p', variantId: 'b', quantity: 500, unitPrice: 100 },
+          ],
+        }),
+      ).rejects.toMatchObject({ response: { code: 'QUANTITY_TOO_LARGE' } });
+    });
+
+    it('allows matching quantity at MAX without QUANTITY_TOO_LARGE', async () => {
+      const result = await validateCodeExtended(service, 'BXGY21', 99900, undefined, undefined, {
+        mode: 'preview',
+        lines: linesForQ([{ quantity: 999, unitPrice: 100 }]),
+      });
+
+      expect(result.freeUnits).toBe(333);
+      expect(result.ineligibilityReason).toBeNull();
     });
 
     it('apply freeUnits=0 with lines: skip without throw (AC-037b/c)', async () => {

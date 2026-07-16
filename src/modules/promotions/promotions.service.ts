@@ -13,7 +13,11 @@ import { Product } from '../../database/entities/product.entity';
 import { Customer } from '../../database/entities/customer.entity';
 import { Order } from '../../database/entities/order.entity';
 import { OrderStatus } from '../../database/entities/enums/order.enums';
-import { CreatePromotionInput, UpdatePromotionInput } from './promotions.inputs';
+import {
+  CreatePromotionInput,
+  MAX_VALIDATE_PROMOTION_LINE_QUANTITY,
+  UpdatePromotionInput,
+} from './promotions.inputs';
 
 export type PromotionCustomerIdentity = {
   customerId?: string;
@@ -376,6 +380,21 @@ export class PromotionsService {
     const x = buyQuantity;
     const y = getQuantity;
 
+    // Cap before materializing unit slots (defense-in-depth vs public preview abuse).
+    let matchingQty = 0;
+    for (const line of lines) {
+      if (line.productId !== productId) {
+        continue;
+      }
+      matchingQty += Math.max(0, Math.floor(Number(line.quantity)) || 0);
+      if (matchingQty > MAX_VALIDATE_PROMOTION_LINE_QUANTITY) {
+        throw new BadRequestException({
+          code: 'QUANTITY_TOO_LARGE',
+          message: `BxGy unit quantity exceeds maximum of ${MAX_VALIDATE_PROMOTION_LINE_QUANTITY}`,
+        });
+      }
+    }
+
     type UnitSlot = { unitPrice: number; lineIndex: number; variantId: string };
     const units: UnitSlot[] = [];
     for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
@@ -524,12 +543,15 @@ export class PromotionsService {
     }
 
     const nDays = nc.nDays;
-    if (typeof nDays === 'number' && Number.isInteger(nDays) && nDays >= 1) {
-      const endInstantMs = record.createdAt.getTime() + nDays * 24 * 60 * 60 * 1000;
-      // Inclusive end: pass iff nowUtc <= createdAtUtc + nDays×24h
-      if (nowUtc.getTime() > endInstantMs) {
-        return 'ACCOUNT_AGE';
-      }
+    // Fail closed: enabled without a positive integer nDays must not skip the age gate.
+    if (typeof nDays !== 'number' || !Number.isInteger(nDays) || nDays < 1) {
+      return 'ACCOUNT_AGE';
+    }
+
+    const endInstantMs = record.createdAt.getTime() + nDays * 24 * 60 * 60 * 1000;
+    // Inclusive end: pass iff nowUtc <= createdAtUtc + nDays×24h
+    if (nowUtc.getTime() > endInstantMs) {
+      return 'ACCOUNT_AGE';
     }
 
     const paidPathCount = await this.orderRepository
