@@ -11,9 +11,19 @@ import { SavedPaymentMethod } from '../../database/entities/saved-payment-method
 import { NotificationsService } from '../notifications/notifications.service';
 import { PaymentEventsService } from './payment-events.service';
 import { InventoryService } from '../inventory/inventory.service';
+import { PayoutsService } from '../payouts/payouts.service';
+import { StoresService } from '../stores/stores.service';
 
 const paymentEventsServiceMock = {
   publishPaymentStatusUpdated: jest.fn(),
+};
+
+const payoutsServiceMock = {
+  handleOmiseTransferWebhook: jest.fn(),
+};
+
+const storesServiceMock = {
+  handleOmiseRecipientWebhook: jest.fn(),
 };
 
 describe('PaymentsService guest access', () => {
@@ -59,6 +69,8 @@ describe('PaymentsService guest access', () => {
           provide: InventoryService,
           useValue: { restoreOrderStock: jest.fn().mockResolvedValue(true) },
         },
+        { provide: PayoutsService, useValue: payoutsServiceMock },
+        { provide: StoresService, useValue: storesServiceMock },
       ],
     }).compile();
 
@@ -155,6 +167,8 @@ describe('PaymentsService payment read queries', () => {
           provide: InventoryService,
           useValue: { restoreOrderStock: jest.fn().mockResolvedValue(true) },
         },
+        { provide: PayoutsService, useValue: payoutsServiceMock },
+        { provide: StoresService, useValue: storesServiceMock },
       ],
     }).compile();
 
@@ -299,6 +313,8 @@ describe('PaymentsService createCharge return_uri', () => {
           provide: InventoryService,
           useValue: { restoreOrderStock: jest.fn().mockResolvedValue(true) },
         },
+        { provide: PayoutsService, useValue: payoutsServiceMock },
+        { provide: StoresService, useValue: storesServiceMock },
       ],
     }).compile();
 
@@ -508,6 +524,8 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
           provide: InventoryService,
           useValue: inventoryService,
         },
+        { provide: PayoutsService, useValue: payoutsServiceMock },
+        { provide: StoresService, useValue: storesServiceMock },
       ],
     }).compile();
 
@@ -761,6 +779,8 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
           provide: InventoryService,
           useValue: inventoryService,
         },
+        { provide: PayoutsService, useValue: payoutsServiceMock },
+        { provide: StoresService, useValue: storesServiceMock },
       ],
     }).compile();
 

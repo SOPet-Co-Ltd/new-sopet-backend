@@ -7,13 +7,21 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, IsNull } from 'typeorm';
 import { Promotion, PromotionScope, PromotionType } from '../../database/entities/promotion.entity';
+import { PromotionUsage } from '../../database/entities/promotion-usage.entity';
 import { CreatePromotionInput, UpdatePromotionInput } from './promotions.inputs';
+
+export type PromotionCustomerIdentity = {
+  customerId?: string;
+  guestPhone?: string;
+};
 
 @Injectable()
 export class PromotionsService {
   constructor(
     @InjectRepository(Promotion)
     private readonly promotionRepository: Repository<Promotion>,
+    @InjectRepository(PromotionUsage)
+    private readonly promotionUsageRepository: Repository<PromotionUsage>,
   ) {}
 
   async findActive(storeId?: string): Promise<Promotion[]> {
@@ -184,6 +192,7 @@ export class PromotionsService {
     code: string,
     subtotal: number,
     storeId?: string,
+    customer?: PromotionCustomerIdentity,
   ): Promise<{ promotion: Promotion; discountAmount: number }> {
     const promotion = await this.promotionRepository.findOne({
       where: { code, isActive: true, deletedAt: IsNull() },
@@ -209,6 +218,7 @@ export class PromotionsService {
         message: 'Promotion usage limit reached',
       });
     }
+    await this.assertCustomerUsageWithinLimit(promotion, customer);
     if (promotion.scope === PromotionScope.STORE && storeId && promotion.storeId !== storeId) {
       throw new BadRequestException({
         code: 'PROMOTION_STORE',
@@ -242,12 +252,13 @@ export class PromotionsService {
     storeSubtotals: Map<string, number>,
     platformCode?: string,
     storeCodes?: string[],
+    customer?: PromotionCustomerIdentity,
   ): Promise<{ promotions: Promotion[]; discountAmount: number }> {
     const promotions: Promotion[] = [];
     let discountAmount = 0;
 
     if (platformCode) {
-      const platform = await this.validateCode(platformCode, subtotal);
+      const platform = await this.validateCode(platformCode, subtotal, undefined, customer);
       promotions.push(platform.promotion);
       discountAmount += platform.discountAmount;
     }
@@ -259,7 +270,7 @@ export class PromotionsService {
         });
         const storeId = promo?.storeId ?? undefined;
         const storeSubtotal = storeId ? (storeSubtotals.get(storeId) ?? 0) : subtotal;
-        const store = await this.validateCode(code, storeSubtotal, storeId);
+        const store = await this.validateCode(code, storeSubtotal, storeId, customer);
         promotions.push(store.promotion);
         discountAmount += store.discountAmount;
       }
@@ -267,6 +278,40 @@ export class PromotionsService {
 
     discountAmount = Math.min(discountAmount, subtotal);
     return { promotions, discountAmount };
+  }
+
+  private async assertCustomerUsageWithinLimit(
+    promotion: Promotion,
+    customer?: PromotionCustomerIdentity,
+  ): Promise<void> {
+    if (!promotion.usagePerCustomer || promotion.usagePerCustomer <= 0) {
+      return;
+    }
+
+    const customerId = customer?.customerId;
+    const guestPhone = customer?.guestPhone?.trim();
+    if (!customerId && !guestPhone) {
+      return;
+    }
+
+    const qb = this.promotionUsageRepository
+      .createQueryBuilder('usage')
+      .innerJoin('usage.order', 'order')
+      .where('usage.promotion_id = :promotionId', { promotionId: promotion.id });
+
+    if (customerId) {
+      qb.andWhere('order.customer_id = :customerId', { customerId });
+    } else if (guestPhone) {
+      qb.andWhere('order.guest_phone = :guestPhone', { guestPhone });
+    }
+
+    const customerUsageCount = await qb.getCount();
+    if (customerUsageCount >= promotion.usagePerCustomer) {
+      throw new BadRequestException({
+        code: 'PROMOTION_CUSTOMER_LIMIT',
+        message: 'You have reached the usage limit for this promotion',
+      });
+    }
   }
 
   private parseConditions(conditions?: string): Record<string, unknown> {

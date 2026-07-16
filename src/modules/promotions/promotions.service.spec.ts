@@ -13,6 +13,7 @@ describe('PromotionsService', () => {
     minPurchaseAmount: null,
     maxDiscountAmount: null,
     usageLimit: null,
+    usagePerCustomer: 1,
     usageCount: 0,
     isActive: true,
     startsAt: null,
@@ -29,8 +30,26 @@ describe('PromotionsService', () => {
     save: jest.Mock;
     softRemove: jest.Mock;
   };
+  let promotionUsageRepository: {
+    createQueryBuilder: jest.Mock;
+  };
+  let usageQueryBuilder: {
+    innerJoin: jest.Mock;
+    where: jest.Mock;
+    andWhere: jest.Mock;
+    getCount: jest.Mock;
+  };
 
   beforeEach(() => {
+    usageQueryBuilder = {
+      innerJoin: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getCount: jest.fn().mockResolvedValue(0),
+    };
+    promotionUsageRepository = {
+      createQueryBuilder: jest.fn().mockReturnValue(usageQueryBuilder),
+    };
     promotionRepository = {
       findOne: jest.fn().mockResolvedValue(mockPromotion),
       createQueryBuilder: jest.fn(),
@@ -38,7 +57,10 @@ describe('PromotionsService', () => {
       save: jest.fn(),
       softRemove: jest.fn(),
     };
-    service = new PromotionsService(promotionRepository as never);
+    service = new PromotionsService(
+      promotionRepository as never,
+      promotionUsageRepository as never,
+    );
   });
 
   it('validates a percentage promotion', async () => {
@@ -96,6 +118,61 @@ describe('PromotionsService', () => {
     await expect(service.validateCode('WELCOME10', 100)).rejects.toMatchObject({
       response: { code: 'PROMOTION_MIN_PURCHASE' },
     });
+  });
+
+  it('rejects promotion when total usage limit is reached', async () => {
+    promotionRepository.findOne.mockResolvedValue({
+      ...mockPromotion,
+      usageLimit: 10,
+      usageCount: 10,
+    });
+
+    await expect(service.validateCode('WELCOME10', 100)).rejects.toMatchObject({
+      response: { code: 'PROMOTION_LIMIT' },
+    });
+  });
+
+  it('rejects promotion when customer usage limit is reached', async () => {
+    promotionRepository.findOne.mockResolvedValue({
+      ...mockPromotion,
+      usagePerCustomer: 1,
+    });
+    usageQueryBuilder.getCount.mockResolvedValue(1);
+
+    await expect(
+      service.validateCode('WELCOME10', 100, undefined, { customerId: 'cust-1' }),
+    ).rejects.toMatchObject({
+      response: { code: 'PROMOTION_CUSTOMER_LIMIT' },
+    });
+  });
+
+  it('rejects promotion when guest phone usage limit is reached', async () => {
+    promotionRepository.findOne.mockResolvedValue({
+      ...mockPromotion,
+      usagePerCustomer: 2,
+    });
+    usageQueryBuilder.getCount.mockResolvedValue(2);
+
+    await expect(
+      service.validateCode('WELCOME10', 100, undefined, { guestPhone: '+66812345678' }),
+    ).rejects.toMatchObject({
+      response: { code: 'PROMOTION_CUSTOMER_LIMIT' },
+    });
+  });
+
+  it('allows unlimited per-customer usage when usagePerCustomer is 0', async () => {
+    promotionRepository.findOne.mockResolvedValue({
+      ...mockPromotion,
+      usagePerCustomer: 0,
+    });
+    usageQueryBuilder.getCount.mockResolvedValue(5);
+
+    const result = await service.validateCode('WELCOME10', 1000, undefined, {
+      customerId: 'cust-1',
+    });
+
+    expect(result.discountAmount).toBe(100);
+    expect(promotionUsageRepository.createQueryBuilder).not.toHaveBeenCalled();
   });
 
   it('calculates fixed amount discount', async () => {

@@ -75,6 +75,7 @@ describe('StoresService', () => {
         hasCredentials: jest.fn().mockReturnValue(false),
         createRecipient: jest.fn(),
         updateRecipient: jest.fn(),
+        getRecipient: jest.fn(),
       } as never,
       {
         notifyVendorAboutStoreStatus: jest.fn().mockResolvedValue(undefined),

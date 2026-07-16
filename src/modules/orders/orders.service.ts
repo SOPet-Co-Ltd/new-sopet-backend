@@ -248,6 +248,11 @@ export class OrdersService {
         storeSubtotals,
         platformPromotionCode,
         codes,
+        customerId
+          ? { customerId }
+          : normalizedGuestPhone
+            ? { guestPhone: normalizedGuestPhone }
+            : undefined,
       );
       discountAmount = stacked.discountAmount;
       appliedPromotions = stacked.promotions;

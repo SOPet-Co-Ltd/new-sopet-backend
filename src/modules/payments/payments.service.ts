@@ -16,6 +16,8 @@ import { CreateChargeDto } from './dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PaymentEventsService } from './payment-events.service';
 import { InventoryService } from '../inventory/inventory.service';
+import { PayoutsService } from '../payouts/payouts.service';
+import { StoresService } from '../stores/stores.service';
 import { verifyOmiseWebhookSignature } from './omise-webhook.util';
 import { buildOmiseReturnUri } from './build-omise-return-uri';
 import { normalizeCheckoutPaymentMethod } from '../../common/utils/checkout-payment.util';
@@ -80,6 +82,8 @@ export class PaymentsService {
     private notificationsService: NotificationsService,
     private paymentEventsService: PaymentEventsService,
     private inventoryService: InventoryService,
+    private payoutsService: PayoutsService,
+    private storesService: StoresService,
   ) {
     this.omiseSecretKey = this.configService.get<string>('omise.secretKey') ?? '';
     this.omisePublicKey = this.configService.get<string>('omise.publicKey') ?? '';
@@ -687,9 +691,29 @@ export class PaymentsService {
 
   async handleWebhook(payload: {
     key?: string;
-    data?: { object?: string; id?: string; status?: string };
+    data?: {
+      object?: string;
+      id?: string;
+      status?: string;
+      paid?: boolean;
+      sent?: boolean;
+      verified?: boolean;
+      active?: boolean;
+      failure_code?: string | null;
+      failure_message?: string | null;
+    };
   }): Promise<void> {
     this.logger.log(`Omise webhook: ${payload.key}`);
+
+    if (payload.key?.startsWith('transfer.')) {
+      await this.payoutsService.handleOmiseTransferWebhook(payload);
+      return;
+    }
+
+    if (payload.key?.startsWith('recipient.')) {
+      await this.storesService.handleOmiseRecipientWebhook(payload);
+      return;
+    }
 
     const charge = payload.data;
     if (!charge?.id) {

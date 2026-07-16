@@ -40,11 +40,13 @@ export class PromotionsResolver {
   @Public()
   async validatePromotion(
     @Args('input') input: ValidatePromotionInput,
+    @CurrentUser('id') customerId?: string,
   ): Promise<PromotionValidationResult> {
     const { promotion, discountAmount } = await this.promotionsService.validateCode(
       input.code,
       input.subtotal,
       input.storeId,
+      customerId ? { customerId } : undefined,
     );
     return { code: promotion.code, name: promotion.name, discountAmount };
   }
