@@ -1781,4 +1781,14 @@ describe('ValidatePromotions* inputs (Decision 6)', () => {
     const errors = await validate(input);
     expect(errors.some((e) => e.property === 'promotions')).toBe(true);
   });
+
+  it('rejects negative subtotal on ValidatePromotionsInput', async () => {
+    const input = new ValidatePromotionsInput();
+    const target = new ValidatePromotionsTargetInput();
+    target.code = 'WELCOME10';
+    input.promotions = [target];
+    input.subtotal = -1;
+    const errors = await validate(input);
+    expect(errors.some((e) => e.property === 'subtotal')).toBe(true);
+  });
 });

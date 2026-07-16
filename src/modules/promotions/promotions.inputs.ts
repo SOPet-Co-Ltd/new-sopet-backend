@@ -130,6 +130,7 @@ export class ValidatePromotionsInput {
 
   @Field(() => Float)
   @IsNumber()
+  @Min(0)
   subtotal!: number;
 
   @Field({ nullable: true })
