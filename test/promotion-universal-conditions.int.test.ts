@@ -33,6 +33,19 @@ async function validateCodeExtended(
   return service.validateCode(code, subtotal, storeId, customer, options);
 }
 
+/** Shared BxGy line-builder fixture (dedup across cases 2 and 3). */
+function linesForQ(
+  quantitiesAndPrices: Array<{ quantity: number; unitPrice: number; variantId?: string }>,
+  productId = 'product-p',
+) {
+  return quantitiesAndPrices.map((row, index) => ({
+    productId,
+    variantId: row.variantId ?? `var-${index}`,
+    quantity: row.quantity,
+    unitPrice: row.unitPrice,
+  }));
+}
+
 describe('promotion-universal-conditions integration case-1: new-customer dual gates', () => {
   const conditionedPromo = {
     id: 'promo-newcust',
@@ -301,16 +314,6 @@ describe('promotion-universal-conditions integration case-2: BxGy Rules A/B', ()
 
   let service: PromotionsService;
 
-  const linesForQ = (
-    quantitiesAndPrices: Array<{ quantity: number; unitPrice: number; variantId?: string }>,
-  ) =>
-    quantitiesAndPrices.map((row, index) => ({
-      productId: 'product-p',
-      variantId: row.variantId ?? `var-${index}`,
-      quantity: row.quantity,
-      unitPrice: row.unitPrice,
-    }));
-
   beforeEach(() => {
     const usageQueryBuilder = {
       innerJoin: jest.fn().mockReturnThis(),
@@ -394,8 +397,9 @@ describe('promotion-universal-conditions integration case-2: BxGy Rules A/B', ()
 
 // ---------------------------------------------------------------------------
 // Integration test 3 of 3 — Rule C clamp + conditions write + preview/apply agreement
-// Unit scaffold: describe('case-3: Rule C clamp + conditions write + preview/apply agreement …')
-// Deferred to backend-task-07 (Rule C unit coverage already in promotions.service.spec.ts)
+// Proof obligation (backend-task-07): Rule C V>B clamp / V<B no over-clamp; write validation vs
+// evaluate path (create then re-evaluate the persisted record); preview vs applyStackedPromotions
+// agreement for identical eligible fixtures.
 // ---------------------------------------------------------------------------
 //
 // AC-015 / AC-016 / AC-036: "fixed_amount discountAmount = min(V, eligibleBase); base never < 0."
@@ -423,3 +427,181 @@ describe('promotion-universal-conditions integration case-2: BxGy Rules A/B', ()
 // - Successful write persists camelCase newCustomer / productId / buyQuantity / getQuantity
 // - Eligible preview vs applyStackedPromotions: discountAmount and freeUnits match for same lines/customer/codes
 // - Unconditioned percentage/fixed fixtures unchanged vs pre-feature discountAmount baselines
+
+describe('promotion-universal-conditions integration case-3: Rule C clamp + conditions write + preview/apply agreement', () => {
+  const fixedPromo = {
+    id: 'promo-fixed',
+    code: 'FIXEDX',
+    name: 'Fixed amount',
+    type: PromotionType.FIXED_AMOUNT,
+    scope: PromotionScope.PLATFORM,
+    discountValue: 0,
+    minPurchaseAmount: null,
+    maxDiscountAmount: null,
+    usageLimit: null,
+    usagePerCustomer: 1,
+    usageCount: 0,
+    isActive: true,
+    startsAt: null,
+    expiresAt: null,
+    storeId: null,
+    deletedAt: null,
+    conditions: {},
+  };
+
+  let service: PromotionsService;
+  let promotionRepository: {
+    findOne: jest.Mock;
+    create: jest.Mock;
+    save: jest.Mock;
+  };
+  let productRepository: { findOne: jest.Mock };
+
+  beforeEach(() => {
+    const usageQueryBuilder = {
+      innerJoin: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getCount: jest.fn().mockResolvedValue(0),
+    };
+    promotionRepository = {
+      findOne: jest.fn().mockResolvedValue(fixedPromo),
+      create: jest.fn(),
+      save: jest.fn(),
+    };
+    productRepository = {
+      findOne: jest.fn().mockResolvedValue({ id: 'product-p', storeId: 'store-1' }),
+    };
+    service = new PromotionsService(
+      promotionRepository as never,
+      { createQueryBuilder: jest.fn().mockReturnValue(usageQueryBuilder) } as never,
+      productRepository as never,
+      { findOne: jest.fn() } as never,
+      { createQueryBuilder: jest.fn() } as never,
+    );
+  });
+
+  it('Rule C: FIXED_AMOUNT V=100 clamps to eligible base B=60 → discountAmount=60, never negative (AC-015/036)', async () => {
+    promotionRepository.findOne.mockResolvedValue({ ...fixedPromo, discountValue: 100 });
+
+    const result = await validateCodeExtended(service, 'FIXEDX', 60, undefined, undefined, {
+      mode: 'apply',
+    });
+
+    expect(result.discountAmount).toBe(60);
+    expect(result.discountAmount).toBeGreaterThanOrEqual(0);
+  });
+
+  it('Rule C: FIXED_AMOUNT V=40 under base B=60 → discountAmount=40, no over-clamp (AC-016)', async () => {
+    promotionRepository.findOne.mockResolvedValue({ ...fixedPromo, discountValue: 40 });
+
+    const result = await validateCodeExtended(service, 'FIXEDX', 60, undefined, undefined, {
+      mode: 'apply',
+    });
+
+    expect(result.discountAmount).toBe(40);
+  });
+
+  it('write validation boundary: BUY_X_GET_Y without productId rejected before reaching evaluate path (AC-023)', async () => {
+    await expect(
+      service.create(
+        {
+          code: 'bxgy-int-bad',
+          name: 'BxGy missing product',
+          type: PromotionType.BUY_X_GET_Y,
+          discountValue: 0,
+          conditions: JSON.stringify({ buyQuantity: 2, getQuantity: 1 }),
+        },
+        PromotionScope.PLATFORM,
+      ),
+    ).rejects.toMatchObject({ response: { code: 'INVALID_BXGY_CONDITIONS' } });
+
+    expect(promotionRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('write validation boundary: newCustomer.enabled without positive nDays rejected (AC-008)', async () => {
+    await expect(
+      service.create(
+        {
+          code: 'newcust-int-bad',
+          name: 'New customer integration bad',
+          type: PromotionType.PERCENTAGE,
+          discountValue: 10,
+          conditions: JSON.stringify({ newCustomer: { enabled: true, nDays: 0 } }),
+        },
+        PromotionScope.PLATFORM,
+      ),
+    ).rejects.toMatchObject({ response: { code: 'INVALID_NEW_CUSTOMER_CONDITIONS' } });
+
+    expect(promotionRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('write→evaluate roundtrip: valid BxGy write persists productId/buyQuantity/getQuantity, then Rule A/B evaluates on the persisted record (AC-024)', async () => {
+    const conditions = { productId: 'product-p', buyQuantity: 2, getQuantity: 1 };
+    const created = {
+      ...fixedPromo,
+      id: 'promo-bxgy-int',
+      code: 'BXGYINT',
+      type: PromotionType.BUY_X_GET_Y,
+      discountValue: 0,
+      conditions,
+    };
+    promotionRepository.create.mockReturnValue(created);
+    promotionRepository.save.mockResolvedValue(created);
+
+    const written = await service.create(
+      {
+        code: 'bxgyint',
+        name: 'BxGy integration ok',
+        type: PromotionType.BUY_X_GET_Y,
+        discountValue: 0,
+        conditions: JSON.stringify(conditions),
+      },
+      PromotionScope.PLATFORM,
+    );
+
+    expect(written.conditions).toMatchObject(conditions);
+
+    // Evaluate path re-reads the just-written record — write validation vs evaluate boundary.
+    promotionRepository.findOne.mockResolvedValue(written);
+    const evaluated = await validateCodeExtended(service, 'BXGYINT', 300, undefined, undefined, {
+      mode: 'preview',
+      lines: linesForQ([{ quantity: 3, unitPrice: 100 }]),
+    });
+
+    expect(evaluated.freeUnits).toBe(1);
+    expect(evaluated.discountAmount).toBe(100);
+  });
+
+  it('preview/apply agreement: eligible validateCode(preview) and applyStackedPromotions(apply) equal discountAmount and freeUnits for identical fixtures (AC-035)', async () => {
+    const bxgyPromo = {
+      ...fixedPromo,
+      id: 'promo-agree-int',
+      code: 'AGREEINT',
+      type: PromotionType.BUY_X_GET_Y,
+      discountValue: 0,
+      conditions: { productId: 'product-p', buyQuantity: 2, getQuantity: 1 },
+    };
+    promotionRepository.findOne.mockResolvedValue(bxgyPromo);
+    const lines = linesForQ([{ quantity: 3, unitPrice: 100 }]);
+    const storeSubtotals = new Map<string, number>();
+
+    const preview = await validateCodeExtended(service, 'AGREEINT', 300, undefined, undefined, {
+      mode: 'preview',
+      lines,
+    });
+    const stacked = await service.applyStackedPromotions(
+      300,
+      storeSubtotals,
+      'AGREEINT',
+      undefined,
+      undefined,
+      { mode: 'apply', lines },
+    );
+
+    expect(preview.discountAmount).toBe(100);
+    expect(preview.freeUnits).toBe(1);
+    expect(stacked.discountAmount).toBe(preview.discountAmount);
+    expect(stacked.freeUnits).toBe(preview.freeUnits);
+  });
+});
