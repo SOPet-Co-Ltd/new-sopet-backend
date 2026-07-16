@@ -7,6 +7,7 @@ import {
 } from './promotions.service';
 import { PromotionScope, PromotionType } from '../../database/entities/promotion.entity';
 import { OrderStatus } from '../../database/entities/enums/order.enums';
+import { mapPromotion } from '../../graphql/models/mappers';
 
 /**
  * Call site for validateCode(…, options) with mode/lines/eligibility fields.
@@ -1364,6 +1365,156 @@ describe('PromotionsService', () => {
       expect(preview.freeUnits).toBe(1);
       expect(stacked.discountAmount).toBe(preview.discountAmount);
       expect(stacked.freeUnits).toBe(preview.freeUnits);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // ADR-0008 / Backend contract freeze — optional autoApply persist + map
+  // -------------------------------------------------------------------------
+  describe('autoApply persist and map (contract freeze)', () => {
+    it('create persists autoApply true and priority when provided', async () => {
+      const created = {
+        ...mockPromotion,
+        code: 'AUTO10',
+        autoApply: true,
+        priority: 10,
+      };
+      promotionRepository.create = jest.fn().mockReturnValue(created);
+      promotionRepository.save = jest.fn().mockResolvedValue(created);
+
+      const result = await service.create(
+        {
+          code: 'auto10',
+          name: 'Auto 10%',
+          type: PromotionType.PERCENTAGE,
+          discountValue: 10,
+          autoApply: true,
+          priority: 10,
+        },
+        PromotionScope.PLATFORM,
+      );
+
+      expect(promotionRepository.create).toHaveBeenCalledWith(
+        expect.objectContaining({ autoApply: true, priority: 10 }),
+      );
+      expect(result.autoApply).toBe(true);
+      expect(result.priority).toBe(10);
+      expect(mapPromotion(result as never).autoApply).toBe(true);
+      expect(mapPromotion(result as never).priority).toBe(10);
+    });
+
+    it('create defaults autoApply false and priority 0 when omitted', async () => {
+      const created = {
+        ...mockPromotion,
+        code: 'MANUAL10',
+        autoApply: false,
+        priority: 0,
+      };
+      promotionRepository.create = jest.fn().mockReturnValue(created);
+      promotionRepository.save = jest.fn().mockResolvedValue(created);
+
+      const result = await service.create(
+        {
+          code: 'manual10',
+          name: 'Manual 10%',
+          type: PromotionType.PERCENTAGE,
+          discountValue: 10,
+        },
+        PromotionScope.PLATFORM,
+      );
+
+      expect(promotionRepository.create).toHaveBeenCalledWith(
+        expect.objectContaining({ autoApply: false, priority: 0 }),
+      );
+      expect(result.autoApply).toBe(false);
+      expect(result.priority).toBe(0);
+      expect(mapPromotion(result as never).autoApply).toBe(false);
+      expect(mapPromotion(result as never).priority).toBe(0);
+    });
+
+    it('update persists autoApply and priority when provided', async () => {
+      const existing = {
+        ...mockPromotion,
+        autoApply: false,
+        priority: 0,
+      };
+      promotionRepository.findOne.mockResolvedValue(existing);
+      promotionRepository.save = jest
+        .fn()
+        .mockImplementation((entity: typeof existing) => Promise.resolve(entity));
+
+      const result = await service.update('promo-1', { autoApply: true, priority: 5 });
+
+      expect(result.autoApply).toBe(true);
+      expect(result.priority).toBe(5);
+      expect(mapPromotion(result as never).autoApply).toBe(true);
+      expect(mapPromotion(result as never).priority).toBe(5);
+    });
+
+    it('findActive returns both autoApply true and false rows (no autoApply filter)', async () => {
+      const mixed = [
+        { ...mockPromotion, id: 'auto-1', code: 'AUTO', autoApply: true, priority: 2 },
+        { ...mockPromotion, id: 'manual-1', code: 'MANUAL', autoApply: false, priority: 1 },
+      ];
+      const andWhere = jest.fn().mockReturnThis();
+      const qb = {
+        where: jest.fn().mockReturnThis(),
+        andWhere,
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue(mixed),
+      };
+      promotionRepository.createQueryBuilder = jest.fn().mockReturnValue(qb);
+
+      const result = await service.findActive();
+
+      expect(result).toHaveLength(2);
+      expect(result.map((p) => p.autoApply).sort()).toEqual([false, true]);
+      const andWhereSql = andWhere.mock.calls.map((c: unknown[]) => String(c[0]));
+      expect(andWhereSql.some((sql) => /auto_?apply/i.test(sql))).toBe(false);
+      expect(mapPromotion(result[0] as never).autoApply).toBe(true);
+      expect(mapPromotion(result[1] as never).autoApply).toBe(false);
+    });
+
+    it('findActiveForStore returns both autoApply true and false rows (no autoApply filter)', async () => {
+      const mixed = [
+        {
+          ...mockPromotion,
+          id: 'store-auto',
+          code: 'SAUTO',
+          scope: PromotionScope.STORE,
+          storeId: 'store-1',
+          autoApply: true,
+          priority: 3,
+        },
+        {
+          ...mockPromotion,
+          id: 'store-manual',
+          code: 'SMANUAL',
+          scope: PromotionScope.STORE,
+          storeId: 'store-1',
+          autoApply: false,
+          priority: 0,
+        },
+      ];
+      const andWhere = jest.fn().mockReturnThis();
+      const qb = {
+        where: jest.fn().mockReturnThis(),
+        andWhere,
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue(mixed),
+      };
+      promotionRepository.createQueryBuilder = jest.fn().mockReturnValue(qb);
+
+      const result = await service.findActiveForStore('store-1');
+
+      expect(result).toHaveLength(2);
+      expect(result.some((p) => p.autoApply === true)).toBe(true);
+      expect(result.some((p) => p.autoApply === false)).toBe(true);
+      const andWhereSql = andWhere.mock.calls.map((c: unknown[]) => String(c[0]));
+      expect(andWhereSql.some((sql) => /auto_?apply/i.test(sql))).toBe(false);
+      expect(mapPromotion(result[0] as never).priority).toBe(3);
+      expect(mapPromotion(result[1] as never).priority).toBe(0);
     });
   });
 });
