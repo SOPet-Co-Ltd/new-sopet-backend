@@ -1033,6 +1033,16 @@ type ProductVariantType {
   stockQuantity: Int!
 }
 
+type PromotionEligibilityResult {
+  code: String!
+  discountAmount: Float
+  eligible: Boolean!
+  freeUnits: Int
+  id: String
+  ineligibilityReason: String
+  name: String
+}
+
 type PromotionType {
   autoApply: Boolean!
   code: String!
@@ -1179,6 +1189,7 @@ type Query {
   topProducts(limit: Int, storeId: String!): [TopProductType!]!
   unreadNotificationsCount: Int!
   validatePromotion(input: ValidatePromotionInput!): PromotionValidationResult!
+  validatePromotions(input: ValidatePromotionsInput!): ValidatePromotionsResult!
   vendorCustomer(id: String!): VendorCustomerType!
   vendorCustomerDetail(id: String!): VendorCustomerDetailType!
   vendorCustomers(limit: Int! = 20, page: Int! = 1, search: String): VendorCustomerConnection!
@@ -1877,6 +1888,22 @@ input ValidatePromotionLineInput {
   storeId: String
   unitPrice: Float!
   variantId: String
+}
+
+input ValidatePromotionsInput {
+  lines: [ValidatePromotionLineInput!]
+  promotions: [ValidatePromotionsTargetInput!]!
+  storeId: String
+  subtotal: Float!
+}
+
+type ValidatePromotionsResult {
+  items: [PromotionEligibilityResult!]!
+}
+
+input ValidatePromotionsTargetInput {
+  code: String
+  id: String
 }
 
 enum VariantRemovalBlockReason {

@@ -8,12 +8,14 @@ import { PromotionScope } from '../../database/entities/promotion.entity';
 import {
   PromotionType as PromotionGraphqlType,
   PromotionValidationResult,
+  ValidatePromotionsResult,
 } from '../../graphql/models/types';
 import { mapPromotion } from '../../graphql/models/mappers';
 import {
   CreatePromotionInput,
   UpdatePromotionInput,
   ValidatePromotionInput,
+  ValidatePromotionsInput,
 } from './promotions.inputs';
 import { StoresService } from '../stores/stores.service';
 import { StoreMemberRole } from '../../database/entities/store-member.entity';
@@ -46,6 +48,21 @@ export class PromotionsResolver {
       ineligibilityReason: ineligibilityReason ?? null,
       freeUnits: freeUnits ?? 0,
     };
+  }
+
+  @Query(() => ValidatePromotionsResult)
+  @Public()
+  async validatePromotions(
+    @Args('input') input: ValidatePromotionsInput,
+    @CurrentUser('id') customerId?: string,
+  ): Promise<ValidatePromotionsResult> {
+    return this.promotionsService.validatePromotionsBatch(
+      input.promotions.map((t) => ({ id: t.id, code: t.code })),
+      input.subtotal,
+      input.storeId,
+      customerId ? { customerId } : undefined,
+      input.lines,
+    );
   }
 
   @Query(() => [PromotionGraphqlType])

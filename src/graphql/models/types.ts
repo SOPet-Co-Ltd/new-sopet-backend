@@ -1216,6 +1216,37 @@ export class PromotionValidationResult {
   freeUnits?: number | null;
 }
 
+/** Decision 6 — per-promotion soft eligibility item for batch validatePromotions. */
+@ObjectType()
+export class PromotionEligibilityResult {
+  @Field(() => String, { nullable: true })
+  id?: string | null;
+
+  @Field()
+  code!: string;
+
+  @Field(() => String, { nullable: true })
+  name?: string | null;
+
+  @Field(() => Boolean)
+  eligible!: boolean;
+
+  @Field(() => String, { nullable: true })
+  ineligibilityReason?: string | null;
+
+  @Field(() => Float, { nullable: true })
+  discountAmount?: number | null;
+
+  @Field(() => Int, { nullable: true })
+  freeUnits?: number | null;
+}
+
+@ObjectType()
+export class ValidatePromotionsResult {
+  @Field(() => [PromotionEligibilityResult])
+  items!: PromotionEligibilityResult[];
+}
+
 @ObjectType()
 export class StoreRequestType {
   @Field()
