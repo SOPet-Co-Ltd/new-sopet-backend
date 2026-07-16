@@ -16,6 +16,7 @@ import { OrderStatus } from '../../database/entities/enums/order.enums';
 import {
   CreatePromotionInput,
   MAX_VALIDATE_PROMOTION_LINE_QUANTITY,
+  MAX_VALIDATE_PROMOTIONS_TARGETS,
   UpdatePromotionInput,
 } from './promotions.inputs';
 
@@ -33,9 +34,19 @@ export type PromotionCartLine = {
   storeId?: string;
 };
 
+/** Request-local memo for newCustomer gate DB lookups (Decision 6). */
+export type NewCustomerGateCacheEntry = {
+  createdAt: Date | null;
+  paidPathCount: number;
+};
+
+export type NewCustomerGateCache = Map<string, NewCustomerGateCacheEntry>;
+
 export type ValidateCodeOptions = {
   lines?: PromotionCartLine[];
   mode?: 'preview' | 'apply';
+  /** Request-local identity cache; used by validatePromotionsBatch. */
+  newCustomerGateCache?: NewCustomerGateCache;
 };
 
 export type ValidateCodeResult = {
@@ -43,6 +54,25 @@ export type ValidateCodeResult = {
   discountAmount: number;
   freeUnits: number;
   ineligibilityReason: string | null;
+};
+
+export type ValidatePromotionsTarget = {
+  id?: string;
+  code?: string;
+};
+
+export type PromotionEligibilityItem = {
+  id: string | null;
+  code: string;
+  name: string | null;
+  eligible: boolean;
+  ineligibilityReason: string | null;
+  discountAmount: number;
+  freeUnits: number;
+};
+
+export type ValidatePromotionsBatchResult = {
+  items: PromotionEligibilityItem[];
 };
 
 /** Paid-path statuses for new-customer ORDER_HISTORY gate (ADR / Design Doc). */
@@ -294,7 +324,12 @@ export class PromotionsService {
       return this.resolveEligibilityFailure(promotion, loggedInReason, mode);
     }
 
-    const gateReason = await this.evaluateNewCustomerGates(promotion, customer, now);
+    const gateReason = await this.evaluateNewCustomerGates(
+      promotion,
+      customer,
+      now,
+      options?.newCustomerGateCache,
+    );
     if (gateReason) {
       return this.resolveEligibilityFailure(promotion, gateReason, mode);
     }
@@ -344,6 +379,149 @@ export class PromotionsService {
       freeUnits,
       ineligibilityReason: null,
     };
+  }
+
+  /**
+   * Decision 6 batch list-time soft eligibility. Softens structural codes per-item;
+   * does not change single validateCode hard matrix. Assumes each target has ≥1 of
+   * id|code (ValidationPipe invariant); still guards empty/>20 whole-query.
+   */
+  async validatePromotionsBatch(
+    targets: ValidatePromotionsTarget[],
+    subtotal: number,
+    storeId?: string,
+    customer?: PromotionCustomerIdentity,
+    lines?: PromotionCartLine[],
+  ): Promise<ValidatePromotionsBatchResult> {
+    if (targets.length < 1 || targets.length > MAX_VALIDATE_PROMOTIONS_TARGETS) {
+      throw new BadRequestException({
+        code: 'INVALID_VALIDATE_PROMOTIONS_INPUT',
+        message: `promotions must contain between 1 and ${MAX_VALIDATE_PROMOTIONS_TARGETS} targets`,
+      });
+    }
+
+    const gateCache: NewCustomerGateCache = new Map();
+    const items: PromotionEligibilityItem[] = [];
+
+    for (const target of targets) {
+      items.push(
+        await this.evaluateBatchTarget(target, subtotal, storeId, customer, lines, gateCache),
+      );
+    }
+
+    return { items };
+  }
+
+  private softIneligibleItem(
+    partial: {
+      id?: string | null;
+      code?: string;
+      name?: string | null;
+    },
+    reason: string,
+  ): PromotionEligibilityItem {
+    return {
+      id: partial.id ?? null,
+      code: partial.code ?? '',
+      name: partial.name ?? null,
+      eligible: false,
+      ineligibilityReason: reason,
+      discountAmount: 0,
+      freeUnits: 0,
+    };
+  }
+
+  private toEligibilityItem(result: ValidateCodeResult): PromotionEligibilityItem {
+    const reason = result.ineligibilityReason;
+    if (reason) {
+      return {
+        id: result.promotion.id,
+        code: result.promotion.code,
+        name: result.promotion.name,
+        eligible: false,
+        ineligibilityReason: reason,
+        discountAmount: 0,
+        freeUnits: 0,
+      };
+    }
+    return {
+      id: result.promotion.id,
+      code: result.promotion.code,
+      name: result.promotion.name,
+      eligible: true,
+      ineligibilityReason: null,
+      discountAmount: result.discountAmount,
+      freeUnits: result.freeUnits,
+    };
+  }
+
+  private async evaluateBatchTarget(
+    target: ValidatePromotionsTarget,
+    subtotal: number,
+    storeId: string | undefined,
+    customer: PromotionCustomerIdentity | undefined,
+    lines: PromotionCartLine[] | undefined,
+    gateCache: NewCustomerGateCache,
+  ): Promise<PromotionEligibilityItem> {
+    const inputCode = typeof target.code === 'string' ? target.code : undefined;
+    const inputId =
+      typeof target.id === 'string' && target.id.trim().length > 0 ? target.id : undefined;
+    let resolved: Promotion | null = null;
+
+    try {
+      if (inputId) {
+        resolved = await this.promotionRepository.findOne({
+          where: { id: inputId, deletedAt: IsNull() },
+        });
+        if (!resolved) {
+          return this.softIneligibleItem({ code: inputCode ?? '' }, 'INVALID_PROMOTION');
+        }
+        if (inputCode !== undefined && inputCode.length > 0 && resolved.code !== inputCode) {
+          return this.softIneligibleItem(
+            { id: resolved.id, code: inputCode, name: resolved.name },
+            'INVALID_PROMOTION',
+          );
+        }
+        if (!resolved.isActive) {
+          return this.softIneligibleItem(
+            { id: resolved.id, code: resolved.code, name: resolved.name },
+            'INVALID_PROMOTION',
+          );
+        }
+      }
+
+      const codeToValidate = resolved?.code ?? inputCode;
+      if (!codeToValidate) {
+        return this.softIneligibleItem({ code: '' }, 'INVALID_PROMOTION');
+      }
+
+      const result = await this.validateCode(codeToValidate, subtotal, storeId, customer, {
+        mode: 'preview',
+        lines,
+        newCustomerGateCache: gateCache,
+      });
+      return this.toEligibilityItem(result);
+    } catch (error) {
+      if (error instanceof BadRequestException) {
+        const response = error.getResponse();
+        const code =
+          typeof response === 'object' &&
+          response !== null &&
+          'code' in response &&
+          typeof response.code === 'string'
+            ? (response as { code: string }).code
+            : 'INVALID_PROMOTION';
+        return this.softIneligibleItem(
+          {
+            id: resolved?.id ?? inputId ?? null,
+            code: resolved?.code ?? inputCode ?? '',
+            name: resolved?.name ?? null,
+          },
+          code,
+        );
+      }
+      throw error;
+    }
   }
 
   /**
@@ -544,11 +722,13 @@ export class PromotionsService {
 
   /**
    * New-customer dual gates (AND). Returns ineligibility code or null when skipped/passed.
+   * Optional request-local cache memoizes customer createdAt + paid-path COUNT per identity.
    */
   private async evaluateNewCustomerGates(
     promotion: Promotion,
     customer: PromotionCustomerIdentity | undefined,
     nowUtc: Date,
+    gateCache?: NewCustomerGateCache,
   ): Promise<string | null> {
     const conditions = promotion.conditions ?? {};
     const newCustomer = conditions.newCustomer;
@@ -570,6 +750,43 @@ export class PromotionsService {
       return 'GUEST';
     }
 
+    const nDays = nc.nDays;
+    // Fail closed: enabled without a positive integer nDays must not skip the age gate.
+    const nDaysInvalid = typeof nDays !== 'number' || !Number.isInteger(nDays) || nDays < 1;
+
+    if (gateCache) {
+      let entry = gateCache.get(customerId);
+      if (!entry) {
+        const record = await this.customerRepository.findOne({
+          where: { id: customerId, deletedAt: IsNull() },
+        });
+        let paidPathCount = 0;
+        if (record) {
+          paidPathCount = await this.orderRepository
+            .createQueryBuilder('order')
+            .where('order.customer_id = :customerId', { customerId })
+            .andWhere('order.status IN (:...statuses)', { statuses: PAID_PATH_ORDER_STATUSES })
+            .getCount();
+        }
+        entry = { createdAt: record?.createdAt ?? null, paidPathCount };
+        gateCache.set(customerId, entry);
+      }
+      if (!entry.createdAt) {
+        return 'GUEST';
+      }
+      if (nDaysInvalid) {
+        return 'ACCOUNT_AGE';
+      }
+      const endInstantMs = entry.createdAt.getTime() + nDays * 24 * 60 * 60 * 1000;
+      if (nowUtc.getTime() > endInstantMs) {
+        return 'ACCOUNT_AGE';
+      }
+      if (entry.paidPathCount > 0) {
+        return 'ORDER_HISTORY';
+      }
+      return null;
+    }
+
     const record = await this.customerRepository.findOne({
       where: { id: customerId, deletedAt: IsNull() },
     });
@@ -577,9 +794,7 @@ export class PromotionsService {
       return 'GUEST';
     }
 
-    const nDays = nc.nDays;
-    // Fail closed: enabled without a positive integer nDays must not skip the age gate.
-    if (typeof nDays !== 'number' || !Number.isInteger(nDays) || nDays < 1) {
+    if (nDaysInvalid) {
       return 'ACCOUNT_AGE';
     }
 

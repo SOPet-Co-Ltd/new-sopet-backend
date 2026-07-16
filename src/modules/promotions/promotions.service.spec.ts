@@ -1,10 +1,16 @@
 import { BadRequestException } from '@nestjs/common';
+import { validate } from 'class-validator';
 import {
   PromotionsService,
   PromotionCustomerIdentity,
   ValidateCodeOptions,
   ValidateCodeResult,
 } from './promotions.service';
+import {
+  MAX_VALIDATE_PROMOTIONS_TARGETS,
+  ValidatePromotionsInput,
+  ValidatePromotionsTargetInput,
+} from './promotions.inputs';
 import { PromotionScope, PromotionType } from '../../database/entities/promotion.entity';
 import { OrderStatus } from '../../database/entities/enums/order.enums';
 import { mapPromotion } from '../../graphql/models/mappers';
@@ -1516,5 +1522,263 @@ describe('PromotionsService', () => {
       expect(mapPromotion(result[0] as never).priority).toBe(3);
       expect(mapPromotion(result[1] as never).priority).toBe(0);
     });
+  });
+
+  describe('validatePromotionsBatch (Decision 6 soft matrix)', () => {
+    const percentPromo = {
+      ...mockPromotion,
+      id: 'promo-percent',
+      code: 'WELCOME10',
+      name: 'Welcome 10%',
+      type: PromotionType.PERCENTAGE,
+      discountValue: 10,
+      conditions: {},
+    };
+
+    const newCustomerPromo = {
+      ...mockPromotion,
+      id: 'promo-newcust',
+      code: 'NEWCUST10',
+      name: 'New Customer 10%',
+      type: PromotionType.PERCENTAGE,
+      discountValue: 10,
+      conditions: { newCustomer: { enabled: true, nDays: 7 } },
+    };
+
+    const minPurchasePromo = {
+      ...mockPromotion,
+      id: 'promo-min',
+      code: 'MIN500',
+      name: 'Min 500',
+      type: PromotionType.PERCENTAGE,
+      discountValue: 10,
+      minPurchaseAmount: 500,
+      conditions: {},
+    };
+
+    it('early verification: eligible %-off + ORDER_HISTORY soft; siblings not aborted (AC-041/046)', async () => {
+      promotionRepository.findOne.mockImplementation(
+        ({ where }: { where: { id?: string; code?: string } }) => {
+          if (where?.id === percentPromo.id || where?.code === percentPromo.code) {
+            return Promise.resolve(percentPromo);
+          }
+          if (where?.id === newCustomerPromo.id || where?.code === newCustomerPromo.code) {
+            return Promise.resolve(newCustomerPromo);
+          }
+          return Promise.resolve(null);
+        },
+      );
+
+      const result = await service.validatePromotionsBatch(
+        [{ code: 'WELCOME10' }, { code: 'NEWCUST10' }],
+        1000,
+        undefined,
+        { customerId: 'cust-paid' },
+      );
+
+      expect(result.items).toHaveLength(2);
+      expect(result.items[0].eligible).toBe(true);
+      expect(result.items[0].ineligibilityReason).toBeNull();
+      expect(result.items[0].discountAmount).toBe(100);
+      expect(result.items[1].eligible).toBe(false);
+      expect(result.items[1].ineligibilityReason).toBe('ORDER_HISTORY');
+      expect(result.items[1].discountAmount).toBe(0);
+    });
+
+    it('soft matrix: structural expired soft in batch; single preview still hard', async () => {
+      const expired = {
+        ...percentPromo,
+        id: 'promo-expired',
+        code: 'EXPIRED10',
+        expiresAt: new Date('2020-01-01'),
+      };
+      promotionRepository.findOne.mockResolvedValue(expired);
+
+      const batch = await service.validatePromotionsBatch([{ code: 'EXPIRED10' }], 1000);
+      expect(batch.items).toHaveLength(1);
+      expect(batch.items[0].eligible).toBe(false);
+      expect(batch.items[0].ineligibilityReason).toBe('PROMOTION_EXPIRED');
+      expect(batch.items[0].discountAmount).toBe(0);
+
+      await expect(
+        service.validateCode('EXPIRED10', 1000, undefined, undefined, {
+          mode: 'preview',
+        }),
+      ).rejects.toMatchObject({ response: { code: 'PROMOTION_EXPIRED' } });
+    });
+
+    it('soft matrix: PROMOTION_MIN_PURCHASE soft in batch; single preview hard', async () => {
+      promotionRepository.findOne.mockResolvedValue(minPurchasePromo);
+
+      const batch = await service.validatePromotionsBatch([{ code: 'MIN500' }], 100);
+      expect(batch.items[0].eligible).toBe(false);
+      expect(batch.items[0].ineligibilityReason).toBe('PROMOTION_MIN_PURCHASE');
+
+      await expect(
+        service.validateCode('MIN500', 100, undefined, undefined, { mode: 'preview' }),
+      ).rejects.toMatchObject({ response: { code: 'PROMOTION_MIN_PURCHASE' } });
+    });
+
+    it('unknown id → soft INVALID_PROMOTION; does not abort sibling', async () => {
+      promotionRepository.findOne.mockImplementation(
+        ({ where }: { where: { id?: string; code?: string } }) => {
+          if (where?.id === 'missing-id') {
+            return Promise.resolve(null);
+          }
+          if (where?.code === percentPromo.code || where?.id === percentPromo.id) {
+            return Promise.resolve(percentPromo);
+          }
+          return Promise.resolve(null);
+        },
+      );
+
+      const result = await service.validatePromotionsBatch(
+        [{ id: 'missing-id' }, { code: 'WELCOME10' }],
+        1000,
+      );
+
+      expect(result.items).toHaveLength(2);
+      expect(result.items[0].eligible).toBe(false);
+      expect(result.items[0].ineligibilityReason).toBe('INVALID_PROMOTION');
+      expect(result.items[0].id).toBeNull();
+      expect(result.items[0].code).toBe('');
+      expect(result.items[1].eligible).toBe(true);
+      expect(result.items[1].discountAmount).toBe(100);
+    });
+
+    it('id + mismatched code → soft INVALID_PROMOTION', async () => {
+      promotionRepository.findOne.mockResolvedValue(percentPromo);
+
+      const result = await service.validatePromotionsBatch(
+        [{ id: percentPromo.id, code: 'WRONGCODE' }],
+        1000,
+      );
+
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].eligible).toBe(false);
+      expect(result.items[0].ineligibilityReason).toBe('INVALID_PROMOTION');
+    });
+
+    it('duplicate slots: no server dedupe; items.length === promotions.length', async () => {
+      promotionRepository.findOne.mockResolvedValue(percentPromo);
+
+      const result = await service.validatePromotionsBatch(
+        [{ code: 'WELCOME10' }, { code: 'WELCOME10' }, { id: percentPromo.id }],
+        1000,
+      );
+
+      expect(result.items).toHaveLength(3);
+      expect(result.items.every((i) => i.eligible && i.code === 'WELCOME10')).toBe(true);
+    });
+
+    it('identity-scoped newCustomer gate cache: Order COUNT once per customerId', async () => {
+      const promoA = { ...newCustomerPromo, id: 'nc-a', code: 'NCA' };
+      const promoB = { ...newCustomerPromo, id: 'nc-b', code: 'NCB' };
+      promotionRepository.findOne.mockImplementation(
+        ({ where }: { where: { id?: string; code?: string } }) => {
+          if (where?.code === 'NCA' || where?.id === 'nc-a') {
+            return Promise.resolve(promoA);
+          }
+          if (where?.code === 'NCB' || where?.id === 'nc-b') {
+            return Promise.resolve(promoB);
+          }
+          return Promise.resolve(null);
+        },
+      );
+
+      await service.validatePromotionsBatch([{ code: 'NCA' }, { code: 'NCB' }], 1000, undefined, {
+        customerId: 'cust-paid',
+      });
+
+      expect(orderRepository.createQueryBuilder).toHaveBeenCalledTimes(1);
+      expect(customerRepository.findOne).toHaveBeenCalledTimes(1);
+    });
+
+    it('AC-048: batch soft reason equals validateCode preview for ORDER_HISTORY', async () => {
+      promotionRepository.findOne.mockResolvedValue(newCustomerPromo);
+      const customer = { customerId: 'cust-paid' };
+
+      const preview = await validateCodeExtended(service, 'NEWCUST10', 1000, undefined, customer, {
+        mode: 'preview',
+      });
+      const batch = await service.validatePromotionsBatch(
+        [{ code: 'NEWCUST10' }],
+        1000,
+        undefined,
+        customer,
+      );
+
+      expect(batch.items[0].ineligibilityReason).toBe(preview.ineligibilityReason);
+      expect(batch.items[0].discountAmount).toBe(preview.discountAmount);
+      expect(batch.items[0].eligible).toBe(false);
+      expect(preview.ineligibilityReason).toBe('ORDER_HISTORY');
+    });
+
+    it('empty targets → whole-query INVALID_VALIDATE_PROMOTIONS_INPUT', async () => {
+      await expect(service.validatePromotionsBatch([], 1000)).rejects.toMatchObject({
+        response: { code: 'INVALID_VALIDATE_PROMOTIONS_INPUT' },
+      });
+    });
+
+    it('>20 targets → whole-query INVALID_VALIDATE_PROMOTIONS_INPUT', async () => {
+      const targets = Array.from({ length: 21 }, (_, i) => ({ code: `C${i}` }));
+      await expect(service.validatePromotionsBatch(targets, 1000)).rejects.toMatchObject({
+        response: { code: 'INVALID_VALIDATE_PROMOTIONS_INPUT' },
+      });
+    });
+
+    it('inactive resolved by id → soft INVALID_PROMOTION', async () => {
+      promotionRepository.findOne.mockResolvedValue({
+        ...percentPromo,
+        isActive: false,
+      });
+
+      const result = await service.validatePromotionsBatch([{ id: percentPromo.id }], 1000);
+      expect(result.items[0].eligible).toBe(false);
+      expect(result.items[0].ineligibilityReason).toBe('INVALID_PROMOTION');
+      expect(result.items[0].id).toBe(percentPromo.id);
+      expect(result.items[0].code).toBe(percentPromo.code);
+    });
+  });
+});
+
+describe('ValidatePromotions* inputs (Decision 6)', () => {
+  it('MAX_VALIDATE_PROMOTIONS_TARGETS equals 20', () => {
+    expect(MAX_VALIDATE_PROMOTIONS_TARGETS).toBe(20);
+  });
+
+  it('rejects target missing both id and code (at-least-one-of)', async () => {
+    const target = new ValidatePromotionsTargetInput();
+    const errors = await validate(target);
+    expect(errors.length).toBeGreaterThan(0);
+    const messages = errors.flatMap((e) => Object.values(e.constraints ?? {}));
+    expect(messages.some((m) => /id or code/i.test(m))).toBe(true);
+  });
+
+  it('accepts target with only code', async () => {
+    const target = new ValidatePromotionsTargetInput();
+    target.code = 'WELCOME10';
+    const errors = await validate(target);
+    expect(errors).toHaveLength(0);
+  });
+
+  it('rejects empty promotions array on ValidatePromotionsInput', async () => {
+    const input = new ValidatePromotionsInput();
+    input.promotions = [];
+    input.subtotal = 100;
+    const errors = await validate(input);
+    expect(errors.some((e) => e.property === 'promotions')).toBe(true);
+  });
+
+  it('rejects >20 promotions on ValidatePromotionsInput', async () => {
+    const input = new ValidatePromotionsInput();
+    input.promotions = Array.from({ length: 21 }, (_, i) => {
+      const t = new ValidatePromotionsTargetInput();
+      t.code = `C${i}`;
+      return t;
+    });
+    input.subtotal = 100;
+    const errors = await validate(input);
+    expect(errors.some((e) => e.property === 'promotions')).toBe(true);
   });
 });
