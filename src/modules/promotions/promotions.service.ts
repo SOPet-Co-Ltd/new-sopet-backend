@@ -8,6 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, IsNull } from 'typeorm';
 import { Promotion, PromotionScope, PromotionType } from '../../database/entities/promotion.entity';
 import { PromotionUsage } from '../../database/entities/promotion-usage.entity';
+import { Product } from '../../database/entities/product.entity';
 import { CreatePromotionInput, UpdatePromotionInput } from './promotions.inputs';
 
 export type PromotionCustomerIdentity = {
@@ -22,6 +23,8 @@ export class PromotionsService {
     private readonly promotionRepository: Repository<Promotion>,
     @InjectRepository(PromotionUsage)
     private readonly promotionUsageRepository: Repository<PromotionUsage>,
+    @InjectRepository(Product)
+    private readonly productRepository: Repository<Product>,
   ) {}
 
   async findActive(storeId?: string): Promise<Promotion[]> {
@@ -106,6 +109,7 @@ export class PromotionsService {
   ): Promise<Promotion> {
     this.assertDiscountBounds(input.type, input.discountValue);
     const conditions = this.parseConditions(input.conditions);
+    await this.assertValidConditions(input.type, scope, storeId, conditions);
     const promotion = this.promotionRepository.create({
       code: input.code.toUpperCase(),
       name: input.name,
@@ -156,6 +160,14 @@ export class PromotionsService {
     if (input.priority !== undefined) promotion.priority = input.priority;
     if (input.conditions !== undefined) {
       promotion.conditions = this.parseConditions(input.conditions);
+    }
+    if (input.conditions !== undefined || input.type !== undefined) {
+      await this.assertValidConditions(
+        input.type ?? promotion.type,
+        promotion.scope,
+        promotion.storeId,
+        promotion.conditions,
+      );
     }
     if (input.startsAt !== undefined) promotion.startsAt = input.startsAt;
     if (input.expiresAt !== undefined) promotion.expiresAt = input.expiresAt;
@@ -319,11 +331,92 @@ export class PromotionsService {
       return {};
     }
     try {
-      return JSON.parse(conditions) as Record<string, unknown>;
-    } catch {
+      const parsed: unknown = JSON.parse(conditions);
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new BadRequestException({
+          code: 'INVALID_CONDITIONS',
+          message: 'conditions must be a JSON object',
+        });
+      }
+      return parsed as Record<string, unknown>;
+    } catch (error) {
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
       throw new BadRequestException({
         code: 'INVALID_CONDITIONS',
         message: 'conditions must be valid JSON',
+      });
+    }
+  }
+
+  /**
+   * Semantic write validation for opaque conditions JSON (ADR-0007 keys).
+   * Unknown keys are ignored. Called from create/update only.
+   */
+  private async assertValidConditions(
+    type: PromotionType,
+    scope: PromotionScope,
+    storeId: string | null | undefined,
+    conditions: Record<string, unknown>,
+  ): Promise<void> {
+    const newCustomer = conditions.newCustomer;
+    if (newCustomer !== undefined && newCustomer !== null) {
+      if (typeof newCustomer !== 'object' || Array.isArray(newCustomer)) {
+        throw new BadRequestException({
+          code: 'INVALID_NEW_CUSTOMER_CONDITIONS',
+          message: 'newCustomer must be an object with enabled and nDays',
+        });
+      }
+      const nc = newCustomer as Record<string, unknown>;
+      if (nc.enabled === true) {
+        const nDays = nc.nDays;
+        if (typeof nDays !== 'number' || !Number.isInteger(nDays) || nDays < 1) {
+          throw new BadRequestException({
+            code: 'INVALID_NEW_CUSTOMER_CONDITIONS',
+            message: 'newCustomer.nDays must be a positive integer when enabled',
+          });
+        }
+      }
+    }
+
+    if (type !== PromotionType.BUY_X_GET_Y) {
+      return;
+    }
+
+    const productId = conditions.productId;
+    const buyQuantity = conditions.buyQuantity;
+    const getQuantity = conditions.getQuantity;
+
+    if (
+      typeof productId !== 'string' ||
+      productId.trim().length === 0 ||
+      typeof buyQuantity !== 'number' ||
+      !Number.isInteger(buyQuantity) ||
+      buyQuantity < 1 ||
+      typeof getQuantity !== 'number' ||
+      !Number.isInteger(getQuantity) ||
+      getQuantity < 1
+    ) {
+      throw new BadRequestException({
+        code: 'INVALID_BXGY_CONDITIONS',
+        message: 'buy_x_get_y requires productId, buyQuantity ≥ 1, and getQuantity ≥ 1',
+      });
+    }
+
+    const product = await this.productRepository.findOne({
+      where: { id: productId, deletedAt: IsNull() },
+    });
+    if (!product) {
+      throw new BadRequestException({
+        code: 'PRODUCT_NOT_FOUND',
+        message: 'Product not found for buy_x_get_y conditions',
+      });
+    }
+    if (scope === PromotionScope.STORE && storeId && product.storeId !== storeId) {
+      throw new BadRequestException({
+        code: 'PRODUCT_STORE_MISMATCH',
+        message: 'Product does not belong to this store',
       });
     }
   }

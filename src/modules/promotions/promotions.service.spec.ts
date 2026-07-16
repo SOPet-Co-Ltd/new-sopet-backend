@@ -106,6 +106,9 @@ describe('PromotionsService', () => {
   let promotionUsageRepository: {
     createQueryBuilder: jest.Mock;
   };
+  let productRepository: {
+    findOne: jest.Mock;
+  };
   let usageQueryBuilder: {
     innerJoin: jest.Mock;
     where: jest.Mock;
@@ -130,9 +133,13 @@ describe('PromotionsService', () => {
       save: jest.fn(),
       softRemove: jest.fn(),
     };
+    productRepository = {
+      findOne: jest.fn().mockResolvedValue({ id: 'product-p', storeId: 'store-1' }),
+    };
     service = new PromotionsService(
       promotionRepository as never,
       promotionUsageRepository as never,
+      productRepository as never,
     );
   });
 
@@ -647,6 +654,124 @@ describe('PromotionsService', () => {
           PromotionScope.PLATFORM,
         ),
       ).rejects.toMatchObject({ response: { code: 'INVALID_NEW_CUSTOMER_CONDITIONS' } });
+    });
+
+    it('write rejects malformed conditions JSON (INVALID_CONDITIONS)', async () => {
+      await expect(
+        service.create(
+          {
+            code: 'bad-json',
+            name: 'Bad JSON',
+            type: PromotionType.PERCENTAGE,
+            discountValue: 10,
+            conditions: '{not-json',
+          },
+          PromotionScope.PLATFORM,
+        ),
+      ).rejects.toMatchObject({ response: { code: 'INVALID_CONDITIONS' } });
+    });
+
+    it('write rejects BxGy when productId does not exist (PRODUCT_NOT_FOUND)', async () => {
+      productRepository.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.create(
+          {
+            code: 'bxgy-missing',
+            name: 'BxGy missing product',
+            type: PromotionType.BUY_X_GET_Y,
+            discountValue: 0,
+            conditions: JSON.stringify({
+              productId: 'missing-product',
+              buyQuantity: 2,
+              getQuantity: 1,
+            }),
+          },
+          PromotionScope.PLATFORM,
+        ),
+      ).rejects.toMatchObject({ response: { code: 'PRODUCT_NOT_FOUND' } });
+    });
+
+    it('write rejects store-scope BxGy when product belongs to another store (PRODUCT_STORE_MISMATCH)', async () => {
+      productRepository.findOne.mockResolvedValue({ id: 'product-p', storeId: 'other-store' });
+
+      await expect(
+        service.create(
+          {
+            code: 'bxgy-mismatch',
+            name: 'BxGy store mismatch',
+            type: PromotionType.BUY_X_GET_Y,
+            discountValue: 0,
+            conditions: JSON.stringify({
+              productId: 'product-p',
+              buyQuantity: 2,
+              getQuantity: 1,
+            }),
+          },
+          PromotionScope.STORE,
+          'store-1',
+        ),
+      ).rejects.toMatchObject({ response: { code: 'PRODUCT_STORE_MISMATCH' } });
+    });
+
+    it('update rejects BUY_X_GET_Y without productId (AC-023)', async () => {
+      promotionRepository.findOne.mockResolvedValue({
+        ...mockPromotion,
+        type: PromotionType.BUY_X_GET_Y,
+        scope: PromotionScope.PLATFORM,
+        conditions: {},
+      });
+
+      await expect(
+        service.update('promo-1', {
+          conditions: JSON.stringify({ buyQuantity: 2, getQuantity: 1 }),
+        }),
+      ).rejects.toMatchObject({ response: { code: 'INVALID_BXGY_CONDITIONS' } });
+    });
+
+    it('write accepts ADR example JSON and ignores unknown keys', async () => {
+      const conditions = {
+        newCustomer: { enabled: true, nDays: 30 },
+        productId: 'product-p',
+        buyQuantity: 2,
+        getQuantity: 1,
+        futureKey: 'ignored',
+      };
+      const created = {
+        ...mockPromotion,
+        id: 'promo-adr',
+        code: 'ADREX',
+        type: PromotionType.PERCENTAGE,
+        discountValue: 10,
+        conditions,
+      };
+      promotionRepository.create = jest.fn().mockReturnValue(created);
+      promotionRepository.save = jest.fn().mockResolvedValue(created);
+
+      const result = await service.create(
+        {
+          code: 'adrex',
+          name: 'ADR example',
+          type: PromotionType.PERCENTAGE,
+          discountValue: 10,
+          conditions: JSON.stringify(conditions),
+        },
+        PromotionScope.PLATFORM,
+      );
+
+      expect(result.conditions).toMatchObject({
+        newCustomer: { enabled: true, nDays: 30 },
+        productId: 'product-p',
+        buyQuantity: 2,
+        getQuantity: 1,
+      });
+      expect(promotionRepository.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: PromotionType.PERCENTAGE,
+          conditions,
+        }),
+      );
+      expect(productRepository.findOne).not.toHaveBeenCalled();
     });
 
     it('write persists newCustomer.enabled + positive nDays camelCase (AC-001/AC-008)', async () => {
