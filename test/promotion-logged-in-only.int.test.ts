@@ -4,8 +4,7 @@
 // Parent pattern: test/promotion-universal-conditions.int.test.ts (case-1 new-customer)
 // Generated: 2026-07-16 | Budget Used: integration 3/3, fixture-e2e 0/3, service-e2e 0/2
 //
-// Cases 1–2 executable (backend-task-02): in-process PromotionsService + mocked repos.
-// Case 3 remains comment-only until backend-task-03.
+// Cases 1–3 executable (backend-task-02 / backend-task-03): in-process PromotionsService + mocked repos.
 //
 // Run target:
 //   yarn jest --config ./test/jest-e2e.json --testRegex='promotion-logged-in-only.int.test.ts$' --no-coverage
@@ -393,4 +392,268 @@ describe('promotion-logged-in-only integration case-2: returning/young eligible 
     expect(customerRepository.findOne).not.toHaveBeenCalled();
     expect(orderRepository.createQueryBuilder).not.toHaveBeenCalled();
   });
+});
+
+describe('promotion-logged-in-only integration case-3: composition + Rule L5 write', () => {
+  const newCustomerOnlyPromo = {
+    id: 'promo-newcust',
+    code: 'NEWCUST10',
+    name: 'New customer 10%',
+    type: PromotionType.PERCENTAGE,
+    scope: PromotionScope.PLATFORM,
+    discountValue: 10,
+    minPurchaseAmount: null,
+    maxDiscountAmount: null,
+    usageLimit: null,
+    usagePerCustomer: 1,
+    usageCount: 0,
+    isActive: true,
+    startsAt: null,
+    expiresAt: null,
+    storeId: null,
+    deletedAt: null,
+    conditions: { newCustomer: { enabled: true, nDays: 7 } },
+  };
+
+  const bothOnPromo = {
+    ...newCustomerOnlyPromo,
+    id: 'promo-both',
+    code: 'BOTH10',
+    name: 'Members + new customer 10%',
+    conditions: {
+      loggedInOnly: { enabled: true },
+      newCustomer: { enabled: true, nDays: 7 },
+    },
+  };
+
+  let service: PromotionsService;
+  let promotionRepository: {
+    findOne: jest.Mock;
+    create: jest.Mock;
+    save: jest.Mock;
+  };
+  let customerRepository: { findOne: jest.Mock };
+  let orderRepository: { createQueryBuilder: jest.Mock };
+  let orderQueryBuilder: {
+    where: jest.Mock;
+    andWhere: jest.Mock;
+    getCount: jest.Mock;
+  };
+
+  const daysAgo = (days: number) => new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+  beforeEach(() => {
+    const usageQueryBuilder = {
+      innerJoin: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getCount: jest.fn().mockResolvedValue(0),
+    };
+    orderQueryBuilder = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getCount: jest.fn().mockImplementation(() => {
+        const calls = orderQueryBuilder.where.mock.calls as Array<
+          [string, { customerId?: string } | undefined]
+        >;
+        const last = calls[calls.length - 1];
+        const customerId = last?.[1]?.customerId;
+        return Promise.resolve(customerId === 'cust-paid' ? 1 : 0);
+      }),
+    };
+    promotionRepository = {
+      findOne: jest.fn().mockResolvedValue(bothOnPromo),
+      create: jest.fn(),
+      save: jest.fn(),
+    };
+    customerRepository = {
+      findOne: jest.fn().mockImplementation(({ where }: { where: { id: string } }) => {
+        const id = where?.id;
+        if (id === 'cust-paid' || id === 'cust-eligible') {
+          return Promise.resolve({ id, createdAt: daysAgo(1), deletedAt: null });
+        }
+        return Promise.resolve(null);
+      }),
+    };
+    orderRepository = {
+      createQueryBuilder: jest.fn().mockReturnValue(orderQueryBuilder),
+    };
+
+    service = new PromotionsService(
+      promotionRepository as never,
+      { createQueryBuilder: jest.fn().mockReturnValue(usageQueryBuilder) } as never,
+      { findOne: jest.fn() } as never,
+      customerRepository as never,
+      orderRepository as never,
+    );
+  });
+
+  it('newCustomer-only guest: soft GUEST without loggedInOnly (AC-010 regression)', async () => {
+    promotionRepository.findOne.mockResolvedValue(newCustomerOnlyPromo);
+
+    const result = await validateCodeExtended(service, 'NEWCUST10', 1000, undefined, undefined, {
+      mode: 'preview',
+    });
+
+    expect(result.discountAmount).toBe(0);
+    expect(result.freeUnits).toBe(0);
+    expect(result.ineligibilityReason).toBe('GUEST');
+  });
+
+  it('newCustomer-only guest apply: hard-throws GUEST (AC-010)', async () => {
+    promotionRepository.findOne.mockResolvedValue(newCustomerOnlyPromo);
+
+    await expect(
+      validateCodeExtended(service, 'NEWCUST10', 1000, undefined, undefined, { mode: 'apply' }),
+    ).rejects.toMatchObject({ response: { code: 'GUEST' } });
+  });
+
+  it('both on + guest preview: soft GUEST; short-circuits dual-gate queries (AC-011)', async () => {
+    const result = await validateCodeExtended(service, 'BOTH10', 1000, undefined, undefined, {
+      mode: 'preview',
+    });
+
+    expect(result.discountAmount).toBe(0);
+    expect(result.ineligibilityReason).toBe('GUEST');
+    expect(customerRepository.findOne).not.toHaveBeenCalled();
+    expect(orderRepository.createQueryBuilder).not.toHaveBeenCalled();
+  });
+
+  it('both on + guest apply: hard-throws GUEST (AC-011)', async () => {
+    await expect(
+      validateCodeExtended(service, 'BOTH10', 1000, undefined, undefined, { mode: 'apply' }),
+    ).rejects.toMatchObject({ response: { code: 'GUEST' } });
+    expect(customerRepository.findOne).not.toHaveBeenCalled();
+    expect(orderRepository.createQueryBuilder).not.toHaveBeenCalled();
+  });
+
+  it('both on + paid-path: ORDER_HISTORY soft/hard (AC-012 AND)', async () => {
+    const preview = await validateCodeExtended(
+      service,
+      'BOTH10',
+      1000,
+      undefined,
+      { customerId: 'cust-paid' },
+      { mode: 'preview' },
+    );
+    expect(preview.discountAmount).toBe(0);
+    expect(preview.ineligibilityReason).toBe('ORDER_HISTORY');
+    expect(customerRepository.findOne).toHaveBeenCalled();
+    expect(orderRepository.createQueryBuilder).toHaveBeenCalled();
+
+    await expect(
+      validateCodeExtended(
+        service,
+        'BOTH10',
+        1000,
+        undefined,
+        { customerId: 'cust-paid' },
+        { mode: 'apply' },
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      validateCodeExtended(
+        service,
+        'BOTH10',
+        1000,
+        undefined,
+        { customerId: 'cust-paid' },
+        { mode: 'apply' },
+      ),
+    ).rejects.toMatchObject({ response: { code: 'ORDER_HISTORY' } });
+  });
+
+  it('both on + eligible new customer: discount applies (AC-012)', async () => {
+    const result = await validateCodeExtended(
+      service,
+      'BOTH10',
+      1000,
+      undefined,
+      { customerId: 'cust-eligible' },
+      { mode: 'preview' },
+    );
+
+    expect(result.discountAmount).toBe(100);
+    expect(result.ineligibilityReason).toBeNull();
+  });
+
+  it('Rule L5 write: ON with extras normalizes to exactly { enabled: true } (AC-013)', async () => {
+    const normalized = { loggedInOnly: { enabled: true } };
+    const created = {
+      ...bothOnPromo,
+      code: 'MEMBERSON',
+      conditions: normalized,
+    };
+    promotionRepository.create.mockReturnValue(created);
+    promotionRepository.save.mockResolvedValue(created);
+
+    const result = await service.create(
+      {
+        code: 'memberson',
+        name: 'Members only',
+        type: PromotionType.PERCENTAGE,
+        discountValue: 10,
+        conditions: JSON.stringify({
+          loggedInOnly: { enabled: true, extra: 'x' },
+        }),
+      },
+      PromotionScope.PLATFORM,
+    );
+
+    expect(promotionRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({ conditions: normalized }),
+    );
+    expect(result.conditions).toEqual(normalized);
+    expect(result.conditions.loggedInOnly).not.toHaveProperty('extra');
+  });
+
+  it('Rule L5 write: OFF omits loggedInOnly key on create (AC-014)', async () => {
+    const normalized = { otherKey: 1 };
+    const created = {
+      ...bothOnPromo,
+      code: 'MEMBERSOFF',
+      conditions: normalized,
+    };
+    promotionRepository.create.mockReturnValue(created);
+    promotionRepository.save.mockResolvedValue(created);
+
+    const result = await service.create(
+      {
+        code: 'membersoff',
+        name: 'Members off',
+        type: PromotionType.PERCENTAGE,
+        discountValue: 10,
+        conditions: JSON.stringify({
+          loggedInOnly: { enabled: false },
+          otherKey: 1,
+        }),
+      },
+      PromotionScope.PLATFORM,
+    );
+
+    expect(promotionRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({ conditions: normalized }),
+    );
+    expect(result.conditions).toEqual(normalized);
+    expect(result.conditions).not.toHaveProperty('loggedInOnly');
+  });
+
+  it.each([null, []] as const)(
+    'write rejects loggedInOnly=%j with INVALID_LOGGED_IN_ONLY_CONDITIONS; save not called',
+    async (badValue) => {
+      await expect(
+        service.create(
+          {
+            code: 'members-bad',
+            name: 'Members bad',
+            type: PromotionType.PERCENTAGE,
+            discountValue: 10,
+            conditions: JSON.stringify({ loggedInOnly: badValue }),
+          },
+          PromotionScope.PLATFORM,
+        ),
+      ).rejects.toMatchObject({ response: { code: 'INVALID_LOGGED_IN_ONLY_CONDITIONS' } });
+      expect(promotionRepository.save).not.toHaveBeenCalled();
+    },
+  );
 });

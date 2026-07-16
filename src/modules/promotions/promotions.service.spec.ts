@@ -804,8 +804,135 @@ describe('PromotionsService', () => {
             PromotionScope.PLATFORM,
           ),
         ).rejects.toMatchObject({ response: { code: 'INVALID_LOGGED_IN_ONLY_CONDITIONS' } });
+        expect(promotionRepository.save).not.toHaveBeenCalled();
       },
     );
+  });
+
+  describe('loggedInOnly × newCustomer composition matrix (AC-010–AC-012)', () => {
+    const bothOnPromo = {
+      ...mockPromotion,
+      id: 'promo-both',
+      code: 'BOTH10',
+      type: PromotionType.PERCENTAGE,
+      discountValue: 10,
+      conditions: {
+        loggedInOnly: { enabled: true },
+        newCustomer: { enabled: true, nDays: 7 },
+      },
+    };
+
+    const newCustomerOnlyPromo = {
+      ...mockPromotion,
+      id: 'promo-newcust',
+      code: 'NEWCUST10',
+      type: PromotionType.PERCENTAGE,
+      discountValue: 10,
+      conditions: { newCustomer: { enabled: true, nDays: 7 } },
+    };
+
+    it('newCustomer-only guest: GUEST without requiring loggedInOnly (AC-010)', async () => {
+      promotionRepository.findOne.mockResolvedValue(newCustomerOnlyPromo);
+
+      const result = await validateCodeExtended(service, 'NEWCUST10', 1000, undefined, undefined, {
+        mode: 'preview',
+      });
+
+      expect(result.discountAmount).toBe(0);
+      expect(result.ineligibilityReason).toBe('GUEST');
+    });
+
+    it('both on + guest: soft GUEST; short-circuits dual-gate queries (AC-011)', async () => {
+      promotionRepository.findOne.mockResolvedValue(bothOnPromo);
+
+      const result = await validateCodeExtended(service, 'BOTH10', 1000, undefined, undefined, {
+        mode: 'preview',
+      });
+
+      expect(result.discountAmount).toBe(0);
+      expect(result.ineligibilityReason).toBe('GUEST');
+      expect(customerRepository.findOne).not.toHaveBeenCalled();
+      expect(orderRepository.createQueryBuilder).not.toHaveBeenCalled();
+    });
+
+    it('both on + guest apply: hard-throws GUEST (AC-011)', async () => {
+      promotionRepository.findOne.mockResolvedValue(bothOnPromo);
+
+      await expect(
+        validateCodeExtended(service, 'BOTH10', 1000, undefined, undefined, { mode: 'apply' }),
+      ).rejects.toMatchObject({ response: { code: 'GUEST' } });
+      expect(customerRepository.findOne).not.toHaveBeenCalled();
+    });
+
+    it('both on + paid-path: ORDER_HISTORY (AND composition; AC-012)', async () => {
+      promotionRepository.findOne.mockResolvedValue(bothOnPromo);
+
+      const result = await validateCodeExtended(
+        service,
+        'BOTH10',
+        1000,
+        undefined,
+        { customerId: 'cust-paid' },
+        { mode: 'preview' },
+      );
+
+      expect(result.discountAmount).toBe(0);
+      expect(result.ineligibilityReason).toBe('ORDER_HISTORY');
+      expect(customerRepository.findOne).toHaveBeenCalled();
+      expect(orderRepository.createQueryBuilder).toHaveBeenCalled();
+    });
+
+    it('both on + old account: ACCOUNT_AGE (AND composition; AC-012)', async () => {
+      promotionRepository.findOne.mockResolvedValue(bothOnPromo);
+
+      const result = await validateCodeExtended(
+        service,
+        'BOTH10',
+        1000,
+        undefined,
+        { customerId: 'cust-old' },
+        { mode: 'preview' },
+      );
+
+      expect(result.discountAmount).toBe(0);
+      expect(result.ineligibilityReason).toBe('ACCOUNT_AGE');
+    });
+
+    it('both on + eligible new customer: discount applies (AC-012)', async () => {
+      promotionRepository.findOne.mockResolvedValue(bothOnPromo);
+
+      const result = await validateCodeExtended(
+        service,
+        'BOTH10',
+        1000,
+        undefined,
+        { customerId: 'cust-eligible' },
+        { mode: 'preview' },
+      );
+
+      expect(result.discountAmount).toBe(100);
+      expect(result.ineligibilityReason).toBeNull();
+    });
+
+    it('FIXED_AMOUNT both-on + eligible: type math still applies (adjacent unconditioned path)', async () => {
+      promotionRepository.findOne.mockResolvedValue({
+        ...bothOnPromo,
+        type: PromotionType.FIXED_AMOUNT,
+        discountValue: 50,
+      });
+
+      const result = await validateCodeExtended(
+        service,
+        'BOTH10',
+        1000,
+        undefined,
+        { customerId: 'cust-eligible' },
+        { mode: 'preview' },
+      );
+
+      expect(result.discountAmount).toBe(50);
+      expect(result.ineligibilityReason).toBeNull();
+    });
   });
 
   describe('case-2: BxGy Rules A/B + MISSING_LINES vs INSUFFICIENT_QTY (AC-019–022, AC-037–038)', () => {
