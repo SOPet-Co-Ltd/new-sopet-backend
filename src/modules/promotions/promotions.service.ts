@@ -289,6 +289,11 @@ export class PromotionsService {
       });
     }
 
+    const loggedInReason = this.evaluateLoggedInOnlyGate(promotion, customer);
+    if (loggedInReason) {
+      return this.resolveEligibilityFailure(promotion, loggedInReason, mode);
+    }
+
     const gateReason = await this.evaluateNewCustomerGates(promotion, customer, now);
     if (gateReason) {
       return this.resolveEligibilityFailure(promotion, gateReason, mode);
@@ -508,6 +513,36 @@ export class PromotionsService {
   }
 
   /**
+   * Auth-only members gate (ADR-0007 loggedInOnly). No DB; guestPhone never counts as auth.
+   * Returns 'GUEST' when enabled and customerId is absent/empty; otherwise null (skip or pass).
+   */
+  private evaluateLoggedInOnlyGate(
+    promotion: Promotion,
+    customer: PromotionCustomerIdentity | undefined,
+  ): string | null {
+    const conditions = promotion.conditions ?? {};
+    const loggedInOnly = conditions.loggedInOnly;
+    if (
+      loggedInOnly === undefined ||
+      loggedInOnly === null ||
+      typeof loggedInOnly !== 'object' ||
+      Array.isArray(loggedInOnly)
+    ) {
+      return null;
+    }
+    const lo = loggedInOnly as Record<string, unknown>;
+    if (lo.enabled !== true) {
+      return null;
+    }
+
+    const customerId = customer?.customerId;
+    if (typeof customerId === 'string' && customerId.trim().length > 0) {
+      return null;
+    }
+    return 'GUEST';
+  }
+
+  /**
    * New-customer dual gates (AND). Returns ineligibility code or null when skipped/passed.
    */
   private async evaluateNewCustomerGates(
@@ -671,6 +706,28 @@ export class PromotionsService {
             message: 'newCustomer.nDays must be a positive integer when enabled',
           });
         }
+      }
+    }
+
+    const loggedInOnly = conditions.loggedInOnly;
+    if (loggedInOnly !== undefined) {
+      if (
+        loggedInOnly === null ||
+        typeof loggedInOnly !== 'object' ||
+        Array.isArray(loggedInOnly)
+      ) {
+        throw new BadRequestException({
+          code: 'INVALID_LOGGED_IN_ONLY_CONDITIONS',
+          message: 'loggedInOnly must be a plain object',
+        });
+      }
+      const lo = loggedInOnly as Record<string, unknown>;
+      if (lo.enabled === true) {
+        // Rule L5: persist exactly { enabled: true }; strip unknown nested keys.
+        conditions.loggedInOnly = { enabled: true };
+      } else {
+        // Rule L5: omit key when filter off.
+        delete conditions.loggedInOnly;
       }
     }
 

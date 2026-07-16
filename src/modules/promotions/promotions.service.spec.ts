@@ -622,6 +622,192 @@ describe('PromotionsService', () => {
     });
   });
 
+  describe('loggedInOnly gate (AC-002–005, AC-008–009, AC-013–014, AC-018)', () => {
+    const membersOnlyPromo = {
+      ...mockPromotion,
+      id: 'promo-members',
+      code: 'MEMBERS10',
+      type: PromotionType.PERCENTAGE,
+      discountValue: 10,
+      conditions: { loggedInOnly: { enabled: true } },
+    };
+
+    beforeEach(() => {
+      promotionRepository.findOne.mockResolvedValue(membersOnlyPromo);
+    });
+
+    it('preview guest: discountAmount=0, ineligibilityReason=GUEST (AC-003/AC-018)', async () => {
+      const result = await validateCodeExtended(service, 'MEMBERS10', 1000, undefined, undefined, {
+        mode: 'preview',
+      });
+
+      expect(result.discountAmount).toBe(0);
+      expect(result.freeUnits ?? 0).toBe(0);
+      expect(result.ineligibilityReason).toBe('GUEST');
+      expect(customerRepository.findOne).not.toHaveBeenCalled();
+      expect(orderRepository.createQueryBuilder).not.toHaveBeenCalled();
+    });
+
+    it('apply guest: hard-throws GUEST (AC-005)', async () => {
+      await expect(
+        validateCodeExtended(service, 'MEMBERS10', 1000, undefined, undefined, {
+          mode: 'apply',
+        }),
+      ).rejects.toMatchObject({ response: { code: 'GUEST' } });
+    });
+
+    it('guestPhone-only identity does not satisfy gate (apply → GUEST)', async () => {
+      await expect(
+        validateCodeExtended(
+          service,
+          'MEMBERS10',
+          1000,
+          undefined,
+          { guestPhone: '+66812345678' },
+          { mode: 'apply' },
+        ),
+      ).rejects.toMatchObject({ response: { code: 'GUEST' } });
+      expect(customerRepository.findOne).not.toHaveBeenCalled();
+    });
+
+    it('authenticated customerId passes gate; discount applies (AC-006/007 unit)', async () => {
+      const result = await validateCodeExtended(
+        service,
+        'MEMBERS10',
+        1000,
+        undefined,
+        { customerId: 'cust-paid' },
+        { mode: 'preview' },
+      );
+
+      expect(result.discountAmount).toBe(100);
+      expect(result.ineligibilityReason).toBeNull();
+      expect(customerRepository.findOne).not.toHaveBeenCalled();
+      expect(orderRepository.createQueryBuilder).not.toHaveBeenCalled();
+    });
+
+    it('gate off when loggedInOnly absent → guest eligible on this gate (AC-014)', async () => {
+      promotionRepository.findOne.mockResolvedValue({
+        ...membersOnlyPromo,
+        conditions: {},
+      });
+
+      const result = await validateCodeExtended(service, 'MEMBERS10', 1000, undefined, undefined, {
+        mode: 'preview',
+      });
+
+      expect(result.discountAmount).toBe(100);
+      expect(result.ineligibilityReason).toBeNull();
+    });
+
+    it('gate off when enabled !== true → no GUEST from this gate (AC-014)', async () => {
+      promotionRepository.findOne.mockResolvedValue({
+        ...membersOnlyPromo,
+        conditions: { loggedInOnly: { enabled: false } },
+      });
+
+      const result = await validateCodeExtended(service, 'MEMBERS10', 1000, undefined, undefined, {
+        mode: 'preview',
+      });
+
+      expect(result.discountAmount).toBe(100);
+      expect(result.ineligibilityReason).toBeNull();
+    });
+
+    it('store-scoped promo hits same validateCode gate (shared evaluator)', async () => {
+      promotionRepository.findOne.mockResolvedValue({
+        ...membersOnlyPromo,
+        scope: PromotionScope.STORE,
+        storeId: 'store-1',
+      });
+
+      await expect(
+        validateCodeExtended(service, 'MEMBERS10', 1000, 'store-1', undefined, {
+          mode: 'apply',
+        }),
+      ).rejects.toMatchObject({ response: { code: 'GUEST' } });
+    });
+
+    it('write normalizes ON to exactly { enabled: true } (Rule L5 / AC-013)', async () => {
+      const normalized = { loggedInOnly: { enabled: true } };
+      const created = {
+        ...mockPromotion,
+        code: 'MEMBERSON',
+        conditions: normalized,
+      };
+      promotionRepository.create = jest.fn().mockReturnValue(created);
+      promotionRepository.save = jest.fn().mockResolvedValue(created);
+
+      const result = await service.create(
+        {
+          code: 'memberson',
+          name: 'Members only',
+          type: PromotionType.PERCENTAGE,
+          discountValue: 10,
+          conditions: JSON.stringify({
+            loggedInOnly: { enabled: true, unknownNested: 'strip-me' },
+          }),
+        },
+        PromotionScope.PLATFORM,
+      );
+
+      expect(promotionRepository.create).toHaveBeenCalledWith(
+        expect.objectContaining({ conditions: normalized }),
+      );
+      expect(result.conditions).toEqual(normalized);
+      expect(result.conditions.loggedInOnly).not.toHaveProperty('unknownNested');
+    });
+
+    it('write omits loggedInOnly when filter off (Rule L5 / AC-014)', async () => {
+      const normalized = { otherKey: 1 };
+      const created = {
+        ...mockPromotion,
+        code: 'MEMBERSOFF',
+        conditions: normalized,
+      };
+      promotionRepository.create = jest.fn().mockReturnValue(created);
+      promotionRepository.save = jest.fn().mockResolvedValue(created);
+
+      const result = await service.create(
+        {
+          code: 'membersoff',
+          name: 'Members off',
+          type: PromotionType.PERCENTAGE,
+          discountValue: 10,
+          conditions: JSON.stringify({
+            loggedInOnly: { enabled: false },
+            otherKey: 1,
+          }),
+        },
+        PromotionScope.PLATFORM,
+      );
+
+      expect(promotionRepository.create).toHaveBeenCalledWith(
+        expect.objectContaining({ conditions: normalized }),
+      );
+      expect(result.conditions).toEqual(normalized);
+      expect(result.conditions).not.toHaveProperty('loggedInOnly');
+    });
+
+    it.each([null, [], 'yes', 1] as const)(
+      'write rejects non-plain-object loggedInOnly=%j with INVALID_LOGGED_IN_ONLY_CONDITIONS',
+      async (badValue) => {
+        await expect(
+          service.create(
+            {
+              code: 'members-bad',
+              name: 'Members bad',
+              type: PromotionType.PERCENTAGE,
+              discountValue: 10,
+              conditions: JSON.stringify({ loggedInOnly: badValue }),
+            },
+            PromotionScope.PLATFORM,
+          ),
+        ).rejects.toMatchObject({ response: { code: 'INVALID_LOGGED_IN_ONLY_CONDITIONS' } });
+      },
+    );
+  });
+
   describe('case-2: BxGy Rules A/B + MISSING_LINES vs INSUFFICIENT_QTY (AC-019–022, AC-037–038)', () => {
     const bxgyPromo = {
       ...mockPromotion,
