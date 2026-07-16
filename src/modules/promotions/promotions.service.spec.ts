@@ -1,29 +1,15 @@
 import { BadRequestException } from '@nestjs/common';
-import { PromotionsService, PromotionCustomerIdentity } from './promotions.service';
+import {
+  PromotionsService,
+  PromotionCustomerIdentity,
+  ValidateCodeOptions,
+  ValidateCodeResult,
+} from './promotions.service';
 import { PromotionScope, PromotionType } from '../../database/entities/promotion.entity';
-
-/** Future validateCode options (Design Doc Interface Change Matrix) — not on service yet. */
-type ValidateCodeOptions = {
-  lines?: Array<{
-    productId: string;
-    variantId?: string;
-    quantity: number;
-    unitPrice: number;
-    storeId?: string;
-  }>;
-  mode?: 'preview' | 'apply';
-};
-
-type ValidateCodeResult = {
-  promotion: { code: string; conditions?: Record<string, unknown> };
-  discountAmount: number;
-  freeUnits?: number;
-  ineligibilityReason?: string | null;
-};
+import { OrderStatus } from '../../database/entities/enums/order.enums';
 
 /**
- * Red-scaffold call site for planned validateCode(…, options).
- * 5th arg is ignored until later tasks implement mode/lines/eligibility fields.
+ * Call site for validateCode(…, options) with mode/lines/eligibility fields.
  */
 async function validateCodeExtended(
   service: PromotionsService,
@@ -33,15 +19,7 @@ async function validateCodeExtended(
   customer: PromotionCustomerIdentity | undefined,
   options: ValidateCodeOptions,
 ): Promise<ValidateCodeResult> {
-  return (
-    service.validateCode as (
-      code: string,
-      subtotal: number,
-      storeId?: string,
-      customer?: PromotionCustomerIdentity,
-      options?: ValidateCodeOptions,
-    ) => Promise<ValidateCodeResult>
-  )(code, subtotal, storeId, customer, options);
+  return service.validateCode(code, subtotal, storeId, customer, options);
 }
 
 type ApplyStackedResult = {
@@ -51,8 +29,7 @@ type ApplyStackedResult = {
 };
 
 /**
- * Red-scaffold call site for planned applyStackedPromotions(…, options with lines).
- * Extra options arg ignored until stacking forwards lines / freeUnits (AC-035).
+ * Call site for applyStackedPromotions(…, options with lines).
  */
 async function applyStackedExtended(
   service: PromotionsService,
@@ -63,16 +40,14 @@ async function applyStackedExtended(
   customer: PromotionCustomerIdentity | undefined,
   options: ValidateCodeOptions,
 ): Promise<ApplyStackedResult> {
-  return (
-    service.applyStackedPromotions as (
-      subtotal: number,
-      storeSubtotals: Map<string, number>,
-      platformCode?: string,
-      storeCodes?: string[],
-      customer?: PromotionCustomerIdentity,
-      options?: ValidateCodeOptions,
-    ) => Promise<ApplyStackedResult>
-  )(subtotal, storeSubtotals, platformCode, storeCodes, customer, options);
+  return service.applyStackedPromotions(
+    subtotal,
+    storeSubtotals,
+    platformCode,
+    storeCodes,
+    customer,
+    options,
+  );
 }
 
 describe('PromotionsService', () => {
@@ -93,6 +68,7 @@ describe('PromotionsService', () => {
     expiresAt: null,
     storeId: null,
     deletedAt: null,
+    conditions: {},
   };
 
   let service: PromotionsService;
@@ -109,12 +85,26 @@ describe('PromotionsService', () => {
   let productRepository: {
     findOne: jest.Mock;
   };
+  let customerRepository: {
+    findOne: jest.Mock;
+  };
+  let orderRepository: {
+    createQueryBuilder: jest.Mock;
+  };
   let usageQueryBuilder: {
     innerJoin: jest.Mock;
     where: jest.Mock;
     andWhere: jest.Mock;
     getCount: jest.Mock;
   };
+  let orderQueryBuilder: {
+    where: jest.Mock;
+    andWhere: jest.Mock;
+    getCount: jest.Mock;
+  };
+
+  const hoursAgo = (hours: number) => new Date(Date.now() - hours * 60 * 60 * 1000);
+  const daysAgo = (days: number) => hoursAgo(days * 24);
 
   beforeEach(() => {
     usageQueryBuilder = {
@@ -136,10 +126,55 @@ describe('PromotionsService', () => {
     productRepository = {
       findOne: jest.fn().mockResolvedValue({ id: 'product-p', storeId: 'store-1' }),
     };
+    orderQueryBuilder = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getCount: jest.fn().mockResolvedValue(0),
+    };
+    orderRepository = {
+      createQueryBuilder: jest.fn().mockReturnValue(orderQueryBuilder),
+    };
+    customerRepository = {
+      findOne: jest.fn().mockImplementation(({ where }: { where: { id: string } }) => {
+        const id = where?.id;
+        if (id === 'cust-paid') {
+          return Promise.resolve({ id, createdAt: daysAgo(1), deletedAt: null });
+        }
+        if (id === 'cust-non-paid-only') {
+          return Promise.resolve({ id, createdAt: daysAgo(1), deletedAt: null });
+        }
+        if (id === 'cust-old') {
+          return Promise.resolve({ id, createdAt: daysAgo(8), deletedAt: null });
+        }
+        if (id === 'cust-eligible') {
+          return Promise.resolve({ id, createdAt: daysAgo(1), deletedAt: null });
+        }
+        if (id === 'cust-age-boundary') {
+          // Exactly at inclusive end for nDays=7: createdAt = now - 7×24h
+          return Promise.resolve({ id, createdAt: daysAgo(7), deletedAt: null });
+        }
+        return Promise.resolve(null);
+      }),
+    };
+    // Default: no paid-path orders; cust-paid overrides in case-1 tests
+    orderQueryBuilder.getCount.mockImplementation(() => {
+      const calls = orderQueryBuilder.where.mock.calls as Array<
+        [string, { customerId?: string } | undefined]
+      >;
+      const last = calls[calls.length - 1];
+      const customerId = last?.[1]?.customerId;
+      if (customerId === 'cust-paid') {
+        return Promise.resolve(1);
+      }
+      return Promise.resolve(0);
+    });
+
     service = new PromotionsService(
       promotionRepository as never,
       promotionUsageRepository as never,
       productRepository as never,
+      customerRepository as never,
+      orderRepository as never,
     );
   });
 
@@ -355,7 +390,6 @@ describe('PromotionsService', () => {
     });
 
     it('preview ORDER_HISTORY: soft reason, discountAmount=0 (AC-006)', async () => {
-      // Gate wiring (Customer/Order repos) lands in later tasks; assert soft contract now.
       const result = await validateCodeExtended(
         service,
         'NEWCUST10',
@@ -367,6 +401,14 @@ describe('PromotionsService', () => {
 
       expect(result.discountAmount).toBe(0);
       expect(result.ineligibilityReason).toBe('ORDER_HISTORY');
+      expect(orderQueryBuilder.andWhere).toHaveBeenCalledWith('order.status IN (:...statuses)', {
+        statuses: [
+          OrderStatus.PAID,
+          OrderStatus.PROCESSING,
+          OrderStatus.SHIPPED,
+          OrderStatus.DELIVERED,
+        ],
+      });
     });
 
     it('apply ORDER_HISTORY: hard-throws matching code (AC-006)', async () => {
@@ -425,6 +467,32 @@ describe('PromotionsService', () => {
       ).rejects.toMatchObject({ response: { code: 'ACCOUNT_AGE' } });
     });
 
+    it('age window inclusive of end instant (createdAt + N×24h)', async () => {
+      jest.useFakeTimers();
+      const fixedNow = new Date('2026-07-16T12:00:00.000Z');
+      jest.setSystemTime(fixedNow);
+      customerRepository.findOne.mockResolvedValue({
+        id: 'cust-age-boundary',
+        createdAt: new Date(fixedNow.getTime() - 7 * 24 * 60 * 60 * 1000),
+        deletedAt: null,
+      });
+
+      try {
+        const result = await validateCodeExtended(
+          service,
+          'NEWCUST10',
+          1000,
+          undefined,
+          { customerId: 'cust-age-boundary' },
+          { mode: 'preview' },
+        );
+        expect(result.discountAmount).toBe(100);
+        expect(result.ineligibilityReason).toBeNull();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
     it('either-gate failure never yields positive discountAmount (AC-011 AND)', async () => {
       const historyFail = await validateCodeExtended(
         service,
@@ -461,6 +529,20 @@ describe('PromotionsService', () => {
 
       expect(result.discountAmount).toBe(100);
       expect(result.ineligibilityReason == null || result.ineligibilityReason === null).toBe(true);
+    });
+
+    it('gates off (enabled=false) → skip; discount path unchanged (AC-002)', async () => {
+      promotionRepository.findOne.mockResolvedValue({
+        ...conditionedPromo,
+        conditions: { newCustomer: { enabled: false, nDays: 7 } },
+      });
+
+      const result = await validateCodeExtended(service, 'NEWCUST10', 1000, undefined, undefined, {
+        mode: 'preview',
+      });
+
+      expect(result.discountAmount).toBe(100);
+      expect(result.ineligibilityReason).toBeNull();
     });
   });
 

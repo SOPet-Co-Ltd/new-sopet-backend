@@ -3,12 +3,16 @@ import {
   BadRequestException,
   NotFoundException,
   ForbiddenException,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, IsNull } from 'typeorm';
 import { Promotion, PromotionScope, PromotionType } from '../../database/entities/promotion.entity';
 import { PromotionUsage } from '../../database/entities/promotion-usage.entity';
 import { Product } from '../../database/entities/product.entity';
+import { Customer } from '../../database/entities/customer.entity';
+import { Order } from '../../database/entities/order.entity';
+import { OrderStatus } from '../../database/entities/enums/order.enums';
 import { CreatePromotionInput, UpdatePromotionInput } from './promotions.inputs';
 
 export type PromotionCustomerIdentity = {
@@ -16,8 +20,39 @@ export type PromotionCustomerIdentity = {
   guestPhone?: string;
 };
 
+/** Transient cart line context for BxGy evaluation (Design Doc). */
+export type PromotionCartLine = {
+  productId: string;
+  variantId?: string;
+  quantity: number;
+  unitPrice: number;
+  storeId?: string;
+};
+
+export type ValidateCodeOptions = {
+  lines?: PromotionCartLine[];
+  mode?: 'preview' | 'apply';
+};
+
+export type ValidateCodeResult = {
+  promotion: Promotion;
+  discountAmount: number;
+  freeUnits: number;
+  ineligibilityReason: string | null;
+};
+
+/** Paid-path statuses for new-customer ORDER_HISTORY gate (ADR / Design Doc). */
+const PAID_PATH_ORDER_STATUSES: OrderStatus[] = [
+  OrderStatus.PAID,
+  OrderStatus.PROCESSING,
+  OrderStatus.SHIPPED,
+  OrderStatus.DELIVERED,
+];
+
 @Injectable()
 export class PromotionsService {
+  private readonly logger = new Logger(PromotionsService.name);
+
   constructor(
     @InjectRepository(Promotion)
     private readonly promotionRepository: Repository<Promotion>,
@@ -25,6 +60,10 @@ export class PromotionsService {
     private readonly promotionUsageRepository: Repository<PromotionUsage>,
     @InjectRepository(Product)
     private readonly productRepository: Repository<Product>,
+    @InjectRepository(Customer)
+    private readonly customerRepository: Repository<Customer>,
+    @InjectRepository(Order)
+    private readonly orderRepository: Repository<Order>,
   ) {}
 
   async findActive(storeId?: string): Promise<Promotion[]> {
@@ -205,7 +244,9 @@ export class PromotionsService {
     subtotal: number,
     storeId?: string,
     customer?: PromotionCustomerIdentity,
-  ): Promise<{ promotion: Promotion; discountAmount: number }> {
+    options?: ValidateCodeOptions,
+  ): Promise<ValidateCodeResult> {
+    const mode = options?.mode ?? 'apply';
     const promotion = await this.promotionRepository.findOne({
       where: { code, isActive: true, deletedAt: IsNull() },
     });
@@ -244,6 +285,11 @@ export class PromotionsService {
       });
     }
 
+    const gateReason = await this.evaluateNewCustomerGates(promotion, customer, now);
+    if (gateReason) {
+      return this.resolveEligibilityFailure(promotion, gateReason, mode);
+    }
+
     let discountAmount = 0;
     if (promotion.type === PromotionType.PERCENTAGE) {
       discountAmount = (subtotal * Number(promotion.discountValue)) / 100;
@@ -254,9 +300,15 @@ export class PromotionsService {
     if (promotion.maxDiscountAmount) {
       discountAmount = Math.min(discountAmount, Number(promotion.maxDiscountAmount));
     }
+    // Rule C: clamp to eligible base (subtotal) after optional maxDiscountAmount
     discountAmount = Math.min(discountAmount, subtotal);
 
-    return { promotion, discountAmount };
+    return {
+      promotion,
+      discountAmount,
+      freeUnits: 0,
+      ineligibilityReason: null,
+    };
   }
 
   async applyStackedPromotions(
@@ -265,12 +317,17 @@ export class PromotionsService {
     platformCode?: string,
     storeCodes?: string[],
     customer?: PromotionCustomerIdentity,
+    options?: ValidateCodeOptions,
   ): Promise<{ promotions: Promotion[]; discountAmount: number }> {
+    const mode = options?.mode ?? 'apply';
     const promotions: Promotion[] = [];
     let discountAmount = 0;
 
     if (platformCode) {
-      const platform = await this.validateCode(platformCode, subtotal, undefined, customer);
+      const platform = await this.validateCode(platformCode, subtotal, undefined, customer, {
+        ...options,
+        mode,
+      });
       promotions.push(platform.promotion);
       discountAmount += platform.discountAmount;
     }
@@ -282,7 +339,10 @@ export class PromotionsService {
         });
         const storeId = promo?.storeId ?? undefined;
         const storeSubtotal = storeId ? (storeSubtotals.get(storeId) ?? 0) : subtotal;
-        const store = await this.validateCode(code, storeSubtotal, storeId, customer);
+        const store = await this.validateCode(code, storeSubtotal, storeId, customer, {
+          ...options,
+          mode,
+        });
         promotions.push(store.promotion);
         discountAmount += store.discountAmount;
       }
@@ -290,6 +350,82 @@ export class PromotionsService {
 
     discountAmount = Math.min(discountAmount, subtotal);
     return { promotions, discountAmount };
+  }
+
+  /**
+   * New-customer dual gates (AND). Returns ineligibility code or null when skipped/passed.
+   */
+  private async evaluateNewCustomerGates(
+    promotion: Promotion,
+    customer: PromotionCustomerIdentity | undefined,
+    nowUtc: Date,
+  ): Promise<string | null> {
+    const conditions = promotion.conditions ?? {};
+    const newCustomer = conditions.newCustomer;
+    if (
+      newCustomer === undefined ||
+      newCustomer === null ||
+      typeof newCustomer !== 'object' ||
+      Array.isArray(newCustomer)
+    ) {
+      return null;
+    }
+    const nc = newCustomer as Record<string, unknown>;
+    if (nc.enabled !== true) {
+      return null;
+    }
+
+    const customerId = customer?.customerId;
+    if (!customerId) {
+      return 'GUEST';
+    }
+
+    const record = await this.customerRepository.findOne({
+      where: { id: customerId, deletedAt: IsNull() },
+    });
+    if (!record) {
+      return 'GUEST';
+    }
+
+    const nDays = nc.nDays;
+    if (typeof nDays === 'number' && Number.isInteger(nDays) && nDays >= 1) {
+      const endInstantMs = record.createdAt.getTime() + nDays * 24 * 60 * 60 * 1000;
+      // Inclusive end: pass iff nowUtc <= createdAtUtc + nDays×24h
+      if (nowUtc.getTime() > endInstantMs) {
+        return 'ACCOUNT_AGE';
+      }
+    }
+
+    const paidPathCount = await this.orderRepository
+      .createQueryBuilder('order')
+      .where('order.customer_id = :customerId', { customerId })
+      .andWhere('order.status IN (:...statuses)', { statuses: PAID_PATH_ORDER_STATUSES })
+      .getCount();
+    if (paidPathCount > 0) {
+      return 'ORDER_HISTORY';
+    }
+
+    return null;
+  }
+
+  private resolveEligibilityFailure(
+    promotion: Promotion,
+    code: string,
+    mode: 'preview' | 'apply',
+  ): ValidateCodeResult {
+    this.logger.debug(`Promotion eligibility fail code=${code} promotionId=${promotion.id}`);
+    if (mode === 'preview') {
+      return {
+        promotion,
+        discountAmount: 0,
+        freeUnits: 0,
+        ineligibilityReason: code,
+      };
+    }
+    throw new BadRequestException({
+      code,
+      message: `Promotion not eligible: ${code}`,
+    });
   }
 
   private async assertCustomerUsageWithinLimit(

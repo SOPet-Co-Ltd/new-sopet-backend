@@ -3,59 +3,276 @@
 // PRD: promotion-universal-conditions-prd.md (FR-1, FR-2, FR-3, FR-8)
 // Generated: 2026-07-16 | Budget Used: integration 3/3, fixture-e2e 0/3, service-e2e 0/2
 //
-// Implement target: expand PromotionsService coverage (this file or promotions.service.spec.ts
-// colocated helpers). Keep skeletons comment-only until implementation task adds executable
-// imports / describe / assertions.
+// Case 1 executable (backend-task-03): in-process PromotionsService + mocked repos.
+// Cases 2–3 remain comment-only until backend-task-04 / backend-task-07.
 //
-// Unit Red scaffolds (Phase 0 / backend-task-01): promotions.service.spec.ts
-//   describe('case-1: ...') | describe('case-2: ...') | describe('case-3: ...')
-//   align to integration cases 1–3 below; executable green deferred to backend-task-02..07.
+// Run case 1:
+//   yarn jest --config ./test/jest-e2e.json --testRegex='promotion-universal-conditions.int.test.ts$' --testPathPatterns=promotion-universal-conditions --no-coverage
 //
 // Test Boundaries compliance (Backend Design Doc § Test Boundaries):
 // Mock: Promotion / Usage / Customer / Order / Product repositories
 // @real-dependency: none (in-process service + mocked repos)
-//
-// ---------------------------------------------------------------------------
-// Integration test 1 of 3 — New-customer dual gates (soft preview vs hard apply)
-// Unit scaffold: describe('case-1: new-customer dual gates (AC-003–012)')
-// ---------------------------------------------------------------------------
-//
-// AC-003: "Given a guest session and a promotion with the new-registered-customer condition,
-// when cart/checkout evaluates promotions, then that promotion does not apply."
-// AC-005 / AC-009 / AC-012: "Logged-in customer with no paid-path orders and age ≤ N×24h UTC
-// may be eligible when other rules pass."
-// AC-006: "Customer with ≥1 paid-path order → conditioned promo does not apply."
-// AC-007: "Orders only outside paid-path set → order-history gate still passes."
-// AC-010: "Evaluation after createdAt + N×24h → ACCOUNT_AGE reject."
-// AC-011: "Fail either gate → promotion does not apply (AND)."
-// ROI: 99 (BV:10 × Freq:9 + Legal:0 + Defect:9)
-// Behavior: validateCode(mode=preview|apply) with newCustomer.enabled → GUEST / ORDER_HISTORY /
-// ACCOUNT_AGE soft reasons (preview) or hard throws (apply); both gates must pass for eligible
-// @category: core-functionality
-// @lane: integration
-// @dependency: PromotionsService, Customer repository (mock), Order repository (mock), Promotion repository (mock)
-// @complexity: high
-// Primary failure mode: guest or paid-path / age-failed customer still receives discountAmount>0;
-// preview hard-throws eligibility instead of soft reason; apply soft-skips instead of hard throw;
-// gates OR instead of AND
-// Proof obligation: fixture conditioned percentage promo; (A) no customerId → preview
-// discountAmount=0 + ineligibilityReason=GUEST, apply throws GUEST; (B) customer with PAID order →
-// ORDER_HISTORY soft/hard; (C) only cancelled/pending orders → history gate passes; (D) createdAt
-// older than N×24h → ACCOUNT_AGE; (E) both gates pass → discount applies; (F) fail either alone →
-// no apply. Mock Customer/Order repos only; use real PromotionsService gate helpers. Boundary:
-// preview vs apply mode for each eligibility class
-// Verification points / expected results / pass criteria:
-// - Preview guest: discountAmount=0, freeUnits=0, ineligibilityReason='GUEST'
-// - Apply guest: BadRequestException response.code === 'GUEST'
-// - Preview ORDER_HISTORY / ACCOUNT_AGE: soft reason codes; discountAmount=0
-// - Apply same inputs: hard throw with matching code
-// - Non-paid-path-only history does not set ORDER_HISTORY
-// - Age window inclusive of end instant (createdAt + N×24h)
-// - Either-gate failure never yields positive discountAmount
-//
+
+import { BadRequestException } from '@nestjs/common';
+import {
+  PromotionsService,
+  PromotionCustomerIdentity,
+  ValidateCodeOptions,
+} from '../src/modules/promotions/promotions.service';
+import { PromotionScope, PromotionType } from '../src/database/entities/promotion.entity';
+import { OrderStatus } from '../src/database/entities/enums/order.enums';
+
+async function validateCodeExtended(
+  service: PromotionsService,
+  code: string,
+  subtotal: number,
+  storeId: string | undefined,
+  customer: PromotionCustomerIdentity | undefined,
+  options: ValidateCodeOptions,
+) {
+  return service.validateCode(code, subtotal, storeId, customer, options);
+}
+
+describe('promotion-universal-conditions integration case-1: new-customer dual gates', () => {
+  const conditionedPromo = {
+    id: 'promo-newcust',
+    code: 'NEWCUST10',
+    name: 'New customer 10%',
+    type: PromotionType.PERCENTAGE,
+    scope: PromotionScope.PLATFORM,
+    discountValue: 10,
+    minPurchaseAmount: null,
+    maxDiscountAmount: null,
+    usageLimit: null,
+    usagePerCustomer: 1,
+    usageCount: 0,
+    isActive: true,
+    startsAt: null,
+    expiresAt: null,
+    storeId: null,
+    deletedAt: null,
+    conditions: { newCustomer: { enabled: true, nDays: 7 } },
+  };
+
+  let service: PromotionsService;
+  let promotionRepository: { findOne: jest.Mock };
+  let customerRepository: { findOne: jest.Mock };
+  let orderQueryBuilder: {
+    where: jest.Mock;
+    andWhere: jest.Mock;
+    getCount: jest.Mock;
+  };
+
+  const daysAgo = (days: number) => new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+  beforeEach(() => {
+    const usageQueryBuilder = {
+      innerJoin: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getCount: jest.fn().mockResolvedValue(0),
+    };
+    orderQueryBuilder = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getCount: jest.fn().mockImplementation(() => {
+        const calls = orderQueryBuilder.where.mock.calls as Array<
+          [string, { customerId?: string } | undefined]
+        >;
+        const last = calls[calls.length - 1];
+        const customerId = last?.[1]?.customerId;
+        return Promise.resolve(customerId === 'cust-paid' ? 1 : 0);
+      }),
+    };
+    promotionRepository = {
+      findOne: jest.fn().mockResolvedValue(conditionedPromo),
+    };
+    customerRepository = {
+      findOne: jest.fn().mockImplementation(({ where }: { where: { id: string } }) => {
+        const id = where?.id;
+        if (id === 'cust-paid' || id === 'cust-non-paid-only' || id === 'cust-eligible') {
+          return Promise.resolve({ id, createdAt: daysAgo(1), deletedAt: null });
+        }
+        if (id === 'cust-old') {
+          return Promise.resolve({ id, createdAt: daysAgo(8), deletedAt: null });
+        }
+        return Promise.resolve(null);
+      }),
+    };
+
+    service = new PromotionsService(
+      promotionRepository as never,
+      { createQueryBuilder: jest.fn().mockReturnValue(usageQueryBuilder) } as never,
+      { findOne: jest.fn() } as never,
+      customerRepository as never,
+      { createQueryBuilder: jest.fn().mockReturnValue(orderQueryBuilder) } as never,
+    );
+  });
+
+  // ---------------------------------------------------------------------------
+  // Integration test 1 of 3 — New-customer dual gates (soft preview vs hard apply)
+  // Proof obligation A–F
+  // ---------------------------------------------------------------------------
+
+  it('(A) preview guest: discountAmount=0, ineligibilityReason=GUEST', async () => {
+    const result = await validateCodeExtended(service, 'NEWCUST10', 1000, undefined, undefined, {
+      mode: 'preview',
+    });
+    expect(result.discountAmount).toBe(0);
+    expect(result.freeUnits).toBe(0);
+    expect(result.ineligibilityReason).toBe('GUEST');
+  });
+
+  it('(A) apply guest: hard-throws GUEST', async () => {
+    await expect(
+      validateCodeExtended(service, 'NEWCUST10', 1000, undefined, undefined, { mode: 'apply' }),
+    ).rejects.toMatchObject({ response: { code: 'GUEST' } });
+  });
+
+  it('(B) preview ORDER_HISTORY soft; apply hard', async () => {
+    const preview = await validateCodeExtended(
+      service,
+      'NEWCUST10',
+      1000,
+      undefined,
+      { customerId: 'cust-paid' },
+      { mode: 'preview' },
+    );
+    expect(preview.discountAmount).toBe(0);
+    expect(preview.ineligibilityReason).toBe('ORDER_HISTORY');
+    expect(orderQueryBuilder.andWhere).toHaveBeenCalledWith('order.status IN (:...statuses)', {
+      statuses: [
+        OrderStatus.PAID,
+        OrderStatus.PROCESSING,
+        OrderStatus.SHIPPED,
+        OrderStatus.DELIVERED,
+      ],
+    });
+
+    await expect(
+      validateCodeExtended(
+        service,
+        'NEWCUST10',
+        1000,
+        undefined,
+        { customerId: 'cust-paid' },
+        { mode: 'apply' },
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      validateCodeExtended(
+        service,
+        'NEWCUST10',
+        1000,
+        undefined,
+        { customerId: 'cust-paid' },
+        { mode: 'apply' },
+      ),
+    ).rejects.toMatchObject({ response: { code: 'ORDER_HISTORY' } });
+  });
+
+  it('(C) non-paid-path-only history does not set ORDER_HISTORY', async () => {
+    const result = await validateCodeExtended(
+      service,
+      'NEWCUST10',
+      1000,
+      undefined,
+      { customerId: 'cust-non-paid-only' },
+      { mode: 'preview' },
+    );
+    expect(result.ineligibilityReason).not.toBe('ORDER_HISTORY');
+    expect(result.discountAmount).toBe(100);
+    expect(result.ineligibilityReason).toBeNull();
+  });
+
+  it('(D) preview ACCOUNT_AGE soft; apply hard', async () => {
+    const preview = await validateCodeExtended(
+      service,
+      'NEWCUST10',
+      1000,
+      undefined,
+      { customerId: 'cust-old' },
+      { mode: 'preview' },
+    );
+    expect(preview.discountAmount).toBe(0);
+    expect(preview.ineligibilityReason).toBe('ACCOUNT_AGE');
+
+    await expect(
+      validateCodeExtended(
+        service,
+        'NEWCUST10',
+        1000,
+        undefined,
+        { customerId: 'cust-old' },
+        { mode: 'apply' },
+      ),
+    ).rejects.toMatchObject({ response: { code: 'ACCOUNT_AGE' } });
+  });
+
+  it('(E) both gates pass → discount applies', async () => {
+    const result = await validateCodeExtended(
+      service,
+      'NEWCUST10',
+      1000,
+      undefined,
+      { customerId: 'cust-eligible' },
+      { mode: 'preview' },
+    );
+    expect(result.discountAmount).toBe(100);
+    expect(result.ineligibilityReason).toBeNull();
+  });
+
+  it('(F) either-gate failure never yields positive discountAmount', async () => {
+    const historyFail = await validateCodeExtended(
+      service,
+      'NEWCUST10',
+      1000,
+      undefined,
+      { customerId: 'cust-paid' },
+      { mode: 'preview' },
+    );
+    const ageFail = await validateCodeExtended(
+      service,
+      'NEWCUST10',
+      1000,
+      undefined,
+      { customerId: 'cust-old' },
+      { mode: 'preview' },
+    );
+    expect(historyFail.discountAmount).toBe(0);
+    expect(ageFail.discountAmount).toBe(0);
+  });
+
+  it('age window inclusive of end instant (createdAt + N×24h)', async () => {
+    jest.useFakeTimers();
+    const fixedNow = new Date('2026-07-16T12:00:00.000Z');
+    jest.setSystemTime(fixedNow);
+    customerRepository.findOne.mockResolvedValue({
+      id: 'cust-age-boundary',
+      createdAt: new Date(fixedNow.getTime() - 7 * 24 * 60 * 60 * 1000),
+      deletedAt: null,
+    });
+    try {
+      const result = await validateCodeExtended(
+        service,
+        'NEWCUST10',
+        1000,
+        undefined,
+        { customerId: 'cust-age-boundary' },
+        { mode: 'preview' },
+      );
+      expect(result.discountAmount).toBe(100);
+      expect(result.ineligibilityReason).toBeNull();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Integration test 2 of 3 — BxGy Rules A/B + MISSING_LINES vs INSUFFICIENT_QTY
 // Unit scaffold: describe('case-2: BxGy Rules A/B + MISSING_LINES vs INSUFFICIENT_QTY …')
+// Deferred to backend-task-04 (comment-only until then)
 // ---------------------------------------------------------------------------
 //
 // AC-019–AC-022 / AC-037 / AC-038: "Same-product BxGy; freeUnits = floor(Q/(X+Y))×Y;
@@ -90,6 +307,7 @@
 // ---------------------------------------------------------------------------
 // Integration test 3 of 3 — Rule C clamp + conditions write + preview/apply agreement
 // Unit scaffold: describe('case-3: Rule C clamp + conditions write + preview/apply agreement …')
+// Deferred to backend-task-07 (Rule C unit coverage already in promotions.service.spec.ts)
 // ---------------------------------------------------------------------------
 //
 // AC-015 / AC-016 / AC-036: "fixed_amount discountAmount = min(V, eligibleBase); base never < 0."
