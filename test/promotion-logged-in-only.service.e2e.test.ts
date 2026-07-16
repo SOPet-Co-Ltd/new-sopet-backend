@@ -4,7 +4,7 @@
 // Parent pattern: test/promotion-universal-conditions.service.e2e.test.ts
 // Generated: 2026-07-16 | Budget Used: integration 0/3, fixture-e2e 0/3, service-e2e 1/2
 //
-// Implement target: test/promotion-logged-in-only.e2e-spec.ts (promote when executable)
+// Implement target: test/promotion-logged-in-only.e2e-spec.ts (PROMOTED — see that file)
 //
 // Test Boundaries compliance:
 // @real-dependency: PostgreSQL, TypeORM (promotions, customers, orders, products, promotion_usages)
