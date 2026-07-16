@@ -3,10 +3,10 @@
 // PRD: promotion-universal-conditions-prd.md (FR-1, FR-2, FR-3, FR-8)
 // Generated: 2026-07-16 | Budget Used: integration 3/3, fixture-e2e 0/3, service-e2e 0/2
 //
-// Case 1 executable (backend-task-03): in-process PromotionsService + mocked repos.
-// Cases 2–3 remain comment-only until backend-task-04 / backend-task-07.
+// Cases 1–2 executable (backend-task-03 / backend-task-04): in-process PromotionsService + mocked repos.
+// Case 3 remains comment-only until backend-task-07.
 //
-// Run case 1:
+// Run:
 //   yarn jest --config ./test/jest-e2e.json --testRegex='promotion-universal-conditions.int.test.ts$' --testPathPatterns=promotion-universal-conditions --no-coverage
 //
 // Test Boundaries compliance (Backend Design Doc § Test Boundaries):
@@ -271,39 +271,127 @@ describe('promotion-universal-conditions integration case-1: new-customer dual g
 
 // ---------------------------------------------------------------------------
 // Integration test 2 of 3 — BxGy Rules A/B + MISSING_LINES vs INSUFFICIENT_QTY
-// Unit scaffold: describe('case-2: BxGy Rules A/B + MISSING_LINES vs INSUFFICIENT_QTY …')
-// Deferred to backend-task-04 (comment-only until then)
+// Proof obligation: Rule A table + failure classes (backend-task-04)
 // ---------------------------------------------------------------------------
-//
-// AC-019–AC-022 / AC-037 / AC-038: "Same-product BxGy; freeUnits = floor(Q/(X+Y))×Y;
-// cheapest matching unit prices; all variants of productId sum to Q."
-// AC-037 edge: "(a) lines omitted → MISSING_LINES soft/hard; (b) lines present freeUnits=0 →
-// INSUFFICIENT_QTY soft preview; apply skips without throw; (c) never hard-throw solely for
-// Rule A zero free."
-// ROI: 90 (BV:10 × Freq:8 + Legal:0 + Defect:10)
-// Behavior: validateCode BUY_X_GET_Y with lines → Rule A free count + Rule B cheapest sum;
-// missing lines vs insufficient qty follow soft/hard/skip policy
-// @category: core-functionality
-// @lane: integration
-// @dependency: PromotionsService, Promotion repository (mock), Product repository (mock when write path covered elsewhere)
-// @complexity: high
-// Primary failure mode: freeUnits formula uses Y per X without counting set size (X+Y); free units
-// taken from wrong product; expensive units preferred; lines omitted invents Q from subtotal;
-// apply hard-throws INSUFFICIENT_QTY and aborts createOrder stacking
-// Proof obligation: Buy 2 Get 1 (X=2,Y=1) table — Q=2→0, Q=3→1, Q=5→1, Q=6→2; multi-variant lines
-// of P with unequal unitPrices → discountAmount equals sum of cheapest freeUnits prices; foreign
-// productId lines ignored; mode=preview without lines → MISSING_LINES; mode=preview Q insufficient
-// → INSUFFICIENT_QTY + discount 0; mode=apply with lines and freeUnits=0 → skip (no throw).
-// Boundary: MISSING_LINES vs INSUFFICIENT_QTY failure classes
-// Verification points / expected results / pass criteria:
-// - freeUnits matches PRD examples for Q∈{2,3,5,6}
-// - discountAmount = sum of cheapest freeUnits unit prices among lines of P only
-// - Preview missing lines: ineligibilityReason='MISSING_LINES', freeUnits=0
-// - Apply missing lines: throws MISSING_LINES
-// - Preview freeUnits=0 with lines: ineligibilityReason='INSUFFICIENT_QTY'; no throw
-// - Apply freeUnits=0 with lines: no throw; discount contribution 0 (skip)
-// - No free order-line mutations (discount-only)
-//
+
+describe('promotion-universal-conditions integration case-2: BxGy Rules A/B', () => {
+  const bxgyPromo = {
+    id: 'promo-bxgy',
+    code: 'BXGY21',
+    name: 'Buy 2 Get 1',
+    type: PromotionType.BUY_X_GET_Y,
+    scope: PromotionScope.PLATFORM,
+    discountValue: 0,
+    minPurchaseAmount: null,
+    maxDiscountAmount: null,
+    usageLimit: null,
+    usagePerCustomer: 1,
+    usageCount: 0,
+    isActive: true,
+    startsAt: null,
+    expiresAt: null,
+    storeId: null,
+    deletedAt: null,
+    conditions: {
+      productId: 'product-p',
+      buyQuantity: 2,
+      getQuantity: 1,
+    },
+  };
+
+  let service: PromotionsService;
+
+  const linesForQ = (
+    quantitiesAndPrices: Array<{ quantity: number; unitPrice: number; variantId?: string }>,
+  ) =>
+    quantitiesAndPrices.map((row, index) => ({
+      productId: 'product-p',
+      variantId: row.variantId ?? `var-${index}`,
+      quantity: row.quantity,
+      unitPrice: row.unitPrice,
+    }));
+
+  beforeEach(() => {
+    const usageQueryBuilder = {
+      innerJoin: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getCount: jest.fn().mockResolvedValue(0),
+    };
+    service = new PromotionsService(
+      { findOne: jest.fn().mockResolvedValue(bxgyPromo) } as never,
+      { createQueryBuilder: jest.fn().mockReturnValue(usageQueryBuilder) } as never,
+      { findOne: jest.fn() } as never,
+      { findOne: jest.fn() } as never,
+      { createQueryBuilder: jest.fn() } as never,
+    );
+  });
+
+  it.each([
+    { Q: 2, freeUnits: 0 },
+    { Q: 3, freeUnits: 1 },
+    { Q: 5, freeUnits: 1 },
+    { Q: 6, freeUnits: 2 },
+  ])('Rule A: Buy 2 Get 1 freeUnits for Q=$Q equals $freeUnits', async ({ Q, freeUnits }) => {
+    const result = await validateCodeExtended(service, 'BXGY21', 1000, undefined, undefined, {
+      mode: 'preview',
+      lines: linesForQ([{ quantity: Q, unitPrice: 100 }]),
+    });
+    expect(result.freeUnits).toBe(freeUnits);
+  });
+
+  it('Rule B: discountAmount = sum of cheapest freeUnits; foreign productId ignored', async () => {
+    const result = await validateCodeExtended(service, 'BXGY21', 1000, undefined, undefined, {
+      mode: 'preview',
+      lines: [
+        { productId: 'product-p', variantId: 'a', quantity: 1, unitPrice: 50 },
+        { productId: 'product-p', variantId: 'b', quantity: 1, unitPrice: 80 },
+        { productId: 'product-p', variantId: 'c', quantity: 1, unitPrice: 100 },
+        { productId: 'product-p', variantId: 'd', quantity: 1, unitPrice: 110 },
+        { productId: 'product-p', variantId: 'e', quantity: 1, unitPrice: 120 },
+        { productId: 'product-p', variantId: 'f', quantity: 1, unitPrice: 130 },
+        { productId: 'foreign', variantId: 'x', quantity: 10, unitPrice: 1 },
+      ],
+    });
+    expect(result.freeUnits).toBe(2);
+    expect(result.discountAmount).toBe(130);
+  });
+
+  it('preview missing lines: MISSING_LINES soft', async () => {
+    const result = await validateCodeExtended(service, 'BXGY21', 1000, undefined, undefined, {
+      mode: 'preview',
+    });
+    expect(result.discountAmount).toBe(0);
+    expect(result.freeUnits).toBe(0);
+    expect(result.ineligibilityReason).toBe('MISSING_LINES');
+  });
+
+  it('apply missing lines: hard-throws MISSING_LINES', async () => {
+    await expect(
+      validateCodeExtended(service, 'BXGY21', 1000, undefined, undefined, { mode: 'apply' }),
+    ).rejects.toMatchObject({ response: { code: 'MISSING_LINES' } });
+  });
+
+  it('preview freeUnits=0 with lines: INSUFFICIENT_QTY soft', async () => {
+    const result = await validateCodeExtended(service, 'BXGY21', 1000, undefined, undefined, {
+      mode: 'preview',
+      lines: linesForQ([{ quantity: 2, unitPrice: 100 }]),
+    });
+    expect(result.discountAmount).toBe(0);
+    expect(result.freeUnits).toBe(0);
+    expect(result.ineligibilityReason).toBe('INSUFFICIENT_QTY');
+  });
+
+  it('apply freeUnits=0 with lines: skip without throw (I001c)', async () => {
+    await expect(
+      validateCodeExtended(service, 'BXGY21', 1000, undefined, undefined, {
+        mode: 'apply',
+        lines: linesForQ([{ quantity: 2, unitPrice: 100 }]),
+      }),
+    ).resolves.toMatchObject({ discountAmount: 0, freeUnits: 0, ineligibilityReason: null });
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Integration test 3 of 3 — Rule C clamp + conditions write + preview/apply agreement
 // Unit scaffold: describe('case-3: Rule C clamp + conditions write + preview/apply agreement …')

@@ -291,10 +291,36 @@ export class PromotionsService {
     }
 
     let discountAmount = 0;
+    let freeUnits = 0;
+
     if (promotion.type === PromotionType.PERCENTAGE) {
       discountAmount = (subtotal * Number(promotion.discountValue)) / 100;
     } else if (promotion.type === PromotionType.FIXED_AMOUNT) {
       discountAmount = Number(promotion.discountValue);
+    } else if (promotion.type === PromotionType.BUY_X_GET_Y) {
+      const bxgy = this.evaluateBuyXGetY(promotion, options?.lines);
+      if (bxgy.kind === 'eligibility') {
+        return this.resolveEligibilityFailure(promotion, bxgy.code, mode);
+      }
+      if (bxgy.kind === 'insufficient') {
+        // Preview: soft INSUFFICIENT_QTY. Apply: skip promo (I001c — never hard-throw).
+        if (mode === 'preview') {
+          return {
+            promotion,
+            discountAmount: 0,
+            freeUnits: 0,
+            ineligibilityReason: 'INSUFFICIENT_QTY',
+          };
+        }
+        return {
+          promotion,
+          discountAmount: 0,
+          freeUnits: 0,
+          ineligibilityReason: null,
+        };
+      }
+      freeUnits = bxgy.freeUnits;
+      discountAmount = bxgy.discountAmount;
     }
 
     if (promotion.maxDiscountAmount) {
@@ -306,9 +332,98 @@ export class PromotionsService {
     return {
       promotion,
       discountAmount,
-      freeUnits: 0,
+      freeUnits,
       ineligibilityReason: null,
     };
+  }
+
+  /**
+   * BxGy Rules A–B (discount-only). Foreign productId lines ignored.
+   * Sort: unitPrice asc, then line index, then variantId string.
+   */
+  private evaluateBuyXGetY(
+    promotion: Promotion,
+    lines: PromotionCartLine[] | undefined,
+  ):
+    | { kind: 'eligibility'; code: 'MISSING_LINES' }
+    | { kind: 'insufficient' }
+    | { kind: 'ok'; freeUnits: number; discountAmount: number } {
+    if (lines == null) {
+      return { kind: 'eligibility', code: 'MISSING_LINES' };
+    }
+
+    const conditions = promotion.conditions ?? {};
+    const productId = conditions.productId;
+    const buyQuantity = conditions.buyQuantity;
+    const getQuantity = conditions.getQuantity;
+
+    if (
+      typeof productId !== 'string' ||
+      productId.trim().length === 0 ||
+      typeof buyQuantity !== 'number' ||
+      !Number.isInteger(buyQuantity) ||
+      buyQuantity < 1 ||
+      typeof getQuantity !== 'number' ||
+      !Number.isInteger(getQuantity) ||
+      getQuantity < 1
+    ) {
+      throw new BadRequestException({
+        code: 'INVALID_BXGY_CONDITIONS',
+        message: 'buy_x_get_y requires productId, buyQuantity ≥ 1, and getQuantity ≥ 1',
+      });
+    }
+
+    const x = buyQuantity;
+    const y = getQuantity;
+
+    type UnitSlot = { unitPrice: number; lineIndex: number; variantId: string };
+    const units: UnitSlot[] = [];
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+      const line = lines[lineIndex];
+      if (line.productId !== productId) {
+        continue;
+      }
+      const qty = Math.max(0, Math.floor(Number(line.quantity)) || 0);
+      const variantId = line.variantId ?? '';
+      for (let u = 0; u < qty; u++) {
+        units.push({
+          unitPrice: Number(line.unitPrice),
+          lineIndex,
+          variantId,
+        });
+      }
+    }
+
+    const q = units.length;
+    // Rule A: freeUnits = floor(Q / (X + Y)) * Y
+    const freeUnits = Math.floor(q / (x + y)) * y;
+    if (freeUnits === 0) {
+      return { kind: 'insufficient' };
+    }
+
+    // Rule B: cheapest freeUnits; stable tie-break (line index, then variantId)
+    units.sort((a, b) => {
+      if (a.unitPrice !== b.unitPrice) {
+        return a.unitPrice - b.unitPrice;
+      }
+      if (a.lineIndex !== b.lineIndex) {
+        return a.lineIndex - b.lineIndex;
+      }
+      if (a.variantId < b.variantId) {
+        return -1;
+      }
+      if (a.variantId > b.variantId) {
+        return 1;
+      }
+      return 0;
+    });
+
+    let discountAmount = 0;
+    for (let i = 0; i < freeUnits; i++) {
+      discountAmount += units[i].unitPrice;
+    }
+
+    return { kind: 'ok', freeUnits, discountAmount };
   }
 
   async applyStackedPromotions(
