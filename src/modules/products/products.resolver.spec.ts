@@ -16,6 +16,7 @@ describe('ProductsResolver', () => {
   const productsService = {
     findAll: jest.fn(),
     findPublishedByIds: jest.fn(),
+    resolveActiveStoreId: jest.fn(),
   };
   const analyticsService = {
     getPlatformTopProducts: jest.fn(),

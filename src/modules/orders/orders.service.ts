@@ -11,14 +11,14 @@ import { ProductVariant } from '../../database/entities/product-variant.entity';
 import { Product } from '../../database/entities/product.entity';
 import { StoreShippingOption } from '../../database/entities/store-shipping-option.entity';
 import { PromotionUsage } from '../../database/entities/promotion-usage.entity';
-import { Promotion, PromotionType } from '../../database/entities/promotion.entity';
+import { Promotion } from '../../database/entities/promotion.entity';
 import {
   InventoryTransaction,
   InventoryTransactionType,
 } from '../../database/entities/inventory-transaction.entity';
 import { CreateOrderDto, ShippingAddressDto } from './dto';
 import { NotificationsService } from '../notifications/notifications.service';
-import { PromotionsService } from '../promotions/promotions.service';
+import { PromotionsService, PromotionCartLine } from '../promotions/promotions.service';
 import { GuestOrderLinkService } from './guest-order-link.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { CartService } from '../cart/cart.service';
@@ -32,7 +32,6 @@ import {
   normalizeCustomerOrdersLimit,
   normalizeCustomerOrdersPage,
 } from './order-list-filter.util';
-
 export interface StoreShippingSelection {
   storeId: string;
   shippingOptionId: string;
@@ -210,6 +209,7 @@ export class OrdersService {
 
     const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
     const storeSubtotals = new Map<string, number>();
+    const promotionLines: PromotionCartLine[] = [];
 
     for (const item of items) {
       if (!item.variantId) {
@@ -230,6 +230,13 @@ export class OrdersService {
       }
       const storeId = variant.product.storeId;
       storeSubtotals.set(storeId, (storeSubtotals.get(storeId) ?? 0) + item.price * item.quantity);
+      promotionLines.push({
+        productId: variant.productId,
+        variantId: variant.id,
+        quantity: item.quantity,
+        unitPrice: item.price,
+        storeId,
+      });
     }
 
     const storeIds = [...storeSubtotals.keys()];
@@ -240,6 +247,7 @@ export class OrdersService {
 
     let discountAmount = 0;
     let appliedPromotions: Promotion[] = [];
+    let discountsByPromotionId: Record<string, number> = {};
 
     const codes = storePromotionCodes ?? (promotionCode ? [promotionCode] : []);
     if (platformPromotionCode || codes.length) {
@@ -248,9 +256,16 @@ export class OrdersService {
         storeSubtotals,
         platformPromotionCode,
         codes,
+        customerId
+          ? { customerId }
+          : normalizedGuestPhone
+            ? { guestPhone: normalizedGuestPhone }
+            : undefined,
+        { mode: 'apply', lines: promotionLines },
       );
       discountAmount = stacked.discountAmount;
       appliedPromotions = stacked.promotions;
+      discountsByPromotionId = stacked.discountsByPromotionId;
     }
 
     const total = subtotal + shippingFee - discountAmount;
@@ -360,15 +375,7 @@ export class OrdersService {
       );
 
       for (const promotion of appliedPromotions) {
-        const promoDiscount =
-          appliedPromotions.length === 1
-            ? discountAmount
-            : Math.min(
-                promotion.type === PromotionType.PERCENTAGE
-                  ? (subtotal * Number(promotion.discountValue)) / 100
-                  : Number(promotion.discountValue),
-                subtotal,
-              );
+        const promoDiscount = discountsByPromotionId[promotion.id] ?? 0;
 
         await manager.save(
           PromotionUsage,

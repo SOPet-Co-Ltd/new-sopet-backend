@@ -483,6 +483,77 @@ export class StoresService {
   }
 
   /**
+   * Re-fetches the Omise recipient and updates local verification status.
+   * Called when vendors open payout settings so Omise dashboard activations
+   * are reflected without requiring a bank-detail re-save.
+   */
+  async refreshOmiseRecipientStatus(storeId: string): Promise<Store> {
+    const store = await this.findOne(storeId);
+    await this.applyOmiseRecipientSnapshot(store);
+    return this.storeRepository.save(store);
+  }
+
+  /**
+   * Handles Omise recipient.* webhooks by refreshing the matching store's
+   * recipient status from the live Omise API.
+   */
+  async handleOmiseRecipientWebhook(payload: {
+    key?: string;
+    data?: { object?: string; id?: string; verified?: boolean; active?: boolean };
+  }): Promise<void> {
+    const recipientId = payload.data?.id;
+    if (!recipientId || payload.data?.object !== 'recipient') {
+      return;
+    }
+
+    const store = await this.storeRepository.findOne({
+      where: { omiseRecipientId: recipientId },
+    });
+    if (!store) {
+      return;
+    }
+
+    await this.applyOmiseRecipientSnapshot(store, payload.data);
+    await this.storeRepository.save(store);
+  }
+
+  /**
+   * Applies Omise recipient verified/active flags onto the store. Prefers a
+   * live API fetch when credentials are available; falls back to webhook
+   * payload fields when present.
+   */
+  private async applyOmiseRecipientSnapshot(
+    store: Store,
+    fallback?: { verified?: boolean; active?: boolean },
+  ): Promise<void> {
+    if (!store.omiseRecipientId) {
+      return;
+    }
+
+    if (this.omiseService.hasCredentials()) {
+      try {
+        const recipient = await this.omiseService.getRecipient(store.omiseRecipientId);
+        this.applyRecipientFlags(store, recipient.verified, recipient.active);
+        return;
+      } catch {
+        // Fall through to webhook payload when API refresh fails.
+      }
+    }
+
+    if (fallback && fallback.verified !== undefined && fallback.active !== undefined) {
+      this.applyRecipientFlags(store, fallback.verified, fallback.active);
+    }
+  }
+
+  private applyRecipientFlags(store: Store, verified: boolean, active: boolean): void {
+    store.omiseRecipientStatus =
+      verified && active ? OmiseRecipientStatus.ACTIVE : OmiseRecipientStatus.PENDING;
+    if (store.omiseRecipientStatus === OmiseRecipientStatus.ACTIVE) {
+      store.omiseRecipientFailureMessage = null;
+    }
+  }
+
+  /**
    * Binds the store's payout bank account to a real Omise recipient. Creates a
    * new recipient (or updates the existing one) via the Omise API and persists
    * the returned recipient id + verification status on the store. Mutates the

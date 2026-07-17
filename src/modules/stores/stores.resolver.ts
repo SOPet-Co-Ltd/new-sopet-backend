@@ -729,8 +729,12 @@ export class StoresResolver {
     }
 
     await this.storesService.assertStoreOwner(userId, storeId);
-    const store = await this.storesService.findOne(storeId);
     const includePayout = await this.storesService.isStoreOwner(userId, storeId);
+    // Refresh Omise recipient status so dashboard activations show up without
+    // requiring the vendor to re-save bank details.
+    const store = includePayout
+      ? await this.storesService.refreshOmiseRecipientStatus(storeId)
+      : await this.storesService.findOne(storeId);
     return mapMyStore(store, includePayout);
   }
 

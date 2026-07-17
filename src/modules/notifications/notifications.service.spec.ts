@@ -96,7 +96,7 @@ describe('NotificationsService', () => {
             subtotal: 1400,
           },
         ],
-      } as Order;
+      } as unknown as Order;
       customerRepo.findOne.mockResolvedValue({
         id: 'cust-1',
         email: 'user@example.com',
@@ -147,7 +147,7 @@ describe('NotificationsService', () => {
         guestEmail: null,
         createdAt: new Date('2025-07-11T12:00:00.000Z'),
         items: [],
-      } as Order;
+      } as unknown as Order;
       customerRepo.findOne.mockResolvedValue({ id: 'cust-1', email: 'user@example.com' });
 
       await service.notifyOrderStatusChanged(order, 'shipped');

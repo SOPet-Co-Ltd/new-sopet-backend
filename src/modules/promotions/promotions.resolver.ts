@@ -1,6 +1,5 @@
-import { Args, Field, Float, InputType, Mutation, Query, Resolver } from '@nestjs/graphql';
+import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { BadRequestException, UseGuards } from '@nestjs/common';
-import { IsNotEmpty, IsString } from 'class-validator';
 import { PromotionsService } from './promotions.service';
 import { Public, CurrentUser, Roles } from '../../common/decorators';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -9,25 +8,17 @@ import { PromotionScope } from '../../database/entities/promotion.entity';
 import {
   PromotionType as PromotionGraphqlType,
   PromotionValidationResult,
+  ValidatePromotionsResult,
 } from '../../graphql/models/types';
 import { mapPromotion } from '../../graphql/models/mappers';
-import { CreatePromotionInput, UpdatePromotionInput } from './promotions.inputs';
+import {
+  CreatePromotionInput,
+  UpdatePromotionInput,
+  ValidatePromotionInput,
+  ValidatePromotionsInput,
+} from './promotions.inputs';
 import { StoresService } from '../stores/stores.service';
 import { StoreMemberRole } from '../../database/entities/store-member.entity';
-
-@InputType()
-export class ValidatePromotionInput {
-  @Field()
-  @IsString()
-  @IsNotEmpty()
-  code!: string;
-
-  @Field(() => Float)
-  subtotal!: number;
-
-  @Field({ nullable: true })
-  storeId?: string;
-}
 
 @Resolver()
 export class PromotionsResolver {
@@ -40,13 +31,38 @@ export class PromotionsResolver {
   @Public()
   async validatePromotion(
     @Args('input') input: ValidatePromotionInput,
+    @CurrentUser('id') customerId?: string,
   ): Promise<PromotionValidationResult> {
-    const { promotion, discountAmount } = await this.promotionsService.validateCode(
-      input.code,
+    const { promotion, discountAmount, freeUnits, ineligibilityReason } =
+      await this.promotionsService.validateCode(
+        input.code,
+        input.subtotal,
+        input.storeId,
+        customerId ? { customerId } : undefined,
+        { mode: 'preview', lines: input.lines },
+      );
+    return {
+      code: promotion.code,
+      name: promotion.name,
+      discountAmount,
+      ineligibilityReason: ineligibilityReason ?? null,
+      freeUnits: freeUnits ?? 0,
+    };
+  }
+
+  @Query(() => ValidatePromotionsResult)
+  @Public()
+  async validatePromotions(
+    @Args('input') input: ValidatePromotionsInput,
+    @CurrentUser('id') customerId?: string,
+  ): Promise<ValidatePromotionsResult> {
+    return this.promotionsService.validatePromotionsBatch(
+      input.promotions.map((t) => ({ id: t.id, code: t.code })),
       input.subtotal,
       input.storeId,
+      customerId ? { customerId } : undefined,
+      input.lines,
     );
-    return { code: promotion.code, name: promotion.name, discountAmount };
   }
 
   @Query(() => [PromotionGraphqlType])

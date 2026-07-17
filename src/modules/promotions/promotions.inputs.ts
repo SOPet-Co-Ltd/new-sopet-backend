@@ -1,16 +1,78 @@
 import { Field, Float, InputType, Int } from '@nestjs/graphql';
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
   IsBoolean,
   IsEnum,
+  IsInt,
   IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
   IsUUID,
   Length,
+  Max,
   Min,
+  Validate,
+  ValidateNested,
+  ValidationArguments,
+  ValidatorConstraint,
+  ValidatorConstraintInterface,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { PromotionType } from '../../database/entities/promotion.entity';
+
+/** Per-line and BxGy unit-expansion ceiling (public validatePromotion DoS guard). */
+export const MAX_VALIDATE_PROMOTION_LINE_QUANTITY = 999;
+/** Max cart lines accepted on validatePromotion. */
+export const MAX_VALIDATE_PROMOTION_LINES = 100;
+/** Max promotion targets on validatePromotions batch (ADR Decision 6 / NFR ≤20). */
+export const MAX_VALIDATE_PROMOTIONS_TARGETS = 20;
+
+@ValidatorConstraint({ name: 'atLeastOneIdOrCode', async: false })
+export class AtLeastOneIdOrCodeConstraint implements ValidatorConstraintInterface {
+  validate(_value: unknown, args: ValidationArguments): boolean {
+    const obj = args.object as { id?: string; code?: string };
+    const hasId = typeof obj.id === 'string' && obj.id.trim().length > 0;
+    const hasCode = typeof obj.code === 'string' && obj.code.trim().length > 0;
+    return hasId || hasCode;
+  }
+
+  defaultMessage(): string {
+    return 'Either id or code must be provided';
+  }
+}
+
+@InputType()
+export class ValidatePromotionLineInput {
+  @Field()
+  @IsString()
+  @IsNotEmpty()
+  @IsUUID()
+  productId!: string;
+
+  @Field(() => Int)
+  @IsInt()
+  @Min(1)
+  @Max(MAX_VALIDATE_PROMOTION_LINE_QUANTITY)
+  quantity!: number;
+
+  @Field(() => Float)
+  @IsNumber()
+  @Min(0)
+  unitPrice!: number;
+
+  @Field({ nullable: true })
+  @IsOptional()
+  @IsUUID()
+  variantId?: string;
+
+  @Field({ nullable: true })
+  @IsOptional()
+  @IsUUID()
+  storeId?: string;
+}
 
 @InputType()
 export class ValidatePromotionInput {
@@ -26,6 +88,63 @@ export class ValidatePromotionInput {
   @IsOptional()
   @IsUUID()
   storeId?: string;
+
+  @Field(() => [ValidatePromotionLineInput], { nullable: true })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_VALIDATE_PROMOTION_LINES)
+  @ValidateNested({ each: true })
+  @Type(() => ValidatePromotionLineInput)
+  lines?: ValidatePromotionLineInput[];
+}
+
+@InputType()
+export class ValidatePromotionsTargetInput {
+  @Field({ nullable: true })
+  @IsOptional()
+  @IsUUID()
+  id?: string;
+
+  @Field({ nullable: true })
+  @IsOptional()
+  @IsString()
+  code?: string;
+
+  /**
+   * Always-present hook so at-least-one-of runs when both id and code are omitted
+   * (`@IsOptional` would otherwise skip validators on undefined fields).
+   */
+  @Validate(AtLeastOneIdOrCodeConstraint)
+  private readonly _atLeastOneIdOrCode: boolean = true;
+}
+
+@InputType()
+export class ValidatePromotionsInput {
+  @Field(() => [ValidatePromotionsTargetInput])
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(MAX_VALIDATE_PROMOTIONS_TARGETS)
+  @ValidateNested({ each: true })
+  @Type(() => ValidatePromotionsTargetInput)
+  promotions!: ValidatePromotionsTargetInput[];
+
+  @Field(() => Float)
+  @IsNumber()
+  @Min(0)
+  subtotal!: number;
+
+  @Field({ nullable: true })
+  @IsOptional()
+  @IsUUID()
+  storeId?: string;
+
+  @Field(() => [ValidatePromotionLineInput], { nullable: true })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_VALIDATE_PROMOTION_LINES)
+  @ValidateNested({ each: true })
+  @Type(() => ValidatePromotionLineInput)
+  lines?: ValidatePromotionLineInput[];
 }
 
 @InputType()
@@ -46,7 +165,7 @@ export class CreatePromotionInput {
   @IsString()
   description?: string;
 
-  @Field()
+  @Field(() => String)
   @IsEnum(PromotionType)
   type!: PromotionType;
 
@@ -131,7 +250,7 @@ export class UpdatePromotionInput {
   @IsString()
   description?: string;
 
-  @Field({ nullable: true })
+  @Field(() => String, { nullable: true })
   @IsOptional()
   @IsEnum(PromotionType)
   type?: PromotionType;

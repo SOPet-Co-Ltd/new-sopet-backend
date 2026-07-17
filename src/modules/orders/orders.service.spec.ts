@@ -374,6 +374,8 @@ describe('OrdersService', () => {
     promotionsService.applyStackedPromotions.mockResolvedValue({
       discountAmount: 50,
       promotions: [{ id: 'promo-1', type: 'percentage', discountValue: 10 }],
+      discountsByPromotionId: { 'promo-1': 50 },
+      freeUnits: 0,
     });
     orderRepository.findOne.mockResolvedValue({
       id: 'ord-3',
@@ -395,7 +397,106 @@ describe('OrdersService', () => {
       undefined,
     );
 
-    expect(promotionsService.applyStackedPromotions).toHaveBeenCalled();
+    expect(promotionsService.applyStackedPromotions).toHaveBeenCalledWith(
+      100,
+      expect.any(Map),
+      'SAVE10',
+      [],
+      { guestPhone: '0812345678' },
+      {
+        mode: 'apply',
+        lines: [
+          {
+            productId: 'prod-1',
+            variantId: 'var-1',
+            quantity: 1,
+            unitPrice: 100,
+            storeId: 'store-1',
+          },
+        ],
+      },
+    );
+  });
+
+  it('persists PromotionUsage discountAmount from discountsByPromotionId map', async () => {
+    variantRepository.findOne.mockResolvedValue(variant);
+    promotionsService.applyStackedPromotions.mockResolvedValue({
+      discountAmount: 130,
+      promotions: [
+        { id: 'promo-platform', type: 'percentage', discountValue: 10 },
+        { id: 'promo-bxgy', type: 'buy_x_get_y', discountValue: 0 },
+      ],
+      discountsByPromotionId: { 'promo-platform': 100, 'promo-bxgy': 30 },
+      freeUnits: 1,
+    });
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-usage',
+      status: OrderStatus.PENDING_PAYMENT,
+      items: [],
+      shippingAddress: {},
+      storeShippings: [],
+      statusHistory: [],
+    });
+
+    await service.create(
+      {
+        items: [{ productId: 'p1', variantId: 'var-1', quantity: 3, price: 100 }],
+        paymentMethod: 'promptpay',
+        guestPhone: '+66812345678',
+        shippingAddress,
+        platformPromotionCode: 'SAVE10',
+        storePromotionCodes: ['BXGY'],
+      },
+      undefined,
+    );
+
+    const usagePayloads = mockManager.create.mock.calls
+      .map((call: unknown[]) => call[1] as Record<string, unknown> | undefined)
+      .filter((data) => data && 'promotionId' in data && 'discountAmount' in data);
+
+    expect(usagePayloads).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ promotionId: 'promo-platform', discountAmount: 100 }),
+        expect.objectContaining({ promotionId: 'promo-bxgy', discountAmount: 30 }),
+      ]),
+    );
+    expect(usagePayloads).toHaveLength(2);
+  });
+
+  it('create succeeds when stacking returns empty promotions (BxGy freeUnits=0 skip)', async () => {
+    variantRepository.findOne.mockResolvedValue(variant);
+    promotionsService.applyStackedPromotions.mockResolvedValue({
+      discountAmount: 0,
+      promotions: [],
+      discountsByPromotionId: {},
+      freeUnits: 0,
+    });
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-skip',
+      status: OrderStatus.PENDING_PAYMENT,
+      items: [],
+      shippingAddress: {},
+      storeShippings: [],
+      statusHistory: [],
+    });
+
+    await expect(
+      service.create(
+        {
+          items: [{ productId: 'p1', variantId: 'var-1', quantity: 2, price: 100 }],
+          paymentMethod: 'promptpay',
+          guestPhone: '+66812345678',
+          shippingAddress,
+          platformPromotionCode: 'BXGY21',
+        },
+        undefined,
+      ),
+    ).resolves.toBeDefined();
+
+    const usagePayloads = mockManager.create.mock.calls
+      .map((call: unknown[]) => call[1] as Record<string, unknown> | undefined)
+      .filter((data) => data && 'promotionId' in data);
+    expect(usagePayloads).toHaveLength(0);
   });
 
   describe('findByCustomerPaginated', () => {

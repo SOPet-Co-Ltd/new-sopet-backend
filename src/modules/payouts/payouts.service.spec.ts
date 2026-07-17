@@ -4,7 +4,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PayoutsService } from './payouts.service';
 import { Payout, PayoutStatus } from '../../database/entities/payout.entity';
-import { Store } from '../../database/entities/store.entity';
+import { Store, OmiseRecipientStatus } from '../../database/entities/store.entity';
 import { OrderItem } from '../../database/entities/order-item.entity';
 import { OmiseService } from '../omise/omise.service';
 
@@ -24,10 +24,12 @@ describe('PayoutsService', () => {
     create: jest.fn((x) => x),
     save: jest.fn(async (x) => ({ ...x, id: 'payout-1', createdAt: new Date('2026-07-01') })),
     find: jest.fn(),
+    findOne: jest.fn(),
     createQueryBuilder: jest.fn(),
   };
   const storeRepo = {
     findOne: jest.fn(),
+    save: jest.fn(async (x) => x),
   };
   const orderItemRepo = {
     createQueryBuilder: jest.fn(),
@@ -35,6 +37,8 @@ describe('PayoutsService', () => {
   const omiseService = {
     hasCredentials: jest.fn().mockReturnValue(false),
     createTransfer: jest.fn(),
+    getRecipient: jest.fn(),
+    getTransfer: jest.fn(),
   };
   const configService = {
     get: jest.fn((key: string) => (key === 'payout.minPayoutAmount' ? 500 : undefined)),
@@ -44,6 +48,7 @@ describe('PayoutsService', () => {
     jest.clearAllMocks();
     omiseService.hasCredentials.mockReturnValue(false);
     storeRepo.findOne.mockResolvedValue({ id: 'store-1' });
+    payoutRepo.findOne.mockResolvedValue(null);
     orderItemRepo.createQueryBuilder.mockReturnValue(createQueryBuilderMock({ total: '5000' }));
     payoutRepo.createQueryBuilder.mockImplementation(() =>
       createQueryBuilderMock({ total: '1000' }),
@@ -82,16 +87,120 @@ describe('PayoutsService', () => {
     storeRepo.findOne.mockResolvedValue({
       id: 'store-1',
       omiseRecipientId: 'recp_test_1',
-      omiseRecipientStatus: 'active',
+      omiseRecipientStatus: OmiseRecipientStatus.ACTIVE,
     });
     omiseService.hasCredentials.mockReturnValue(true);
-    omiseService.createTransfer.mockResolvedValue({ id: 'trsf_test_1' });
+    omiseService.getRecipient.mockResolvedValue({
+      id: 'recp_test_1',
+      verified: true,
+      active: true,
+    });
+    omiseService.createTransfer.mockResolvedValue({ id: 'trsf_test_1', paid: false });
 
     const payout = await service.createManualPayout('store-1', 1500);
 
     expect(omiseService.createTransfer).toHaveBeenCalledWith('recp_test_1', 150000);
     expect(payout.transferReference).toBe('trsf_test_1');
     expect(payout.status).toBe(PayoutStatus.PROCESSING);
+  });
+
+  it('refreshes pending recipient and creates transfer when Omise has activated it', async () => {
+    storeRepo.findOne.mockResolvedValue({
+      id: 'store-1',
+      omiseRecipientId: 'recp_test_1',
+      omiseRecipientStatus: OmiseRecipientStatus.PENDING,
+    });
+    omiseService.hasCredentials.mockReturnValue(true);
+    omiseService.getRecipient.mockResolvedValue({
+      id: 'recp_test_1',
+      verified: true,
+      active: true,
+    });
+    omiseService.createTransfer.mockResolvedValue({ id: 'trsf_test_2', paid: false });
+
+    const payout = await service.createManualPayout('store-1', 1500);
+
+    expect(storeRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({ omiseRecipientStatus: OmiseRecipientStatus.ACTIVE }),
+    );
+    expect(omiseService.createTransfer).toHaveBeenCalledWith('recp_test_1', 150000);
+    expect(payout.status).toBe(PayoutStatus.PROCESSING);
+  });
+
+  it('rejects payout when Omise recipient is still pending after refresh', async () => {
+    storeRepo.findOne.mockResolvedValue({
+      id: 'store-1',
+      omiseRecipientId: 'recp_test_1',
+      omiseRecipientStatus: OmiseRecipientStatus.PENDING,
+    });
+    omiseService.hasCredentials.mockReturnValue(true);
+    omiseService.getRecipient.mockResolvedValue({
+      id: 'recp_test_1',
+      verified: false,
+      active: false,
+    });
+
+    await expect(service.createManualPayout('store-1', 1500)).rejects.toThrow(BadRequestException);
+    expect(omiseService.createTransfer).not.toHaveBeenCalled();
+  });
+
+  it('retries Omise transfer for orphan pending payouts', async () => {
+    const orphan = {
+      id: 'payout-orphan',
+      storeId: 'store-1',
+      amount: 2050,
+      netAmount: 2050,
+      status: PayoutStatus.PENDING,
+      transferReference: null,
+      failureReason: null,
+    };
+    payoutRepo.findOne.mockResolvedValue(orphan);
+    storeRepo.findOne.mockResolvedValue({
+      id: 'store-1',
+      omiseRecipientId: 'recp_test_1',
+      omiseRecipientStatus: OmiseRecipientStatus.ACTIVE,
+    });
+    omiseService.hasCredentials.mockReturnValue(true);
+    omiseService.getRecipient.mockResolvedValue({
+      id: 'recp_test_1',
+      verified: true,
+      active: true,
+    });
+    omiseService.createTransfer.mockResolvedValue({ id: 'trsf_retry_1', paid: false });
+
+    const payout = await service.requestPayout('store-1', 'vendor-1');
+
+    expect(omiseService.createTransfer).toHaveBeenCalledWith('recp_test_1', 205000);
+    expect(payout.transferReference).toBe('trsf_retry_1');
+    expect(payout.status).toBe(PayoutStatus.PROCESSING);
+  });
+
+  it('marks payout completed on transfer.pay webhook', async () => {
+    const payout = {
+      id: 'payout-1',
+      status: PayoutStatus.PROCESSING,
+      transferReference: 'trsf_1',
+      failureReason: null,
+      processedAt: null,
+    };
+    payoutRepo.findOne.mockResolvedValue(payout);
+    omiseService.hasCredentials.mockReturnValue(true);
+    omiseService.getTransfer.mockResolvedValue({
+      id: 'trsf_1',
+      paid: true,
+      sent: true,
+      amount: 100,
+      currency: 'thb',
+    });
+
+    await service.handleOmiseTransferWebhook({
+      key: 'transfer.pay',
+      data: { object: 'transfer', id: 'trsf_1', paid: true },
+    });
+
+    expect(payoutRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({ status: PayoutStatus.COMPLETED }),
+    );
   });
 
   it('throws when store not found', async () => {
@@ -118,6 +227,21 @@ describe('PayoutsService', () => {
     expect(summary.grossRevenue).toBe(5000);
     expect(summary.totalPaidOut).toBe(1500);
     expect(summary.availableBalance).toBe(3500);
+    expect(summary.canRequestPayout).toBe(true);
+  });
+
+  it('allows retry when orphan pending payout exists', async () => {
+    orderItemRepo.createQueryBuilder.mockReturnValue(createQueryBuilderMock({ total: '2050' }));
+    payoutRepo.createQueryBuilder
+      .mockImplementationOnce(() => createQueryBuilderMock({ total: '0' }))
+      .mockImplementationOnce(() => createQueryBuilderMock({ total: '2050' }));
+    payoutRepo.findOne.mockResolvedValue({
+      id: 'orphan',
+      status: PayoutStatus.PENDING,
+      transferReference: null,
+    });
+
+    const summary = await service.getPayoutSummary('store-1');
     expect(summary.canRequestPayout).toBe(true);
   });
 
