@@ -165,7 +165,7 @@ export class CreatePromotionInput {
   @IsString()
   description?: string;
 
-  @Field()
+  @Field(() => String)
   @IsEnum(PromotionType)
   type!: PromotionType;
 
@@ -250,7 +250,7 @@ export class UpdatePromotionInput {
   @IsString()
   description?: string;
 
-  @Field({ nullable: true })
+  @Field(() => String, { nullable: true })
   @IsOptional()
   @IsEnum(PromotionType)
   type?: PromotionType;
