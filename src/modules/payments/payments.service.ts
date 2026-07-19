@@ -264,24 +264,30 @@ export class PaymentsService {
     return configured && configured > 0 ? configured : 4000;
   }
 
-  /** Deterministic charge-id resolution for Phase A cancel (AC-013). */
-  private resolveOmiseChargeIdForCancel(
-    payment: Payment,
-    pendingCountForOrder: number,
-    orderPaymentReference: string | null | undefined,
-  ): string | null {
-    if (payment.omiseChargeId) {
-      return payment.omiseChargeId;
+  private formatCaughtErrorMessage(error: unknown): string {
+    if (error instanceof BadRequestException) {
+      const response = error.getResponse();
+      if (typeof response === 'string') {
+        return response;
+      }
+      if (response && typeof response === 'object' && 'message' in response) {
+        const message = (response as { message?: unknown }).message;
+        if (typeof message === 'string') {
+          return message;
+        }
+      }
+      return 'BadRequestException';
     }
-    if (pendingCountForOrder === 1 && orderPaymentReference) {
-      return orderPaymentReference;
+    if (error instanceof Error) {
+      return error.message;
     }
-    return null;
+    return 'unknown';
   }
 
   /**
    * Best-effort Omise expire/reverse within omiseCancelTimeoutMs. Never throws for cleanup failure.
-   * PromptPay: prefer POST /charges/{id}/expire. Card: expire then reverse. Fail-open otherwise.
+   * PromptPay: POST /charges/{id}/expire (Omise support varies; may fail — fail-open).
+   * Card: expire then reverse. Fail-open otherwise.
    */
   private async cancelOmiseChargeBestEffort(
     chargeId: string,
@@ -295,75 +301,120 @@ export class PaymentsService {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
+    const expireCharge = async (): Promise<void> => {
+      // Empty body so POST is unambiguous (some Omise paths reject GET-style empty posts).
+      await this.omiseRequest(`/charges/${chargeId}/expire`, {}, 'POST', controller.signal);
+    };
+
     try {
       const isPromptPay = paymentMethod === PaymentMethod.PROMPTPAY;
 
       if (isPromptPay) {
-        await this.omiseRequest(
-          `/charges/${chargeId}/expire`,
-          undefined,
-          'POST',
-          controller.signal,
-        );
+        await expireCharge();
         return 'cancelled';
       }
 
       try {
-        await this.omiseRequest(
-          `/charges/${chargeId}/expire`,
-          undefined,
-          'POST',
-          controller.signal,
-        );
+        await expireCharge();
         return 'cancelled';
-      } catch {
+      } catch (expireError) {
         if (controller.signal.aborted) {
+          this.logger.warn(
+            JSON.stringify({
+              event: 'omise_cancel_timeout',
+              omiseChargeId: chargeId,
+              paymentMethod,
+            }),
+          );
           return 'failed_open';
         }
-        await this.omiseRequest(
-          `/charges/${chargeId}/reverse`,
-          undefined,
-          'POST',
-          controller.signal,
+        this.logger.warn(
+          JSON.stringify({
+            event: 'omise_expire_failed_try_reverse',
+            omiseChargeId: chargeId,
+            paymentMethod,
+            message: this.formatCaughtErrorMessage(expireError),
+          }),
         );
+        await this.omiseRequest(`/charges/${chargeId}/reverse`, {}, 'POST', controller.signal);
         return 'cancelled';
       }
-    } catch {
+    } catch (error) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'omise_cancel_failed',
+          omiseChargeId: chargeId,
+          paymentMethod,
+          message: this.formatCaughtErrorMessage(error),
+        }),
+      );
       return 'failed_open';
     } finally {
       clearTimeout(timer);
     }
   }
 
-  /** Phase A: Omise cancel outside FOR UPDATE; fail-open on any failure. */
+  /**
+   * Phase A: cancel every known Omise charge for pending payments (outside FOR UPDATE).
+   * Collects omiseChargeId on each pending row plus order.paymentReference so multi-pending
+   * switches still expire the active webhook pointer even when some rows lack omiseChargeId.
+   */
   private async cancelPendingOmiseChargesForOrder(order: Order): Promise<void> {
     const pendingPayments = await this.paymentRepository.find({
       where: { orderId: order.id, status: 'pending' },
     });
-    const pendingCount = pendingPayments.length;
-    if (pendingCount === 0 || !this.omiseSecretKey) {
+    if (pendingPayments.length === 0 || !this.omiseSecretKey) {
       return;
     }
 
+    const chargeTargets = new Map<string, PaymentMethod>();
     for (const pending of pendingPayments) {
-      const chargeId = this.resolveOmiseChargeIdForCancel(
-        pending,
-        pendingCount,
-        order.paymentReference,
-      );
-      if (!chargeId) {
-        continue;
+      if (pending.omiseChargeId) {
+        chargeTargets.set(pending.omiseChargeId, pending.paymentMethod);
       }
+    }
 
-      const result = await this.cancelOmiseChargeBestEffort(chargeId, pending.paymentMethod);
+    // Include order.paymentReference when any pending row still lacks omiseChargeId
+    // (legacy rows) or when no charge ids were collected at all. Do not cancel a
+    // stale paymentReference when every pending row already has omiseChargeId.
+    const needsPaymentReferenceFallback =
+      pendingPayments.some((p) => !p.omiseChargeId) || chargeTargets.size === 0;
+    if (
+      needsPaymentReferenceFallback &&
+      order.paymentReference &&
+      !chargeTargets.has(order.paymentReference)
+    ) {
+      const matching =
+        pendingPayments.find((p) => !p.omiseChargeId) ??
+        pendingPayments.find((p) => p.paymentMethod === PaymentMethod.PROMPTPAY) ??
+        pendingPayments[0];
+      chargeTargets.set(order.paymentReference, matching?.paymentMethod ?? PaymentMethod.PROMPTPAY);
+    }
+
+    for (const [chargeId, paymentMethod] of chargeTargets) {
+      const pending = pendingPayments.find(
+        (p) => p.omiseChargeId === chargeId || order.paymentReference === chargeId,
+      );
+      const result = await this.cancelOmiseChargeBestEffort(chargeId, paymentMethod);
       if (result === 'failed_open') {
         this.logger.warn(
           JSON.stringify({
             event: 'omise_cancel_fail_open',
             orderId: order.id,
-            paymentId: pending.id,
+            paymentId: pending?.id ?? null,
             omiseChargeId: chargeId,
+            paymentMethod,
             reason: 'cancel_failed_unsupported_or_timeout',
+          }),
+        );
+      } else {
+        this.logger.log(
+          JSON.stringify({
+            event: 'omise_cancel_ok',
+            orderId: order.id,
+            paymentId: pending?.id ?? null,
+            omiseChargeId: chargeId,
+            paymentMethod,
           }),
         );
       }
@@ -816,6 +867,9 @@ export class PaymentsService {
 
         if (paymentMethod === 'promptpay') {
           chargeBody.source = { type: 'promptpay' };
+          // Omise default PromptPay QR lives ~24h; bind to our QR window so abandoned
+          // charges die even when POST /charges/{id}/expire is unsupported.
+          chargeBody.expires_at = this.computeQrExpiresAt().toISOString();
         } else if (paymentMethod === 'credit_card') {
           if (savedPaymentMethodId) {
             if (!customerId) {

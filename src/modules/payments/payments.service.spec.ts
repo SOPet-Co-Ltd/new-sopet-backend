@@ -451,7 +451,7 @@ describe('PaymentsService createCharge return_uri', () => {
     });
   });
 
-  it('omits return_uri for PromptPay createCharge', async () => {
+  it('omits return_uri for PromptPay createCharge and sets Omise expires_at', async () => {
     service = await compileService(STOREFRONT_ORIGIN);
 
     await service.createCharge({
@@ -465,6 +465,8 @@ describe('PaymentsService createCharge return_uri', () => {
     const body = parseChargeBody();
     expect(body).not.toHaveProperty('return_uri');
     expect(body.source).toEqual({ type: 'promptpay' });
+    expect(typeof body.expires_at).toBe('string');
+    expect(new Date(body.expires_at as string).getTime()).toBeGreaterThan(Date.now());
   });
 
   it('does not call Omise (no return_uri leak) for COD', async () => {
@@ -1316,7 +1318,7 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
     expect(paths.some((p) => p.includes('/charges/chrg_stale_order_ref/'))).toBe(false);
   });
 
-  it('charge-id resolution: skips Omise cancel when multi-pending without omiseChargeId', async () => {
+  it('charge-id resolution: cancels order.paymentReference when multi-pending lack omiseChargeId', async () => {
     const priorA = priorCardPending();
     const priorB = {
       ...priorPromptPayPending(),
@@ -1324,6 +1326,7 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
     };
     delete (priorA as { omiseChargeId?: string | null }).omiseChargeId;
     delete (priorB as { omiseChargeId?: string | null }).omiseChargeId;
+    order.paymentReference = OLD_CHARGE_ID;
     paymentRepository.findOne.mockResolvedValue(priorB);
     paymentRepository.find.mockResolvedValue([priorA, priorB]);
 
@@ -1337,7 +1340,7 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
     });
 
     const paths = (global.fetch as jest.Mock).mock.calls.map((c: [string]) => c[0]);
-    expect(paths.every((p) => !p.includes('/expire') && !p.includes('/reverse'))).toBe(true);
+    expect(paths.some((p) => p.includes(`/charges/${OLD_CHARGE_ID}/expire`))).toBe(true);
     expect(
       paths.some(
         (p) => p.includes('/charges') && !p.includes('/expire') && !p.includes('/reverse'),
