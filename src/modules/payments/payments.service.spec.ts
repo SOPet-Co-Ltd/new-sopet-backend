@@ -896,9 +896,12 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
     expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
   });
 
-  it('PromptPay pending resume → same id, no new POST (same-value)', async () => {
+  it('PromptPay pending restart → new paymentId + prior failed + new Omise POST (no soft-resume)', async () => {
+    // Amended unpaid-switch contract (BE-UPMS-001): never soft-resume same pending PromptPay.
+    // Intentional Red until Task 1.2 removes soft-resume early-return (~506–530).
     const prior = priorPromptPayPending();
     paymentRepository.findOne.mockResolvedValue(prior);
+    paymentRepository.find.mockResolvedValue([prior]);
 
     const result = await service.createCharge({
       orderId: order.id,
@@ -908,18 +911,25 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
       customerId: 'cust-1',
     });
 
-    expect(result.paymentId).toBe(PRIOR_PAYMENT_ID);
-    expect(global.fetch).not.toHaveBeenCalled();
-    expect(paymentRepository.find).not.toHaveBeenCalled();
-    expect(prior.status).toBe('pending');
+    expect(result.paymentId).toBe(NEW_PAYMENT_ID);
+    expect(result.paymentId).not.toBe(PRIOR_PAYMENT_ID);
+    expect(prior.status).toBe('failed');
+    const paths = (global.fetch as jest.Mock).mock.calls.map((c: [string]) => c[0] as string);
+    expect(
+      paths.some(
+        (p) => p.includes('/charges') && !p.includes('/expire') && !p.includes('/reverse'),
+      ),
+    ).toBe(true);
     expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
   });
 
-  it('does not call Omise reverse on supersede (rollback-only visibility — local only)', async () => {
+  it('attempts Omise expire/reverse on supersede before create (fail-open still creates)', async () => {
+    // Amended unpaid-switch contract (BE-UPMS-002 prep): cancel-before-create + fail-open.
+    // Intentional Red until Phase 2 cancel attempt lands; create path must still succeed.
     const prior = priorCardPending();
     paymentRepository.find.mockResolvedValue([prior]);
 
-    await service.createCharge({
+    const result = await service.createCharge({
       orderId: order.id,
       amount: 300,
       currency: 'THB',
@@ -928,9 +938,16 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
       customerId: 'cust-1',
     });
 
-    const paths = (global.fetch as jest.Mock).mock.calls.map((c: [string]) => c[0]);
-    expect(paths.some((p) => p.includes('/reverse'))).toBe(false);
-    // MVP orphan: superseded Omise charge is abandoned locally only (ops residual).
+    const paths = (global.fetch as jest.Mock).mock.calls.map((c: [string]) => c[0] as string);
+    expect(paths.some((p) => p.includes('/expire') || p.includes('/reverse'))).toBe(true);
+    expect(result.paymentId).toBe(NEW_PAYMENT_ID);
+    expect(prior.status).toBe('failed');
+    expect(
+      paths.some(
+        (p) => p.includes('/charges') && !p.includes('/expire') && !p.includes('/reverse'),
+      ),
+    ).toBe(true);
+    expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
   });
 
   it('late unmatched old charge webhook does not invent paid (shared-state)', async () => {
