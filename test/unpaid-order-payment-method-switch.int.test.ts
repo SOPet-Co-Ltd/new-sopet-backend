@@ -27,7 +27,6 @@
 //   Unit suite (payments.service.spec.ts) covers finer grain path cases; this lane owns INT matrix
 //   proof obligations (always-new+sync, three fail-open classes, eligibility/COD/orphan).
 
-import { BadRequestException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
@@ -255,6 +254,36 @@ describe('unpaid-order-payment-method-switch integration', () => {
   // -------------------------------------------------------------------------
   // INT-1 — Always-new PromptPay restart + cancel attempt + field sync
   // -------------------------------------------------------------------------
+  //
+  // AC: "When eligible and client requests PromptPay again while a prior PromptPay payment
+  // is still pending, then the system shall create a new Payment row and return a new
+  // paymentId (not soft-resume); cancel Omise first best-effort; persist omise_charge_id;
+  // sync order.paymentMethod" (prd AC-003–AC-008, AC-012, AC-014–AC-015)
+  // ROI: 99 (BV:10 × Freq:9 + Legal:0 + Defect:9)
+  // Behavior: Prior PromptPay pending + createCharge PromptPay → cancel expire attempt →
+  // new paymentId ≠ prior; prior.status failed; omise_charge_id + order.paymentMethod sync;
+  // restoreOrderStock not called
+  // @category: core-functionality
+  // @lane: integration
+  // @dependency: PaymentsService.createCharge / cancelOmiseChargeBestEffort (real);
+  // Omise fetch + Payment/Order repos + InventoryService (mock)
+  // @complexity: high
+  // Primary failure mode: PromptPay soft-resume returns same paymentId; cancel never
+  // attempted; omise_charge_id not written; order.paymentMethod stale after switch
+  // Proof obligation: Fixture prior PromptPay pending with omiseChargeId (or single-pending
+  // + order.paymentReference); mock fetch expire 2xx then create charge with new id; call
+  // createCharge PromptPay again; assert result.paymentId !== prior.id; prior.status ===
+  // 'failed'; fetch URLs include /charges/{oldId}/expire (or documented cleanup path) AND
+  // a new POST /charges; saved payment.omiseChargeId === new charge id; order.paymentMethod
+  // === 'promptpay'; inventoryService.restoreOrderStock not called. Boundary path: mid-QR
+  // same-method restart must not take soft-resume early-return (invert payments.service.spec
+  // “PromptPay pending resume”). Mock only Omise HTTP + repos; exercise real createCharge
+  // supersede path.
+  // Verification points / expected results / pass criteria:
+  //   - result.paymentId === NEW and !== PRIOR; prior.status === 'failed'
+  //   - fetch includes /expire on old charge AND new POST /charges
+  //   - saved payment.omiseChargeId + order.paymentReference/method synced; no stock restore
+  //
   describe('INT-1 always-new PromptPay restart + cancel + field sync', () => {
     it('PromptPay pending restart → new paymentId, expire attempt, sync fields, no stock restore', async () => {
       const prior = priorPromptPayPending();
@@ -290,6 +319,33 @@ describe('unpaid-order-payment-method-switch integration', () => {
   // -------------------------------------------------------------------------
   // INT-2 — Fail-open cancel classes still create + AC-022 warn fields
   // -------------------------------------------------------------------------
+  //
+  // AC: "If Omise cleanup fails, is unsupported, or exceeds the cancel budget, then the
+  // system shall still local-supersede, create the new payment/charge, and emit ops
+  // warn/alert with order id, prior payment id, and prior charge id" (prd AC-010, AC-011,
+  // AC-022)
+  // ROI: 98 (BV:10 × Freq:8 + Legal:0 + Defect:10)
+  // Behavior: Three cancel-failure classes (HTTP 4xx unsupported, network throw, AbortSignal
+  // timeout) each still yield successful createCharge + new paymentId; logger.warn includes
+  // omise_cancel_fail_open + orderId + prior paymentId + prior charge id
+  // @category: core-functionality
+  // @lane: integration
+  // @dependency: PaymentsService.createCharge / cancelOmiseChargeBestEffort (real);
+  // Omise fetch failure matrix + Payment/Order repos (mock)
+  // @complexity: high
+  // Primary failure mode: cancel failure hard-blocks createCharge for the customer; or
+  // fail-open creates without ops warn (orphan undetectable)
+  // Proof obligation: Three cancel-failure classes (HTTP 4xx unsupported, network throw,
+  // timeout past omiseCancelTimeoutMs/4000ms) each still yield successful create + new
+  // paymentId; assert logger.warn / structured alert includes orderId + prior paymentId +
+  // prior charge id; assert createCharge does not throw BadRequest solely due to cancel
+  // failure. Boundary path: card expire/reverse unsupported is primary fail-open (I004) —
+  // treat unsupported as success path for customer create, not product defect.
+  // Verification points / expected results / pass criteria:
+  //   - Each of 4xx / throw / timeout → result.paymentId === NEW; prior failed
+  //   - warn contains omise_cancel_fail_open + orderId + PRIOR_PAYMENT_ID + OLD_CHARGE_ID
+  //   - create charge path still invoked (POST /charges present)
+  //
   describe('INT-2 fail-open cancel still creates', () => {
     async function assertFailOpenCreate(opts: {
       prior: Payment;
@@ -407,6 +463,35 @@ describe('unpaid-order-payment-method-switch integration', () => {
   // -------------------------------------------------------------------------
   // INT-3 — ORDER_NOT_PAYABLE + Omise→COD clear + orphan webhook
   // -------------------------------------------------------------------------
+  //
+  // AC: "If order is not pending_payment or the latest payment is paid/refunded, then reject
+  // with ORDER_NOT_PAYABLE including COD; when new payment is COD after Omise, null
+  // order.paymentReference; unmatched orphan webhook warn+return and never invent paid"
+  // (prd AC-001–AC-002; COD clear; webhook residual)
+  // ROI: 99 (BV:10 × Freq:9 + Legal:0 + Defect:9)
+  // Behavior: (1) PAID order / paid latest → COD and PromptPay both ORDER_NOT_PAYABLE, no
+  // new row; (2) Omise→COD clears paymentReference + syncs method; (3) orphan
+  // charge.complete for prior chrg_… → warn+return, no invent-paid side effects
+  // @category: core-functionality
+  // @lane: integration
+  // @dependency: PaymentsService.createCharge / handleWebhook (real); Payment/Order repos +
+  // InventoryService + PaymentEventsService (mock)
+  // @complexity: high
+  // Primary failure mode: COD skips eligibility (BE-UPMS-008 hole); Omise→COD leaves stale
+  // paymentReference so orphan webhook invents paid
+  // Proof obligation: (1) order status PAID or latest payment paid → createCharge with COD
+  // and with PromptPay both throw BadRequestException({ code: 'ORDER_NOT_PAYABLE' });
+  // paymentRepository.create not used for a new row. (2) pending PromptPay with charge id →
+  // createCharge COD → prior failed; order.paymentReference === null; order.paymentMethod
+  // === 'cod'; payment.omiseChargeId absent/null. (3) handleWebhook charge.complete for prior
+  // chrg_… with paymentReference already null → warn + return; order.status remains
+  // PENDING_PAYMENT; no orderRepository.save / paid-event invent-paid side effects. Boundary
+  // path: COD branch must share eligibility gate with Omise (hoist before COD early path).
+  // Verification points / expected results / pass criteria:
+  //   - PAID / paid-latest → COD + PromptPay both ORDER_NOT_PAYABLE; create not called
+  //   - Omise→COD → paymentReference null; method cod; omiseChargeId null; no stock restore
+  //   - Orphan webhook → warn; status PENDING_PAYMENT; no save / paid publish / Omise GET
+  //
   describe('INT-3 eligibility + COD clear + orphan webhook', () => {
     it('rejects COD and PromptPay with ORDER_NOT_PAYABLE when latest payment is paid', async () => {
       const paidLatest = {
@@ -443,7 +528,7 @@ describe('unpaid-order-payment-method-switch integration', () => {
       expect(paymentRepository.create).not.toHaveBeenCalled();
     });
 
-    it('rejects COD with ORDER_NOT_PAYABLE when order is not pending_payment', async () => {
+    it('rejects COD and PromptPay with ORDER_NOT_PAYABLE when order is PAID', async () => {
       order.status = OrderStatus.PAID;
       paymentRepository.findOne.mockResolvedValue(null);
 
@@ -455,14 +540,14 @@ describe('unpaid-order-payment-method-switch integration', () => {
           paymentMethod: 'cod',
           customerId: 'cust-1',
         }),
-      ).rejects.toBeInstanceOf(BadRequestException);
+      ).rejects.toMatchObject({ response: { code: 'ORDER_NOT_PAYABLE' } });
 
       await expect(
         service.createCharge({
           orderId: order.id,
           amount: 300,
           currency: 'THB',
-          paymentMethod: 'cod',
+          paymentMethod: 'promptpay',
           customerId: 'cust-1',
         }),
       ).rejects.toMatchObject({ response: { code: 'ORDER_NOT_PAYABLE' } });
@@ -492,6 +577,12 @@ describe('unpaid-order-payment-method-switch integration', () => {
       expect(created?.omiseChargeId ?? null).toBeNull();
       expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
 
+      // Isolate invent-paid side effects from the prior createCharge path.
+      orderRepository.save.mockClear();
+      paymentRepository.save.mockClear();
+      paymentEventsServiceMock.publishPaymentStatusUpdated.mockClear();
+      inventoryService.restoreOrderStock.mockClear();
+
       orderRepository.findOne.mockResolvedValue(null);
       const warnSpy = jest.spyOn(
         (service as unknown as { logger: { warn: (...a: unknown[]) => void } }).logger,
@@ -506,6 +597,10 @@ describe('unpaid-order-payment-method-switch integration', () => {
 
       expect(warnSpy).toHaveBeenCalledWith(`No order for Omise charge ${OLD_CHARGE_ID}`);
       expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
+      expect(orderRepository.save).not.toHaveBeenCalled();
+      expect(paymentRepository.save).not.toHaveBeenCalled();
+      expect(paymentEventsServiceMock.publishPaymentStatusUpdated).not.toHaveBeenCalled();
+      expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
       expect(global.fetch).not.toHaveBeenCalled();
       warnSpy.mockRestore();
     });
