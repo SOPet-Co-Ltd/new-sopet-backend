@@ -51,6 +51,9 @@ export class Payment {
   @Column({ name: 'expires_at', type: 'timestamp', nullable: true })
   expiresAt!: Date | null;
 
+  @Column({ name: 'omise_charge_id', type: 'varchar', length: 255, nullable: true })
+  omiseChargeId!: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
   createdAt!: Date;
 
