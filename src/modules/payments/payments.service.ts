@@ -501,37 +501,27 @@ export class PaymentsService {
 
     const order = await this.assertCanPayForOrder(orderId, customerId);
 
-    // Executable Supersede/Retry Rule (Design Doc § Executable steps; Q-PENDING-RETRY = A / I001).
-    // Step 1 — PromptPay resume carve-out: only intentional pending early-return.
-    if (paymentMethod === 'promptpay') {
-      const existingPromptPay = await this.paymentRepository.findOne({
-        where: {
-          orderId,
-          amount,
-          paymentMethod: paymentMethod as Payment['paymentMethod'],
-        },
-        order: { createdAt: 'DESC' },
+    // Eligibility gate (all methods, including COD) — unpaid-switch Backend DD.
+    if (order.status !== OrderStatus.PENDING_PAYMENT) {
+      throw new BadRequestException({
+        code: 'ORDER_NOT_PAYABLE',
+        message: 'This order is no longer awaiting payment',
       });
-      if (existingPromptPay && existingPromptPay.status === 'pending') {
-        const activePayment = await this.expirePendingQrPaymentIfNeeded(existingPromptPay);
-        if (activePayment.status === 'pending') {
-          return {
-            paymentId: activePayment.id,
-            status: activePayment.status,
-            amount,
-            currency,
-            paymentMethod,
-            authorizeUri: activePayment.authorizeUri ?? undefined,
-            qrCodeUrl: activePayment.qrCodeUrl ?? undefined,
-            expiresAt: this.getEffectiveExpiresAt(activePayment) ?? undefined,
-          };
-        }
-      }
     }
 
-    // Step 2 — Otherwise (all credit_card creates, method switches, COD, new PromptPay):
-    // supersede other pending for this order locally. Never early-return credit_card pending (step 3).
-    // MVP: no Omise reverse — superseded charge may remain open at Omise (ops orphan residual).
+    const latestPayment = await this.paymentRepository.findOne({
+      where: { orderId },
+      order: { createdAt: 'DESC' },
+    });
+    if (latestPayment && latestPayment.status !== 'pending' && latestPayment.status !== 'failed') {
+      throw new BadRequestException({
+        code: 'ORDER_NOT_PAYABLE',
+        message: 'This order is no longer awaiting payment',
+      });
+    }
+
+    // Always-new payment when prior pending exists (no PromptPay soft-resume).
+    // Local supersede only until cancel-before-create (Task 2.1).
     await this.supersedePendingPaymentsForOrder(orderId);
 
     if (paymentMethod === 'cod') {
@@ -561,14 +551,7 @@ export class PaymentsService {
 
     const amountSatang = Math.round(Number(amount) * 100);
 
-    if (order.status !== OrderStatus.PENDING_PAYMENT) {
-      throw new BadRequestException({
-        code: 'ORDER_NOT_PAYABLE',
-        message: 'This order is no longer awaiting payment',
-      });
-    }
-
-    // Step 4 — Create new Payment + Omise charge (steps 3–5 continue below).
+    // Create new Payment + Omise charge.
     const payment = this.paymentRepository.create({
       orderId,
       amount,

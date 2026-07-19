@@ -870,8 +870,8 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
   it('pending card + promptpay → prior failed + new PromptPay charge', async () => {
     const prior = priorCardPending();
     paymentRepository.find.mockResolvedValue([prior]);
-    // PromptPay resume findOne: no matching PromptPay pending
-    paymentRepository.findOne.mockResolvedValue(null);
+    // Eligibility latest-payment findOne: prior pending is eligible
+    paymentRepository.findOne.mockResolvedValue(prior);
 
     const result = await service.createCharge({
       orderId: order.id,
@@ -898,7 +898,6 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
 
   it('PromptPay pending restart → new paymentId + prior failed + new Omise POST (no soft-resume)', async () => {
     // Amended unpaid-switch contract (BE-UPMS-001): never soft-resume same pending PromptPay.
-    // Intentional Red until Task 1.2 removes soft-resume early-return (~506–530).
     const prior = priorPromptPayPending();
     paymentRepository.findOne.mockResolvedValue(prior);
     paymentRepository.find.mockResolvedValue([prior]);
@@ -914,19 +913,98 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
     expect(result.paymentId).toBe(NEW_PAYMENT_ID);
     expect(result.paymentId).not.toBe(PRIOR_PAYMENT_ID);
     expect(prior.status).toBe('failed');
-    const paths = (global.fetch as jest.Mock).mock.calls.map((c: [string]) => c[0] as string);
+    const paths = (global.fetch as jest.Mock).mock.calls.map((c: [string]) => c[0]);
     expect(
       paths.some(
         (p) => p.includes('/charges') && !p.includes('/expire') && !p.includes('/reverse'),
       ),
     ).toBe(true);
     expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
+    expect(paymentRepository.findOne).toHaveBeenCalledWith({
+      where: { orderId: order.id },
+      order: { createdAt: 'DESC' },
+    });
+  });
+
+  it('Omise createCharge rejects with ORDER_NOT_PAYABLE when latest payment is paid', async () => {
+    const paidLatest = {
+      id: 'pay-paid-latest',
+      orderId: order.id,
+      amount: 300,
+      currency: 'THB',
+      status: 'paid',
+      paymentMethod: 'credit_card',
+      createdAt: new Date('2026-07-15T12:00:00.000Z'),
+    } as Payment;
+    paymentRepository.findOne.mockResolvedValue(paidLatest);
+
+    await expect(
+      service.createCharge({
+        orderId: order.id,
+        amount: 300,
+        currency: 'THB',
+        paymentMethod: 'credit_card',
+        omiseToken: 'tokn_new_1',
+        customerId: 'cust-1',
+      }),
+    ).rejects.toMatchObject({ response: { code: 'ORDER_NOT_PAYABLE' } });
+
+    expect(paymentRepository.create).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(paymentRepository.findOne).toHaveBeenCalledWith({
+      where: { orderId: order.id },
+      order: { createdAt: 'DESC' },
+    });
+  });
+
+  it('COD createCharge rejects with ORDER_NOT_PAYABLE when latest payment is paid', async () => {
+    const paidLatest = {
+      id: 'pay-paid-latest-cod',
+      orderId: order.id,
+      amount: 300,
+      currency: 'THB',
+      status: 'paid',
+      paymentMethod: 'promptpay',
+      createdAt: new Date('2026-07-15T12:00:00.000Z'),
+    } as Payment;
+    paymentRepository.findOne.mockResolvedValue(paidLatest);
+
+    await expect(
+      service.createCharge({
+        orderId: order.id,
+        amount: 300,
+        currency: 'THB',
+        paymentMethod: 'cod',
+        customerId: 'cust-1',
+      }),
+    ).rejects.toMatchObject({ response: { code: 'ORDER_NOT_PAYABLE' } });
+
+    expect(paymentRepository.create).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('COD createCharge rejects with ORDER_NOT_PAYABLE when order is not pending_payment', async () => {
+    order.status = OrderStatus.PAID;
+    paymentRepository.findOne.mockResolvedValue(null);
+
+    await expect(
+      service.createCharge({
+        orderId: order.id,
+        amount: 300,
+        currency: 'THB',
+        paymentMethod: 'cod',
+        customerId: 'cust-1',
+      }),
+    ).rejects.toMatchObject({ response: { code: 'ORDER_NOT_PAYABLE' } });
+
+    expect(paymentRepository.create).not.toHaveBeenCalled();
   });
 
   it('attempts Omise expire/reverse on supersede before create (fail-open still creates)', async () => {
     // Amended unpaid-switch contract (BE-UPMS-002 prep): cancel-before-create + fail-open.
-    // Intentional Red until Phase 2 cancel attempt lands; create path must still succeed.
+    // Intentional Red until Phase 2 / task-05 cancel attempt lands; create path must still succeed.
     const prior = priorCardPending();
+    paymentRepository.findOne.mockResolvedValue(prior);
     paymentRepository.find.mockResolvedValue([prior]);
 
     const result = await service.createCharge({
@@ -938,7 +1016,7 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
       customerId: 'cust-1',
     });
 
-    const paths = (global.fetch as jest.Mock).mock.calls.map((c: [string]) => c[0] as string);
+    const paths = (global.fetch as jest.Mock).mock.calls.map((c: [string]) => c[0]);
     expect(paths.some((p) => p.includes('/expire') || p.includes('/reverse'))).toBe(true);
     expect(result.paymentId).toBe(NEW_PAYMENT_ID);
     expect(prior.status).toBe('failed');
