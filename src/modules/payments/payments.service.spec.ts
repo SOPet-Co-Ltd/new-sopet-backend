@@ -737,6 +737,73 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
     expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
   });
 
+  it('ignores charge.complete when order is already CANCELLED (no invent-paid)', async () => {
+    service = await compileService('skey_test');
+    const order = {
+      id: 'ord-cancelled-complete',
+      status: OrderStatus.CANCELLED,
+      paymentReference: CHARGE_ID,
+    };
+    const payment = {
+      id: 'pay-cancelled-complete',
+      orderId: 'ord-cancelled-complete',
+      status: 'failed',
+      paymentMethod: 'promptpay',
+    };
+    orderRepository.findOne.mockResolvedValue(order);
+    paymentRepository.findOne.mockResolvedValue(payment);
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    global.fetch = jest.fn();
+
+    await service.handleWebhook({
+      key: 'charge.complete',
+      data: { object: 'charge', id: CHARGE_ID, status: 'successful' },
+    });
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      `Order ${order.id} is ${OrderStatus.CANCELLED} — ignoring charge.complete webhook`,
+    );
+    expect(order.status).toBe(OrderStatus.CANCELLED);
+    expect(payment.status).toBe('failed');
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(paymentRepository.manager.transaction).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('ignores charge.complete when order is already REFUNDED (no invent-paid)', async () => {
+    service = await compileService('skey_test');
+    const order = {
+      id: 'ord-refunded-complete',
+      status: OrderStatus.REFUNDED,
+      paymentReference: CHARGE_ID,
+    };
+    // Payment not marked paid yet — exercises terminal-status guard (not already-paid early return).
+    const payment = {
+      id: 'pay-refunded-complete',
+      orderId: 'ord-refunded-complete',
+      status: 'pending',
+      paymentMethod: 'credit_card',
+    };
+    orderRepository.findOne.mockResolvedValue(order);
+    paymentRepository.findOne.mockResolvedValue(payment);
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    global.fetch = jest.fn();
+
+    await service.handleWebhook({
+      key: 'charge.complete',
+      data: { object: 'charge', id: CHARGE_ID, status: 'successful' },
+    });
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      `Order ${order.id} is ${OrderStatus.REFUNDED} — ignoring charge.complete webhook`,
+    );
+    expect(order.status).toBe(OrderStatus.REFUNDED);
+    expect(payment.status).toBe('pending');
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(paymentRepository.manager.transaction).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
   it('PromptPay QR expiry still cancels and restores stock', async () => {
     service = await compileService('skey_test');
     const createdAt = new Date(Date.now() - 20 * 60 * 1000);
@@ -751,6 +818,7 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
     const order = {
       id: 'ord-qr-exp',
       status: OrderStatus.PENDING_PAYMENT,
+      paymentReference: 'chrg_qr_exp',
     };
     orderRepository.findOne.mockResolvedValue(order);
 
@@ -758,11 +826,51 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
 
     expect(updated.status).toBe('failed');
     expect(order.status).toBe(OrderStatus.CANCELLED);
+    expect(order.paymentReference).toBeNull();
     expect(inventoryService.restoreOrderStock).toHaveBeenCalledWith(
       'ord-qr-exp',
       expect.anything(),
       'QR payment expired',
     );
+  });
+
+  it('QR cancel nulls paymentReference so late webhook cannot invent paid', async () => {
+    service = await compileService('skey_test');
+    const chargeId = 'chrg_qr_orphan';
+    const createdAt = new Date(Date.now() - 20 * 60 * 1000);
+    const payment = {
+      id: 'pay-qr-orphan',
+      orderId: 'ord-qr-orphan',
+      status: 'pending',
+      paymentMethod: 'promptpay',
+      createdAt,
+      expiresAt: null,
+    } as Payment;
+    const order = {
+      id: 'ord-qr-orphan',
+      status: OrderStatus.PENDING_PAYMENT,
+      paymentReference: chargeId,
+    };
+    orderRepository.findOne.mockResolvedValue(order);
+
+    await service.expirePendingQrPaymentIfNeeded(payment);
+    expect(order.status).toBe(OrderStatus.CANCELLED);
+    expect(order.paymentReference).toBeNull();
+
+    // After clear, webhook lookup by paymentReference finds no order (orphan warn+return).
+    orderRepository.findOne.mockResolvedValue(null);
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    global.fetch = jest.fn();
+
+    await service.handleWebhook({
+      key: 'charge.complete',
+      data: { object: 'charge', id: chargeId, status: 'successful' },
+    });
+
+    expect(warnSpy).toHaveBeenCalledWith(`No order for Omise charge ${chargeId}`);
+    expect(order.status).toBe(OrderStatus.CANCELLED);
+    expect(global.fetch).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 });
 
@@ -1427,6 +1535,7 @@ describe('PaymentsService cancelStaleUnpaidOrders (AC-019–021)', () => {
       id: 'ord-stale-1',
       status: OrderStatus.PENDING_PAYMENT,
       createdAt: new Date(NOW.getTime() - TWENTY_FIVE_HOURS_MS),
+      paymentReference: 'chrg_stale_1',
     };
     const pendingPayment = {
       id: 'pay-stale-1',
@@ -1443,6 +1552,7 @@ describe('PaymentsService cancelStaleUnpaidOrders (AC-019–021)', () => {
 
     expect(cancelled).toBe(1);
     expect(staleOrder.status).toBe(OrderStatus.CANCELLED);
+    expect(staleOrder.paymentReference).toBeNull();
     expect(pendingPayment.status).toBe('failed');
     expect(inventoryService.restoreOrderStock).toHaveBeenCalledTimes(1);
     expect(inventoryService.restoreOrderStock).toHaveBeenCalledWith(
@@ -1529,6 +1639,7 @@ describe('PaymentsService cancelStaleUnpaidOrders (AC-019–021)', () => {
     const order = {
       id: 'ord-qr-coexist',
       status: OrderStatus.PENDING_PAYMENT,
+      paymentReference: 'chrg_qr_coexist',
     };
     orderRepository.findOne.mockResolvedValue(order);
 
@@ -1536,6 +1647,7 @@ describe('PaymentsService cancelStaleUnpaidOrders (AC-019–021)', () => {
 
     expect(updated.status).toBe('failed');
     expect(order.status).toBe(OrderStatus.CANCELLED);
+    expect(order.paymentReference).toBeNull();
     expect(inventoryService.restoreOrderStock).toHaveBeenCalledWith(
       'ord-qr-coexist',
       expect.anything(),
@@ -1543,6 +1655,44 @@ describe('PaymentsService cancelStaleUnpaidOrders (AC-019–021)', () => {
     );
     expect(typeof service.expirePendingQrPayments).toBe('function');
     expect(typeof service.cancelStaleUnpaidOrders).toBe('function');
+  });
+
+  it('24h cancel nulls paymentReference so late webhook cannot invent paid', async () => {
+    const chargeId = 'chrg_24h_orphan';
+    const staleOrder = {
+      id: 'ord-24h-orphan',
+      status: OrderStatus.PENDING_PAYMENT,
+      createdAt: new Date(NOW.getTime() - TWENTY_FIVE_HOURS_MS),
+      paymentReference: chargeId,
+    };
+    const pendingPayment = {
+      id: 'pay-24h-orphan',
+      orderId: 'ord-24h-orphan',
+      status: 'pending',
+      paymentMethod: 'credit_card',
+    } as Payment;
+
+    orderRepository.find.mockResolvedValue([staleOrder]);
+    paymentRepository.findOne.mockResolvedValue(null);
+    paymentRepository.find.mockResolvedValue([pendingPayment]);
+
+    await service.cancelStaleUnpaidOrders();
+    expect(staleOrder.status).toBe(OrderStatus.CANCELLED);
+    expect(staleOrder.paymentReference).toBeNull();
+
+    orderRepository.findOne.mockResolvedValue(null);
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    global.fetch = jest.fn();
+
+    await service.handleWebhook({
+      key: 'charge.complete',
+      data: { object: 'charge', id: chargeId, status: 'successful' },
+    });
+
+    expect(warnSpy).toHaveBeenCalledWith(`No order for Omise charge ${chargeId}`);
+    expect(staleOrder.status).toBe(OrderStatus.CANCELLED);
+    expect(global.fetch).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 
   it('cancels stale order with only failed payments (abandoned card) and restores stock', async () => {

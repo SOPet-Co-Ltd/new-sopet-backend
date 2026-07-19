@@ -141,7 +141,10 @@ export class PaymentsService {
         }
       }
 
+      // Clear paymentReference so a late Omise webhook cannot match and invent paid
+      // (same orphan defense as Omise→COD).
       order.status = OrderStatus.CANCELLED;
+      order.paymentReference = null;
       await manager.save(order);
 
       await this.inventoryService.restoreOrderStock(order.id, manager, restoreReason);
@@ -1006,6 +1009,12 @@ export class PaymentsService {
     if (payload.key === 'charge.complete') {
       if (order.status === OrderStatus.PAID || payment.status === 'paid') {
         this.logger.log(`Order ${order.id} already paid — ignoring duplicate webhook`);
+        return;
+      }
+      // Defense-in-depth: cancelled/refunded orders must never be invented paid by a late webhook
+      // (primary defense: cancelOrderRestoreStockAndFailPayments nulls paymentReference).
+      if (order.status === OrderStatus.CANCELLED || order.status === OrderStatus.REFUNDED) {
+        this.logger.warn(`Order ${order.id} is ${order.status} — ignoring charge.complete webhook`);
         return;
       }
     }
