@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import { Payment } from '../../database/entities/payment.entity';
 import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
 import { Customer } from '../../database/entities/customer.entity';
@@ -20,7 +20,10 @@ import { PayoutsService } from '../payouts/payouts.service';
 import { StoresService } from '../stores/stores.service';
 import { verifyOmiseWebhookSignature } from './omise-webhook.util';
 import { buildOmiseReturnUri } from './build-omise-return-uri';
-import { normalizeCheckoutPaymentMethod } from '../../common/utils/checkout-payment.util';
+import {
+  CheckoutPaymentMethod,
+  normalizeCheckoutPaymentMethod,
+} from '../../common/utils/checkout-payment.util';
 
 interface OmiseCharge {
   id: string;
@@ -158,19 +161,157 @@ export class PaymentsService {
 
   /**
    * Local abandon of pending payments for an order before creating a replacement charge.
-   * Does not cancel the order or restore stock. MVP does not call Omise reverse —
-   * superseded charges may remain open at Omise (ops orphan residual).
+   * Does not cancel the order or restore stock. Omise cancel runs in Phase A (outside the lock).
    */
-  private async supersedePendingPaymentsForOrder(orderId: string): Promise<void> {
-    const pendingPayments = await this.paymentRepository.find({
-      where: { orderId, status: 'pending' },
-    });
+  private async supersedePendingPaymentsForOrder(
+    orderId: string,
+    manager?: EntityManager,
+  ): Promise<void> {
+    const pendingPayments = manager
+      ? await manager.find(Payment, { where: { orderId, status: 'pending' } })
+      : await this.paymentRepository.find({ where: { orderId, status: 'pending' } });
 
     for (const pending of pendingPayments) {
       pending.status = 'failed';
-      await this.paymentRepository.save(pending);
+      if (manager) {
+        await manager.save(pending);
+      } else {
+        await this.paymentRepository.save(pending);
+      }
       await this.paymentEventsService.publishPaymentStatusUpdated(pending);
     }
+  }
+
+  private getOmiseCancelTimeoutMs(): number {
+    const configured = this.configService.get<number>('payment.omiseCancelTimeoutMs');
+    return configured && configured > 0 ? configured : 4000;
+  }
+
+  /** Deterministic charge-id resolution for Phase A cancel (AC-013). */
+  private resolveOmiseChargeIdForCancel(
+    payment: Payment,
+    pendingCountForOrder: number,
+    orderPaymentReference: string | null | undefined,
+  ): string | null {
+    if (payment.omiseChargeId) {
+      return payment.omiseChargeId;
+    }
+    if (pendingCountForOrder === 1 && orderPaymentReference) {
+      return orderPaymentReference;
+    }
+    return null;
+  }
+
+  /**
+   * Best-effort Omise expire/reverse within omiseCancelTimeoutMs. Never throws for cleanup failure.
+   * PromptPay: prefer POST /charges/{id}/expire. Card: expire then reverse. Fail-open otherwise.
+   */
+  private async cancelOmiseChargeBestEffort(
+    chargeId: string,
+    paymentMethod: PaymentMethod,
+  ): Promise<'cancelled' | 'failed_open'> {
+    if (!this.omiseSecretKey || !chargeId) {
+      return 'failed_open';
+    }
+
+    const timeoutMs = this.getOmiseCancelTimeoutMs();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const isPromptPay = paymentMethod === PaymentMethod.PROMPTPAY;
+
+      if (isPromptPay) {
+        await this.omiseRequest(
+          `/charges/${chargeId}/expire`,
+          undefined,
+          'POST',
+          controller.signal,
+        );
+        return 'cancelled';
+      }
+
+      try {
+        await this.omiseRequest(
+          `/charges/${chargeId}/expire`,
+          undefined,
+          'POST',
+          controller.signal,
+        );
+        return 'cancelled';
+      } catch {
+        if (controller.signal.aborted) {
+          return 'failed_open';
+        }
+        await this.omiseRequest(
+          `/charges/${chargeId}/reverse`,
+          undefined,
+          'POST',
+          controller.signal,
+        );
+        return 'cancelled';
+      }
+    } catch {
+      return 'failed_open';
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** Phase A: Omise cancel outside FOR UPDATE; fail-open on any failure. */
+  private async cancelPendingOmiseChargesForOrder(order: Order): Promise<void> {
+    const pendingPayments = await this.paymentRepository.find({
+      where: { orderId: order.id, status: 'pending' },
+    });
+    const pendingCount = pendingPayments.length;
+    if (pendingCount === 0 || !this.omiseSecretKey) {
+      return;
+    }
+
+    for (const pending of pendingPayments) {
+      const chargeId = this.resolveOmiseChargeIdForCancel(
+        pending,
+        pendingCount,
+        order.paymentReference,
+      );
+      if (!chargeId) {
+        continue;
+      }
+
+      const result = await this.cancelOmiseChargeBestEffort(chargeId, pending.paymentMethod);
+      if (result === 'failed_open') {
+        this.logger.warn(
+          JSON.stringify({
+            event: 'omise_cancel_fail_open',
+            orderId: order.id,
+            paymentId: pending.id,
+            omiseChargeId: chargeId,
+            reason: 'cancel_failed_unsupported_or_timeout',
+          }),
+        );
+      }
+    }
+  }
+
+  private assertOrderPayableForCreate(order: Order, latestPayment: Payment | null): void {
+    if (order.status !== OrderStatus.PENDING_PAYMENT) {
+      throw new BadRequestException({
+        code: 'ORDER_NOT_PAYABLE',
+        message: 'This order is no longer awaiting payment',
+      });
+    }
+    if (latestPayment && latestPayment.status !== 'pending' && latestPayment.status !== 'failed') {
+      throw new BadRequestException({
+        code: 'ORDER_NOT_PAYABLE',
+        message: 'This order is no longer awaiting payment',
+      });
+    }
+  }
+
+  private toOrderPaymentMethod(method: CheckoutPaymentMethod): PaymentMethod {
+    if (method === 'promptpay') return PaymentMethod.PROMPTPAY;
+    if (method === 'credit_card') return PaymentMethod.CREDIT_CARD;
+    return PaymentMethod.COD;
   }
 
   async expirePendingQrPayments(): Promise<number> {
@@ -200,6 +341,7 @@ export class PaymentsService {
     path: string,
     body?: Record<string, unknown>,
     method?: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+    signal?: AbortSignal,
   ): Promise<T> {
     const resolvedMethod = method ?? (body !== undefined ? 'POST' : 'GET');
     const response = await fetch(`https://api.omise.co${path}`, {
@@ -209,6 +351,7 @@ export class PaymentsService {
         'Content-Type': 'application/json',
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal,
     });
 
     return this.parseOmiseResponse<T>(response, resolvedMethod, path);
@@ -502,159 +645,226 @@ export class PaymentsService {
     const order = await this.assertCanPayForOrder(orderId, customerId);
 
     // Eligibility gate (all methods, including COD) — unpaid-switch Backend DD.
-    if (order.status !== OrderStatus.PENDING_PAYMENT) {
-      throw new BadRequestException({
-        code: 'ORDER_NOT_PAYABLE',
-        message: 'This order is no longer awaiting payment',
-      });
-    }
-
     const latestPayment = await this.paymentRepository.findOne({
       where: { orderId },
       order: { createdAt: 'DESC' },
     });
-    if (latestPayment && latestPayment.status !== 'pending' && latestPayment.status !== 'failed') {
-      throw new BadRequestException({
-        code: 'ORDER_NOT_PAYABLE',
-        message: 'This order is no longer awaiting payment',
-      });
-    }
+    this.assertOrderPayableForCreate(order, latestPayment);
 
-    // Always-new payment when prior pending exists (no PromptPay soft-resume).
-    // Local supersede only until cancel-before-create (Task 2.1).
-    await this.supersedePendingPaymentsForOrder(orderId);
+    // Phase A — Omise cancel outside FOR UPDATE (fail-open).
+    await this.cancelPendingOmiseChargesForOrder(order);
 
-    if (paymentMethod === 'cod') {
-      const payment = this.paymentRepository.create({
-        orderId,
-        amount,
-        currency,
-        paymentMethod: paymentMethod as Payment['paymentMethod'],
-        status: 'pending',
-      });
-      await this.paymentRepository.save(payment);
+    // Phase B — short FOR UPDATE: re-check → local supersede → insert payment.
+    type CreateChargeResult = {
+      paymentId: string;
+      status: string;
+      amount: number;
+      currency: string;
+      paymentMethod: string;
+      authorizeUri?: string;
+      qrCodeUrl?: string;
+      expiresAt?: Date;
+      paidImmediately?: { order: Order; payment: Payment; chargeId: string };
+    };
+
+    const result = await this.paymentRepository.manager.transaction(
+      async (manager): Promise<CreateChargeResult> => {
+        const lockedOrder = await manager.findOne(Order, {
+          where: { id: orderId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!lockedOrder) {
+          throw new BadRequestException({
+            code: 'ORDER_NOT_FOUND',
+            message: 'Order not found',
+          });
+        }
+
+        const latestUnderLock = await manager.findOne(Payment, {
+          where: { orderId },
+          order: { createdAt: 'DESC' },
+        });
+        this.assertOrderPayableForCreate(lockedOrder, latestUnderLock);
+
+        await this.supersedePendingPaymentsForOrder(orderId, manager);
+
+        const orderPaymentMethod = this.toOrderPaymentMethod(paymentMethod);
+
+        if (paymentMethod === 'cod') {
+          const payment = manager.create(Payment, {
+            orderId,
+            amount,
+            currency,
+            paymentMethod: orderPaymentMethod,
+            status: 'pending',
+            omiseChargeId: null,
+          });
+          await manager.save(payment);
+
+          lockedOrder.paymentMethod = orderPaymentMethod;
+          lockedOrder.paymentReference = null;
+          await manager.save(lockedOrder);
+
+          return {
+            paymentId: payment.id,
+            status: 'pending',
+            amount,
+            currency,
+            paymentMethod,
+          };
+        }
+
+        if (!this.omiseSecretKey) {
+          throw new BadRequestException({
+            code: 'OMISE_NOT_CONFIGURED',
+            message: 'Payment provider is not configured',
+          });
+        }
+
+        const amountSatang = Math.round(Number(amount) * 100);
+
+        const payment = manager.create(Payment, {
+          orderId,
+          amount,
+          currency,
+          paymentMethod: orderPaymentMethod,
+          status: 'pending',
+        });
+        await manager.save(payment);
+
+        const chargeBody: Record<string, unknown> = {
+          amount: amountSatang,
+          currency: currency.toLowerCase(),
+        };
+
+        if (paymentMethod === 'promptpay') {
+          chargeBody.source = { type: 'promptpay' };
+        } else if (paymentMethod === 'credit_card') {
+          if (savedPaymentMethodId) {
+            if (!customerId) {
+              throw new BadRequestException({
+                code: 'CUSTOMER_REQUIRED',
+                message: 'Customer ID required for saved payment method',
+              });
+            }
+            const saved = await this.savedPaymentMethodRepository.findOne({
+              where: { id: savedPaymentMethodId, customerId },
+            });
+            if (!saved) {
+              throw new BadRequestException({
+                code: 'PAYMENT_METHOD_NOT_FOUND',
+                message: 'Saved payment method not found',
+              });
+            }
+
+            const customer = await this.customerRepository.findOne({ where: { id: customerId } });
+            if (!customer?.omiseCustomerId) {
+              throw new BadRequestException({
+                code: 'OMISE_CUSTOMER_NOT_FOUND',
+                message: 'Saved card is not linked to a payment profile',
+              });
+            }
+
+            chargeBody.customer = customer.omiseCustomerId;
+            chargeBody.card = saved.omiseCardToken;
+          } else if (omiseToken) {
+            chargeBody.card = omiseToken;
+          } else {
+            throw new BadRequestException({
+              code: 'CARD_TOKEN_REQUIRED',
+              message: 'Credit card payments require an Omise token or saved payment method',
+            });
+          }
+
+          const storefrontUrl = this.configService.get<string>('app.storefrontUrl');
+          if (!storefrontUrl?.trim()) {
+            throw new BadRequestException({
+              code: 'STOREFRONT_URL_NOT_CONFIGURED',
+              message: 'Storefront URL is not configured',
+            });
+          }
+          try {
+            chargeBody.return_uri = buildOmiseReturnUri(storefrontUrl, payment.id);
+          } catch {
+            throw new BadRequestException({
+              code: 'STOREFRONT_URL_NOT_CONFIGURED',
+              message: 'Storefront URL is not configured',
+            });
+          }
+        }
+
+        const charge = await this.omiseRequest<OmiseCharge>('/charges', chargeBody);
+
+        const authorizeUri = charge.authorize_uri ?? null;
+        const qrCodeUrl = charge.source?.scannable_code?.image?.download_uri ?? null;
+        const expiresAt = paymentMethod === 'promptpay' ? this.computeQrExpiresAt() : null;
+
+        payment.omiseChargeId = charge.id;
+        payment.status = charge.status === 'failed' ? 'failed' : 'pending';
+        payment.authorizeUri = authorizeUri;
+        payment.qrCodeUrl = qrCodeUrl;
+        payment.expiresAt = expiresAt;
+        await manager.save(payment);
+
+        lockedOrder.paymentMethod = orderPaymentMethod;
+        lockedOrder.paymentReference = charge.id;
+        await manager.save(lockedOrder);
+
+        if (payment.status === 'failed') {
+          await this.paymentEventsService.publishPaymentStatusUpdated(payment);
+        }
+
+        const response: CreateChargeResult = {
+          paymentId: payment.id,
+          status: payment.status,
+          amount,
+          currency,
+          paymentMethod,
+          authorizeUri: authorizeUri ?? undefined,
+          qrCodeUrl: qrCodeUrl ?? undefined,
+          expiresAt: expiresAt ?? undefined,
+        };
+
+        if (charge.status === 'successful') {
+          response.status = 'paid';
+          response.paidImmediately = {
+            order: lockedOrder,
+            payment,
+            chargeId: charge.id,
+          };
+        }
+
+        return response;
+      },
+    );
+
+    if (result.paidImmediately) {
+      await this.markOrderPaid(
+        result.paidImmediately.order,
+        result.paidImmediately.payment,
+        result.paidImmediately.chargeId,
+      );
       return {
-        paymentId: payment.id,
-        status: 'pending',
-        amount,
-        currency,
-        paymentMethod,
+        paymentId: result.paymentId,
+        status: 'paid',
+        amount: result.amount,
+        currency: result.currency,
+        paymentMethod: result.paymentMethod,
+        authorizeUri: result.authorizeUri,
+        qrCodeUrl: result.qrCodeUrl,
+        expiresAt: result.expiresAt,
       };
     }
 
-    if (!this.omiseSecretKey) {
-      throw new BadRequestException({
-        code: 'OMISE_NOT_CONFIGURED',
-        message: 'Payment provider is not configured',
-      });
-    }
-
-    const amountSatang = Math.round(Number(amount) * 100);
-
-    // Create new Payment + Omise charge.
-    const payment = this.paymentRepository.create({
-      orderId,
-      amount,
-      currency,
-      paymentMethod: paymentMethod as Payment['paymentMethod'],
-      status: 'pending',
-    });
-    await this.paymentRepository.save(payment);
-
-    const chargeBody: Record<string, unknown> = {
-      amount: amountSatang,
-      currency: currency.toLowerCase(),
-    };
-
-    if (paymentMethod === 'promptpay') {
-      chargeBody.source = { type: 'promptpay' };
-    } else if (paymentMethod === 'credit_card') {
-      if (savedPaymentMethodId) {
-        if (!customerId) {
-          throw new BadRequestException({
-            code: 'CUSTOMER_REQUIRED',
-            message: 'Customer ID required for saved payment method',
-          });
-        }
-        const saved = await this.savedPaymentMethodRepository.findOne({
-          where: { id: savedPaymentMethodId, customerId },
-        });
-        if (!saved) {
-          throw new BadRequestException({
-            code: 'PAYMENT_METHOD_NOT_FOUND',
-            message: 'Saved payment method not found',
-          });
-        }
-
-        const customer = await this.customerRepository.findOne({ where: { id: customerId } });
-        if (!customer?.omiseCustomerId) {
-          throw new BadRequestException({
-            code: 'OMISE_CUSTOMER_NOT_FOUND',
-            message: 'Saved card is not linked to a payment profile',
-          });
-        }
-
-        // Saved methods store Omise card ids (card_test_...), not one-time tokens.
-        chargeBody.customer = customer.omiseCustomerId;
-        chargeBody.card = saved.omiseCardToken;
-      } else if (omiseToken) {
-        chargeBody.card = omiseToken;
-      } else {
-        throw new BadRequestException({
-          code: 'CARD_TOKEN_REQUIRED',
-          message: 'Credit card payments require an Omise token or saved payment method',
-        });
-      }
-
-      const storefrontUrl = this.configService.get<string>('app.storefrontUrl');
-      if (!storefrontUrl?.trim()) {
-        throw new BadRequestException({
-          code: 'STOREFRONT_URL_NOT_CONFIGURED',
-          message: 'Storefront URL is not configured',
-        });
-      }
-      try {
-        chargeBody.return_uri = buildOmiseReturnUri(storefrontUrl, payment.id);
-      } catch {
-        throw new BadRequestException({
-          code: 'STOREFRONT_URL_NOT_CONFIGURED',
-          message: 'Storefront URL is not configured',
-        });
-      }
-    }
-
-    const charge = await this.omiseRequest<OmiseCharge>('/charges', chargeBody);
-
-    const authorizeUri = charge.authorize_uri ?? null;
-    const qrCodeUrl = charge.source?.scannable_code?.image?.download_uri ?? null;
-    const expiresAt = paymentMethod === 'promptpay' ? this.computeQrExpiresAt() : null;
-
-    // Step 5 — latest charge is active UI/webhook target (paymentReference pointer).
-    order.paymentReference = charge.id;
-    await this.orderRepository.save(order);
-
-    if (charge.status === 'successful') {
-      await this.markOrderPaid(order, payment, charge.id);
-    } else {
-      payment.status = charge.status === 'failed' ? 'failed' : 'pending';
-      payment.authorizeUri = authorizeUri;
-      payment.qrCodeUrl = qrCodeUrl;
-      payment.expiresAt = expiresAt;
-      await this.paymentRepository.save(payment);
-      if (payment.status === 'failed') {
-        await this.paymentEventsService.publishPaymentStatusUpdated(payment);
-      }
-    }
-
     return {
-      paymentId: payment.id,
-      status: payment.status,
-      amount,
-      currency,
-      paymentMethod,
-      authorizeUri: authorizeUri ?? undefined,
-      qrCodeUrl: qrCodeUrl ?? undefined,
-      expiresAt: expiresAt ?? undefined,
+      paymentId: result.paymentId,
+      status: result.status,
+      amount: result.amount,
+      currency: result.currency,
+      paymentMethod: result.paymentMethod,
+      authorizeUri: result.authorizeUri,
+      qrCodeUrl: result.qrCodeUrl,
+      expiresAt: result.expiresAt,
     };
   }
 
