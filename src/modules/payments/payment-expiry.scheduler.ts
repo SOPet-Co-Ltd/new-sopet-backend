@@ -42,5 +42,17 @@ export class PaymentExpiryScheduler implements OnModuleInit, OnModuleDestroy {
         error instanceof Error ? error.stack : String(error),
       );
     }
+
+    try {
+      const cancelledCount = await this.paymentsService.cancelStaleUnpaidOrders();
+      if (cancelledCount > 0) {
+        this.logger.log(`Cancelled ${cancelledCount} stale unpaid order(s)`);
+      }
+    } catch (error) {
+      this.logger.error(
+        'Unpaid order cancel check failed',
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
   }
 }

@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
@@ -1344,6 +1344,285 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
       where: { orderId: order.id },
       order: { createdAt: 'DESC' },
     });
+  });
+});
+
+describe('PaymentsService cancelStaleUnpaidOrders (AC-019–021)', () => {
+  let service: PaymentsService;
+  let inventoryService: { restoreOrderStock: jest.Mock };
+  let managerSave: jest.Mock;
+  let configGet: jest.Mock;
+
+  const TWENTY_FIVE_HOURS_MS = 25 * 60 * 60 * 1000;
+  const NOW = new Date('2026-07-20T00:00:00.000Z');
+
+  const orderRepository = {
+    findOne: jest.fn(),
+    find: jest.fn(),
+    save: jest.fn(),
+  };
+  const paymentRepository = {
+    create: jest.fn(<T>(x: T): T => x),
+    save: jest.fn((x: Payment) => Promise.resolve(x)),
+    findOne: jest.fn(),
+    find: jest.fn(),
+    manager: {
+      transaction: jest.fn(),
+    },
+  };
+
+  async function compileService() {
+    inventoryService = { restoreOrderStock: jest.fn().mockResolvedValue(true) };
+    managerSave = jest.fn((entity: unknown) => Promise.resolve(entity));
+    paymentRepository.manager.transaction.mockImplementation(
+      async (cb: (manager: { save: jest.Mock }) => Promise<void>) => {
+        await cb({ save: managerSave });
+      },
+    );
+    configGet = jest.fn((key: string) => {
+      if (key === 'omise.secretKey') return 'skey_test';
+      if (key === 'payment.unpaidOrderCancelAfterMs') return 86_400_000;
+      if (key === 'payment.qrExpiryMinutes') return 15;
+      return '';
+    });
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        PaymentsService,
+        { provide: getRepositoryToken(Payment), useValue: paymentRepository },
+        { provide: getRepositoryToken(Order), useValue: orderRepository },
+        { provide: getRepositoryToken(Customer), useValue: { findOne: jest.fn() } },
+        {
+          provide: getRepositoryToken(SavedPaymentMethod),
+          useValue: { findOne: jest.fn() },
+        },
+        { provide: ConfigService, useValue: { get: configGet } },
+        {
+          provide: NotificationsService,
+          useValue: { notifyOrderPaid: jest.fn() },
+        },
+        { provide: PaymentEventsService, useValue: paymentEventsServiceMock },
+        { provide: InventoryService, useValue: inventoryService },
+        { provide: PayoutsService, useValue: payoutsServiceMock },
+        { provide: StoresService, useValue: storesServiceMock },
+      ],
+    }).compile();
+
+    return module.get(PaymentsService);
+  }
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    jest.useFakeTimers();
+    jest.setSystemTime(NOW);
+    service = await compileService();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('cancels stale unpaid PENDING_PAYMENT and restores stock once', async () => {
+    const staleOrder = {
+      id: 'ord-stale-1',
+      status: OrderStatus.PENDING_PAYMENT,
+      createdAt: new Date(NOW.getTime() - TWENTY_FIVE_HOURS_MS),
+    };
+    const pendingPayment = {
+      id: 'pay-stale-1',
+      orderId: 'ord-stale-1',
+      status: 'pending',
+      paymentMethod: 'credit_card',
+    } as Payment;
+
+    orderRepository.find.mockResolvedValue([staleOrder]);
+    paymentRepository.findOne.mockResolvedValue(null);
+    paymentRepository.find.mockResolvedValue([pendingPayment]);
+
+    const cancelled = await service.cancelStaleUnpaidOrders();
+
+    expect(cancelled).toBe(1);
+    expect(staleOrder.status).toBe(OrderStatus.CANCELLED);
+    expect(pendingPayment.status).toBe('failed');
+    expect(inventoryService.restoreOrderStock).toHaveBeenCalledTimes(1);
+    expect(inventoryService.restoreOrderStock).toHaveBeenCalledWith(
+      'ord-stale-1',
+      expect.anything(),
+      'Unpaid order expired',
+    );
+    expect(paymentEventsServiceMock.publishPaymentStatusUpdated).toHaveBeenCalledWith(
+      pendingPayment,
+    );
+  });
+
+  it('skips young unpaid orders within the 24h window', async () => {
+    orderRepository.find.mockResolvedValue([]);
+
+    const cancelled = await service.cancelStaleUnpaidOrders();
+
+    expect(cancelled).toBe(0);
+    const findCall = orderRepository.find.mock.calls[0] as
+      [{ where: { createdAt: unknown; status: unknown } }] | undefined;
+    expect(findCall?.[0].where.createdAt).toBeDefined();
+    expect(findCall?.[0].where.status).toBe(OrderStatus.PENDING_PAYMENT);
+    expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
+  });
+
+  it('skips orders that already have a paid payment', async () => {
+    const staleOrder = {
+      id: 'ord-paid-edge',
+      status: OrderStatus.PENDING_PAYMENT,
+      createdAt: new Date(NOW.getTime() - TWENTY_FIVE_HOURS_MS),
+    };
+    orderRepository.find.mockResolvedValue([staleOrder]);
+    paymentRepository.findOne.mockResolvedValue({
+      id: 'pay-paid',
+      orderId: 'ord-paid-edge',
+      status: 'paid',
+    });
+
+    const cancelled = await service.cancelStaleUnpaidOrders();
+
+    expect(cancelled).toBe(0);
+    expect(staleOrder.status).toBe(OrderStatus.PENDING_PAYMENT);
+    expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
+    expect(paymentRepository.manager.transaction).not.toHaveBeenCalled();
+  });
+
+  it('is idempotent when re-run finds no PENDING_PAYMENT candidates', async () => {
+    orderRepository.find.mockResolvedValue([]);
+
+    const first = await service.cancelStaleUnpaidOrders();
+    const second = await service.cancelStaleUnpaidOrders();
+
+    expect(first).toBe(0);
+    expect(second).toBe(0);
+    expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
+  });
+
+  it('skips candidates that are no longer PENDING_PAYMENT (idempotent guard)', async () => {
+    const candidate = {
+      id: 'ord-already',
+      status: OrderStatus.CANCELLED,
+      createdAt: new Date(NOW.getTime() - TWENTY_FIVE_HOURS_MS),
+    };
+    orderRepository.find.mockResolvedValue([candidate]);
+    paymentRepository.findOne.mockResolvedValue(null);
+
+    const cancelled = await service.cancelStaleUnpaidOrders();
+
+    expect(cancelled).toBe(0);
+    expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
+    expect(paymentRepository.manager.transaction).not.toHaveBeenCalled();
+  });
+
+  it('keeps QR finalizeExpiredPayment path callable (AC-020 coexistence)', async () => {
+    const createdAt = new Date(NOW.getTime() - 20 * 60 * 1000);
+    const payment = {
+      id: 'pay-qr-coexist',
+      orderId: 'ord-qr-coexist',
+      status: 'pending',
+      paymentMethod: 'promptpay',
+      createdAt,
+      expiresAt: null,
+    } as Payment;
+    const order = {
+      id: 'ord-qr-coexist',
+      status: OrderStatus.PENDING_PAYMENT,
+    };
+    orderRepository.findOne.mockResolvedValue(order);
+
+    const updated = await service.expirePendingQrPaymentIfNeeded(payment);
+
+    expect(updated.status).toBe('failed');
+    expect(order.status).toBe(OrderStatus.CANCELLED);
+    expect(inventoryService.restoreOrderStock).toHaveBeenCalledWith(
+      'ord-qr-coexist',
+      expect.anything(),
+      'QR payment expired',
+    );
+    expect(typeof service.expirePendingQrPayments).toBe('function');
+    expect(typeof service.cancelStaleUnpaidOrders).toBe('function');
+  });
+
+  it('cancels stale order with only failed payments (abandoned card) and restores stock', async () => {
+    const staleOrder = {
+      id: 'ord-failed-only',
+      status: OrderStatus.PENDING_PAYMENT,
+      createdAt: new Date(NOW.getTime() - TWENTY_FIVE_HOURS_MS),
+    };
+    const failedPayment = {
+      id: 'pay-failed',
+      orderId: 'ord-failed-only',
+      status: 'failed',
+      paymentMethod: 'credit_card',
+    } as Payment;
+
+    orderRepository.find.mockResolvedValue([staleOrder]);
+    paymentRepository.findOne.mockResolvedValue(null);
+    paymentRepository.find.mockResolvedValue([failedPayment]);
+
+    const cancelled = await service.cancelStaleUnpaidOrders();
+
+    expect(cancelled).toBe(1);
+    expect(staleOrder.status).toBe(OrderStatus.CANCELLED);
+    expect(failedPayment.status).toBe('failed');
+    expect(inventoryService.restoreOrderStock).toHaveBeenCalledWith(
+      'ord-failed-only',
+      expect.anything(),
+      'Unpaid order expired',
+    );
+  });
+
+  it('reads unpaidOrderCancelAfterMs from payment config', async () => {
+    orderRepository.find.mockResolvedValue([]);
+
+    await service.cancelStaleUnpaidOrders(NOW);
+
+    expect(configGet).toHaveBeenCalledWith('payment.unpaidOrderCancelAfterMs');
+  });
+
+  it('logs and continues the batch when one order cancel fails', async () => {
+    const failingOrder = {
+      id: 'ord-fail',
+      status: OrderStatus.PENDING_PAYMENT,
+      createdAt: new Date(NOW.getTime() - TWENTY_FIVE_HOURS_MS),
+    };
+    const okOrder = {
+      id: 'ord-ok',
+      status: OrderStatus.PENDING_PAYMENT,
+      createdAt: new Date(NOW.getTime() - TWENTY_FIVE_HOURS_MS),
+    };
+    const okPayment = {
+      id: 'pay-ok',
+      orderId: 'ord-ok',
+      status: 'pending',
+      paymentMethod: 'credit_card',
+    } as Payment;
+
+    orderRepository.find.mockResolvedValue([failingOrder, okOrder]);
+    paymentRepository.findOne.mockResolvedValue(null);
+    paymentRepository.find.mockImplementation(({ where }: { where: { orderId: string } }) => {
+      if (where.orderId === 'ord-ok') return Promise.resolve([okPayment]);
+      return Promise.resolve([]);
+    });
+    paymentRepository.manager.transaction
+      .mockRejectedValueOnce(new Error('tx failed'))
+      .mockImplementation(async (cb: (manager: { save: jest.Mock }) => Promise<void>) => {
+        await cb({ save: managerSave });
+      });
+
+    const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+
+    const cancelled = await service.cancelStaleUnpaidOrders();
+
+    expect(cancelled).toBe(1);
+    expect(okOrder.status).toBe(OrderStatus.CANCELLED);
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Failed to cancel stale unpaid order ord-fail',
+      expect.any(String),
+    );
+    errorSpy.mockRestore();
   });
 });
 

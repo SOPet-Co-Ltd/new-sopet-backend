@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, Repository } from 'typeorm';
+import { EntityManager, LessThanOrEqual, Repository } from 'typeorm';
 import { Payment } from '../../database/entities/payment.entity';
 import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
 import { Customer } from '../../database/entities/customer.entity';
@@ -119,6 +119,41 @@ export class PaymentsService {
     return expiresAt !== null && expiresAt.getTime() <= now.getTime();
   }
 
+  private getUnpaidOrderCancelAfterMs(): number {
+    const configured = this.configService.get<number>('payment.unpaidOrderCancelAfterMs');
+    return configured && configured > 0 ? configured : 86_400_000;
+  }
+
+  /**
+   * Shared cancel+stock-restore transaction used by QR finalize and 24h unpaid cancel.
+   * Eligibility remains at the call sites so QR expiresAt and order.createdAt clocks stay separate.
+   */
+  private async cancelOrderRestoreStockAndFailPayments(
+    order: Order,
+    paymentsToFail: Payment[],
+    restoreReason: string,
+  ): Promise<void> {
+    await this.paymentRepository.manager.transaction(async (manager) => {
+      for (const payment of paymentsToFail) {
+        if (payment.status === 'pending') {
+          payment.status = 'failed';
+          await manager.save(payment);
+        }
+      }
+
+      order.status = OrderStatus.CANCELLED;
+      await manager.save(order);
+
+      await this.inventoryService.restoreOrderStock(order.id, manager, restoreReason);
+    });
+
+    for (const payment of paymentsToFail) {
+      if (payment.status === 'failed') {
+        await this.paymentEventsService.publishPaymentStatusUpdated(payment);
+      }
+    }
+  }
+
   private async finalizeExpiredPayment(payment: Payment): Promise<Payment> {
     const order = await this.orderRepository.findOne({ where: { id: payment.orderId } });
     if (!order) {
@@ -133,18 +168,57 @@ export class PaymentsService {
       return payment;
     }
 
-    await this.paymentRepository.manager.transaction(async (manager) => {
-      payment.status = 'failed';
-      await manager.save(payment);
+    await this.cancelOrderRestoreStockAndFailPayments(order, [payment], 'QR payment expired');
+    return payment;
+  }
 
-      order.status = OrderStatus.CANCELLED;
-      await manager.save(order);
-
-      await this.inventoryService.restoreOrderStock(order.id, manager, 'QR payment expired');
+  /**
+   * Cancel PENDING_PAYMENT orders older than unpaidOrderCancelAfterMs with no paid payment.
+   * Reuses the same cancel+stock-restore transaction pattern as finalizeExpiredPayment.
+   */
+  async cancelStaleUnpaidOrders(now: Date = new Date()): Promise<number> {
+    const cutoff = new Date(now.getTime() - this.getUnpaidOrderCancelAfterMs());
+    const candidates = await this.orderRepository.find({
+      where: {
+        status: OrderStatus.PENDING_PAYMENT,
+        createdAt: LessThanOrEqual(cutoff),
+      },
     });
 
-    await this.paymentEventsService.publishPaymentStatusUpdated(payment);
-    return payment;
+    let cancelledCount = 0;
+    for (const order of candidates) {
+      try {
+        if (order.status !== OrderStatus.PENDING_PAYMENT) {
+          continue;
+        }
+
+        const paidPayment = await this.paymentRepository.findOne({
+          where: { orderId: order.id, status: 'paid' },
+        });
+        if (paidPayment) {
+          continue;
+        }
+
+        const orderPayments = await this.paymentRepository.find({
+          where: { orderId: order.id },
+        });
+        const pendingPayments = orderPayments.filter((p) => p.status === 'pending');
+
+        await this.cancelOrderRestoreStockAndFailPayments(
+          order,
+          pendingPayments,
+          'Unpaid order expired',
+        );
+        cancelledCount += 1;
+      } catch (error) {
+        this.logger.error(
+          `Failed to cancel stale unpaid order ${order.id}`,
+          error instanceof Error ? error.stack : String(error),
+        );
+      }
+    }
+
+    return cancelledCount;
   }
 
   async expirePendingQrPaymentIfNeeded(payment: Payment): Promise<Payment> {
