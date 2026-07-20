@@ -618,12 +618,13 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
 
     expect(payment.status).toBe('failed');
     expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
+    expect(order.paymentReference).toBeNull();
     expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
     expect(managerSave).toHaveBeenCalledWith(payment);
     expect(paymentEventsServiceMock.publishPaymentStatusUpdated).toHaveBeenCalledWith(payment);
   });
 
-  it('non-card (promptpay) webhook+GET fail cancels order and restores stock', async () => {
+  it('promptpay webhook+GET fail keeps PENDING_PAYMENT for new QR retry (no stock restore)', async () => {
     service = await compileService('skey_test');
     const order = {
       id: 'ord-pp-1',
@@ -649,12 +650,9 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
     });
 
     expect(payment.status).toBe('failed');
-    expect(order.status).toBe(OrderStatus.CANCELLED);
-    expect(inventoryService.restoreOrderStock).toHaveBeenCalledWith(
-      'ord-pp-1',
-      expect.anything(),
-      'Payment failed',
-    );
+    expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
+    expect(order.paymentReference).toBeNull();
+    expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
   });
 
   it('GET charge fail causes no mutation (unavailable boundary)', async () => {
@@ -806,7 +804,7 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
     warnSpy.mockRestore();
   });
 
-  it('PromptPay QR expiry still cancels and restores stock', async () => {
+  it('PromptPay QR expiry fails payment only and keeps order pending for new QR', async () => {
     service = await compileService('skey_test');
     const createdAt = new Date(Date.now() - 20 * 60 * 1000);
     const payment = {
@@ -814,6 +812,7 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
       orderId: 'ord-qr-exp',
       status: 'pending',
       paymentMethod: 'promptpay',
+      omiseChargeId: 'chrg_qr_exp',
       createdAt,
       expiresAt: null,
     } as Payment;
@@ -823,20 +822,20 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
       paymentReference: 'chrg_qr_exp',
     };
     orderRepository.findOne.mockResolvedValue(order);
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ id: 'chrg_qr_exp', status: 'expired' }),
+    });
 
     const updated = await service.expirePendingQrPaymentIfNeeded(payment);
 
     expect(updated.status).toBe('failed');
-    expect(order.status).toBe(OrderStatus.CANCELLED);
+    expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
     expect(order.paymentReference).toBeNull();
-    expect(inventoryService.restoreOrderStock).toHaveBeenCalledWith(
-      'ord-qr-exp',
-      expect.anything(),
-      'QR payment expired',
-    );
+    expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
   });
 
-  it('QR cancel nulls paymentReference so late webhook cannot invent paid', async () => {
+  it('QR expire nulls paymentReference so late webhook cannot invent paid', async () => {
     service = await compileService('skey_test');
     const chargeId = 'chrg_qr_orphan';
     const createdAt = new Date(Date.now() - 20 * 60 * 1000);
@@ -845,6 +844,7 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
       orderId: 'ord-qr-orphan',
       status: 'pending',
       paymentMethod: 'promptpay',
+      omiseChargeId: chargeId,
       createdAt,
       expiresAt: null,
     } as Payment;
@@ -854,9 +854,13 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
       paymentReference: chargeId,
     };
     orderRepository.findOne.mockResolvedValue(order);
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ id: chargeId, status: 'expired' }),
+    });
 
     await service.expirePendingQrPaymentIfNeeded(payment);
-    expect(order.status).toBe(OrderStatus.CANCELLED);
+    expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
     expect(order.paymentReference).toBeNull();
 
     // After clear, webhook lookup by paymentReference finds no order (orphan warn+return).
@@ -870,7 +874,7 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
     });
 
     expect(warnSpy).toHaveBeenCalledWith(`No order for Omise charge ${chargeId}`);
-    expect(order.status).toBe(OrderStatus.CANCELLED);
+    expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
     expect(global.fetch).not.toHaveBeenCalled();
     warnSpy.mockRestore();
   });
@@ -1629,13 +1633,14 @@ describe('PaymentsService cancelStaleUnpaidOrders (AC-019–021)', () => {
     expect(paymentRepository.manager.transaction).not.toHaveBeenCalled();
   });
 
-  it('keeps QR finalizeExpiredPayment path callable (AC-020 coexistence)', async () => {
+  it('keeps QR finalizeExpiredPayment path callable without cancelling order (AC-020)', async () => {
     const createdAt = new Date(NOW.getTime() - 20 * 60 * 1000);
     const payment = {
       id: 'pay-qr-coexist',
       orderId: 'ord-qr-coexist',
       status: 'pending',
       paymentMethod: 'promptpay',
+      omiseChargeId: 'chrg_qr_coexist',
       createdAt,
       expiresAt: null,
     } as Payment;
@@ -1645,17 +1650,17 @@ describe('PaymentsService cancelStaleUnpaidOrders (AC-019–021)', () => {
       paymentReference: 'chrg_qr_coexist',
     };
     orderRepository.findOne.mockResolvedValue(order);
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ id: 'chrg_qr_coexist', status: 'expired' }),
+    });
 
     const updated = await service.expirePendingQrPaymentIfNeeded(payment);
 
     expect(updated.status).toBe('failed');
-    expect(order.status).toBe(OrderStatus.CANCELLED);
+    expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
     expect(order.paymentReference).toBeNull();
-    expect(inventoryService.restoreOrderStock).toHaveBeenCalledWith(
-      'ord-qr-coexist',
-      expect.anything(),
-      'QR payment expired',
-    );
+    expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
     expect(typeof service.expirePendingQrPayments).toBe('function');
     expect(typeof service.cancelStaleUnpaidOrders).toBe('function');
   });

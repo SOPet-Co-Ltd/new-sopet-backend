@@ -125,8 +125,9 @@ export class PaymentsService {
   }
 
   /**
-   * Shared cancel+stock-restore transaction used by QR finalize and 24h unpaid cancel.
-   * Eligibility remains at the call sites so QR expiresAt and order.createdAt clocks stay separate.
+   * Shared cancel+stock-restore transaction used by 24h unpaid cancel.
+   * QR ~15m expiry fails the payment only (see finalizeExpiredPayment) so the customer can
+   * create a new QR while the order remains pending_payment within the 24h window.
    */
   private async cancelOrderRestoreStockAndFailPayments(
     order: Order,
@@ -157,6 +158,10 @@ export class PaymentsService {
     }
   }
 
+  /**
+   * PromptPay QR window elapsed: mark payment failed and clear paymentReference, but keep the
+   * order pending_payment so the customer can createPayment for a new QR until the 24h job.
+   */
   private async finalizeExpiredPayment(payment: Payment): Promise<Payment> {
     const order = await this.orderRepository.findOne({ where: { id: payment.orderId } });
     if (!order) {
@@ -171,13 +176,32 @@ export class PaymentsService {
       return payment;
     }
 
-    await this.cancelOrderRestoreStockAndFailPayments(order, [payment], 'QR payment expired');
+    const chargeId = payment.omiseChargeId ?? order.paymentReference;
+
+    await this.paymentRepository.manager.transaction(async (manager) => {
+      payment.status = 'failed';
+      await manager.save(payment);
+
+      if (
+        order.paymentReference &&
+        (!payment.omiseChargeId || order.paymentReference === payment.omiseChargeId)
+      ) {
+        order.paymentReference = null;
+        await manager.save(order);
+      }
+    });
+
+    if (chargeId && this.omiseSecretKey) {
+      await this.cancelOmiseChargeBestEffort(chargeId, payment.paymentMethod);
+    }
+
+    await this.paymentEventsService.publishPaymentStatusUpdated(payment);
     return payment;
   }
 
   /**
    * Cancel PENDING_PAYMENT orders older than unpaidOrderCancelAfterMs with no paid payment.
-   * Reuses the same cancel+stock-restore transaction pattern as finalizeExpiredPayment.
+   * This is the order-level 24h hygiene path (distinct from QR ~15m payment expiry).
    */
   async cancelStaleUnpaidOrders(now: Date = new Date()): Promise<number> {
     const cutoff = new Date(now.getTime() - this.getUnpaidOrderCancelAfterMs());
@@ -1098,26 +1122,21 @@ export class PaymentsService {
     }
 
     if (payload.key === 'charge.fail' || chargeStatus === 'failed') {
-      const isCreditCard = payment.paymentMethod === PaymentMethod.CREDIT_CARD;
-
       await this.paymentRepository.manager.transaction(async (manager) => {
         payment.status = 'failed';
         await manager.save(payment);
 
-        // UD-001: card/3DS fail keeps PENDING_PAYMENT so same-order retry works; no stock restore.
-        if (!isCreditCard) {
-          order.status = OrderStatus.CANCELLED;
+        // Keep PENDING_PAYMENT for card and PromptPay so same-order retry / new QR works within
+        // the 24h unpaid window. Stock restore happens only via cancelStaleUnpaidOrders.
+        if (order.paymentReference === charge.id) {
+          order.paymentReference = null;
           await manager.save(order);
-
-          await this.inventoryService.restoreOrderStock(order.id, manager, 'Payment failed');
         }
       });
       await this.paymentEventsService.publishPaymentStatusUpdated(payment);
-      if (isCreditCard) {
-        this.logger.log(
-          `Credit card payment ${payment.id} failed; order ${order.id} left PENDING_PAYMENT`,
-        );
-      }
+      this.logger.log(
+        `Payment ${payment.id} failed; order ${order.id} left PENDING_PAYMENT for retry`,
+      );
     }
   }
 

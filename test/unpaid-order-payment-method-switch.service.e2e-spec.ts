@@ -621,11 +621,12 @@ describe('Unpaid order payment method switch (service-integration-e2e)', () => {
     expect(finalized.status).toBe('failed');
 
     const qrOrderAfter = await orderRepo.findOneByOrFail({ id: qrOrder.id });
-    expect(qrOrderAfter.status).toBe(OrderStatus.CANCELLED);
+    expect(qrOrderAfter.status).toBe(OrderStatus.PENDING_PAYMENT);
+    expect(qrOrderAfter.paymentReference).toBeNull();
 
     const qrStockAfter = (await variantRepo.findOneByOrFail({ id: qrCatalog.variant.id }))
       .stockQuantity;
-    expect(qrStockAfter).toBe(qrStockBefore + 1);
+    expect(qrStockAfter).toBe(qrStockBefore);
 
     expect(typeof paymentsService.expirePendingQrPayments).toBe('function');
     expect(typeof paymentsService.cancelStaleUnpaidOrders).toBe('function');
