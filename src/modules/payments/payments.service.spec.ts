@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
@@ -25,6 +25,45 @@ const payoutsServiceMock = {
 const storesServiceMock = {
   handleOmiseRecipientWebhook: jest.fn(),
 };
+
+/** EntityManager mock for Phase B FOR UPDATE createCharge path. */
+function createPhaseBManagerMock(deps: {
+  orderRepository: { findOne: jest.Mock; save: jest.Mock };
+  paymentRepository: {
+    create: jest.Mock;
+    save: jest.Mock;
+    findOne: jest.Mock;
+    find: jest.Mock;
+  };
+}) {
+  return {
+    findOne: jest.fn((entity: unknown, options?: unknown): Promise<unknown> => {
+      if (entity === Order) {
+        return Promise.resolve(deps.orderRepository.findOne(options) as unknown);
+      }
+      if (entity === Payment) {
+        return Promise.resolve(deps.paymentRepository.findOne(options) as unknown);
+      }
+      return Promise.resolve(null);
+    }),
+    find: jest.fn((entity: unknown, options?: unknown): Promise<unknown[]> => {
+      if (entity === Payment) {
+        return Promise.resolve(deps.paymentRepository.find(options) as unknown[]);
+      }
+      return Promise.resolve([]);
+    }),
+    create: jest.fn(
+      (_entity: unknown, data: unknown): Payment =>
+        deps.paymentRepository.create(data as Payment) as Payment,
+    ),
+    save: jest.fn((entity: { orderId?: string }): Promise<unknown> => {
+      if (entity && typeof entity === 'object' && 'orderId' in entity) {
+        return Promise.resolve(deps.paymentRepository.save(entity) as unknown);
+      }
+      return Promise.resolve(deps.orderRepository.save(entity) as unknown);
+    }),
+  };
+}
 
 describe('PaymentsService guest access', () => {
   let service: PaymentsService;
@@ -323,7 +362,17 @@ describe('PaymentsService createCharge return_uri', () => {
 
   function parseChargeBody(): Record<string, unknown> {
     expect(global.fetch).toHaveBeenCalled();
-    const [, init] = (global.fetch as jest.Mock).mock.calls[0] as [string, RequestInit];
+    const createCall = (global.fetch as jest.Mock).mock.calls.find(
+      ([url]: [string]) =>
+        typeof url === 'string' &&
+        url.includes('/charges') &&
+        !url.includes('/expire') &&
+        !url.includes('/reverse'),
+    ) as [string, RequestInit] | undefined;
+    if (!createCall) {
+      throw new Error('expected Omise create charge fetch call');
+    }
+    const [, init] = createCall;
     const rawBody = init.body;
     if (typeof rawBody !== 'string') {
       throw new Error(`expected string charge body, got ${typeof rawBody}`);
@@ -333,6 +382,10 @@ describe('PaymentsService createCharge return_uri', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    paymentRepository.manager.transaction.mockImplementation(
+      async (cb: (manager: ReturnType<typeof createPhaseBManagerMock>) => Promise<unknown>) =>
+        cb(createPhaseBManagerMock({ orderRepository, paymentRepository })),
+    );
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
       json: () =>
@@ -398,7 +451,7 @@ describe('PaymentsService createCharge return_uri', () => {
     });
   });
 
-  it('omits return_uri for PromptPay createCharge', async () => {
+  it('omits return_uri for PromptPay createCharge and sets Omise expires_at', async () => {
     service = await compileService(STOREFRONT_ORIGIN);
 
     await service.createCharge({
@@ -412,6 +465,8 @@ describe('PaymentsService createCharge return_uri', () => {
     const body = parseChargeBody();
     expect(body).not.toHaveProperty('return_uri');
     expect(body.source).toEqual({ type: 'promptpay' });
+    expect(typeof body.expires_at).toBe('string');
+    expect(new Date(body.expires_at as string).getTime()).toBeGreaterThan(Date.now());
   });
 
   it('does not call Omise (no return_uri leak) for COD', async () => {
@@ -563,12 +618,13 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
 
     expect(payment.status).toBe('failed');
     expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
+    expect(order.paymentReference).toBeNull();
     expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
     expect(managerSave).toHaveBeenCalledWith(payment);
     expect(paymentEventsServiceMock.publishPaymentStatusUpdated).toHaveBeenCalledWith(payment);
   });
 
-  it('non-card (promptpay) webhook+GET fail cancels order and restores stock', async () => {
+  it('promptpay webhook+GET fail keeps PENDING_PAYMENT for new QR retry (no stock restore)', async () => {
     service = await compileService('skey_test');
     const order = {
       id: 'ord-pp-1',
@@ -594,12 +650,9 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
     });
 
     expect(payment.status).toBe('failed');
-    expect(order.status).toBe(OrderStatus.CANCELLED);
-    expect(inventoryService.restoreOrderStock).toHaveBeenCalledWith(
-      'ord-pp-1',
-      expect.anything(),
-      'Payment failed',
-    );
+    expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
+    expect(order.paymentReference).toBeNull();
+    expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
   });
 
   it('GET charge fail causes no mutation (unavailable boundary)', async () => {
@@ -684,7 +737,74 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
     expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
   });
 
-  it('PromptPay QR expiry still cancels and restores stock', async () => {
+  it('ignores charge.complete when order is already CANCELLED (no invent-paid)', async () => {
+    service = await compileService('skey_test');
+    const order = {
+      id: 'ord-cancelled-complete',
+      status: OrderStatus.CANCELLED,
+      paymentReference: CHARGE_ID,
+    };
+    const payment = {
+      id: 'pay-cancelled-complete',
+      orderId: 'ord-cancelled-complete',
+      status: 'failed',
+      paymentMethod: 'promptpay',
+    };
+    orderRepository.findOne.mockResolvedValue(order);
+    paymentRepository.findOne.mockResolvedValue(payment);
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    global.fetch = jest.fn();
+
+    await service.handleWebhook({
+      key: 'charge.complete',
+      data: { object: 'charge', id: CHARGE_ID, status: 'successful' },
+    });
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      `Order ${order.id} is ${OrderStatus.CANCELLED} — ignoring charge.complete webhook`,
+    );
+    expect(order.status).toBe(OrderStatus.CANCELLED);
+    expect(payment.status).toBe('failed');
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(paymentRepository.manager.transaction).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('ignores charge.complete when order is already REFUNDED (no invent-paid)', async () => {
+    service = await compileService('skey_test');
+    const order = {
+      id: 'ord-refunded-complete',
+      status: OrderStatus.REFUNDED,
+      paymentReference: CHARGE_ID,
+    };
+    // Payment not marked paid yet — exercises terminal-status guard (not already-paid early return).
+    const payment = {
+      id: 'pay-refunded-complete',
+      orderId: 'ord-refunded-complete',
+      status: 'pending',
+      paymentMethod: 'credit_card',
+    };
+    orderRepository.findOne.mockResolvedValue(order);
+    paymentRepository.findOne.mockResolvedValue(payment);
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    global.fetch = jest.fn();
+
+    await service.handleWebhook({
+      key: 'charge.complete',
+      data: { object: 'charge', id: CHARGE_ID, status: 'successful' },
+    });
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      `Order ${order.id} is ${OrderStatus.REFUNDED} — ignoring charge.complete webhook`,
+    );
+    expect(order.status).toBe(OrderStatus.REFUNDED);
+    expect(payment.status).toBe('pending');
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(paymentRepository.manager.transaction).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('PromptPay QR expiry fails payment only and keeps order pending for new QR', async () => {
     service = await compileService('skey_test');
     const createdAt = new Date(Date.now() - 20 * 60 * 1000);
     const payment = {
@@ -692,24 +812,71 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
       orderId: 'ord-qr-exp',
       status: 'pending',
       paymentMethod: 'promptpay',
+      omiseChargeId: 'chrg_qr_exp',
       createdAt,
       expiresAt: null,
     } as Payment;
     const order = {
       id: 'ord-qr-exp',
       status: OrderStatus.PENDING_PAYMENT,
+      paymentReference: 'chrg_qr_exp',
     };
     orderRepository.findOne.mockResolvedValue(order);
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ id: 'chrg_qr_exp', status: 'expired' }),
+    });
 
     const updated = await service.expirePendingQrPaymentIfNeeded(payment);
 
     expect(updated.status).toBe('failed');
-    expect(order.status).toBe(OrderStatus.CANCELLED);
-    expect(inventoryService.restoreOrderStock).toHaveBeenCalledWith(
-      'ord-qr-exp',
-      expect.anything(),
-      'QR payment expired',
-    );
+    expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
+    expect(order.paymentReference).toBeNull();
+    expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
+  });
+
+  it('QR expire nulls paymentReference so late webhook cannot invent paid', async () => {
+    service = await compileService('skey_test');
+    const chargeId = 'chrg_qr_orphan';
+    const createdAt = new Date(Date.now() - 20 * 60 * 1000);
+    const payment = {
+      id: 'pay-qr-orphan',
+      orderId: 'ord-qr-orphan',
+      status: 'pending',
+      paymentMethod: 'promptpay',
+      omiseChargeId: chargeId,
+      createdAt,
+      expiresAt: null,
+    } as Payment;
+    const order = {
+      id: 'ord-qr-orphan',
+      status: OrderStatus.PENDING_PAYMENT,
+      paymentReference: chargeId,
+    };
+    orderRepository.findOne.mockResolvedValue(order);
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ id: chargeId, status: 'expired' }),
+    });
+
+    await service.expirePendingQrPaymentIfNeeded(payment);
+    expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
+    expect(order.paymentReference).toBeNull();
+
+    // After clear, webhook lookup by paymentReference finds no order (orphan warn+return).
+    orderRepository.findOne.mockResolvedValue(null);
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    global.fetch = jest.fn();
+
+    await service.handleWebhook({
+      key: 'charge.complete',
+      data: { object: 'charge', id: chargeId, status: 'successful' },
+    });
+
+    expect(warnSpy).toHaveBeenCalledWith(`No order for Omise charge ${chargeId}`);
+    expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
+    expect(global.fetch).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 });
 
@@ -763,6 +930,7 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
               if (key === 'omise.publicKey') return 'pkey_test';
               if (key === 'app.storefrontUrl') return STOREFRONT_ORIGIN;
               if (key === 'payment.qrExpiryMinutes') return 15;
+              if (key === 'payment.omiseCancelTimeoutMs') return 4000;
               return '';
             }),
           },
@@ -828,14 +996,26 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
       }
       return Promise.resolve(p);
     });
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: () =>
-        Promise.resolve({
-          id: NEW_CHARGE_ID,
-          status: 'pending',
-          authorize_uri: 'https://pay.omise.co/new',
-        }),
+    paymentRepository.manager.transaction.mockImplementation(
+      async (cb: (manager: ReturnType<typeof createPhaseBManagerMock>) => Promise<unknown>) =>
+        cb(createPhaseBManagerMock({ orderRepository, paymentRepository })),
+    );
+    global.fetch = jest.fn().mockImplementation((url: string) => {
+      if (typeof url === 'string' && (url.includes('/expire') || url.includes('/reverse'))) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ id: OLD_CHARGE_ID, status: 'expired' }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            id: NEW_CHARGE_ID,
+            status: 'pending',
+            authorize_uri: 'https://pay.omise.co/new',
+          }),
+      });
     });
     service = await compileService();
   });
@@ -859,19 +1039,27 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
     expect(paymentEventsServiceMock.publishPaymentStatusUpdated).toHaveBeenCalledWith(prior);
     expect(result.paymentId).toBe(NEW_PAYMENT_ID);
     expect(result.paymentId).not.toBe(PRIOR_PAYMENT_ID);
-    expect(global.fetch).toHaveBeenCalledTimes(1);
-    const [fetchUrl] = (global.fetch as jest.Mock).mock.calls[0] as [string, RequestInit];
-    expect(fetchUrl).toContain('/charges');
+    const paths = (global.fetch as jest.Mock).mock.calls.map((c: [string]) => c[0]);
+    expect(paths.some((p) => p.includes('/expire') || p.includes('/reverse'))).toBe(true);
+    expect(
+      paths.some(
+        (p) => p.includes('/charges') && !p.includes('/expire') && !p.includes('/reverse'),
+      ),
+    ).toBe(true);
     expect(order.paymentReference).toBe(NEW_CHARGE_ID);
+    expect(order.paymentMethod).toBe('credit_card');
     expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
     expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
+    const savedPayments = paymentRepository.save.mock.calls.map((c: [Payment]) => c[0]);
+    const created = savedPayments.find((p) => p.id === NEW_PAYMENT_ID);
+    expect(created?.omiseChargeId).toBe(NEW_CHARGE_ID);
   });
 
   it('pending card + promptpay → prior failed + new PromptPay charge', async () => {
     const prior = priorCardPending();
     paymentRepository.find.mockResolvedValue([prior]);
-    // PromptPay resume findOne: no matching PromptPay pending
-    paymentRepository.findOne.mockResolvedValue(null);
+    // Eligibility latest-payment findOne: prior pending is eligible
+    paymentRepository.findOne.mockResolvedValue(prior);
 
     const result = await service.createCharge({
       orderId: order.id,
@@ -884,21 +1072,32 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
     expect(prior.status).toBe('failed');
     expect(result.paymentId).toBe(NEW_PAYMENT_ID);
     expect(result.paymentId).not.toBe(PRIOR_PAYMENT_ID);
-    expect(global.fetch).toHaveBeenCalledTimes(1);
-    const [, init] = (global.fetch as jest.Mock).mock.calls[0] as [string, RequestInit];
-    const rawBody = init.body;
+    const paths = (global.fetch as jest.Mock).mock.calls.map((c: [string]) => c[0]);
+    expect(
+      paths.some(
+        (p) => p.includes('/charges') && !p.includes('/expire') && !p.includes('/reverse'),
+      ),
+    ).toBe(true);
+    const createCall = (global.fetch as jest.Mock).mock.calls.find(
+      ([url]: [string]) =>
+        url.includes('/charges') && !url.includes('/expire') && !url.includes('/reverse'),
+    ) as [string, RequestInit];
+    const rawBody = createCall[1].body;
     if (typeof rawBody !== 'string') {
       throw new Error(`expected string charge body, got ${typeof rawBody}`);
     }
     const body = JSON.parse(rawBody) as Record<string, unknown>;
     expect(body.source).toEqual({ type: 'promptpay' });
     expect(order.paymentReference).toBe(NEW_CHARGE_ID);
+    expect(order.paymentMethod).toBe('promptpay');
     expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
   });
 
-  it('PromptPay pending resume → same id, no new POST (same-value)', async () => {
+  it('PromptPay pending restart → new paymentId + prior failed + new Omise POST (no soft-resume)', async () => {
+    // Amended unpaid-switch contract (BE-UPMS-001): never soft-resume same pending PromptPay.
     const prior = priorPromptPayPending();
     paymentRepository.findOne.mockResolvedValue(prior);
+    paymentRepository.find.mockResolvedValue([prior]);
 
     const result = await service.createCharge({
       orderId: order.id,
@@ -908,15 +1107,205 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
       customerId: 'cust-1',
     });
 
-    expect(result.paymentId).toBe(PRIOR_PAYMENT_ID);
-    expect(global.fetch).not.toHaveBeenCalled();
-    expect(paymentRepository.find).not.toHaveBeenCalled();
-    expect(prior.status).toBe('pending');
+    expect(result.paymentId).toBe(NEW_PAYMENT_ID);
+    expect(result.paymentId).not.toBe(PRIOR_PAYMENT_ID);
+    expect(prior.status).toBe('failed');
+    const paths = (global.fetch as jest.Mock).mock.calls.map((c: [string]) => c[0]);
+    expect(
+      paths.some(
+        (p) => p.includes('/charges') && !p.includes('/expire') && !p.includes('/reverse'),
+      ),
+    ).toBe(true);
     expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
+    expect(paymentRepository.findOne).toHaveBeenCalledWith({
+      where: { orderId: order.id },
+      order: { createdAt: 'DESC' },
+    });
   });
 
-  it('does not call Omise reverse on supersede (rollback-only visibility — local only)', async () => {
+  it('Omise createCharge rejects with ORDER_NOT_PAYABLE when latest payment is paid', async () => {
+    const paidLatest = {
+      id: 'pay-paid-latest',
+      orderId: order.id,
+      amount: 300,
+      currency: 'THB',
+      status: 'paid',
+      paymentMethod: 'credit_card',
+      createdAt: new Date('2026-07-15T12:00:00.000Z'),
+    } as Payment;
+    paymentRepository.findOne.mockResolvedValue(paidLatest);
+
+    await expect(
+      service.createCharge({
+        orderId: order.id,
+        amount: 300,
+        currency: 'THB',
+        paymentMethod: 'credit_card',
+        omiseToken: 'tokn_new_1',
+        customerId: 'cust-1',
+      }),
+    ).rejects.toMatchObject({ response: { code: 'ORDER_NOT_PAYABLE' } });
+
+    expect(paymentRepository.create).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(paymentRepository.findOne).toHaveBeenCalledWith({
+      where: { orderId: order.id },
+      order: { createdAt: 'DESC' },
+    });
+  });
+
+  it('COD createCharge rejects with ORDER_NOT_PAYABLE when latest payment is paid', async () => {
+    const paidLatest = {
+      id: 'pay-paid-latest-cod',
+      orderId: order.id,
+      amount: 300,
+      currency: 'THB',
+      status: 'paid',
+      paymentMethod: 'promptpay',
+      createdAt: new Date('2026-07-15T12:00:00.000Z'),
+    } as Payment;
+    paymentRepository.findOne.mockResolvedValue(paidLatest);
+
+    await expect(
+      service.createCharge({
+        orderId: order.id,
+        amount: 300,
+        currency: 'THB',
+        paymentMethod: 'cod',
+        customerId: 'cust-1',
+      }),
+    ).rejects.toMatchObject({ response: { code: 'ORDER_NOT_PAYABLE' } });
+
+    expect(paymentRepository.create).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('COD createCharge rejects with ORDER_NOT_PAYABLE when order is not pending_payment', async () => {
+    order.status = OrderStatus.PAID;
+    paymentRepository.findOne.mockResolvedValue(null);
+
+    await expect(
+      service.createCharge({
+        orderId: order.id,
+        amount: 300,
+        currency: 'THB',
+        paymentMethod: 'cod',
+        customerId: 'cust-1',
+      }),
+    ).rejects.toMatchObject({ response: { code: 'ORDER_NOT_PAYABLE' } });
+
+    expect(paymentRepository.create).not.toHaveBeenCalled();
+  });
+
+  it('attempts Omise expire/reverse on supersede before create (fail-open still creates)', async () => {
+    // Amended unpaid-switch contract (BE-UPMS-002): cancel-before-create + fail-open.
     const prior = priorCardPending();
+    paymentRepository.findOne.mockResolvedValue(prior);
+    paymentRepository.find.mockResolvedValue([prior]);
+
+    const callOrder: string[] = [];
+    paymentRepository.manager.transaction.mockImplementation(
+      async (cb: (manager: ReturnType<typeof createPhaseBManagerMock>) => Promise<unknown>) => {
+        callOrder.push('phase_b_transaction');
+        return cb(createPhaseBManagerMock({ orderRepository, paymentRepository }));
+      },
+    );
+    global.fetch = jest.fn().mockImplementation((url: string) => {
+      if (typeof url === 'string' && (url.includes('/expire') || url.includes('/reverse'))) {
+        callOrder.push('phase_a_cancel');
+        return Promise.resolve({
+          ok: false,
+          json: () => Promise.resolve({ message: 'expire unsupported' }),
+        });
+      }
+      callOrder.push('omise_create');
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            id: NEW_CHARGE_ID,
+            status: 'pending',
+            authorize_uri: 'https://pay.omise.co/new',
+          }),
+      });
+    });
+
+    const warnSpy = jest.spyOn(
+      (service as unknown as { logger: { warn: (...a: unknown[]) => void } }).logger,
+      'warn',
+    );
+
+    const result = await service.createCharge({
+      orderId: order.id,
+      amount: 300,
+      currency: 'THB',
+      paymentMethod: 'credit_card',
+      omiseToken: 'tokn_new_1',
+      customerId: 'cust-1',
+    });
+
+    const paths = (global.fetch as jest.Mock).mock.calls.map((c: [string]) => c[0]);
+    expect(paths.some((p) => p.includes('/expire') || p.includes('/reverse'))).toBe(true);
+    expect(result.paymentId).toBe(NEW_PAYMENT_ID);
+    expect(prior.status).toBe('failed');
+    expect(
+      paths.some(
+        (p) => p.includes('/charges') && !p.includes('/expire') && !p.includes('/reverse'),
+      ),
+    ).toBe(true);
+    expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
+    expect(callOrder.indexOf('phase_a_cancel')).toBeGreaterThanOrEqual(0);
+    expect(callOrder.indexOf('phase_a_cancel')).toBeLessThan(
+      callOrder.indexOf('phase_b_transaction'),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('omise_cancel_fail_open'));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(order.id));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(PRIOR_PAYMENT_ID));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(OLD_CHARGE_ID));
+    warnSpy.mockRestore();
+  });
+
+  it('fail-open: expire 4xx still creates new payment', async () => {
+    const prior = priorPromptPayPending();
+    prior.omiseChargeId = OLD_CHARGE_ID;
+    paymentRepository.findOne.mockResolvedValue(prior);
+    paymentRepository.find.mockResolvedValue([prior]);
+
+    global.fetch = jest.fn().mockImplementation((url: string) => {
+      if (typeof url === 'string' && url.includes('/expire')) {
+        return Promise.resolve({
+          ok: false,
+          json: () => Promise.resolve({ message: 'failed_expire' }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            id: NEW_CHARGE_ID,
+            status: 'pending',
+          }),
+      });
+    });
+
+    const result = await service.createCharge({
+      orderId: order.id,
+      amount: 300,
+      currency: 'THB',
+      paymentMethod: 'promptpay',
+      customerId: 'cust-1',
+    });
+
+    expect(result.paymentId).toBe(NEW_PAYMENT_ID);
+    expect(prior.status).toBe('failed');
+    expect(order.paymentReference).toBe(NEW_CHARGE_ID);
+  });
+
+  it('charge-id resolution: prefers payment.omiseChargeId over order.paymentReference', async () => {
+    const prior = priorCardPending();
+    prior.omiseChargeId = 'chrg_from_payment_column';
+    order.paymentReference = 'chrg_stale_order_ref';
+    paymentRepository.findOne.mockResolvedValue(prior);
     paymentRepository.find.mockResolvedValue([prior]);
 
     await service.createCharge({
@@ -929,8 +1318,95 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
     });
 
     const paths = (global.fetch as jest.Mock).mock.calls.map((c: [string]) => c[0]);
-    expect(paths.some((p) => p.includes('/reverse'))).toBe(false);
-    // MVP orphan: superseded Omise charge is abandoned locally only (ops residual).
+    expect(paths.some((p) => p.includes('/charges/chrg_from_payment_column/'))).toBe(true);
+    expect(paths.some((p) => p.includes('/charges/chrg_stale_order_ref/'))).toBe(false);
+  });
+
+  it('charge-id resolution: cancels order.paymentReference when multi-pending lack omiseChargeId', async () => {
+    const priorA = priorCardPending();
+    const priorB = {
+      ...priorPromptPayPending(),
+      id: 'pay-prior-2',
+    };
+    delete (priorA as { omiseChargeId?: string | null }).omiseChargeId;
+    delete (priorB as { omiseChargeId?: string | null }).omiseChargeId;
+    order.paymentReference = OLD_CHARGE_ID;
+    paymentRepository.findOne.mockResolvedValue(priorB);
+    paymentRepository.find.mockResolvedValue([priorA, priorB]);
+
+    await service.createCharge({
+      orderId: order.id,
+      amount: 300,
+      currency: 'THB',
+      paymentMethod: 'credit_card',
+      omiseToken: 'tokn_new_1',
+      customerId: 'cust-1',
+    });
+
+    const paths = (global.fetch as jest.Mock).mock.calls.map((c: [string]) => c[0]);
+    expect(paths.some((p) => p.includes(`/charges/${OLD_CHARGE_ID}/expire`))).toBe(true);
+    expect(
+      paths.some(
+        (p) => p.includes('/charges') && !p.includes('/expire') && !p.includes('/reverse'),
+      ),
+    ).toBe(true);
+  });
+
+  it('Omise→COD clears order.paymentReference and syncs paymentMethod; omiseChargeId absent', async () => {
+    const prior = priorCardPending();
+    prior.omiseChargeId = OLD_CHARGE_ID;
+    paymentRepository.findOne.mockResolvedValue(prior);
+    paymentRepository.find.mockResolvedValue([prior]);
+
+    const result = await service.createCharge({
+      orderId: order.id,
+      amount: 300,
+      currency: 'THB',
+      paymentMethod: 'cod',
+      customerId: 'cust-1',
+    });
+
+    expect(result.paymentId).toBe(NEW_PAYMENT_ID);
+    expect(prior.status).toBe('failed');
+    expect(order.paymentMethod).toBe('cod');
+    expect(order.paymentReference).toBeNull();
+    const savedPayments = paymentRepository.save.mock.calls.map((c: [Payment]) => c[0]);
+    const created = savedPayments.find((p) => p.id === NEW_PAYMENT_ID);
+    expect(created?.omiseChargeId ?? null).toBeNull();
+    expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
+  });
+
+  it('COD after Omise: orphan webhook for prior charge still warn+return (no invent-paid)', async () => {
+    const prior = priorCardPending();
+    prior.omiseChargeId = OLD_CHARGE_ID;
+    paymentRepository.findOne.mockResolvedValue(prior);
+    paymentRepository.find.mockResolvedValue([prior]);
+
+    await service.createCharge({
+      orderId: order.id,
+      amount: 300,
+      currency: 'THB',
+      paymentMethod: 'cod',
+      customerId: 'cust-1',
+    });
+    expect(order.paymentReference).toBeNull();
+
+    orderRepository.findOne.mockResolvedValue(null);
+    const warnSpy = jest.spyOn(
+      (service as unknown as { logger: { warn: (...a: unknown[]) => void } }).logger,
+      'warn',
+    );
+    global.fetch = jest.fn();
+
+    await service.handleWebhook({
+      key: 'charge.complete',
+      data: { object: 'charge', id: OLD_CHARGE_ID, status: 'successful' },
+    });
+
+    expect(warnSpy).toHaveBeenCalledWith(`No order for Omise charge ${OLD_CHARGE_ID}`);
+    expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
+    expect(global.fetch).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 
   it('late unmatched old charge webhook does not invent paid (shared-state)', async () => {
@@ -983,6 +1459,328 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
       where: { orderId: order.id },
       order: { createdAt: 'DESC' },
     });
+  });
+});
+
+describe('PaymentsService cancelStaleUnpaidOrders (AC-019–021)', () => {
+  let service: PaymentsService;
+  let inventoryService: { restoreOrderStock: jest.Mock };
+  let managerSave: jest.Mock;
+  let configGet: jest.Mock;
+
+  const TWENTY_FIVE_HOURS_MS = 25 * 60 * 60 * 1000;
+  const NOW = new Date('2026-07-20T00:00:00.000Z');
+
+  const orderRepository = {
+    findOne: jest.fn(),
+    find: jest.fn(),
+    save: jest.fn(),
+  };
+  const paymentRepository = {
+    create: jest.fn(<T>(x: T): T => x),
+    save: jest.fn((x: Payment) => Promise.resolve(x)),
+    findOne: jest.fn(),
+    find: jest.fn(),
+    manager: {
+      transaction: jest.fn(),
+    },
+  };
+
+  async function compileService() {
+    inventoryService = { restoreOrderStock: jest.fn().mockResolvedValue(true) };
+    managerSave = jest.fn((entity: unknown) => Promise.resolve(entity));
+    paymentRepository.manager.transaction.mockImplementation(
+      async (cb: (manager: { save: jest.Mock }) => Promise<void>) => {
+        await cb({ save: managerSave });
+      },
+    );
+    configGet = jest.fn((key: string) => {
+      if (key === 'omise.secretKey') return 'skey_test';
+      if (key === 'payment.unpaidOrderCancelAfterMs') return 86_400_000;
+      if (key === 'payment.qrExpiryMinutes') return 15;
+      return '';
+    });
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        PaymentsService,
+        { provide: getRepositoryToken(Payment), useValue: paymentRepository },
+        { provide: getRepositoryToken(Order), useValue: orderRepository },
+        { provide: getRepositoryToken(Customer), useValue: { findOne: jest.fn() } },
+        {
+          provide: getRepositoryToken(SavedPaymentMethod),
+          useValue: { findOne: jest.fn() },
+        },
+        { provide: ConfigService, useValue: { get: configGet } },
+        {
+          provide: NotificationsService,
+          useValue: { notifyOrderPaid: jest.fn() },
+        },
+        { provide: PaymentEventsService, useValue: paymentEventsServiceMock },
+        { provide: InventoryService, useValue: inventoryService },
+        { provide: PayoutsService, useValue: payoutsServiceMock },
+        { provide: StoresService, useValue: storesServiceMock },
+      ],
+    }).compile();
+
+    return module.get(PaymentsService);
+  }
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    jest.useFakeTimers();
+    jest.setSystemTime(NOW);
+    service = await compileService();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('cancels stale unpaid PENDING_PAYMENT and restores stock once', async () => {
+    const staleOrder = {
+      id: 'ord-stale-1',
+      status: OrderStatus.PENDING_PAYMENT,
+      createdAt: new Date(NOW.getTime() - TWENTY_FIVE_HOURS_MS),
+      paymentReference: 'chrg_stale_1',
+    };
+    const pendingPayment = {
+      id: 'pay-stale-1',
+      orderId: 'ord-stale-1',
+      status: 'pending',
+      paymentMethod: 'credit_card',
+    } as Payment;
+
+    orderRepository.find.mockResolvedValue([staleOrder]);
+    paymentRepository.findOne.mockResolvedValue(null);
+    paymentRepository.find.mockResolvedValue([pendingPayment]);
+
+    const cancelled = await service.cancelStaleUnpaidOrders();
+
+    expect(cancelled).toBe(1);
+    expect(staleOrder.status).toBe(OrderStatus.CANCELLED);
+    expect(staleOrder.paymentReference).toBeNull();
+    expect(pendingPayment.status).toBe('failed');
+    expect(inventoryService.restoreOrderStock).toHaveBeenCalledTimes(1);
+    expect(inventoryService.restoreOrderStock).toHaveBeenCalledWith(
+      'ord-stale-1',
+      expect.anything(),
+      'Unpaid order expired',
+    );
+    expect(paymentEventsServiceMock.publishPaymentStatusUpdated).toHaveBeenCalledWith(
+      pendingPayment,
+    );
+  });
+
+  it('skips young unpaid orders within the 24h window', async () => {
+    orderRepository.find.mockResolvedValue([]);
+
+    const cancelled = await service.cancelStaleUnpaidOrders();
+
+    expect(cancelled).toBe(0);
+    const findCall = orderRepository.find.mock.calls[0] as
+      [{ where: { createdAt: unknown; status: unknown } }] | undefined;
+    expect(findCall?.[0].where.createdAt).toBeDefined();
+    expect(findCall?.[0].where.status).toBe(OrderStatus.PENDING_PAYMENT);
+    expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
+  });
+
+  it('skips orders that already have a paid payment', async () => {
+    const staleOrder = {
+      id: 'ord-paid-edge',
+      status: OrderStatus.PENDING_PAYMENT,
+      createdAt: new Date(NOW.getTime() - TWENTY_FIVE_HOURS_MS),
+    };
+    orderRepository.find.mockResolvedValue([staleOrder]);
+    paymentRepository.findOne.mockResolvedValue({
+      id: 'pay-paid',
+      orderId: 'ord-paid-edge',
+      status: 'paid',
+    });
+
+    const cancelled = await service.cancelStaleUnpaidOrders();
+
+    expect(cancelled).toBe(0);
+    expect(staleOrder.status).toBe(OrderStatus.PENDING_PAYMENT);
+    expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
+    expect(paymentRepository.manager.transaction).not.toHaveBeenCalled();
+  });
+
+  it('is idempotent when re-run finds no PENDING_PAYMENT candidates', async () => {
+    orderRepository.find.mockResolvedValue([]);
+
+    const first = await service.cancelStaleUnpaidOrders();
+    const second = await service.cancelStaleUnpaidOrders();
+
+    expect(first).toBe(0);
+    expect(second).toBe(0);
+    expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
+  });
+
+  it('skips candidates that are no longer PENDING_PAYMENT (idempotent guard)', async () => {
+    const candidate = {
+      id: 'ord-already',
+      status: OrderStatus.CANCELLED,
+      createdAt: new Date(NOW.getTime() - TWENTY_FIVE_HOURS_MS),
+    };
+    orderRepository.find.mockResolvedValue([candidate]);
+    paymentRepository.findOne.mockResolvedValue(null);
+
+    const cancelled = await service.cancelStaleUnpaidOrders();
+
+    expect(cancelled).toBe(0);
+    expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
+    expect(paymentRepository.manager.transaction).not.toHaveBeenCalled();
+  });
+
+  it('keeps QR finalizeExpiredPayment path callable without cancelling order (AC-020)', async () => {
+    const createdAt = new Date(NOW.getTime() - 20 * 60 * 1000);
+    const payment = {
+      id: 'pay-qr-coexist',
+      orderId: 'ord-qr-coexist',
+      status: 'pending',
+      paymentMethod: 'promptpay',
+      omiseChargeId: 'chrg_qr_coexist',
+      createdAt,
+      expiresAt: null,
+    } as Payment;
+    const order = {
+      id: 'ord-qr-coexist',
+      status: OrderStatus.PENDING_PAYMENT,
+      paymentReference: 'chrg_qr_coexist',
+    };
+    orderRepository.findOne.mockResolvedValue(order);
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ id: 'chrg_qr_coexist', status: 'expired' }),
+    });
+
+    const updated = await service.expirePendingQrPaymentIfNeeded(payment);
+
+    expect(updated.status).toBe('failed');
+    expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
+    expect(order.paymentReference).toBeNull();
+    expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
+    expect(typeof service.expirePendingQrPayments).toBe('function');
+    expect(typeof service.cancelStaleUnpaidOrders).toBe('function');
+  });
+
+  it('24h cancel nulls paymentReference so late webhook cannot invent paid', async () => {
+    const chargeId = 'chrg_24h_orphan';
+    const staleOrder = {
+      id: 'ord-24h-orphan',
+      status: OrderStatus.PENDING_PAYMENT,
+      createdAt: new Date(NOW.getTime() - TWENTY_FIVE_HOURS_MS),
+      paymentReference: chargeId,
+    };
+    const pendingPayment = {
+      id: 'pay-24h-orphan',
+      orderId: 'ord-24h-orphan',
+      status: 'pending',
+      paymentMethod: 'credit_card',
+    } as Payment;
+
+    orderRepository.find.mockResolvedValue([staleOrder]);
+    paymentRepository.findOne.mockResolvedValue(null);
+    paymentRepository.find.mockResolvedValue([pendingPayment]);
+
+    await service.cancelStaleUnpaidOrders();
+    expect(staleOrder.status).toBe(OrderStatus.CANCELLED);
+    expect(staleOrder.paymentReference).toBeNull();
+
+    orderRepository.findOne.mockResolvedValue(null);
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    global.fetch = jest.fn();
+
+    await service.handleWebhook({
+      key: 'charge.complete',
+      data: { object: 'charge', id: chargeId, status: 'successful' },
+    });
+
+    expect(warnSpy).toHaveBeenCalledWith(`No order for Omise charge ${chargeId}`);
+    expect(staleOrder.status).toBe(OrderStatus.CANCELLED);
+    expect(global.fetch).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('cancels stale order with only failed payments (abandoned card) and restores stock', async () => {
+    const staleOrder = {
+      id: 'ord-failed-only',
+      status: OrderStatus.PENDING_PAYMENT,
+      createdAt: new Date(NOW.getTime() - TWENTY_FIVE_HOURS_MS),
+    };
+    const failedPayment = {
+      id: 'pay-failed',
+      orderId: 'ord-failed-only',
+      status: 'failed',
+      paymentMethod: 'credit_card',
+    } as Payment;
+
+    orderRepository.find.mockResolvedValue([staleOrder]);
+    paymentRepository.findOne.mockResolvedValue(null);
+    paymentRepository.find.mockResolvedValue([failedPayment]);
+
+    const cancelled = await service.cancelStaleUnpaidOrders();
+
+    expect(cancelled).toBe(1);
+    expect(staleOrder.status).toBe(OrderStatus.CANCELLED);
+    expect(failedPayment.status).toBe('failed');
+    expect(inventoryService.restoreOrderStock).toHaveBeenCalledWith(
+      'ord-failed-only',
+      expect.anything(),
+      'Unpaid order expired',
+    );
+  });
+
+  it('reads unpaidOrderCancelAfterMs from payment config', async () => {
+    orderRepository.find.mockResolvedValue([]);
+
+    await service.cancelStaleUnpaidOrders(NOW);
+
+    expect(configGet).toHaveBeenCalledWith('payment.unpaidOrderCancelAfterMs');
+  });
+
+  it('logs and continues the batch when one order cancel fails', async () => {
+    const failingOrder = {
+      id: 'ord-fail',
+      status: OrderStatus.PENDING_PAYMENT,
+      createdAt: new Date(NOW.getTime() - TWENTY_FIVE_HOURS_MS),
+    };
+    const okOrder = {
+      id: 'ord-ok',
+      status: OrderStatus.PENDING_PAYMENT,
+      createdAt: new Date(NOW.getTime() - TWENTY_FIVE_HOURS_MS),
+    };
+    const okPayment = {
+      id: 'pay-ok',
+      orderId: 'ord-ok',
+      status: 'pending',
+      paymentMethod: 'credit_card',
+    } as Payment;
+
+    orderRepository.find.mockResolvedValue([failingOrder, okOrder]);
+    paymentRepository.findOne.mockResolvedValue(null);
+    paymentRepository.find.mockImplementation(({ where }: { where: { orderId: string } }) => {
+      if (where.orderId === 'ord-ok') return Promise.resolve([okPayment]);
+      return Promise.resolve([]);
+    });
+    paymentRepository.manager.transaction
+      .mockRejectedValueOnce(new Error('tx failed'))
+      .mockImplementation(async (cb: (manager: { save: jest.Mock }) => Promise<void>) => {
+        await cb({ save: managerSave });
+      });
+
+    const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+
+    const cancelled = await service.cancelStaleUnpaidOrders();
+
+    expect(cancelled).toBe(1);
+    expect(okOrder.status).toBe(OrderStatus.CANCELLED);
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Failed to cancel stale unpaid order ord-fail',
+      expect.any(String),
+    );
+    errorSpy.mockRestore();
   });
 });
 
