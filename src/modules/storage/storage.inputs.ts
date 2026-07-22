@@ -11,6 +11,7 @@ export const UPLOAD_FOLDERS = [
   'ads',
   'categories',
   'pet-types',
+  'login-images',
 ] as const;
 export type UploadFolder = (typeof UPLOAD_FOLDERS)[number];
 

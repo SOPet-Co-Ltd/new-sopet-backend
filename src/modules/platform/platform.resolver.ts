@@ -11,6 +11,7 @@ import {
 } from 'class-validator';
 import { PlatformService } from './platform.service';
 import {
+  LoginPageImagesType,
   PlatformBannerType,
   PlatformSettingsType,
   PlatformSponsorType,
@@ -22,6 +23,8 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { PlatformBanner } from '../../database/entities/platform-banner.entity';
 import { PlatformSponsor } from '../../database/entities/platform-sponsor.entity';
 import { PlatformAd } from '../../database/entities/platform-ad.entity';
+import { LoginPageImagesSettingsService } from './login-page-images-settings.service';
+import { UpdateLoginPageImagesInput } from './login-page-images.inputs';
 
 @InputType()
 export class CreatePlatformBannerInput {
@@ -259,7 +262,10 @@ export class UpdatePlatformAdInput {
 
 @Resolver()
 export class PlatformResolver {
-  constructor(private readonly platformService: PlatformService) {}
+  constructor(
+    private readonly platformService: PlatformService,
+    private readonly loginPageImagesSettingsService: LoginPageImagesSettingsService,
+  ) {}
 
   @Query(() => [PlatformBannerType])
   @Public()
@@ -310,6 +316,35 @@ export class PlatformResolver {
   @Public()
   platformSettings(): PlatformSettingsType {
     return this.platformService.getSettings();
+  }
+
+  @Query(() => LoginPageImagesType)
+  @Public()
+  async loginPageImages(): Promise<LoginPageImagesType> {
+    return mapLoginPageImages(await this.loginPageImagesSettingsService.get());
+  }
+
+  @Mutation(() => LoginPageImagesType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async updateLoginPageImages(
+    @Args('input') input: UpdateLoginPageImagesInput,
+  ): Promise<LoginPageImagesType> {
+    return mapLoginPageImages(await this.loginPageImagesSettingsService.updateConfigured(input));
+  }
+
+  @Mutation(() => LoginPageImagesType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async clearLoginPageDesktopImage(): Promise<LoginPageImagesType> {
+    return mapLoginPageImages(await this.loginPageImagesSettingsService.clearDesktop());
+  }
+
+  @Mutation(() => LoginPageImagesType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async clearLoginPageMobileImage(): Promise<LoginPageImagesType> {
+    return mapLoginPageImages(await this.loginPageImagesSettingsService.clearMobile());
   }
 
   @Mutation(() => PlatformBannerType)
@@ -450,5 +485,17 @@ function mapAd(ad: PlatformAd): PlatformAdType {
     isActive: ad.isActive,
     startsAt: ad.startsAt,
     endsAt: ad.endsAt,
+  };
+}
+
+function mapLoginPageImages(value: {
+  desktopImageUrl: string | null;
+  mobileImageUrl: string | null;
+  altText: string | null;
+}): LoginPageImagesType {
+  return {
+    desktopImageUrl: value.desktopImageUrl,
+    mobileImageUrl: value.mobileImageUrl,
+    altText: value.altText,
   };
 }
