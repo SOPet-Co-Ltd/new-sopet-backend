@@ -66,12 +66,35 @@ describe('LoginPageImagesSettingsService', () => {
   };
 
   it('returns exact null triple when settings row is missing (no merge-defaults)', async () => {
-    const { service, findOne } = createService();
+    const { service, findOne, set } = createService();
 
     const result = await service.get();
 
     expect(findOne).toHaveBeenCalledWith({ where: { key: SETTINGS_KEY } });
     expect(result).toEqual(EMPTY_LOGIN_PAGE_IMAGES);
+    expect(set).toHaveBeenCalledWith(
+      CACHE_KEY,
+      JSON.stringify(EMPTY_LOGIN_PAGE_IMAGES),
+      CACHE_TTL_SECONDS,
+    );
+  });
+
+  it('populates Redis from DB on get cache miss (TTL 60s)', async () => {
+    const configured: LoginPageImagesValue = {
+      desktopImageUrl: DESKTOP_URL,
+      mobileImageUrl: MOBILE_URL,
+      altText: 'Welcome',
+    };
+    const { service, findOne, set, get } = createService({
+      row: { key: SETTINGS_KEY, value: configured },
+    });
+
+    const result = await service.get();
+
+    expect(get).toHaveBeenCalledWith(CACHE_KEY);
+    expect(findOne).toHaveBeenCalledWith({ where: { key: SETTINGS_KEY } });
+    expect(result).toEqual(configured);
+    expect(set).toHaveBeenCalledWith(CACHE_KEY, JSON.stringify(configured), CACHE_TTL_SECONDS);
   });
 
   it('clearDesktop persists empty DTO and overwrites Redis cache', async () => {
@@ -302,7 +325,7 @@ describe('LoginPageImagesSettingsService', () => {
       mobileImageUrl: null,
       altText: null,
     };
-    const { service, findOne, get } = createService({
+    const { service, findOne, get, set } = createService({
       row: { key: SETTINGS_KEY, value: configured },
     });
     get.mockRejectedValueOnce(new Error('redis down'));
@@ -311,5 +334,6 @@ describe('LoginPageImagesSettingsService', () => {
 
     expect(findOne).toHaveBeenCalledWith({ where: { key: SETTINGS_KEY } });
     expect(result).toEqual(configured);
+    expect(set).toHaveBeenCalledWith(CACHE_KEY, JSON.stringify(configured), CACHE_TTL_SECONDS);
   });
 });

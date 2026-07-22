@@ -48,7 +48,9 @@ export class LoginPageImagesSettingsService {
     }
 
     const row = await this.settingsRepository.findOne({ where: { key: SETTINGS_KEY } });
-    return this.normalizeValue(row?.value);
+    const value = this.normalizeValue(row?.value);
+    await this.writeCache(value);
+    return value;
   }
 
   async updateConfigured(
