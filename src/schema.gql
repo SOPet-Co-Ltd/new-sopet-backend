@@ -563,6 +563,12 @@ input InviteVendorInput {
   email: String!
 }
 
+type LoginPageImagesType {
+  altText: String
+  desktopImageUrl: String
+  mobileImageUrl: String
+}
+
 type MeResult {
   customer: CustomerProfile
   user: UserProfile
@@ -598,6 +604,8 @@ type Mutation {
   cancelVendorOrder(orderId: String!): OrderType!
   changeCustomerPhone(input: ChangeCustomerPhoneInput!): CustomerAuthPayload!
   changePassword(input: ChangePasswordInput!): MessagePayload!
+  clearLoginPageDesktopImage: LoginPageImagesType!
+  clearLoginPageMobileImage: LoginPageImagesType!
   confirmGuestOrderDelivered(input: ConfirmOrderDeliveredInput!): OrderType!
   confirmOrderDelivered(input: ConfirmOrderDeliveredInput!): OrderType!
   createAddress(input: CreateAddressInput!): SavedAddressType!
@@ -691,6 +699,7 @@ type Mutation {
   updateCartItem(input: UpdateCartItemInput!): CartType!
   updateCategory(input: UpdateCategoryInput!): CategoryType!
   updateCustomerAsAdmin(input: UpdateCustomerAsAdminInput!): AdminCustomerType!
+  updateLoginPageImages(input: UpdateLoginPageImagesInput!): LoginPageImagesType!
   updateOrderStatus(input: UpdateOrderStatusInput!): OrderType!
   updatePetType(input: UpdatePetTypeInput!): PetTypeType!
   updatePlatformAd(input: UpdatePlatformAdInput!): PlatformAdType!
@@ -1113,6 +1122,7 @@ type Query {
   health: HealthStatus!
   latestPurchaseProduct: ProductType
   latestPurchaseProducts(limit: Int = 10): [ProductType!]!
+  loginPageImages: LoginPageImagesType!
   me: MeResult!
   myBrandProposals: [BrandType!]!
   myCategoryProposals: [CategoryType!]!
@@ -1667,6 +1677,12 @@ input UpdateCustomerAsAdminInput {
   fullName: String
   id: String!
   phone: String
+}
+
+input UpdateLoginPageImagesInput {
+  altText: String
+  desktopImageUrl: String!
+  mobileImageUrl: String
 }
 
 input UpdateOrderStatusInput {

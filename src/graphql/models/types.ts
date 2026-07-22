@@ -815,6 +815,18 @@ export class PlatformSettingsType {
 }
 
 @ObjectType()
+export class LoginPageImagesType {
+  @Field(() => String, { nullable: true })
+  desktopImageUrl!: string | null;
+
+  @Field(() => String, { nullable: true })
+  mobileImageUrl!: string | null;
+
+  @Field(() => String, { nullable: true })
+  altText!: string | null;
+}
+
+@ObjectType()
 export class NotificationType {
   @Field()
   id!: string;
