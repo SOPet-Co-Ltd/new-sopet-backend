@@ -281,6 +281,22 @@ export class StoreTeamService {
     });
   }
 
+  async listPendingInvitationsForEmail(email: string): Promise<StoreMemberInvitation[]> {
+    const normalizedEmail = email.toLowerCase();
+    const now = new Date();
+
+    return this.invitationRepository
+      .createQueryBuilder('invitation')
+      .leftJoinAndSelect('invitation.store', 'store')
+      .where('LOWER(invitation.email) = :email', { email: normalizedEmail })
+      .andWhere('invitation.status = :status', {
+        status: StoreMemberInvitationStatus.PENDING,
+      })
+      .andWhere('invitation.expiresAt > :now', { now })
+      .orderBy('invitation.createdAt', 'DESC')
+      .getMany();
+  }
+
   async updateMemberRole(
     storeId: string,
     memberId: string,

@@ -728,6 +728,16 @@ type Mutation {
   verifyEmail(input: VerifyEmailInput!): MessagePayload!
 }
 
+type MyPendingStoreInvitationType {
+  expiresAt: String!
+  id: String!
+  role: String!
+  status: String!
+  storeId: String!
+  storeName: String!
+  token: String!
+}
+
 type MyStoreType {
   address: String
   bankAccountName: String
@@ -1126,6 +1136,7 @@ type Query {
   me: MeResult!
   myBrandProposals: [BrandType!]!
   myCategoryProposals: [CategoryType!]!
+  myPendingStoreInvitations: [MyPendingStoreInvitationType!]!
   myPetTypeProposals: [PetTypeType!]!
   myReviews(limit: Int = 50, offset: Int = 0): [CustomerReviewType!]!
   myStore: MyStoreType!

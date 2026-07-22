@@ -17,6 +17,7 @@ import {
   UserProfile,
   StoreMemberType,
   StoreMemberInvitationType,
+  MyPendingStoreInvitationType,
   StoreInvitationPreviewType,
   StoreShippingOptionType,
   ShippingProviderType,
@@ -112,6 +113,20 @@ function mapStoreMemberInvitation(invitation: StoreMemberInvitation): StoreMembe
     role: invitation.role,
     status: invitation.status,
     expiresAt: invitation.expiresAt.toISOString(),
+  };
+}
+
+function mapMyPendingStoreInvitation(
+  invitation: StoreMemberInvitation,
+): MyPendingStoreInvitationType {
+  return {
+    id: invitation.id,
+    storeId: invitation.storeId,
+    storeName: invitation.store?.name ?? '',
+    role: invitation.role,
+    status: invitation.status,
+    expiresAt: invitation.expiresAt.toISOString(),
+    token: invitation.token,
   };
 }
 
@@ -712,6 +727,20 @@ export class StoresResolver {
     await this.storesService.assertStoreOwner(userId, storeId);
     const invitations = await this.storeTeamService.listPendingInvitations(storeId);
     return invitations.map(mapStoreMemberInvitation);
+  }
+
+  @Query(() => [MyPendingStoreInvitationType])
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('vendor')
+  @AllowSuspendedStore()
+  async myPendingStoreInvitations(
+    @CurrentUser('email') email: string,
+  ): Promise<MyPendingStoreInvitationType[]> {
+    if (!email) {
+      return [];
+    }
+    const invitations = await this.storeTeamService.listPendingInvitationsForEmail(email);
+    return invitations.map(mapMyPendingStoreInvitation);
   }
 
   @Query(() => MyStoreType)

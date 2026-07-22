@@ -656,6 +656,30 @@ export class StoreMemberInvitationType {
 }
 
 @ObjectType()
+export class MyPendingStoreInvitationType {
+  @Field()
+  id!: string;
+
+  @Field()
+  storeId!: string;
+
+  @Field()
+  storeName!: string;
+
+  @Field()
+  role!: string;
+
+  @Field()
+  status!: string;
+
+  @Field()
+  expiresAt!: string;
+
+  @Field()
+  token!: string;
+}
+
+@ObjectType()
 export class StoreInvitationPreviewType {
   @Field()
   storeName!: string;
