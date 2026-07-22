@@ -14,4 +14,26 @@ describe('upload.rules', () => {
     expect(rules.maxSizeBytes).toBe(5 * MB);
     expect(FOLDER_UPLOAD_RULES.products).toBe(rules);
   });
+
+  it('allows login-images with DEFAULT_RULES only (no ads aspect)', () => {
+    expect(UPLOAD_FOLDERS).toContain('login-images');
+
+    const rules = getFolderUploadRules('login-images');
+    expect(rules.maxSizeBytes).toBe(5 * MB);
+    expect(rules.allowedMimeTypes).toEqual([
+      'image/jpeg',
+      'image/jpg',
+      'image/png',
+      'image/webp',
+      'image/gif',
+    ]);
+    expect(rules.aspectRatio).toBeUndefined();
+    expect(FOLDER_UPLOAD_RULES['login-images']).toBe(FOLDER_UPLOAD_RULES.banners);
+  });
+
+  it('keeps ads aspect rules unchanged', () => {
+    const ads = getFolderUploadRules('ads');
+    expect(ads.maxSizeBytes).toBe(1 * MB);
+    expect(ads.aspectRatio).toEqual({ width: 4, height: 5, tolerance: 0.02 });
+  });
 });

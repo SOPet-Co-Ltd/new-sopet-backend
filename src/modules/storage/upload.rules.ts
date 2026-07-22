@@ -39,6 +39,7 @@ export const FOLDER_UPLOAD_RULES: Record<UploadFolder, FolderUploadRules> = {
   sponsors: DEFAULT_RULES,
   categories: DEFAULT_RULES,
   'pet-types': DEFAULT_RULES,
+  'login-images': DEFAULT_RULES,
   ads: {
     maxSizeBytes: 1 * MB,
     allowedMimeTypes: ADS_ALLOWED_MIME_TYPES,
