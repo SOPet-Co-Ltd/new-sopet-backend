@@ -141,6 +141,104 @@ describe('LoginPageImagesSettingsService', () => {
     expect(assertFolderImageUrl).toHaveBeenCalledWith(MOBILE_URL, LOGIN_IMAGES_FOLDER);
   });
 
+  it('updateConfigured desktop-only upserts Setting key and overwrites Redis TTL 60', async () => {
+    const { service, save, set, assertFolderImageUrl } = createService();
+
+    const result = await service.updateConfigured({ desktopImageUrl: DESKTOP_URL });
+
+    const expected: LoginPageImagesValue = {
+      desktopImageUrl: DESKTOP_URL,
+      mobileImageUrl: null,
+      altText: null,
+    };
+    expect(result).toEqual(expected);
+    expect(assertFolderImageUrl).toHaveBeenCalledWith(DESKTOP_URL, LOGIN_IMAGES_FOLDER);
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        key: SETTINGS_KEY,
+        value: expected,
+      }),
+    );
+    expect(set).toHaveBeenCalledWith(CACHE_KEY, JSON.stringify(expected), CACHE_TTL_SECONDS);
+  });
+
+  it('replace/updateConfigured with same desktop still persists and overwrites Redis', async () => {
+    const configured: LoginPageImagesValue = {
+      desktopImageUrl: DESKTOP_URL,
+      mobileImageUrl: MOBILE_URL,
+      altText: 'Welcome',
+    };
+    const { service, save, set } = createService({
+      row: { key: SETTINGS_KEY, value: configured },
+    });
+
+    const result = await service.updateConfigured({
+      desktopImageUrl: DESKTOP_URL,
+      mobileImageUrl: MOBILE_URL,
+      altText: 'Welcome',
+    });
+
+    expect(result).toEqual(configured);
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        key: SETTINGS_KEY,
+        value: configured,
+      }),
+    );
+    expect(set).toHaveBeenCalledWith(CACHE_KEY, JSON.stringify(configured), CACHE_TTL_SECONDS);
+  });
+
+  it('rejects invalid folder URL from assertFolderImageUrl without persisting', async () => {
+    const { service, save, set, assertFolderImageUrl } = createService();
+    assertFolderImageUrl.mockImplementation(() => {
+      throw new BadRequestException({
+        code: 'INVALID_CATEGORY_IMAGE_URL',
+        message: 'Invalid image URL',
+      });
+    });
+
+    await expect(
+      service.updateConfigured({ desktopImageUrl: 'https://cdn.example.com/other/x.webp' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(save).not.toHaveBeenCalled();
+    expect(set).not.toHaveBeenCalled();
+  });
+
+  it('returns cached value on Redis hit without inventing placeholders', async () => {
+    const configured: LoginPageImagesValue = {
+      desktopImageUrl: DESKTOP_URL,
+      mobileImageUrl: null,
+      altText: null,
+    };
+    const { service, findOne } = createService({
+      cached: JSON.stringify(configured),
+    });
+
+    const result = await service.get();
+
+    expect(result).toEqual(configured);
+    expect(findOne).not.toHaveBeenCalled();
+  });
+
+  it('clearDesktop is idempotent when already empty', async () => {
+    const { service, save, set } = createService();
+
+    const result = await service.clearDesktop();
+
+    expect(result).toEqual(EMPTY_LOGIN_PAGE_IMAGES);
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        key: SETTINGS_KEY,
+        value: EMPTY_LOGIN_PAGE_IMAGES,
+      }),
+    );
+    expect(set).toHaveBeenCalledWith(
+      CACHE_KEY,
+      JSON.stringify(EMPTY_LOGIN_PAGE_IMAGES),
+      CACHE_TTL_SECONDS,
+    );
+  });
+
   it('clearMobile nulls mobile and retains desktop + altText', async () => {
     const configured: LoginPageImagesValue = {
       desktopImageUrl: DESKTOP_URL,
@@ -175,6 +273,25 @@ describe('LoginPageImagesSettingsService', () => {
         mobileImageUrl: null,
         altText: 'Welcome to SOPET',
       }),
+      CACHE_TTL_SECONDS,
+    );
+  });
+
+  it('clearMobile when unconfigured returns empty triple and overwrites Redis', async () => {
+    const { service, save, set } = createService();
+
+    const result = await service.clearMobile();
+
+    expect(result).toEqual(EMPTY_LOGIN_PAGE_IMAGES);
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        key: SETTINGS_KEY,
+        value: EMPTY_LOGIN_PAGE_IMAGES,
+      }),
+    );
+    expect(set).toHaveBeenCalledWith(
+      CACHE_KEY,
+      JSON.stringify(EMPTY_LOGIN_PAGE_IMAGES),
       CACHE_TTL_SECONDS,
     );
   });
