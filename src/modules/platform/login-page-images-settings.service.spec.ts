@@ -29,9 +29,9 @@ describe('LoginPageImagesSettingsService', () => {
     row?: Partial<Setting> | null;
     cached?: string | null;
   } = {}) => {
-    const save = jest.fn(async (value: unknown) => value);
-    const set = jest.fn(async () => undefined);
-    const findOne = jest.fn(async () => row ?? null);
+    const save = jest.fn((value: unknown) => Promise.resolve(value));
+    const set = jest.fn(() => Promise.resolve(undefined));
+    const findOne = jest.fn(() => Promise.resolve(row ?? null));
     const create = jest.fn((value: unknown) => value);
     const assertFolderImageUrl = jest.fn();
 
@@ -41,8 +41,9 @@ describe('LoginPageImagesSettingsService', () => {
       save,
     } as unknown as Repository<Setting>;
 
+    const get = jest.fn(() => Promise.resolve(cached ?? null));
     const redisService = {
-      get: jest.fn(async () => cached ?? null),
+      get,
       set,
     };
 
@@ -59,6 +60,7 @@ describe('LoginPageImagesSettingsService', () => {
       findOne,
       save,
       set,
+      get,
       assertFolderImageUrl,
     };
   };
@@ -137,5 +139,60 @@ describe('LoginPageImagesSettingsService', () => {
 
     expect(assertFolderImageUrl).toHaveBeenCalledWith(DESKTOP_URL, LOGIN_IMAGES_FOLDER);
     expect(assertFolderImageUrl).toHaveBeenCalledWith(MOBILE_URL, LOGIN_IMAGES_FOLDER);
+  });
+
+  it('clearMobile nulls mobile and retains desktop + altText', async () => {
+    const configured: LoginPageImagesValue = {
+      desktopImageUrl: DESKTOP_URL,
+      mobileImageUrl: MOBILE_URL,
+      altText: 'Welcome to SOPET',
+    };
+    const { service, save, set } = createService({
+      row: { key: SETTINGS_KEY, value: configured },
+    });
+
+    const result = await service.clearMobile();
+
+    expect(result).toEqual({
+      desktopImageUrl: DESKTOP_URL,
+      mobileImageUrl: null,
+      altText: 'Welcome to SOPET',
+    });
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        key: SETTINGS_KEY,
+        value: {
+          desktopImageUrl: DESKTOP_URL,
+          mobileImageUrl: null,
+          altText: 'Welcome to SOPET',
+        },
+      }),
+    );
+    expect(set).toHaveBeenCalledWith(
+      CACHE_KEY,
+      JSON.stringify({
+        desktopImageUrl: DESKTOP_URL,
+        mobileImageUrl: null,
+        altText: 'Welcome to SOPET',
+      }),
+      CACHE_TTL_SECONDS,
+    );
+  });
+
+  it('fails open to DB when Redis get throws', async () => {
+    const configured: LoginPageImagesValue = {
+      desktopImageUrl: DESKTOP_URL,
+      mobileImageUrl: null,
+      altText: null,
+    };
+    const { service, findOne, get } = createService({
+      row: { key: SETTINGS_KEY, value: configured },
+    });
+    get.mockRejectedValueOnce(new Error('redis down'));
+
+    const result = await service.get();
+
+    expect(findOne).toHaveBeenCalledWith({ where: { key: SETTINGS_KEY } });
+    expect(result).toEqual(configured);
   });
 });
