@@ -967,6 +967,162 @@ export class ProductsService {
     return this.variantRepository.save(variant);
   }
 
+  /** Product must belong to storeId; otherwise 404 (no cross-store leak). */
+  async findOneInStore(productId: string, storeId: string): Promise<Product> {
+    const product = await this.findOne(productId);
+    if (product.storeId !== storeId) {
+      throw new NotFoundException({
+        code: 'PRODUCT_NOT_FOUND',
+        message: 'Product not found',
+      });
+    }
+    return product;
+  }
+
+  /**
+   * Public API product info update (names for taxonomy, like createWithVariants).
+   * Does not accept stock/price/status.
+   */
+  async updateProductForPublicApi(
+    productId: string,
+    storeId: string,
+    userId: string,
+    input: {
+      name?: string;
+      description?: string;
+      warning?: string;
+      expiryDate?: string;
+      category?: string;
+      tags?: string[];
+      petType?: string;
+      brand?: string;
+    },
+  ): Promise<Product> {
+    this.assertPublicPatchHasFields(input);
+    await this.findOneInStore(productId, storeId);
+
+    let categoryId: string | undefined;
+    if (input.category !== undefined) {
+      const category = await this.taxonomyService.getApprovedCategoryByName(input.category);
+      categoryId = category.id;
+    }
+
+    let tagIds: string[] | undefined;
+    if (input.tags !== undefined) {
+      const tags = await this.taxonomyService.getApprovedTagsByNames(input.tags);
+      tagIds = tags.map((tag) => tag.id);
+    }
+
+    let petTypeId: string | undefined;
+    if (input.petType !== undefined) {
+      const petType = await this.taxonomyService.getApprovedPetTypeByName(input.petType);
+      petTypeId = petType.id;
+    }
+
+    let brandId: string | undefined;
+    if (input.brand !== undefined) {
+      const brand = await this.taxonomyService.getApprovedBrandByName(input.brand);
+      brandId = brand.id;
+    }
+
+    return this.update(productId, userId, {
+      name: input.name,
+      description: input.description,
+      warning: input.warning,
+      expiryDate: input.expiryDate,
+      categoryId,
+      tagIds,
+      petTypeId,
+      brandId,
+    });
+  }
+
+  /**
+   * Public API variant stock / absolute price update.
+   * price → priceAdjustment = price - product.basePrice (may be negative).
+   */
+  async updateVariantStockPriceForPublicApi(
+    storeId: string,
+    userId: string,
+    input: {
+      variantId?: string;
+      sku?: string;
+      productId?: string;
+      stock?: number;
+      price?: number;
+    },
+  ): Promise<ProductVariant> {
+    if (input.stock === undefined && input.price === undefined) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'At least one of stock or price is required',
+      });
+    }
+
+    const variant = await this.findVariantInStoreForPublicApi(storeId, {
+      variantId: input.variantId,
+      sku: input.sku,
+      productId: input.productId,
+    });
+
+    await this.assertStoreAccess(userId, storeId, 'manage product variants');
+
+    if (input.stock !== undefined) {
+      variant.stockQuantity = input.stock;
+    }
+    if (input.price !== undefined) {
+      const basePrice = Number(variant.product.basePrice ?? 0);
+      variant.priceAdjustment = input.price - basePrice;
+    }
+
+    return this.variantRepository.save(variant);
+  }
+
+  private assertPublicPatchHasFields(input: Record<string, unknown>): void {
+    const hasField = Object.values(input).some((value) => value !== undefined);
+    if (!hasField) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'At least one field is required',
+      });
+    }
+  }
+
+  private async findVariantInStoreForPublicApi(
+    storeId: string,
+    lookup: { variantId?: string; sku?: string; productId?: string },
+  ): Promise<ProductVariant> {
+    let variant: ProductVariant | null = null;
+
+    if (lookup.variantId) {
+      variant = await this.variantRepository.findOne({
+        where: { id: lookup.variantId },
+        relations: ['product'],
+      });
+    } else if (lookup.sku) {
+      variant = await this.variantRepository.findOne({
+        where: { sku: lookup.sku, product: { storeId } },
+        relations: ['product'],
+      });
+    }
+
+    if (!variant || variant.product?.storeId !== storeId) {
+      throw new NotFoundException({
+        code: 'VARIANT_NOT_FOUND',
+        message: 'Variant not found',
+      });
+    }
+
+    if (lookup.productId && variant.productId !== lookup.productId) {
+      throw new NotFoundException({
+        code: 'VARIANT_NOT_FOUND',
+        message: 'Variant not found',
+      });
+    }
+
+    return variant;
+  }
+
   // Delete variant
   async removeVariant(variantId: string, userId: string): Promise<void> {
     const variant = await this.variantRepository.findOne({
