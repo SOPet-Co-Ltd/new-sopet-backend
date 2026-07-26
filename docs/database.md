@@ -98,14 +98,14 @@ Use for complex queries. Most modules inject `@InjectRepository(Entity)` directl
 
 ## Seeds
 
-| Script         | Command                 | Purpose                                  |
-| -------------- | ----------------------- | ---------------------------------------- |
-| Dev seed       | `yarn db:seed:dev`      | Admin, vendor, demo catalog (idempotent) |
-| Alias          | `yarn seed`             | Same as `db:seed:dev`                    |
-| Reset (empty)  | `yarn db:reset:migrate` | Drop schema, migrate, **no seed**        |
-| Alias          | `yarn db:reset`         | Same as `db:reset:migrate`               |
-| Dev reset      | `yarn db:reset:dev`     | Drop schema, migrate, dev seed           |
-| Prod bootstrap | `yarn db:seed:prod`     | Admin account only (idempotent)          |
+| Script         | Command                 | Purpose                                                                              |
+| -------------- | ----------------------- | ------------------------------------------------------------------------------------ |
+| Dev seed       | `yarn db:seed:dev`      | Admin, vendor, store, taxonomy, 20 products + variants, shipping, promo (idempotent) |
+| Alias          | `yarn seed`             | Same as `db:seed:dev`                                                                |
+| Reset (empty)  | `yarn db:reset:migrate` | Drop schema, migrate, **no seed**                                                    |
+| Alias          | `yarn db:reset`         | Same as `db:reset:migrate`                                                           |
+| Dev reset      | `yarn db:reset:dev`     | Drop schema, migrate, dev seed                                                       |
+| Prod bootstrap | `yarn db:seed:prod`     | Admin account only (idempotent)                                                      |
 
 **Safety:** `db:reset:dev` and `db:seed:dev` are local-only. `db:reset:migrate` is local-only unless you set `DB_RESET_ALLOW_PRODUCTION=1` (destructive on UAT/prod). Unrecognized local hosts can use `DB_RESET_ALLOW=1`.
 
@@ -118,7 +118,15 @@ Default credentials after dev seed:
 | Admin  | `admin@sopet.org`  | `P@ssw0rd` |
 | Vendor | `vendor@sopet.org` | `P@ssw0rd` |
 
-Seed entrypoints: `src/database/seeds/seed-dev.ts`, `seed-prod.ts`, `reset-db.ts` (helpers in the same folder).
+Dev seed also creates:
+
+- Approved store `sopet-pet-shop` (vendor-owned)
+- Approved taxonomy: categories, pet types, brands, tags
+- 20 published products with multi-option variants + images
+- Shipping providers (Kerry, Flash, Thailand Post, J&T) + store shipping options
+- Platform promo `WELCOME10` (10% off, min ฿200)
+
+Seed entrypoints: `src/database/seeds/seed-dev.ts`, `seed-prod.ts`, `reset-db.ts` (helpers in the same folder). Catalog data: `dev-catalog.ts`.
 
 ## Transactions
 
