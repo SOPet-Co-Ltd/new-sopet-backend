@@ -144,7 +144,7 @@ export class CustomersResolver {
     @Args('limit', { type: () => Int, defaultValue: 20 }) limit: number,
     @Args('search', { nullable: true }) search?: string,
   ): Promise<VendorCustomerConnection> {
-    await this.storesService.assertStoreOwner(userId, storeId);
+    await this.storesService.assertStoreAccess(userId, storeId);
     const result = await this.customersService.findForVendorStore(storeId, page, limit, search);
     return {
       items: result.items.map(mapVendorCustomer),
@@ -160,7 +160,7 @@ export class CustomersResolver {
     @CurrentUser('storeId') storeId: string,
     @Args('id') id: string,
   ): Promise<VendorCustomerType> {
-    await this.storesService.assertStoreOwner(userId, storeId);
+    await this.storesService.assertStoreAccess(userId, storeId);
     const customer = await this.customersService.findByIdForVendor(storeId, id);
     return mapVendorCustomer(customer);
   }
@@ -173,7 +173,7 @@ export class CustomersResolver {
     @CurrentUser('storeId') storeId: string,
     @Args('id') id: string,
   ): Promise<VendorCustomerDetailType> {
-    await this.storesService.assertStoreOwner(userId, storeId);
+    await this.storesService.assertStoreAccess(userId, storeId);
     const customer = await this.customersService.findByIdForVendor(storeId, id);
     const insights = await this.customersService.getInsightsForVendorStore(storeId, id);
     return {

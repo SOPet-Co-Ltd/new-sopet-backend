@@ -6,6 +6,7 @@ import { PaymentsService } from './payments.service';
 import { buildOmiseReturnUri } from './build-omise-return-uri';
 import { Payment } from '../../database/entities/payment.entity';
 import { Order, OrderStatus } from '../../database/entities/order.entity';
+import { FulfillmentStatus, OrderItem } from '../../database/entities/order-item.entity';
 import { Customer } from '../../database/entities/customer.entity';
 import { SavedPaymentMethod } from '../../database/entities/saved-payment-method.entity';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -49,6 +50,9 @@ function createPhaseBManagerMock(deps: {
     find: jest.fn((entity: unknown, options?: unknown): Promise<unknown[]> => {
       if (entity === Payment) {
         return Promise.resolve(deps.paymentRepository.find(options) as unknown[]);
+      }
+      if (entity === OrderItem || (entity as { name?: string })?.name === 'OrderItem') {
+        return Promise.resolve([]);
       }
       return Promise.resolve([]);
     }),
@@ -1543,6 +1547,7 @@ describe('PaymentsService cancelStaleUnpaidOrders (AC-019–021)', () => {
       status: OrderStatus.PENDING_PAYMENT,
       createdAt: new Date(NOW.getTime() - TWENTY_FIVE_HOURS_MS),
       paymentReference: 'chrg_stale_1',
+      items: [{ id: 'i1', fulfillmentStatus: 'pending' }],
     };
     const pendingPayment = {
       id: 'pay-stale-1',
@@ -1781,6 +1786,193 @@ describe('PaymentsService cancelStaleUnpaidOrders (AC-019–021)', () => {
       expect.any(String),
     );
     errorSpy.mockRestore();
+  });
+
+  it('skips entire order when any item is on_hold (AC-040)', async () => {
+    const heldOrder = {
+      id: 'ord-held-skip',
+      status: OrderStatus.PENDING_PAYMENT,
+      createdAt: new Date(NOW.getTime() - TWENTY_FIVE_HOURS_MS),
+      paymentReference: 'chrg_held',
+      items: [
+        { id: 'i-held', fulfillmentStatus: FulfillmentStatus.ON_HOLD },
+        { id: 'i-sib', fulfillmentStatus: FulfillmentStatus.PENDING },
+      ],
+    };
+    orderRepository.find.mockResolvedValue([heldOrder]);
+    paymentRepository.findOne.mockResolvedValue(null);
+
+    const cancelled = await service.cancelStaleUnpaidOrders();
+
+    expect(cancelled).toBe(0);
+    expect(heldOrder.status).toBe(OrderStatus.PENDING_PAYMENT);
+    expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
+    expect(paymentRepository.manager.transaction).not.toHaveBeenCalled();
+  });
+
+  it('still cancels non-held stale unpaid orders', async () => {
+    const nonHeld = {
+      id: 'ord-non-held',
+      status: OrderStatus.PENDING_PAYMENT,
+      createdAt: new Date(NOW.getTime() - TWENTY_FIVE_HOURS_MS),
+      paymentReference: null,
+      items: [{ id: 'i1', fulfillmentStatus: FulfillmentStatus.PENDING }],
+    };
+    orderRepository.find.mockResolvedValue([nonHeld]);
+    paymentRepository.findOne.mockResolvedValue(null);
+    paymentRepository.find.mockResolvedValue([]);
+
+    const cancelled = await service.cancelStaleUnpaidOrders();
+
+    expect(cancelled).toBe(1);
+    expect(nonHeld.status).toBe(OrderStatus.CANCELLED);
+  });
+});
+
+describe('PaymentsService payment held gate + Decision #16 recompute (AC-026–027)', () => {
+  let service: PaymentsService;
+  const orderRepository = {
+    findOne: jest.fn(),
+    save: jest.fn(),
+  };
+  const paymentRepository = {
+    create: jest.fn(<T>(x: T): T => x),
+    save: jest.fn((x: Payment) => Promise.resolve({ ...x, id: 'pay-held-1' })),
+    findOne: jest.fn().mockResolvedValue(null),
+    find: jest.fn().mockResolvedValue([]),
+    manager: {
+      transaction: jest.fn(),
+    },
+  };
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    const phaseBManager = createPhaseBManagerMock({ orderRepository, paymentRepository });
+    paymentRepository.manager.transaction.mockImplementation(
+      async (cb: (manager: unknown) => Promise<unknown>) => cb(phaseBManager),
+    );
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        PaymentsService,
+        { provide: getRepositoryToken(Payment), useValue: paymentRepository },
+        { provide: getRepositoryToken(Order), useValue: orderRepository },
+        { provide: getRepositoryToken(Customer), useValue: { findOne: jest.fn() } },
+        { provide: getRepositoryToken(SavedPaymentMethod), useValue: { findOne: jest.fn() } },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: (key: string) => {
+              if (key === 'omise.secretKey') return 'skey_test';
+              return '';
+            },
+          },
+        },
+        { provide: NotificationsService, useValue: { notifyOrderPaid: jest.fn() } },
+        { provide: PaymentEventsService, useValue: paymentEventsServiceMock },
+        { provide: InventoryService, useValue: { restoreOrderStock: jest.fn() } },
+        { provide: PayoutsService, useValue: payoutsServiceMock },
+        { provide: StoresService, useValue: storesServiceMock },
+      ],
+    }).compile();
+
+    service = module.get(PaymentsService);
+  });
+
+  it('blocks createCharge when all items on_hold with PAYMENT_HELD_PORTION_BLOCKED', async () => {
+    const order = {
+      id: 'ord-held-all',
+      status: OrderStatus.PENDING_PAYMENT,
+      customerId: null,
+      items: [
+        { id: 'i1', fulfillmentStatus: FulfillmentStatus.ON_HOLD },
+        { id: 'i2', fulfillmentStatus: FulfillmentStatus.ON_HOLD },
+      ],
+    };
+    orderRepository.findOne.mockResolvedValue(order);
+
+    await expect(
+      service.createCharge({
+        orderId: 'ord-held-all',
+        amount: 100,
+        currency: 'THB',
+        paymentMethod: 'promptpay',
+      }),
+    ).rejects.toMatchObject({ response: { code: 'PAYMENT_HELD_PORTION_BLOCKED' } });
+  });
+
+  it('blocks createCharge when mixed unpaid has any on_hold item', async () => {
+    const order = {
+      id: 'ord-held-mixed',
+      status: OrderStatus.PENDING_PAYMENT,
+      customerId: null,
+      items: [
+        { id: 'i1', fulfillmentStatus: FulfillmentStatus.ON_HOLD },
+        { id: 'i2', fulfillmentStatus: FulfillmentStatus.PENDING },
+      ],
+    };
+    orderRepository.findOne.mockResolvedValue(order);
+
+    await expect(
+      service.createCharge({
+        orderId: 'ord-held-mixed',
+        amount: 100,
+        currency: 'THB',
+        paymentMethod: 'cod',
+      }),
+    ).rejects.toMatchObject({ response: { code: 'PAYMENT_HELD_PORTION_BLOCKED' } });
+  });
+
+  it('allows createCharge after held lines cancelled and totals recomputed (Decision #16)', async () => {
+    const { recomputeOrderPayableTotals } = await import('../orders/order-totals.util');
+    const order = {
+      id: 'ord-after-sla',
+      status: OrderStatus.PENDING_PAYMENT,
+      customerId: null,
+      subtotal: 300,
+      shippingFee: 50,
+      discountAmount: 0,
+      total: 350,
+      items: [
+        {
+          id: 'i-cancelled',
+          storeId: 'store-a',
+          fulfillmentStatus: FulfillmentStatus.CANCELLED,
+          subtotal: 200,
+          unitPrice: 200,
+          quantity: 1,
+        },
+        {
+          id: 'i-remain',
+          storeId: 'store-b',
+          fulfillmentStatus: FulfillmentStatus.PENDING,
+          subtotal: 100,
+          unitPrice: 100,
+          quantity: 1,
+        },
+      ],
+      storeShippings: [
+        { storeId: 'store-a', shippingFee: 30 },
+        { storeId: 'store-b', shippingFee: 20 },
+      ],
+    } as never;
+
+    recomputeOrderPayableTotals(order);
+    expect(order.subtotal).toBe(100);
+    expect(order.shippingFee).toBe(20);
+    expect(order.total).toBe(120);
+
+    orderRepository.findOne.mockResolvedValue(order);
+
+    const result = await service.createCharge({
+      orderId: 'ord-after-sla',
+      amount: 120,
+      currency: 'THB',
+      paymentMethod: 'cod',
+    });
+
+    expect(result.paymentMethod).toBe('cod');
+    expect(result.status).toBe('pending');
   });
 });
 

@@ -293,6 +293,18 @@ export class CartItemType {
 }
 
 @ObjectType()
+export class CartWarningType {
+  @Field()
+  code!: string;
+
+  @Field()
+  message!: string;
+
+  @Field(() => String, { nullable: true })
+  variantId?: string | null;
+}
+
+@ObjectType()
 export class CartType {
   @Field()
   id!: string;
@@ -305,6 +317,9 @@ export class CartType {
 
   @Field(() => [CartItemType])
   items!: CartItemType[];
+
+  @Field(() => [CartWarningType], { nullable: true })
+  warnings?: CartWarningType[];
 }
 
 @ObjectType()

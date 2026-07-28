@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
 import { ProductsModule } from '../products/products.module';
@@ -7,6 +7,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { StoresModule } from '../stores/stores.module';
 import { OrdersService } from './orders.service';
 import { OrderFulfillmentService } from './order-fulfillment.service';
+import { StoreSuspensionHoldService } from './store-suspension-hold.service';
 import { Order } from '../../database/entities/order.entity';
 import { OrderItem } from '../../database/entities/order-item.entity';
 import { OrderStatusHistory } from '../../database/entities/order-status-history.entity';
@@ -31,9 +32,9 @@ import { CartModule } from '../cart/cart.module';
     ProductsModule,
     PromotionsModule,
     NotificationsModule,
-    StoresModule,
+    forwardRef(() => StoresModule),
     InventoryModule,
-    PaymentsModule,
+    forwardRef(() => PaymentsModule),
     CartModule,
     TypeOrmModule.forFeature([
       Order,
@@ -50,7 +51,7 @@ import { CartModule } from '../cart/cart.module';
       User,
     ]),
   ],
-  providers: [OrdersService, OrderFulfillmentService, OrdersResolver],
-  exports: [OrdersService, OrderFulfillmentService],
+  providers: [OrdersService, OrderFulfillmentService, StoreSuspensionHoldService, OrdersResolver],
+  exports: [OrdersService, OrderFulfillmentService, StoreSuspensionHoldService],
 })
 export class OrdersModule {}

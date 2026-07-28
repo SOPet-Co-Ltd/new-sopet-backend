@@ -16,6 +16,7 @@ import { ProductVariant } from './product-variant.entity';
 export enum FulfillmentStatus {
   PENDING = 'pending',
   PROCESSING = 'processing',
+  ON_HOLD = 'on_hold',
   SHIPPED = 'shipped',
   DELIVERED = 'delivered',
   CANCELLED = 'cancelled',
@@ -24,6 +25,7 @@ export enum FulfillmentStatus {
 @Entity('order_items')
 @Index(['orderId'])
 @Index(['storeId', 'fulfillmentStatus', 'createdAt'])
+@Index(['fulfillmentStatus', 'holdStartedAt'])
 export class OrderItem {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -70,6 +72,17 @@ export class OrderItem {
   })
   @IsEnum(FulfillmentStatus)
   fulfillmentStatus!: FulfillmentStatus;
+
+  @Column({
+    name: 'previous_fulfillment_status',
+    type: 'enum',
+    enum: FulfillmentStatus,
+    nullable: true,
+  })
+  previousFulfillmentStatus!: FulfillmentStatus | null;
+
+  @Column({ name: 'hold_started_at', type: 'timestamptz', nullable: true })
+  holdStartedAt!: Date | null;
 
   @Column({ name: 'tracking_number', type: 'varchar', length: 100, nullable: true })
   trackingNumber!: string | null;

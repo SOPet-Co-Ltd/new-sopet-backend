@@ -470,6 +470,7 @@ export class StoresResolver {
       contactEmail: input.contactEmail,
       address: input.address,
       status: input.status as StoreStatus | undefined,
+      adminId,
     });
 
     const actor = this.adminActor(adminId, adminEmail);
@@ -630,8 +631,10 @@ export class StoresResolver {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('vendor')
   async myStoreShippingOptions(
+    @CurrentUser('id') userId: string,
     @CurrentUser('storeId') storeId: string,
   ): Promise<StoreShippingOptionType[]> {
+    await this.storesService.assertStoreAccess(userId, storeId);
     const options = await this.shippingOptionsService.findByStore(storeId, false);
     return options.map(mapStoreShippingOption);
   }
@@ -757,7 +760,7 @@ export class StoresResolver {
       });
     }
 
-    await this.storesService.assertStoreOwner(userId, storeId);
+    await this.storesService.assertStoreAccess(userId, storeId);
     const includePayout = await this.storesService.isStoreOwner(userId, storeId);
     // Refresh Omise recipient status so dashboard activations show up without
     // requiring the vendor to re-save bank details.
@@ -933,7 +936,9 @@ export class StoresResolver {
   async createShippingOption(
     @Args('input') input: CreateShippingOptionInput,
     @CurrentUser('storeId') storeId: string,
+    @CurrentUser('id') userId: string,
   ): Promise<StoreShippingOptionType> {
+    await this.storesService.assertStoreOwner(userId, storeId);
     const option = await this.shippingOptionsService.create(storeId, input);
     return mapStoreShippingOption(option);
   }
@@ -945,7 +950,9 @@ export class StoresResolver {
     @Args('id') id: string,
     @Args('input') input: UpdateShippingOptionInput,
     @CurrentUser('storeId') storeId: string,
+    @CurrentUser('id') userId: string,
   ): Promise<StoreShippingOptionType> {
+    await this.storesService.assertStoreOwner(userId, storeId);
     const option = await this.shippingOptionsService.update(id, storeId, input);
     return mapStoreShippingOption(option);
   }
@@ -956,7 +963,9 @@ export class StoresResolver {
   async deleteShippingOption(
     @Args('id') id: string,
     @CurrentUser('storeId') storeId: string,
+    @CurrentUser('id') userId: string,
   ): Promise<boolean> {
+    await this.storesService.assertStoreOwner(userId, storeId);
     await this.shippingOptionsService.delete(id, storeId);
     return true;
   }

@@ -11,6 +11,9 @@ describe('Product publish (e2e)', () => {
   let storesService: {
     userHasStoreAccess: jest.Mock;
   };
+  let shippingOptionsService: {
+    hasShippingOptions: jest.Mock;
+  };
 
   const product = {
     id: 'prod-1',
@@ -29,6 +32,9 @@ describe('Product publish (e2e)', () => {
     };
     storesService = {
       userHasStoreAccess: jest.fn(() => Promise.resolve(true)),
+    };
+    shippingOptionsService = {
+      hasShippingOptions: jest.fn().mockResolvedValue(true),
     };
 
     service = new ProductsService(
@@ -50,6 +56,7 @@ describe('Product publish (e2e)', () => {
         getApprovedCategoryByName: jest.fn(),
         getApprovedTagsByNames: jest.fn(() => Promise.resolve([])),
       } as never,
+      shippingOptionsService as never,
     );
   });
 

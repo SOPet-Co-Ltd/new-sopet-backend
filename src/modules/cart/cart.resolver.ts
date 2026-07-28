@@ -1,14 +1,13 @@
 import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { UseGuards } from '@nestjs/common';
-import { CartService } from './cart.service';
+import { CartService, CartWithWarnings } from './cart.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { CartType, CartItemType } from '../../graphql/models/types';
+import { CartType, CartItemType, CartWarningType } from '../../graphql/models/types';
 import { mapVariant } from '../../graphql/models/mappers';
 import { Public, CurrentUser } from '../../common/decorators';
 import { AddToCartInput, RemoveCartItemInput, UpdateCartItemInput } from './cart.inputs';
-import { Cart } from '../../database/entities/cart.entity';
 
-function mapCart(cart: Cart): CartType {
+function mapCart(cart: CartWithWarnings): CartType {
   return {
     id: cart.id,
     customerId: cart.customerId,
@@ -21,6 +20,12 @@ function mapCart(cart: Cart): CartType {
         productVariant: item.productVariant
           ? mapVariant(item.productVariant, Number(item.productVariant.product?.basePrice ?? 0))
           : null,
+      })) ?? [],
+    warnings:
+      cart.warnings?.map((warning): CartWarningType => ({
+        code: warning.code,
+        message: warning.message,
+        variantId: warning.variantId ?? null,
       })) ?? [],
   };
 }

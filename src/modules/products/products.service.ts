@@ -24,6 +24,7 @@ import {
 import { PaginatedResponse } from '../../common/interfaces';
 import { generateSlug as slugify } from '../../common/utils/slug.util';
 import { StoresService } from '../stores/stores.service';
+import { ShippingOptionsService } from '../stores/shipping-options.service';
 import { TaxonomyService } from '../taxonomy/taxonomy.service';
 import { Tag } from '../../database/entities/tag.entity';
 import {
@@ -63,6 +64,7 @@ export class ProductsService {
     private readonly cartItemRepository: Repository<CartItem>,
     private readonly storesService: StoresService,
     private readonly taxonomyService: TaxonomyService,
+    private readonly shippingOptionsService: ShippingOptionsService,
     @Optional() private readonly searchService?: SearchService,
     @Optional() private readonly searchEmbeddingQueueService?: SearchEmbeddingQueueService,
   ) {}
@@ -736,6 +738,7 @@ export class ProductsService {
         message: 'Product not found',
       });
     }
+    this.assertPublishedStoreApproved(product);
     return product;
   }
 
@@ -758,7 +761,11 @@ export class ProductsService {
       ],
     });
 
-    const byId = new Map(products.map((product) => [product.id, product]));
+    const byId = new Map(
+      products
+        .filter((product) => product.store?.status === StoreStatus.APPROVED)
+        .map((product) => [product.id, product]),
+    );
     return ids.map((id) => byId.get(id)).filter((product): product is Product => product != null);
   }
 
@@ -796,15 +803,27 @@ export class ProductsService {
         message: 'Product not found',
       });
     }
+    this.assertPublishedStoreApproved(product);
     return product;
   }
 
-  getPublishChecklist(product: Product): ProductPublishChecklist {
-    return getProductPublishChecklist(product);
+  /** Public PDP/recommend: treat non-approved store products as not found. */
+  private assertPublishedStoreApproved(product: Product): void {
+    if (product.store?.status !== StoreStatus.APPROVED) {
+      throw new NotFoundException({
+        code: 'PRODUCT_NOT_FOUND',
+        message: 'Product not found',
+      });
+    }
   }
 
-  assertPublishable(product: Product): void {
-    const checklist = getProductPublishChecklist(product);
+  async getPublishChecklist(product: Product): Promise<ProductPublishChecklist> {
+    const hasShipping = await this.shippingOptionsService.hasShippingOptions(product.storeId);
+    return getProductPublishChecklist(product, { hasShipping });
+  }
+
+  async assertPublishable(product: Product): Promise<void> {
+    const checklist = await this.getPublishChecklist(product);
     if (!checklist.canPublish) {
       throw new BadRequestException({
         code: 'PRODUCT_NOT_PUBLISHABLE',
@@ -819,7 +838,7 @@ export class ProductsService {
   async publish(id: string, userId: string): Promise<Product> {
     const product = await this.findOne(id);
     await this.assertStoreAccess(userId, product.storeId, 'publish products');
-    this.assertPublishable(product);
+    await this.assertPublishable(product);
     product.status = ProductStatus.PUBLISHED;
     const saved = await this.productRepository.save(product);
     await this.enqueueEmbeddingIfPublished(saved);
@@ -844,7 +863,7 @@ export class ProductsService {
     });
 
     if (rest.status === ProductStatus.PUBLISHED && product.status !== ProductStatus.PUBLISHED) {
-      this.assertPublishable(product);
+      await this.assertPublishable(product);
     }
 
     // Apply rest fields (skip undefined so partial updates don't clear existing values)

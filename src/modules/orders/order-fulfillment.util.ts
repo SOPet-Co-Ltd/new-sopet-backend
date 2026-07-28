@@ -89,6 +89,15 @@ export function validateFulfillmentProvider(fulfillmentProvider: string): string
   return trimmed;
 }
 
+/**
+ * Derive order header status from item fulfillment statuses (Model 5C).
+ *
+ * Precedence (Design Doc §2 / Decision #15):
+ * 1. Terminal order statuses unchanged
+ * 2. Sticky unpaid: pending_payment never elevates to on_hold
+ * 3. N = statuses excluding cancelled; all N on_hold → order on_hold
+ * 4. P = N excluding on_hold; ship/deliver/processing ladder on P only
+ */
 export function deriveOrderStatusFromFulfillment(
   currentOrderStatus: OrderStatus,
   fulfillmentStatuses: FulfillmentStatus[],
@@ -96,25 +105,42 @@ export function deriveOrderStatusFromFulfillment(
   if (TERMINAL_ORDER_STATUSES.has(currentOrderStatus)) {
     return currentOrderStatus;
   }
+  // Sticky unpaid: on_hold items do not change payment obligation header (Decision #15).
   if (currentOrderStatus === OrderStatus.PENDING_PAYMENT) {
     return OrderStatus.PENDING_PAYMENT;
   }
-  if (fulfillmentStatuses.length === 0) {
+
+  const nonTerminalStatuses = fulfillmentStatuses.filter(
+    (status) => status !== FulfillmentStatus.CANCELLED,
+  );
+  if (nonTerminalStatuses.length === 0) {
     return OrderStatus.PAID;
   }
 
-  if (fulfillmentStatuses.every((status) => status === FulfillmentStatus.DELIVERED)) {
+  if (nonTerminalStatuses.every((status) => status === FulfillmentStatus.ON_HOLD)) {
+    return OrderStatus.ON_HOLD;
+  }
+
+  // Progressing peers only — held items must not invent or block ship/deliver aggregates.
+  const progressingStatuses = nonTerminalStatuses.filter(
+    (status) => status !== FulfillmentStatus.ON_HOLD,
+  );
+  if (progressingStatuses.length === 0) {
+    return OrderStatus.PAID;
+  }
+
+  if (progressingStatuses.every((status) => status === FulfillmentStatus.DELIVERED)) {
     return OrderStatus.DELIVERED;
   }
   if (
-    fulfillmentStatuses.every(
+    progressingStatuses.every(
       (status) => status === FulfillmentStatus.SHIPPED || status === FulfillmentStatus.DELIVERED,
     )
   ) {
     return OrderStatus.SHIPPED;
   }
   if (
-    fulfillmentStatuses.some(
+    progressingStatuses.some(
       (status) =>
         status === FulfillmentStatus.PROCESSING ||
         status === FulfillmentStatus.SHIPPED ||

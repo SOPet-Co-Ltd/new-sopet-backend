@@ -252,6 +252,13 @@ type CartType {
   id: String!
   items: [CartItemType!]!
   sessionId: String
+  warnings: [CartWarningType!]
+}
+
+type CartWarningType {
+  code: String!
+  message: String!
+  variantId: String
 }
 
 type CategoryType {
