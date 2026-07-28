@@ -261,7 +261,7 @@ describe('UsersService', () => {
       expect(result.isDefault).toBe(true);
     });
 
-    it('returns an existing active card without calling Omise save', async () => {
+    it('throws ConflictException when the payment method already exists without calling Omise save', async () => {
       paymentMethodRepo.find.mockResolvedValue([
         { id: 'pm-existing', customerId: 'cust-1', isDefault: true },
       ]);
@@ -271,19 +271,20 @@ describe('UsersService', () => {
         isDefault: true,
       });
 
-      const result = await service.addPaymentMethod('cust-1', {
-        omiseCardToken: 'tokn_test_1',
-        lastFour: '1111',
-        brand: 'visa',
-        expiryMonth: 12,
-        expiryYear: 2034,
-      });
+      await expect(
+        service.addPaymentMethod('cust-1', {
+          omiseCardToken: 'tokn_test_1',
+          lastFour: '1111',
+          brand: 'visa',
+          expiryMonth: 12,
+          expiryYear: 2034,
+        }),
+      ).rejects.toThrow(ConflictException);
 
       expect(paymentsService.saveCustomerCard).not.toHaveBeenCalled();
-      expect(result.id).toBe('pm-existing');
     });
 
-    it('returns an existing active card without inserting a duplicate row', async () => {
+    it('throws ConflictException instead of inserting a duplicate payment method', async () => {
       paymentsService.saveCustomerCard.mockResolvedValue({
         omiseCardId: 'card_test_existing',
         cardFingerprint: 'fp-existing',
@@ -301,15 +302,16 @@ describe('UsersService', () => {
         isDefault: true,
       });
 
-      const result = await service.addPaymentMethod('cust-1', {
-        omiseCardToken: 'tokn_test_1',
-        lastFour: '1111',
-        brand: 'visa',
-        expiryMonth: 12,
-        expiryYear: 2034,
-      });
+      await expect(
+        service.addPaymentMethod('cust-1', {
+          omiseCardToken: 'tokn_test_1',
+          lastFour: '1111',
+          brand: 'visa',
+          expiryMonth: 12,
+          expiryYear: 2034,
+        }),
+      ).rejects.toThrow(ConflictException);
 
-      expect(result.id).toBe('pm-existing');
       expect(paymentMethodRepo.create).not.toHaveBeenCalled();
     });
 
