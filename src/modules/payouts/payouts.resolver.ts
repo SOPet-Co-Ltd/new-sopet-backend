@@ -18,6 +18,7 @@ import type { JwtPayload } from '../../common/interfaces';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constants';
 import { AuditActorType } from '../../database/entities/audit-log.entity';
+import { StoresService } from '../stores/stores.service';
 
 @ObjectType()
 export class PayoutType {
@@ -94,12 +95,16 @@ export class PayoutsResolver {
   constructor(
     private readonly payoutsService: PayoutsService,
     private readonly auditLogsService: AuditLogsService,
+    private readonly storesService: StoresService,
   ) {}
 
   @Query(() => PayoutSummaryType)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('vendor')
-  async storePayoutSummary(@CurrentUser('storeId') storeId: string): Promise<PayoutSummaryType> {
+  async storePayoutSummary(
+    @CurrentUser('id') userId: string,
+    @CurrentUser('storeId') storeId: string,
+  ): Promise<PayoutSummaryType> {
     if (!storeId) {
       throw new BadRequestException({
         code: 'STORE_CONTEXT_REQUIRED',
@@ -107,6 +112,7 @@ export class PayoutsResolver {
       });
     }
 
+    await this.storesService.assertStoreOwner(userId, storeId);
     return this.payoutsService.getPayoutSummary(storeId);
   }
 
@@ -119,8 +125,12 @@ export class PayoutsResolver {
 
   @Query(() => [PayoutType])
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor', 'admin')
-  async storePayouts(@CurrentUser('storeId') storeId: string): Promise<PayoutType[]> {
+  @Roles('vendor')
+  async storePayouts(
+    @CurrentUser('id') userId: string,
+    @CurrentUser('storeId') storeId: string,
+  ): Promise<PayoutType[]> {
+    await this.storesService.assertStoreOwner(userId, storeId);
     const payouts = await this.payoutsService.findByStore(storeId);
     return payouts.map(mapPayout);
   }
@@ -144,6 +154,7 @@ export class PayoutsResolver {
       });
     }
 
+    await this.storesService.assertStoreOwner(user.sub, user.storeId);
     const payout = await this.payoutsService.requestPayout(user.storeId, user.sub);
     return mapPayout(payout);
   }

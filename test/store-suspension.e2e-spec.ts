@@ -16,6 +16,7 @@ import { StoreStatusGuard } from '../src/modules/auth/guards/store-status.guard'
 import { Store, StoreStatus } from '../src/database/entities/store.entity';
 import { ValidationPipe } from '../src/common/pipes/validation.pipe';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
+import { AllowSuspendedStore } from '../src/common/decorators';
 
 @Injectable()
 class MockVendorUserGuard implements CanActivate {
@@ -35,6 +36,17 @@ class VendorProductsStubController {
   }
 }
 
+/** Mirrors notifications / account paths reachable while store is suspended. */
+@Controller('vendor/notifications')
+class VendorNotificationsStubController {
+  @Get()
+  @AllowSuspendedStore()
+  @UseGuards(MockVendorUserGuard, StoreStatusGuard)
+  list() {
+    return { ok: true, reachableWhileSuspended: true };
+  }
+}
+
 describe('Store suspension (e2e)', () => {
   let app: INestApplication<App>;
   let storeRepository: { findOne: jest.Mock };
@@ -49,7 +61,7 @@ describe('Store suspension (e2e)', () => {
     };
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
-      controllers: [VendorProductsStubController],
+      controllers: [VendorProductsStubController, VendorNotificationsStubController],
       providers: [
         StoreStatusGuard,
         { provide: getRepositoryToken(Store), useValue: storeRepository },
@@ -90,5 +102,17 @@ describe('Store suspension (e2e)', () => {
       .expect((res) => {
         expect(res.body.error.code).toBe('STORE_SUSPENDED');
       });
+  });
+
+  it('allows @AllowSuspendedStore notification path while store is suspended (AC-028 vendor reachability)', async () => {
+    storeRepository.findOne.mockResolvedValue({
+      id: 'store-1',
+      status: StoreStatus.SUSPENDED,
+    });
+
+    const res = await request(app.getHttpServer()).get('/vendor/notifications').expect(200);
+
+    expect(res.body).toEqual({ ok: true, reachableWhileSuspended: true });
+    expect(storeRepository.findOne).not.toHaveBeenCalled();
   });
 });

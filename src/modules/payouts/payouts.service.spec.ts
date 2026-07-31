@@ -230,6 +230,42 @@ describe('PayoutsService', () => {
     expect(summary.canRequestPayout).toBe(true);
   });
 
+  it('excludes on_hold item portions from gross revenue eligibility', async () => {
+    const qb = createQueryBuilderMock({ total: '3000' });
+    orderItemRepo.createQueryBuilder.mockReturnValue(qb);
+    payoutRepo.createQueryBuilder
+      .mockImplementationOnce(() => createQueryBuilderMock({ total: '0' }))
+      .mockImplementationOnce(() => createQueryBuilderMock({ total: '0' }));
+
+    const summary = await service.getPayoutSummary('store-1');
+
+    expect(summary.grossRevenue).toBe(3000);
+    expect(qb.andWhere).toHaveBeenCalledWith(
+      expect.stringMatching(/fulfillment_status/i),
+      expect.objectContaining({ heldFulfillment: 'on_hold' }),
+    );
+    expect(qb.andWhere).toHaveBeenCalledWith(
+      expect.stringMatching(/order\.status/i),
+      expect.objectContaining({ heldOrderStatus: 'on_hold' }),
+    );
+  });
+
+  it('includes restored non-held lines in gross revenue after leave-hold', async () => {
+    const qb = createQueryBuilderMock({ total: '4500' });
+    orderItemRepo.createQueryBuilder.mockReturnValue(qb);
+    payoutRepo.createQueryBuilder
+      .mockImplementationOnce(() => createQueryBuilderMock({ total: '0' }))
+      .mockImplementationOnce(() => createQueryBuilderMock({ total: '0' }));
+
+    const summary = await service.getPayoutSummary('store-1');
+
+    expect(summary.grossRevenue).toBe(4500);
+    expect(qb.andWhere).toHaveBeenCalledWith(
+      expect.stringMatching(/fulfillment_status\s*<>\s*:heldFulfillment/i),
+      expect.any(Object),
+    );
+  });
+
   it('allows retry when orphan pending payout exists', async () => {
     orderItemRepo.createQueryBuilder.mockReturnValue(createQueryBuilderMock({ total: '2050' }));
     payoutRepo.createQueryBuilder

@@ -14,7 +14,7 @@ import { randomBytes } from 'node:crypto';
 import * as bcrypt from 'bcrypt';
 import { Customer } from '../../database/entities/customer.entity';
 import { User, UserRole } from '../../database/entities/user.entity';
-import { Store, StoreStatus } from '../../database/entities/store.entity';
+import { Store } from '../../database/entities/store.entity';
 import { StoreMember } from '../../database/entities/store-member.entity';
 import { pickDefaultAccessibleStoreId } from '../stores/store-selection.util';
 import { OtpCode } from '../../database/entities/otp-code.entity';
@@ -418,16 +418,8 @@ export class AuthService {
       });
     }
 
-    const store = await this.storeRepository.findOne({
-      where: { id: storeId },
-      select: ['id', 'status'],
-    });
-    if (store?.status === StoreStatus.SUSPENDED) {
-      throw new ForbiddenException({
-        code: 'STORE_SUSPENDED',
-        message: 'This store has been suspended. Please contact support to restore access.',
-      });
-    }
+    // Suspended stores are allowed as the active JWT store so vendors can enter
+    // read-only (banner + reactivation). Mutations remain blocked by StoreStatusGuard.
 
     const payload: Omit<JwtPayload, 'type'> = {
       sub: user.id,

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { StoreShippingOption } from '../../database/entities/store-shipping-option.entity';
@@ -40,6 +40,24 @@ export class ShippingOptionsService {
     });
   }
 
+  async countByStore(storeId: string): Promise<number> {
+    return this.shippingOptionRepository.count({ where: { storeId } });
+  }
+
+  async hasShippingOptions(storeId: string): Promise<boolean> {
+    return (await this.countByStore(storeId)) > 0;
+  }
+
+  private async assertNotLastShippingOption(storeId: string): Promise<void> {
+    const count = await this.countByStore(storeId);
+    if (count <= 1) {
+      throw new BadRequestException({
+        code: 'LAST_SHIPPING_OPTION',
+        message: 'Cannot delete the only shipping option. Add another option first.',
+      });
+    }
+  }
+
   async create(storeId: string, data: CreateShippingOptionData): Promise<StoreShippingOption> {
     const option = this.shippingOptionRepository.create({
       storeId,
@@ -66,6 +84,7 @@ export class ShippingOptionsService {
 
   async delete(id: string, storeId: string): Promise<void> {
     const option = await this.findOneForStore(id, storeId);
+    await this.assertNotLastShippingOption(storeId);
     await this.shippingOptionRepository.softRemove(option);
   }
 
@@ -81,6 +100,7 @@ export class ShippingOptionsService {
 
   async adminDelete(id: string): Promise<void> {
     const option = await this.findOneById(id);
+    await this.assertNotLastShippingOption(option.storeId);
     await this.shippingOptionRepository.softRemove(option);
   }
 

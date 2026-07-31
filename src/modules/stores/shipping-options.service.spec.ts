@@ -10,12 +10,15 @@ describe('ShippingOptionsService', () => {
   const shippingOptionRepo = {
     find: jest.fn(),
     findOne: jest.fn(),
-    create: jest.fn((x) => x),
-    save: jest.fn(async (x: StoreShippingOption) => ({
-      ...x,
-      id: x.id ?? 'opt-1',
-    })),
-    softRemove: jest.fn(async (x: StoreShippingOption) => x),
+    count: jest.fn(),
+    create: jest.fn((x: Partial<StoreShippingOption>): Partial<StoreShippingOption> => x),
+    save: jest.fn((x: StoreShippingOption) =>
+      Promise.resolve({
+        ...x,
+        id: x.id ?? 'opt-1',
+      }),
+    ),
+    softRemove: jest.fn((x: StoreShippingOption) => Promise.resolve(x)),
   };
 
   beforeEach(async () => {
@@ -112,13 +115,25 @@ describe('ShippingOptionsService', () => {
   });
 
   describe('delete', () => {
-    it('soft-removes option belonging to store', async () => {
+    it('soft-removes option belonging to store when more than one exists', async () => {
       const option = { id: 'opt-1', storeId: 'store-1' };
       shippingOptionRepo.findOne.mockResolvedValue(option);
+      shippingOptionRepo.count.mockResolvedValue(2);
 
       await service.delete('opt-1', 'store-1');
 
       expect(shippingOptionRepo.softRemove).toHaveBeenCalledWith(option);
+    });
+
+    it('rejects deleting the last shipping option', async () => {
+      const option = { id: 'opt-1', storeId: 'store-1' };
+      shippingOptionRepo.findOne.mockResolvedValue(option);
+      shippingOptionRepo.count.mockResolvedValue(1);
+
+      await expect(service.delete('opt-1', 'store-1')).rejects.toMatchObject({
+        response: { code: 'LAST_SHIPPING_OPTION' },
+      });
+      expect(shippingOptionRepo.softRemove).not.toHaveBeenCalled();
     });
   });
 
@@ -143,13 +158,24 @@ describe('ShippingOptionsService', () => {
   });
 
   describe('adminDelete', () => {
-    it('soft-removes option by id', async () => {
+    it('soft-removes option by id when more than one exists', async () => {
       const option = { id: 'opt-1', storeId: 'store-1' };
       shippingOptionRepo.findOne.mockResolvedValue(option);
+      shippingOptionRepo.count.mockResolvedValue(2);
 
       await service.adminDelete('opt-1');
 
       expect(shippingOptionRepo.softRemove).toHaveBeenCalledWith(option);
+    });
+
+    it('rejects deleting the last shipping option', async () => {
+      const option = { id: 'opt-1', storeId: 'store-1' };
+      shippingOptionRepo.findOne.mockResolvedValue(option);
+      shippingOptionRepo.count.mockResolvedValue(1);
+
+      await expect(service.adminDelete('opt-1')).rejects.toMatchObject({
+        response: { code: 'LAST_SHIPPING_OPTION' },
+      });
     });
   });
 });

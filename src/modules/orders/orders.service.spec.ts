@@ -177,6 +177,51 @@ describe('OrdersService', () => {
     expect(result.id).toBe('ord-1');
   });
 
+  it('fails entire create when any variant belongs to suspended store (AC-006)', async () => {
+    variantRepository.findOne
+      .mockResolvedValueOnce({
+        ...variant,
+        id: 'var-ok',
+        product: {
+          id: 'prod-ok',
+          storeId: 'store-ok',
+          name: 'Ok Product',
+          store: { status: 'approved' },
+        },
+      })
+      .mockResolvedValueOnce({
+        id: 'var-sus',
+        productId: 'prod-sus',
+        stockQuantity: 10,
+        options: {},
+        product: {
+          id: 'prod-sus',
+          storeId: 'store-sus',
+          name: 'Suspended Product',
+          store: { status: 'suspended' },
+        },
+      });
+
+    await expect(
+      service.create(
+        {
+          items: [
+            { productId: 'prod-ok', variantId: 'var-ok', quantity: 1, price: 100 },
+            { productId: 'prod-sus', variantId: 'var-sus', quantity: 1, price: 50 },
+          ],
+          paymentMethod: 'promptpay',
+          guestPhone: '+66812345678',
+          shippingAddress,
+        },
+        undefined,
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'ORDER_CONTAINS_SUSPENDED_STORE' },
+    });
+
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+  });
+
   it('notifies vendor once per store when order has multiple items', async () => {
     const variantTwo = {
       ...variant,
@@ -310,6 +355,95 @@ describe('OrdersService', () => {
       mockManager,
       'Order status changed to cancelled',
     );
+  });
+
+  describe('updateStatus hold hardening (AC-013–AC-015, AC-020)', () => {
+    it('rejects setting status to on_hold with HOLD_TRANSITION_FORBIDDEN', async () => {
+      orderRepository.findOne.mockResolvedValue({
+        id: 'ord-1',
+        status: OrderStatus.PAID,
+        items: [],
+        shippingAddress: {},
+        storeShippings: [],
+        statusHistory: [],
+      });
+
+      await expect(
+        service.updateStatus('ord-1', OrderStatus.ON_HOLD, 'admin-1'),
+      ).rejects.toMatchObject({ response: { code: 'HOLD_TRANSITION_FORBIDDEN' } });
+      expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
+    });
+
+    it('rejects clearing on_hold to processing with HOLD_TRANSITION_FORBIDDEN', async () => {
+      orderRepository.findOne.mockResolvedValue({
+        id: 'ord-1',
+        status: OrderStatus.ON_HOLD,
+        previousStatus: OrderStatus.PAID,
+        items: [{ id: 'item-1', fulfillmentStatus: FulfillmentStatus.ON_HOLD }],
+        shippingAddress: {},
+        storeShippings: [],
+        statusHistory: [],
+      });
+
+      await expect(
+        service.updateStatus('ord-1', OrderStatus.PROCESSING, 'admin-1'),
+      ).rejects.toMatchObject({ response: { code: 'HOLD_TRANSITION_FORBIDDEN' } });
+    });
+
+    it('allows admin cancel from on_hold and clears item snapshots', async () => {
+      const heldItem = {
+        id: 'item-1',
+        fulfillmentStatus: FulfillmentStatus.ON_HOLD,
+        previousFulfillmentStatus: FulfillmentStatus.PENDING,
+        holdStartedAt: new Date('2026-01-01'),
+      };
+      const order = {
+        id: 'ord-1',
+        status: OrderStatus.ON_HOLD,
+        previousStatus: OrderStatus.PAID,
+        items: [heldItem],
+        shippingAddress: {},
+        storeShippings: [],
+        statusHistory: [],
+      };
+      orderRepository.findOne.mockResolvedValue(order);
+
+      await service.updateStatus('ord-1', OrderStatus.CANCELLED, 'admin-1');
+
+      expect(heldItem.fulfillmentStatus).toBe(FulfillmentStatus.CANCELLED);
+      expect(heldItem.previousFulfillmentStatus).toBeNull();
+      expect(heldItem.holdStartedAt).toBeNull();
+      expect(order.previousStatus).toBeNull();
+      expect(inventoryService.restoreOrderStock).toHaveBeenCalled();
+    });
+
+    it('allows admin refund from on_hold', async () => {
+      const order = {
+        id: 'ord-1',
+        status: OrderStatus.ON_HOLD,
+        previousStatus: OrderStatus.PAID,
+        items: [
+          {
+            id: 'item-1',
+            fulfillmentStatus: FulfillmentStatus.ON_HOLD,
+            previousFulfillmentStatus: FulfillmentStatus.PROCESSING,
+            holdStartedAt: new Date(),
+          },
+        ],
+        shippingAddress: {},
+        storeShippings: [],
+        statusHistory: [],
+      };
+      orderRepository.findOne.mockResolvedValue(order);
+
+      await service.updateStatus('ord-1', OrderStatus.REFUNDED, 'admin-1');
+
+      expect(inventoryService.restoreOrderStock).toHaveBeenCalledWith(
+        'ord-1',
+        mockManager,
+        'Order status changed to refunded',
+      );
+    });
   });
 
   it('resolves saved address for logged-in customer', async () => {

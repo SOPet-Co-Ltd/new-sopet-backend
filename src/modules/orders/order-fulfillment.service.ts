@@ -86,7 +86,27 @@ export class OrderFulfillmentService {
     const now = new Date();
     for (const item of items) {
       item.fulfillmentStatus = FulfillmentStatus.CANCELLED;
+      item.previousFulfillmentStatus = null;
+      item.holdStartedAt = null;
       item.updatedAt = now;
+    }
+  }
+
+  private assertNoHeldItemsForVendorFulfillment(storeItems: OrderItem[]): void {
+    if (storeItems.some((item) => item.fulfillmentStatus === FulfillmentStatus.ON_HOLD)) {
+      throw new BadRequestException({
+        code: 'HOLD_TRANSITION_FORBIDDEN',
+        message: 'Cannot fulfill items that are on hold due to store suspension',
+      });
+    }
+  }
+
+  private assertNoHeldItemsForVendorCancel(storeItems: OrderItem[]): void {
+    if (storeItems.some((item) => item.fulfillmentStatus === FulfillmentStatus.ON_HOLD)) {
+      throw new BadRequestException({
+        code: 'HOLD_CANCEL_FORBIDDEN',
+        message: 'Cannot cancel items that are on hold due to store suspension',
+      });
     }
   }
 
@@ -152,6 +172,7 @@ export class OrderFulfillmentService {
   async acknowledgeVendorOrder(userId: string, storeId: string, orderId: string): Promise<Order> {
     const order = await this.loadOrderWithItems(orderId);
     const storeItems = await this.assertVendorStoreAccess(userId, order, storeId);
+    this.assertNoHeldItemsForVendorFulfillment(storeItems);
 
     if (order.status !== OrderStatus.PAID && order.status !== OrderStatus.PROCESSING) {
       throw new BadRequestException({
@@ -195,6 +216,7 @@ export class OrderFulfillmentService {
   ): Promise<Order> {
     const order = await this.loadOrderWithItems(orderId);
     const storeItems = await this.assertVendorStoreAccess(userId, order, storeId);
+    this.assertNoHeldItemsForVendorFulfillment(storeItems);
     const normalizedTrackingNumber = validateTrackingNumber(trackingNumber);
     const normalizedFulfillmentProvider = validateFulfillmentProvider(fulfillmentProvider);
     const normalizedTrackingUrl = validateOptionalTrackingUrl(trackingUrl);
@@ -307,8 +329,9 @@ export class OrderFulfillmentService {
 
   async cancelVendorOrder(userId: string, storeId: string, orderId: string): Promise<Order> {
     const order = await this.loadOrderWithItems(orderId);
-    await this.assertVendorStoreAccess(userId, order, storeId);
+    const storeItems = await this.assertVendorStoreAccess(userId, order, storeId);
     this.assertSingleStoreOrder(order, storeId);
+    this.assertNoHeldItemsForVendorCancel(storeItems);
 
     if (order.status === OrderStatus.CANCELLED || order.status === OrderStatus.REFUNDED) {
       throw new BadRequestException({

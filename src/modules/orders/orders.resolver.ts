@@ -130,13 +130,7 @@ export class OrdersResolver {
     @Args('storeId') storeId: string,
     @CurrentUser('id') userId: string,
   ): Promise<OrderType[]> {
-    const hasAccess = await this.storesService.userHasStoreAccess(userId, storeId);
-    if (!hasAccess) {
-      throw new ForbiddenException({
-        code: 'STORE_ACCESS_DENIED',
-        message: 'No access to this store',
-      });
-    }
+    await this.storesService.assertStoreAccess(userId, storeId);
 
     const orders = await this.ordersService.findByStore(storeId);
     return orders.map(mapOrder);
@@ -216,7 +210,7 @@ export class OrdersResolver {
     @CurrentUser('id') userId: string,
     @CurrentUser('storeId') storeId: string,
   ): Promise<OrderType> {
-    await this.storesService.assertStoreOwner(userId, storeId);
+    await this.storesService.assertStoreAccess(userId, storeId);
     const updated = await this.orderFulfillmentService.markVendorOrderPaid(
       userId,
       storeId,
@@ -233,7 +227,7 @@ export class OrdersResolver {
     @CurrentUser('id') userId: string,
     @CurrentUser('storeId') storeId: string,
   ): Promise<OrderType> {
-    await this.storesService.assertStoreOwner(userId, storeId);
+    await this.storesService.assertStoreAccess(userId, storeId);
     const updated = await this.orderFulfillmentService.acknowledgeVendorOrder(
       userId,
       storeId,
@@ -250,7 +244,7 @@ export class OrdersResolver {
     @CurrentUser('id') userId: string,
     @CurrentUser('storeId') storeId: string,
   ): Promise<OrderType> {
-    await this.storesService.assertStoreOwner(userId, storeId);
+    await this.storesService.assertStoreAccess(userId, storeId);
     const updated = await this.orderFulfillmentService.shipVendorOrder(
       userId,
       storeId,
@@ -303,7 +297,7 @@ export class OrdersResolver {
     @CurrentUser('id') userId: string,
     @CurrentUser('storeId') storeId: string,
   ): Promise<OrderType> {
-    await this.storesService.assertStoreOwner(userId, storeId);
+    await this.storesService.assertStoreAccess(userId, storeId);
     const updated = await this.orderFulfillmentService.cancelVendorOrder(userId, storeId, orderId);
     return mapOrder(updated);
   }

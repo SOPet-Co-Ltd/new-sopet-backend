@@ -9,7 +9,7 @@ import {
   TopProductType,
   TopStoreType,
 } from '../../graphql/models/types';
-import { Roles } from '../../common/decorators';
+import { CurrentUser, Roles } from '../../common/decorators';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { StoresService } from '../stores/stores.service';
@@ -26,6 +26,8 @@ export class AnalyticsResolver {
   @Roles('vendor', 'admin')
   async storeAnalytics(
     @Args('storeId') storeId: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
     @Args('fromDate', { nullable: true }) fromDate?: string,
     @Args('toDate', { nullable: true }) toDate?: string,
   ): Promise<StoreAnalyticsType> {
@@ -34,6 +36,9 @@ export class AnalyticsResolver {
         code: 'STORE_ID_REQUIRED',
         message: 'Store ID is required',
       });
+    }
+    if (role === 'vendor') {
+      await this.storesService.assertStoreAccess(userId, storeId);
     }
     const range = this.analyticsService.parseDateRange(fromDate, toDate);
     return this.analyticsService.getStoreAnalytics(storeId, range);
@@ -55,6 +60,8 @@ export class AnalyticsResolver {
   @Roles('vendor', 'admin')
   async topProducts(
     @Args('storeId') storeId: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
     @Args('limit', { nullable: true, type: () => Int }) limit?: number,
   ): Promise<TopProductType[]> {
     if (!storeId) {
@@ -62,6 +69,9 @@ export class AnalyticsResolver {
         code: 'STORE_ID_REQUIRED',
         message: 'Store ID is required',
       });
+    }
+    if (role === 'vendor') {
+      await this.storesService.assertStoreAccess(userId, storeId);
     }
     return this.analyticsService.getTopProducts(storeId, limit ?? 5);
   }

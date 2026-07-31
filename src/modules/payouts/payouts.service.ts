@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 import { Payout, PayoutStatus } from '../../database/entities/payout.entity';
-import { OrderItem } from '../../database/entities/order-item.entity';
+import { FulfillmentStatus, OrderItem } from '../../database/entities/order-item.entity';
 import { Order, OrderStatus } from '../../database/entities/order.entity';
 import { Store, OmiseRecipientStatus } from '../../database/entities/store.entity';
 import { OmiseService, OmiseTransfer } from '../omise/omise.service';
@@ -382,6 +382,14 @@ export class PayoutsService {
       .where('item.store_id = :storeId', { storeId })
       .andWhere('order.status IN (:...statuses)', {
         statuses: [OrderStatus.PAID, OrderStatus.DELIVERED],
+      })
+      // Held item portions are not payout-eligible (AC-030); restore re-includes under PAID|DELIVERED.
+      .andWhere('item.fulfillment_status <> :heldFulfillment', {
+        heldFulfillment: FulfillmentStatus.ON_HOLD,
+      })
+      // Defense in depth: order-level on_hold must never contribute via item join.
+      .andWhere('order.status <> :heldOrderStatus', {
+        heldOrderStatus: OrderStatus.ON_HOLD,
       })
       .select('COALESCE(SUM(item.subtotal), 0)', 'total')
       .getRawOne<{ total: string }>();

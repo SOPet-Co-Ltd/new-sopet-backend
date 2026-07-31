@@ -5,6 +5,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { PayoutsModule } from '../payouts/payouts.module';
 import { StoresModule } from '../stores/stores.module';
+import { OrdersModule } from '../orders/orders.module';
 import { PaymentsService } from './payments.service';
 import { PaymentEventsService } from './payment-events.service';
 import { PaymentsWebhookController } from './payments-webhook.controller';
@@ -22,6 +23,7 @@ import { PaymentExpiryScheduler } from './payment-expiry.scheduler';
     InventoryModule,
     forwardRef(() => PayoutsModule),
     StoresModule,
+    forwardRef(() => OrdersModule),
     TypeOrmModule.forFeature([Payment, Order, Customer, SavedPaymentMethod]),
   ],
   controllers: [PaymentsWebhookController],

@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ProductsService } from './products.service';
 import { ProductStatus } from '../../database/entities/product.entity';
+import { StoreStatus } from '../../database/entities/store.entity';
 import { VariantRemovalBlockReason } from './variant-removal.types';
 
 describe('ProductsService', () => {
@@ -8,6 +9,7 @@ describe('ProductsService', () => {
   let productRepository: {
     findOne: jest.Mock;
     findOneOrFail: jest.Mock;
+    find: jest.Mock;
     create: jest.Mock;
     save: jest.Mock;
     createQueryBuilder: jest.Mock;
@@ -50,6 +52,10 @@ describe('ProductsService', () => {
     resolveApprovedCategoryFilter: jest.Mock;
     resolveApprovedTagFilter: jest.Mock;
   };
+  let shippingOptionsService: {
+    hasShippingOptions: jest.Mock;
+    countByStore: jest.Mock;
+  };
 
   const product = {
     id: 'prod-1',
@@ -63,6 +69,7 @@ describe('ProductsService', () => {
     productRepository = {
       findOne: jest.fn(),
       findOneOrFail: jest.fn(),
+      find: jest.fn().mockResolvedValue([]),
       create: jest.fn((data: Record<string, unknown>) => data),
       save: jest.fn((data: Record<string, unknown>) =>
         Promise.resolve({ ...data, id: (data.id as string | undefined) ?? 'prod-1' }),
@@ -117,6 +124,10 @@ describe('ProductsService', () => {
       resolveApprovedCategoryFilter: jest.fn(() => Promise.resolve(null)),
       resolveApprovedTagFilter: jest.fn(() => Promise.resolve(null)),
     };
+    shippingOptionsService = {
+      hasShippingOptions: jest.fn(() => Promise.resolve(true)),
+      countByStore: jest.fn(() => Promise.resolve(1)),
+    };
 
     service = new ProductsService(
       productRepository as never,
@@ -126,6 +137,7 @@ describe('ProductsService', () => {
       cartItemRepository as never,
       storesService as never,
       taxonomyService as never,
+      shippingOptionsService as never,
     );
   });
 
@@ -208,6 +220,22 @@ describe('ProductsService', () => {
     ).rejects.toMatchObject({ response: { code: 'PRODUCT_NOT_PUBLISHABLE' } });
   });
 
+  it('rejects publishing when store has no shipping options', async () => {
+    productRepository.findOne.mockResolvedValue({
+      ...product,
+      basePrice: 299,
+      categoryId: 'cat-1',
+      petTypeId: 'pet-1',
+      images: [{ id: 'img-1' }],
+      variants: [{ id: 'var-1', stockQuantity: 5, priceAdjustment: 0 }],
+    });
+    shippingOptionsService.hasShippingOptions.mockResolvedValue(false);
+
+    await expect(
+      service.update('prod-1', 'user-1', { status: ProductStatus.PUBLISHED }),
+    ).rejects.toMatchObject({ response: { code: 'PRODUCT_NOT_PUBLISHABLE' } });
+  });
+
   it('allows publishing a complete product', async () => {
     productRepository.findOne.mockResolvedValue({
       ...product,
@@ -233,6 +261,60 @@ describe('ProductsService', () => {
     });
 
     await expect(service.findOnePublished('prod-1')).rejects.toThrow(NotFoundException);
+  });
+
+  it('hides published products from suspended stores on findOnePublished (AC-002)', async () => {
+    productRepository.findOne.mockResolvedValue({
+      ...product,
+      status: ProductStatus.PUBLISHED,
+      store: { id: 'store-1', status: StoreStatus.SUSPENDED },
+    });
+
+    await expect(service.findOnePublished('prod-1')).rejects.toMatchObject({
+      response: { code: 'PRODUCT_NOT_FOUND' },
+    });
+  });
+
+  it('returns published products from approved stores on findOnePublished', async () => {
+    const published = {
+      ...product,
+      status: ProductStatus.PUBLISHED,
+      store: { id: 'store-1', status: StoreStatus.APPROVED },
+    };
+    productRepository.findOne.mockResolvedValue(published);
+
+    await expect(service.findOnePublished('prod-1')).resolves.toEqual(published);
+  });
+
+  it('hides published products from suspended stores on findBySlugPublished (AC-002)', async () => {
+    productRepository.findOne.mockResolvedValue({
+      ...product,
+      status: ProductStatus.PUBLISHED,
+      store: { id: 'store-1', status: StoreStatus.SUSPENDED },
+    });
+
+    await expect(service.findBySlugPublished('store-1', 'dog-food')).rejects.toMatchObject({
+      response: { code: 'PRODUCT_NOT_FOUND' },
+    });
+  });
+
+  it('filters suspended-store products from findPublishedByIds (AC-001)', async () => {
+    productRepository.find.mockResolvedValue([
+      {
+        id: 'prod-approved',
+        status: ProductStatus.PUBLISHED,
+        store: { id: 'store-a', status: StoreStatus.APPROVED },
+      },
+      {
+        id: 'prod-suspended',
+        status: ProductStatus.PUBLISHED,
+        store: { id: 'store-s', status: StoreStatus.SUSPENDED },
+      },
+    ]);
+
+    const result = await service.findPublishedByIds(['prod-suspended', 'prod-approved']);
+
+    expect(result.map((p) => p.id)).toEqual(['prod-approved']);
   });
 
   it('publish sets status when checklist passes', async () => {
