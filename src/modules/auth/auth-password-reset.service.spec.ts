@@ -27,10 +27,19 @@ describe('AuthService password reset', () => {
     findOne: jest.fn(),
     save: jest.fn(async (x) => x),
   };
+  const invalidatePriorTokensExecute = jest.fn().mockResolvedValue({ affected: 0 });
+  const invalidatePriorTokensQueryBuilder = {
+    update: jest.fn().mockReturnThis(),
+    set: jest.fn().mockReturnThis(),
+    where: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
+    execute: invalidatePriorTokensExecute,
+  };
   const passwordResetRepo = {
     create: jest.fn((x) => x),
     save: jest.fn(async (x) => ({ ...x, id: x.id ?? 'token-row-1' })),
     findOne: jest.fn(),
+    createQueryBuilder: jest.fn(() => invalidatePriorTokensQueryBuilder),
   };
   const emailDeliveryService = {
     sendPasswordReset: jest.fn(),
@@ -38,6 +47,13 @@ describe('AuthService password reset', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    // Re-bind chain after clearAllMocks so returnThis still works.
+    invalidatePriorTokensQueryBuilder.update.mockReturnThis();
+    invalidatePriorTokensQueryBuilder.set.mockReturnThis();
+    invalidatePriorTokensQueryBuilder.where.mockReturnThis();
+    invalidatePriorTokensQueryBuilder.andWhere.mockReturnThis();
+    invalidatePriorTokensExecute.mockResolvedValue({ affected: 0 });
+    passwordResetRepo.createQueryBuilder.mockReturnValue(invalidatePriorTokensQueryBuilder);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -96,6 +112,30 @@ describe('AuthService password reset', () => {
     );
   });
 
+  it('requestPasswordReset invalidates prior unused tokens for the same email (row 34)', async () => {
+    userRepo.findOne.mockResolvedValue({
+      id: 'user-1',
+      email: 'vendor@test.com',
+      isActive: true,
+    });
+
+    await service.requestPasswordReset('vendor@test.com');
+
+    expect(passwordResetRepo.createQueryBuilder).toHaveBeenCalled();
+    expect(invalidatePriorTokensQueryBuilder.update).toHaveBeenCalledWith(PasswordResetToken);
+    expect(invalidatePriorTokensQueryBuilder.set).toHaveBeenCalledWith({
+      usedAt: expect.any(Date),
+    });
+    expect(invalidatePriorTokensQueryBuilder.where).toHaveBeenCalledWith('email = :email', {
+      email: 'vendor@test.com',
+    });
+    expect(invalidatePriorTokensQueryBuilder.andWhere).toHaveBeenCalledWith('used_at IS NULL');
+    expect(invalidatePriorTokensExecute).toHaveBeenCalled();
+    // Newest token is still created after invalidation.
+    expect(passwordResetRepo.create).toHaveBeenCalled();
+    expect(emailDeliveryService.sendPasswordReset).toHaveBeenCalled();
+  });
+
   it('requestPasswordReset returns generic message when user missing', async () => {
     userRepo.findOne.mockResolvedValue(null);
 
@@ -104,6 +144,7 @@ describe('AuthService password reset', () => {
     expect(result.message).toContain('password reset link');
     expect(passwordResetRepo.save).not.toHaveBeenCalled();
     expect(emailDeliveryService.sendPasswordReset).not.toHaveBeenCalled();
+    expect(passwordResetRepo.createQueryBuilder).not.toHaveBeenCalled();
   });
 
   it('resetPassword updates password for valid token', async () => {
@@ -133,6 +174,9 @@ describe('AuthService password reset', () => {
     expect(passwordResetRepo.save).toHaveBeenCalledWith(
       expect.objectContaining({ usedAt: expect.any(Date) }),
     );
+    // Also invalidates any other unused tokens for the email.
+    expect(passwordResetRepo.createQueryBuilder).toHaveBeenCalled();
+    expect(invalidatePriorTokensExecute).toHaveBeenCalled();
   });
 
   it('resetPassword rejects invalid token', async () => {
@@ -141,6 +185,19 @@ describe('AuthService password reset', () => {
     await expect(service.resetPassword('bad-token', 'new-password-1')).rejects.toThrow(
       BadRequestException,
     );
+  });
+
+  it('resetPassword rejects used token (prior link after re-request)', async () => {
+    passwordResetRepo.findOne.mockResolvedValue({
+      token: 'old-token',
+      email: 'vendor@test.com',
+      usedAt: new Date(),
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    });
+
+    await expect(service.resetPassword('old-token', 'new-password-1')).rejects.toMatchObject({
+      response: { code: 'INVALID_TOKEN' },
+    });
   });
 
   it('resetPassword rejects expired token', async () => {
