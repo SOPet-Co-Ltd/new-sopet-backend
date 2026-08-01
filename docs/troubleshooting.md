@@ -126,6 +126,27 @@ yarn docker:check    # redis-cli ping
 | Coverage below threshold | Add tests for services in `collectCoverageFrom` |
 | E2E timeout              | Check mocked dependencies in test bootstrap     |
 
+## Deploy (SSM) failures
+
+### `Timed out after Ns waiting for SSM` with Status `InProgress`, empty stdout/stderr
+
+Usually **not** “SSM agent offline”. `InProgress` means the agent accepted the command. Empty output is expected until the remote script finishes unless CloudWatch output is enabled.
+
+Most common causes:
+
+1. **`BUILD_ON_HOST=true`**: native `docker build` on EC2 still running longer than the GHA waiter (3600s). Default arm64 path builds on GHA (`ubuntu-24.04-arm`) and EC2 only pulls — if you see long InProgress without that flag, check `deploy.sh` / disk / docker pull.
+2. **Disk full** on a small root volume (pull or leftover build cache)
+3. **Hung docker** (less common) — check processes on the instance
+
+```bash
+aws ssm get-command-invocation \
+  --command-id <COMMAND_ID> \
+  --instance-id <EC2_INSTANCE_ID> \
+  --region <AWS_REGION>
+```
+
+See [Deployment — Inspect a stuck SSM command](deployment.md#inspect-a-stuck--timed-out-ssm-command).
+
 ## Related docs
 
 - [Deployment](deployment.md)

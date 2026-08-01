@@ -38,6 +38,18 @@
         "ec2messages:SendReply"
       ],
       "Resource": "*"
+    },
+    {
+      "Sid": "SsmCloudWatchOutput",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:DescribeLogGroups",
+        "logs:DescribeLogStreams",
+        "logs:PutLogEvents"
+      ],
+      "Resource": "*"
     }
   ]
 }

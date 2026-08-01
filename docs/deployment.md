@@ -60,11 +60,59 @@ Dummy env vars: `JWT_SECRET`, `OMISE_*`.
 
 1. Load GitHub Environment (`DB_*`, secrets, EC2/ECR config) via keys in `infra/github-env.keys`
 2. **Run pending TypeORM migrations** (`yarn migration:run`) against the target database
-3. Build/push Docker image to ECR (if not already present for this commit)
+3. Build/push Docker image to ECR on GitHub Actions (if not already present for this commit)
+   - `linux/amd64`: `ubuntu-latest` (native amd64)
+   - `linux/arm64`: `ubuntu-24.04-arm` (native arm64 — no QEMU, no EC2 build)
+   - Escape hatch: set Environment var `BUILD_ON_HOST=true` to build on EC2 via `infra/ec2/build-on-host.sh` instead
 4. Render runtime `.env` from GitHub Environment
-5. **Deploy on EC2** via AWS Systems Manager (`infra/deploy-via-ssm.sh` → `/opt/sopet/deploy.sh`)
+5. **Deploy on EC2** via AWS Systems Manager (`infra/deploy-via-ssm.sh` → pull image + `/opt/sopet/deploy.sh`; optional build-on-host if `BUILD_ON_HOST=true`)
 
 Migrations run **before** the new container is started so the schema matches the code being rolled out. The GitHub Actions runner must be able to reach `DB_HOST`. Extensions that require superuser (e.g. `vector`) must be pre-installed on the database once by an admin.
+
+### SSM timeouts and empty InProgress output
+
+While Status is `InProgress`, `get-command-invocation` often shows **ResponseCode -1** and **empty stdout/stderr**. That is normal: SSM does not stream output into that API until the command finishes (unless CloudWatch output is enabled).
+
+| Knob                            | Meaning                                 | `BUILD_ON_HOST=true` | pull-only default |
+| ------------------------------- | --------------------------------------- | -------------------- | ----------------- |
+| `SSM_DELIVERY_TIMEOUT_SECONDS`  | Agent must _start_ the command          | 120                  | 120               |
+| `SSM_EXECUTION_TIMEOUT_SECONDS` | Max runtime on EC2 (`executionTimeout`) | 3600                 | 1800              |
+| `SSM_TIMEOUT_SECONDS`           | GHA poller wait                         | 3600                 | 1800              |
+
+Default arm64 deploys are **pull-only** on EC2 (image already in ECR from GHA). The longer timeouts apply only when `BUILD_ON_HOST=true`.
+
+**Optional live logs:** create a CloudWatch log group, attach `infra/iam/ec2-instance-ecr-policy.json` (includes `logs:*` for SSM output), set GitHub Environment variable `SSM_CLOUDWATCH_LOG_GROUP` (e.g. `/sopet/ssm/deploy`), and re-apply the GitHub deploy role with `ssm:CancelCommand` from `infra/iam/github-deploy-ec2-policy.json`.
+
+```bash
+aws logs create-log-group --log-group-name /sopet/ssm/deploy --region ap-southeast-7
+```
+
+### Inspect a stuck / timed-out SSM command
+
+```bash
+REGION=ap-southeast-7
+INSTANCE=i-0551151d36003420c
+CMD=6793bbdc-5bb1-465d-a272-8bea8689f6e1
+
+aws ssm get-command-invocation \
+  --command-id "$CMD" --instance-id "$INSTANCE" --region "$REGION"
+
+aws ssm list-command-invocations \
+  --command-id "$CMD" --details --region "$REGION"
+
+aws ssm describe-instance-information \
+  --filters "Key=InstanceIds,Values=$INSTANCE" --region "$REGION"
+
+# If CloudWatch output was enabled:
+aws logs tail /sopet/ssm/deploy --since 2h --region "$REGION"
+
+# Session Manager — disk / docker / agent
+aws ssm start-session --target "$INSTANCE" --region "$REGION"
+# then on the host:
+#   df -h; free -h; docker ps -a; docker system df
+#   ps aux | grep -E 'docker|build-on-host' | grep -v grep
+#   sudo tail -n 200 /var/log/amazon/ssm/amazon-ssm-agent.log
+```
 
 ## EC2 + ECR deploy (production / UAT)
 
