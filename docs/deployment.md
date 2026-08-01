@@ -56,19 +56,21 @@ E2E tests use mocked repositories — no Postgres/Redis/MinIO in CI.
 
 Dummy env vars: `JWT_SECRET`, `OMISE_*`.
 
-`.github/workflows/deploy.yml` — push to `deploy/uat` or `deploy/production` (also `workflow_dispatch`):
+`.github/workflows/deploy.yml` — push to `deploy/uat` or `deploy/production` (also `workflow_dispatch` with Environment choice):
 
-1. Load GitHub Environment (`DB_*`, secrets, EC2/ECR config) via keys in `infra/github-env.keys`
-2. **Run pending TypeORM migrations** (`yarn migration:run`) against the target database
-3. Build/push Docker image to ECR on GitHub Actions (if not already present for this commit)
+1. **`resolve-runner`** — reads Environment `DOCKER_PLATFORM`, outputs `ubuntu-24.04-arm` (arm64) or `ubuntu-latest` (amd64)
+2. Load GitHub Environment (`DB_*`, secrets, EC2/ECR config) via keys in `infra/github-env.keys`
+3. **Run pending TypeORM migrations** (`yarn migration:run`) against the target database
+4. Build/push Docker image to ECR on GitHub Actions (if not already present for this commit)
    - `linux/amd64`: `ubuntu-latest` (native amd64)
    - `linux/arm64`: `ubuntu-24.04-arm` (native arm64 — no QEMU, no EC2 build)
-   - Runner is chosen by a `resolve-runner` job that reads **Environment** var `DOCKER_PLATFORM` (Environment vars are not reliable on the same job’s `runs-on` at schedule time)
-   - Escape hatch: set Environment var `BUILD_ON_HOST=true` to build on EC2 via `infra/ec2/build-on-host.sh` instead
-4. Render runtime `.env` from GitHub Environment
-5. **Deploy on EC2** via AWS Systems Manager (`infra/deploy-via-ssm.sh` → pull image + `/opt/sopet/deploy.sh`; optional build-on-host if `BUILD_ON_HOST=true`)
+   - Escape hatch: set Environment var `BUILD_ON_HOST=true` to build on EC2 via `infra/ec2/build-on-host.sh` instead (**leave unset** for normal UAT/production)
+5. Render runtime `.env` from GitHub Environment
+6. **Deploy on EC2** via AWS Systems Manager (`infra/deploy-via-ssm.sh` → pull image + `/opt/sopet/deploy.sh`; optional build-on-host if `BUILD_ON_HOST=true`)
 
 Migrations run **before** the new container is started so the schema matches the code being rolled out. The GitHub Actions runner must be able to reach `DB_HOST`. Extensions that require superuser (e.g. `vector`) must be pre-installed on the database once by an admin.
+
+**Production runbook (step-by-step):** [deploy-production.md](deploy-production.md)
 
 ### SSM timeouts and empty InProgress output
 
@@ -128,16 +130,16 @@ Storefront and admin stay on Vercel; only the backend API runs on EC2.
 
 ### One-time AWS setup
 
-1. **ECR repository** — e.g. `sopet/backend-uat` / `sopet/backend-production`
+1. **ECR repository** — **one shared repo for UAT and production** (recommended). Set both GitHub Environments’ `ECR_REPOSITORY` to the same string (e.g. `sopet/backend-uat` or `sopet/backend`). A separate production-only repo is optional.
 
    ```bash
    aws ecr create-repository --repository-name sopet/backend-uat
    bash infra/apply-ecr-lifecycle-policy.sh sopet/backend-uat
    ```
 
-2. **EC2 instance profile** — attach a role with `infra/iam/ec2-instance-ecr-policy.json` (ECR pull + SSM agent).
+2. **EC2 instance profile** — attach a role with `infra/iam/ec2-instance-ecr-policy.json` (ECR pull + SSM agent). Both UAT and production instances need pull access to the shared repo.
 
-3. **GitHub OIDC deploy role** — trust GitHub Actions; attach `infra/iam/github-deploy-ec2-policy.json` (ECR push + `ssm:SendCommand`). Store role ARN as GitHub secret `AWS_ROLE_ARN`.
+3. **GitHub OIDC deploy role** — trust GitHub Actions; attach `infra/iam/github-deploy-ec2-policy.json` (ECR push/pull/describe + `ssm:SendCommand`). Store role ARN as GitHub secret `AWS_ROLE_ARN`. Must cover the shared repo for both Environments.
 
 4. **Security group** (minimum):
    - TCP **80** from `0.0.0.0/0` (or [Cloudflare IP ranges](https://www.cloudflare.com/ips/) if restricting origin)
@@ -153,14 +155,14 @@ Storefront and admin stay on Vercel; only the backend API runs on EC2.
 
 ### GitHub Environment variables
 
-| Variable                             | Example                     | Purpose                                   |
-| ------------------------------------ | --------------------------- | ----------------------------------------- |
-| `AWS_REGION`                         | `ap-southeast-1`            | ECR + SSM region                          |
-| `ECR_REPOSITORY`                     | `sopet/backend-uat`         | Image repository name                     |
-| `EC2_INSTANCE_ID`                    | `i-0abc123...`              | Target EC2 instance                       |
-| `CORS_ORIGINS`                       | `https://uat.sopet.org,...` | Must include Vercel storefront/admin URLs |
-| `API_URL`                            | `https://api-uat.sopet.org` | Public API base (email logo absolute URL) |
-| `STOREFRONT_URL` / `ADMIN_PANEL_URL` | `https://...`               | Public frontend URLs (links in emails)    |
+| Variable                             | Example                     | Purpose                                          |
+| ------------------------------------ | --------------------------- | ------------------------------------------------ |
+| `AWS_REGION`                         | `ap-southeast-1`            | ECR + SSM region                                 |
+| `ECR_REPOSITORY`                     | `sopet/backend-uat`         | Image repository name (same value on UAT + prod) |
+| `EC2_INSTANCE_ID`                    | `i-0abc123...`              | Target EC2 instance                              |
+| `CORS_ORIGINS`                       | `https://uat.sopet.org,...` | Must include Vercel storefront/admin URLs        |
+| `API_URL`                            | `https://api-uat.sopet.org` | Public API base (email logo absolute URL)        |
+| `STOREFRONT_URL` / `ADMIN_PANEL_URL` | `https://...`               | Public frontend URLs (links in emails)           |
 
 Plus all application vars/secrets listed in `infra/env.manifest.json`.
 
