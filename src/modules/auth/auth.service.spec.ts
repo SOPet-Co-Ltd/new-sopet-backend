@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { BadRequestException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { AuthService } from './auth.service';
 import { Customer } from '../../database/entities/customer.entity';
@@ -222,6 +222,49 @@ describe('AuthService', () => {
       email: 'vendor@test.com',
       passwordHash: hash,
       role: 'vendor',
+      isActive: true,
+      ownedStores: [],
+    });
+
+    await expect(
+      service.login({ email: 'vendor@test.com', password: 'wrong' }),
+    ).rejects.toMatchObject({ response: { code: 'INVALID_CREDENTIALS' } });
+  });
+
+  it('rejects login for suspended vendor after valid password with ACCOUNT_SUSPENDED', async () => {
+    const hash = await bcrypt.hash('secret123', 10);
+    userRepo.findOne.mockResolvedValue({
+      id: 'user-1',
+      email: 'vendor@test.com',
+      passwordHash: hash,
+      role: 'vendor',
+      isActive: false,
+      ownedStores: [],
+    });
+
+    await expect(
+      service.login({ email: 'vendor@test.com', password: 'secret123' }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    await expect(
+      service.login({ email: 'vendor@test.com', password: 'secret123' }),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'ACCOUNT_SUSPENDED',
+        message: 'Your account has been suspended. Please contact support for assistance.',
+      },
+    });
+    expect(userRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('keeps INVALID_CREDENTIALS when suspended vendor uses wrong password', async () => {
+    const hash = await bcrypt.hash('secret123', 10);
+    userRepo.findOne.mockResolvedValue({
+      id: 'user-1',
+      email: 'vendor@test.com',
+      passwordHash: hash,
+      role: 'vendor',
+      isActive: false,
       ownedStores: [],
     });
 
@@ -237,6 +280,7 @@ describe('AuthService', () => {
       email: 'vendor@test.com',
       passwordHash: hash,
       role: 'vendor',
+      isActive: true,
       fullName: 'Vendor',
       ownedStores: [{ id: 'store-1' }],
     });
@@ -266,6 +310,7 @@ describe('AuthService', () => {
       email: 'vendor@test.com',
       passwordHash: hash,
       role: 'vendor',
+      isActive: true,
       fullName: 'Vendor',
       ownedStores: [],
     });

@@ -223,8 +223,10 @@ export class AuthService {
   }> {
     const { email, password } = loginDto;
 
+    // Look up by email only — do not filter isActive here, or suspended
+    // accounts collapse into INVALID_CREDENTIALS before password is checked.
     const user = await this.userRepository.findOne({
-      where: { email, isActive: true },
+      where: { email },
       relations: ['ownedStores'],
     });
 
@@ -237,9 +239,18 @@ export class AuthService {
 
     const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
     if (!isPasswordValid) {
+      // Same generic code whether the account is active or suspended —
+      // do not leak existence / suspension status on wrong password.
       throw new UnauthorizedException({
         code: 'INVALID_CREDENTIALS',
         message: 'Invalid email or password',
+      });
+    }
+
+    if (!user.isActive) {
+      throw new ForbiddenException({
+        code: 'ACCOUNT_SUSPENDED',
+        message: 'Your account has been suspended. Please contact support for assistance.',
       });
     }
 
