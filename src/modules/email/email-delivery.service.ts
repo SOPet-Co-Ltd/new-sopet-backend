@@ -9,6 +9,7 @@ import {
   orderStatusChangedTemplate,
   passwordResetTemplate,
   storeMemberInviteTemplate,
+  vendorAccountSuspendedTemplate,
   vendorInviteTemplate,
 } from './email-templates';
 
@@ -145,6 +146,17 @@ export class EmailDeliveryService {
       orderStatusChangedTemplate(this.brand, params),
       'Order status changed',
       params.orderUrl,
+    );
+  }
+
+  async sendVendorAccountSuspended(
+    email: string,
+    params: { vendorName?: string | null; storeName?: string | null } = {},
+  ): Promise<void> {
+    await this.sendTemplate(
+      email,
+      vendorAccountSuspendedTemplate(this.brand, params),
+      'Vendor account suspended',
     );
   }
 }

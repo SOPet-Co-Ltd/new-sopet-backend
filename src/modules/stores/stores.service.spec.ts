@@ -38,6 +38,9 @@ describe('StoresService', () => {
   let auditLogsService: {
     log: jest.Mock;
   };
+  let emailDeliveryService: {
+    sendVendorAccountSuspended: jest.Mock;
+  };
 
   beforeEach(() => {
     storeRepository = {
@@ -77,6 +80,9 @@ describe('StoresService', () => {
     auditLogsService = {
       log: jest.fn().mockResolvedValue(undefined),
     };
+    emailDeliveryService = {
+      sendVendorAccountSuspended: jest.fn().mockResolvedValue(undefined),
+    };
 
     service = new StoresService(
       storeRepository as never,
@@ -99,6 +105,7 @@ describe('StoresService', () => {
       } as never,
       auditLogsService as never,
       storeSuspensionHoldService as never,
+      emailDeliveryService as never,
     );
   });
 
@@ -477,6 +484,83 @@ describe('StoresService', () => {
 
     expect(storeSuspensionHoldService.applyHoldForStore).not.toHaveBeenCalled();
     expect(storeSuspensionHoldService.restoreHoldForStore).not.toHaveBeenCalled();
+  });
+
+  describe('updateVendorAsAdmin', () => {
+    it('sends suspension email once when vendor account becomes inactive', async () => {
+      const vendor = {
+        id: 'vendor-1',
+        email: 'vendor@test.com',
+        fullName: 'Vendor One',
+        isActive: true,
+        role: UserRole.VENDOR,
+        ownedStores: [{ id: 'store-1', name: 'Pet Shop' }],
+      };
+      userRepository.findOne.mockResolvedValue(vendor);
+      userRepository.save.mockImplementation(async (data) => data);
+
+      const result = await service.updateVendorAsAdmin({ id: 'vendor-1', isActive: false });
+
+      expect(result.isActive).toBe(false);
+      expect(emailDeliveryService.sendVendorAccountSuspended).toHaveBeenCalledTimes(1);
+      expect(emailDeliveryService.sendVendorAccountSuspended).toHaveBeenCalledWith(
+        'vendor@test.com',
+        {
+          vendorName: 'Vendor One',
+          storeName: 'Pet Shop',
+        },
+      );
+    });
+
+    it('does not send suspension email when vendor is already inactive', async () => {
+      userRepository.findOne.mockResolvedValue({
+        id: 'vendor-1',
+        email: 'vendor@test.com',
+        fullName: 'Vendor One',
+        isActive: false,
+        role: UserRole.VENDOR,
+        ownedStores: [],
+      });
+      userRepository.save.mockImplementation(async (data) => data);
+
+      await service.updateVendorAsAdmin({ id: 'vendor-1', isActive: false });
+
+      expect(emailDeliveryService.sendVendorAccountSuspended).not.toHaveBeenCalled();
+    });
+
+    it('does not send suspension email when reactivating a vendor', async () => {
+      userRepository.findOne.mockResolvedValue({
+        id: 'vendor-1',
+        email: 'vendor@test.com',
+        fullName: 'Vendor One',
+        isActive: false,
+        role: UserRole.VENDOR,
+        ownedStores: [],
+      });
+      userRepository.save.mockImplementation(async (data) => data);
+
+      await service.updateVendorAsAdmin({ id: 'vendor-1', isActive: true });
+
+      expect(emailDeliveryService.sendVendorAccountSuspended).not.toHaveBeenCalled();
+    });
+
+    it('does not send suspension email when updating profile without status change', async () => {
+      userRepository.findOne
+        .mockResolvedValueOnce({
+          id: 'vendor-1',
+          email: 'vendor@test.com',
+          fullName: 'Old Name',
+          isActive: true,
+          role: UserRole.VENDOR,
+          ownedStores: [],
+        })
+        .mockResolvedValueOnce(null);
+      userRepository.save.mockImplementation(async (data) => data);
+
+      await service.updateVendorAsAdmin({ id: 'vendor-1', fullName: 'New Name' });
+
+      expect(emailDeliveryService.sendVendorAccountSuspended).not.toHaveBeenCalled();
+    });
   });
 
   describe('getVendorInsightsForAdmin', () => {

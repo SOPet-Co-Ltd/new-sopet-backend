@@ -26,6 +26,7 @@ import { StorageService } from '../storage/storage.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constants';
 import { StoreSuspensionHoldService } from '../orders/store-suspension-hold.service';
+import { EmailDeliveryService } from '../email/email-delivery.service';
 
 const VENDOR_REVENUE_EXCLUDED_STATUSES = [
   OrderStatus.CANCELLED,
@@ -104,6 +105,7 @@ export class StoresService {
     private readonly auditLogsService: AuditLogsService,
     @Inject(forwardRef(() => StoreSuspensionHoldService))
     private readonly storeSuspensionHoldService: StoreSuspensionHoldService,
+    private readonly emailDeliveryService: EmailDeliveryService,
   ) {}
 
   private async logAdminStoreAction(
@@ -855,6 +857,7 @@ export class StoresService {
     isActive?: boolean;
   }): Promise<User> {
     const user = await this.findVendorById(input.id);
+    const wasActive = user.isActive;
     if (input.email !== undefined) {
       const existing = await this.userRepository.findOne({
         where: { email: input.email },
@@ -869,7 +872,25 @@ export class StoresService {
     }
     if (input.fullName !== undefined) user.fullName = input.fullName;
     if (input.isActive !== undefined) user.isActive = input.isActive;
-    return this.userRepository.save(user);
+
+    const saved = await this.userRepository.save(user);
+
+    // Email only on active → inactive (idempotent for already-suspended accounts)
+    if (wasActive && input.isActive === false) {
+      const storeName =
+        (user.ownedStores ?? [])
+          .map((store) => store.name)
+          .filter((name): name is string => Boolean(name?.trim()))
+          .join(', ') || null;
+      await this.emailDeliveryService
+        .sendVendorAccountSuspended(saved.email, {
+          vendorName: saved.fullName,
+          storeName,
+        })
+        .catch(() => {});
+    }
+
+    return saved;
   }
 
   async getVendorInsightsForAdmin(vendorId: string): Promise<AdminVendorInsightsResult> {

@@ -461,3 +461,37 @@ export function orderStatusChangedTemplate(
 
   return { subject, html, text };
 }
+
+export function vendorAccountSuspendedTemplate(
+  brand: EmailTemplateBrand,
+  params: { vendorName?: string | null; storeName?: string | null },
+): EmailTemplateResult {
+  const subject = 'บัญชีผู้ขาย SOPet ของคุณถูกระงับ';
+  const displayName = params.vendorName?.trim() || 'ผู้ขาย';
+  const storeLabel = params.storeName?.trim();
+  const text = storeLabel
+    ? `เรียนคุณ${displayName} บัญชีผู้ขายของคุณบน SOPet (ร้าน ${storeLabel}) ถูกระงับชั่วคราว คุณจะไม่สามารถเข้าสู่ระบบได้ กรุณาติดต่อฝ่ายสนับสนุนหากต้องการความช่วยเหลือ`
+    : `เรียนคุณ${displayName} บัญชีผู้ขายของคุณบน SOPet ถูกระงับชั่วคราว คุณจะไม่สามารถเข้าสู่ระบบได้ กรุณาติดต่อฝ่ายสนับสนุนหากต้องการความช่วยเหลือ`;
+
+  const infoRows = [
+    { label: 'บัญชี', value: displayName },
+    ...(storeLabel ? [{ label: 'ร้านค้า', value: storeLabel }] : []),
+    { label: 'สถานะ', value: 'ระงับชั่วคราว' },
+  ];
+
+  const html = layout(
+    brand,
+    `
+    ${heroBadge('บัญชีถูกระงับ', 'info')}
+    ${sectionTitle('บัญชีผู้ขายของคุณถูกระงับ', 'คุณจะไม่สามารถเข้าสู่ระบบแผงผู้ขายได้จนกว่าบัญชีจะได้รับการเปิดใช้งานอีกครั้ง')}
+    ${highlightBox(
+      'ผู้ดูแลระบบได้ระงับบัญชีผู้ขายของคุณบน SOPet ชั่วคราว หากคุณเชื่อว่านี่เป็นความผิดพลาด หรือต้องการขอเปิดใช้งานอีกครั้ง กรุณาติดต่อฝ่ายสนับสนุน',
+    )}
+    ${infoPanel(infoRows)}
+    ${note('หากต้องการความช่วยเหลือ กรุณาติดต่อทีมงาน SOPet ผ่านช่องทางสนับสนุนบนเว็บไซต์')}
+  `,
+    subject,
+  );
+
+  return { subject, html, text };
+}
