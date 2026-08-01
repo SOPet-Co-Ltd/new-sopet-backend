@@ -86,7 +86,27 @@ export class OrderFulfillmentService {
     const now = new Date();
     for (const item of items) {
       item.fulfillmentStatus = FulfillmentStatus.CANCELLED;
+      item.previousFulfillmentStatus = null;
+      item.holdStartedAt = null;
       item.updatedAt = now;
+    }
+  }
+
+  private assertNoHeldItemsForVendorFulfillment(storeItems: OrderItem[]): void {
+    if (storeItems.some((item) => item.fulfillmentStatus === FulfillmentStatus.ON_HOLD)) {
+      throw new BadRequestException({
+        code: 'HOLD_TRANSITION_FORBIDDEN',
+        message: 'Cannot fulfill items that are on hold due to store suspension',
+      });
+    }
+  }
+
+  private assertNoHeldItemsForVendorCancel(storeItems: OrderItem[]): void {
+    if (storeItems.some((item) => item.fulfillmentStatus === FulfillmentStatus.ON_HOLD)) {
+      throw new BadRequestException({
+        code: 'HOLD_CANCEL_FORBIDDEN',
+        message: 'Cannot cancel items that are on hold due to store suspension',
+      });
     }
   }
 
@@ -141,9 +161,24 @@ export class OrderFulfillmentService {
       });
     }
 
+    // Route through the same fulfillment-derived status ladder as acknowledge/ship, using
+    // PAID (not the current PENDING_PAYMENT) as the base so the "sticky unpaid" rule
+    // doesn't apply here - this transition IS the payment event. If another store's items
+    // on this multi-vendor order are ON_HOLD (store suspended), the order should land on
+    // ON_HOLD instead of PAID, matching how the other vendor actions already reconcile
+    // held items with the order header status.
+    const nextStatus = deriveOrderStatusFromFulfillment(
+      OrderStatus.PAID,
+      order.items.map((item) => item.fulfillmentStatus),
+    );
+    // Payment happened regardless of which header status it lands on - set paidAt here
+    // rather than relying on persistOrderTransition's `nextStatus === PAID` check, since
+    // nextStatus can now be ON_HOLD.
+    order.paidAt = order.paidAt ?? new Date();
+
     return this.persistOrderTransition(
       order,
-      OrderStatus.PAID,
+      nextStatus,
       userId,
       `Vendor marked order paid (store ${storeId})`,
     );
@@ -152,6 +187,7 @@ export class OrderFulfillmentService {
   async acknowledgeVendorOrder(userId: string, storeId: string, orderId: string): Promise<Order> {
     const order = await this.loadOrderWithItems(orderId);
     const storeItems = await this.assertVendorStoreAccess(userId, order, storeId);
+    this.assertNoHeldItemsForVendorFulfillment(storeItems);
 
     if (order.status !== OrderStatus.PAID && order.status !== OrderStatus.PROCESSING) {
       throw new BadRequestException({
@@ -195,6 +231,7 @@ export class OrderFulfillmentService {
   ): Promise<Order> {
     const order = await this.loadOrderWithItems(orderId);
     const storeItems = await this.assertVendorStoreAccess(userId, order, storeId);
+    this.assertNoHeldItemsForVendorFulfillment(storeItems);
     const normalizedTrackingNumber = validateTrackingNumber(trackingNumber);
     const normalizedFulfillmentProvider = validateFulfillmentProvider(fulfillmentProvider);
     const normalizedTrackingUrl = validateOptionalTrackingUrl(trackingUrl);
@@ -307,8 +344,9 @@ export class OrderFulfillmentService {
 
   async cancelVendorOrder(userId: string, storeId: string, orderId: string): Promise<Order> {
     const order = await this.loadOrderWithItems(orderId);
-    await this.assertVendorStoreAccess(userId, order, storeId);
+    const storeItems = await this.assertVendorStoreAccess(userId, order, storeId);
     this.assertSingleStoreOrder(order, storeId);
+    this.assertNoHeldItemsForVendorCancel(storeItems);
 
     if (order.status === OrderStatus.CANCELLED || order.status === OrderStatus.REFUNDED) {
       throw new BadRequestException({

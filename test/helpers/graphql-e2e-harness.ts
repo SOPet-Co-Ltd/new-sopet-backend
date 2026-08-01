@@ -34,6 +34,8 @@ import { OmiseService } from '../../src/modules/omise/omise.service';
 import { NotificationsService } from '../../src/modules/notifications/notifications.service';
 import { StorageService } from '../../src/modules/storage/storage.service';
 import { AuditLogsService } from '../../src/modules/audit-logs/audit-logs.service';
+import { ShippingOptionsService } from '../../src/modules/stores/shipping-options.service';
+import { StoreSuspensionHoldService } from '../../src/modules/orders/store-suspension-hold.service';
 import { createTypeOrmTestOptions } from './typeorm-test.config';
 
 export interface SearchTaxonomyGraphqlE2eHarness {
@@ -94,6 +96,21 @@ export const searchTaxonomyGraphqlMockProviders = [
     provide: AuditLogsService,
     useValue: {
       log: jest.fn(),
+    },
+  },
+  {
+    provide: ShippingOptionsService,
+    useValue: {
+      hasShippingOptions: jest.fn().mockResolvedValue(true),
+      countByStore: jest.fn().mockResolvedValue(1),
+      findByStore: jest.fn().mockResolvedValue([]),
+    },
+  },
+  {
+    provide: StoreSuspensionHoldService,
+    useValue: {
+      applyHoldForStore: jest.fn().mockResolvedValue({ ordersTouched: 0, itemsHeld: 0 }),
+      restoreHoldForStore: jest.fn().mockResolvedValue({ ordersTouched: 0, itemsRestored: 0 }),
     },
   },
 ];

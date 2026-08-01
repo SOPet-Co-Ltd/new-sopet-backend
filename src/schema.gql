@@ -2,6 +2,12 @@
 # THIS FILE WAS AUTOMATICALLY GENERATED (DO NOT MODIFY)
 # ------------------------------------------------------
 
+input AcceptAdminInvitationInput {
+  fullName: String!
+  password: String!
+  token: String!
+}
+
 input AcceptStoreMemberInvitationInput {
   fullName: String!
   password: String!
@@ -252,6 +258,13 @@ type CartType {
   id: String!
   items: [CartItemType!]!
   sessionId: String
+  warnings: [CartWarningType!]
+}
+
+type CartWarningType {
+  code: String!
+  message: String!
+  variantId: String
 }
 
 type CategoryType {
@@ -579,6 +592,7 @@ type MessagePayload {
 }
 
 type Mutation {
+  acceptAdminInvitation(input: AcceptAdminInvitationInput!): VendorAuthPayload!
   acceptStoreInvitation(token: String!): StoreMemberType!
   acceptStoreMemberInvitation(input: AcceptStoreMemberInvitationInput!): VendorAuthPayload!
   acceptVendorInvitation(input: AcceptVendorInvitationInput!): VendorAuthPayload!
@@ -880,6 +894,11 @@ type PaginationMeta {
   totalPages: Int!
 }
 
+type PasswordResetTokenStatusType {
+  status: String!
+  valid: Boolean!
+}
+
 type PaymentType {
   amount: Float!
   authorizeUri: String
@@ -1106,6 +1125,7 @@ type Query {
   adminStorePayoutSummary(storeId: String!): PayoutSummaryType!
   adminStorePayouts(storeId: String!): [PayoutType!]!
   adminStoreReactivationRequests(status: String): [StoreReactivationRequestType!]!
+  adminStoreRequests: [StoreRequestType!]!
   adminStoreShippingOptions(storeId: String!): [StoreShippingOptionType!]!
   adminStores: [AdminStoreType!]!
   adminTeamMembers: [AdminTeamMemberType!]!
@@ -1125,6 +1145,8 @@ type Query {
   customerReviewableItems: [CustomerReviewableItemType!]!
   exportSearchAnalyticsCsv(fromDate: DateTime, toDate: DateTime): String!
   favorites: [FavoriteType!]!
+  getAdminInvitationByToken(token: String!): AdminInvitationType!
+  getPasswordResetTokenStatus(token: String!): PasswordResetTokenStatusType!
   getStoreInvitationByToken(token: String!): StoreInvitationPreviewType!
   guestOrders(guestPhone: String!): [OrderType!]!
 
@@ -1259,7 +1281,7 @@ input RejectStoreReactivationRequestInput {
 
 input RejectStoreRequestInput {
   id: String!
-  reason: String!
+  reason: String
 }
 
 input RemoveCartItemInput {
@@ -1905,6 +1927,7 @@ type UserProfile {
 input ValidatePromotionInput {
   code: String!
   lines: [ValidatePromotionLineInput!]
+  shippingFee: Float
   storeId: String
   subtotal: Float!
 }
@@ -1920,6 +1943,7 @@ input ValidatePromotionLineInput {
 input ValidatePromotionsInput {
   lines: [ValidatePromotionLineInput!]
   promotions: [ValidatePromotionsTargetInput!]!
+  shippingFee: Float
   storeId: String
   subtotal: Float!
 }

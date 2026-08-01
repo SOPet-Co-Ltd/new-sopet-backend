@@ -31,6 +31,13 @@ describe('StoresService', () => {
   let auditLogRepository: {
     createQueryBuilder: jest.Mock;
   };
+  let storeSuspensionHoldService: {
+    applyHoldForStore: jest.Mock;
+    restoreHoldForStore: jest.Mock;
+  };
+  let auditLogsService: {
+    log: jest.Mock;
+  };
 
   beforeEach(() => {
     storeRepository = {
@@ -63,6 +70,13 @@ describe('StoresService', () => {
         getMany: jest.fn().mockResolvedValue([]),
       })),
     };
+    storeSuspensionHoldService = {
+      applyHoldForStore: jest.fn().mockResolvedValue({ ordersTouched: 0, itemsHeld: 0 }),
+      restoreHoldForStore: jest.fn().mockResolvedValue({ ordersTouched: 0, itemsRestored: 0 }),
+    };
+    auditLogsService = {
+      log: jest.fn().mockResolvedValue(undefined),
+    };
 
     service = new StoresService(
       storeRepository as never,
@@ -83,9 +97,8 @@ describe('StoresService', () => {
       {
         deleteObject: jest.fn(),
       } as never,
-      {
-        log: jest.fn().mockResolvedValue(undefined),
-      } as never,
+      auditLogsService as never,
+      storeSuspensionHoldService as never,
     );
   });
 
@@ -225,11 +238,91 @@ describe('StoresService', () => {
     expect(result.status).toBe(StoreStatus.SUSPENDED);
   });
 
+  it('calls applyHoldForStore after status persist on suspend', async () => {
+    const callOrder: string[] = [];
+    storeRepository.findOne.mockResolvedValue({ id: 'store-1', status: StoreStatus.APPROVED });
+    storeRepository.save.mockImplementation(async (s) => {
+      callOrder.push('save');
+      return s;
+    });
+    storeSuspensionHoldService.applyHoldForStore.mockImplementation(async () => {
+      callOrder.push('applyHold');
+      return { ordersTouched: 1, itemsHeld: 2 };
+    });
+
+    const result = await service.suspend('store-1', 'admin-1');
+
+    expect(result.status).toBe(StoreStatus.SUSPENDED);
+    expect(storeSuspensionHoldService.applyHoldForStore).toHaveBeenCalledWith('store-1');
+    expect(storeSuspensionHoldService.restoreHoldForStore).not.toHaveBeenCalled();
+    expect(callOrder.indexOf('save')).toBeLessThan(callOrder.indexOf('applyHold'));
+  });
+
+  it('reactivates suspended store and calls restoreHoldForStore after status persist', async () => {
+    const callOrder: string[] = [];
+    storeRepository.findOne.mockResolvedValue({ id: 'store-1', status: StoreStatus.SUSPENDED });
+    storeRepository.save.mockImplementation(async (s) => {
+      callOrder.push('save');
+      return s;
+    });
+    storeSuspensionHoldService.restoreHoldForStore.mockImplementation(async () => {
+      callOrder.push('restoreHold');
+      return { ordersTouched: 1, itemsRestored: 2 };
+    });
+
+    const result = await service.reactivate('store-1', 'admin-1');
+
+    expect(result.status).toBe(StoreStatus.APPROVED);
+    expect(result.approvedBy).toBe('admin-1');
+    expect(result.approvedAt).toBeInstanceOf(Date);
+    expect(storeSuspensionHoldService.restoreHoldForStore).toHaveBeenCalledWith('store-1');
+    expect(storeSuspensionHoldService.applyHoldForStore).not.toHaveBeenCalled();
+    expect(callOrder.indexOf('save')).toBeLessThan(callOrder.indexOf('restoreHold'));
+  });
+
+  it('does not call restoreHoldForStore when reactivate rejects non-suspended store', async () => {
+    storeRepository.findOne.mockResolvedValue({ id: 'store-1', status: StoreStatus.APPROVED });
+
+    await expect(service.reactivate('store-1', 'admin-1')).rejects.toMatchObject({
+      response: { code: 'INVALID_STATUS' },
+    });
+    expect(storeRepository.save).not.toHaveBeenCalled();
+    expect(storeSuspensionHoldService.restoreHoldForStore).not.toHaveBeenCalled();
+  });
+
   it('finds store by slug', async () => {
-    storeRepository.findOne.mockResolvedValue({ id: 'store-1', slug: 'my-store' });
+    storeRepository.findOne.mockResolvedValue({
+      id: 'store-1',
+      slug: 'my-store',
+      status: StoreStatus.APPROVED,
+    });
 
     const store = await service.findBySlug('my-store');
     expect(store.slug).toBe('my-store');
+  });
+
+  it('returns STORE_NOT_FOUND for suspended store on public findBySlug (AC-003)', async () => {
+    storeRepository.findOne.mockResolvedValue({
+      id: 'store-1',
+      slug: 'my-store',
+      status: StoreStatus.SUSPENDED,
+    });
+
+    await expect(service.findBySlug('my-store')).rejects.toMatchObject({
+      response: { code: 'STORE_NOT_FOUND' },
+    });
+  });
+
+  it('returns STORE_NOT_FOUND for pending store on public findBySlug', async () => {
+    storeRepository.findOne.mockResolvedValue({
+      id: 'store-1',
+      slug: 'my-store',
+      status: StoreStatus.PENDING,
+    });
+
+    await expect(service.findBySlug('my-store')).rejects.toMatchObject({
+      response: { code: 'STORE_NOT_FOUND' },
+    });
   });
 
   it('updates store owner and syncs loaded owner relation', async () => {
@@ -268,6 +361,19 @@ describe('StoresService', () => {
     expect(result.ownerId).toBe('owner-2');
   });
 
+  it('trims surrounding whitespace from name before saving (row 46 regression)', async () => {
+    const store = { id: 'store-1', ownerId: 'owner-1', owner: { id: 'owner-1' }, name: 'Old Name' };
+    storeRepository.findOne.mockResolvedValueOnce(store).mockResolvedValueOnce(store);
+    storeRepository.save.mockImplementation(async (saved) => saved);
+
+    await service.updateAsAdmin({
+      id: 'store-1',
+      name: '  New Name  ',
+    });
+
+    expect(store.name).toBe('New Name');
+  });
+
   it('rejects clearing store owner', async () => {
     storeRepository.findOne.mockResolvedValue({
       id: 'store-1',
@@ -299,6 +405,78 @@ describe('StoresService', () => {
         ownerUserId: 'missing-vendor',
       }),
     ).rejects.toThrow(NotFoundException);
+  });
+
+  it('updateAsAdmin to suspended calls applyHoldForStore (admin UI path)', async () => {
+    const callOrder: string[] = [];
+    storeRepository.findOne
+      .mockResolvedValueOnce({ id: 'store-1', status: StoreStatus.APPROVED })
+      .mockResolvedValueOnce({ id: 'store-1', status: StoreStatus.SUSPENDED });
+    storeRepository.save.mockImplementation(async (s) => {
+      callOrder.push('save');
+      return s;
+    });
+    storeSuspensionHoldService.applyHoldForStore.mockImplementation(async () => {
+      callOrder.push('applyHold');
+      return { ordersTouched: 1, itemsHeld: 1 };
+    });
+
+    const result = await service.updateAsAdmin({
+      id: 'store-1',
+      status: StoreStatus.SUSPENDED,
+      adminId: 'admin-1',
+    });
+
+    expect(result.status).toBe(StoreStatus.SUSPENDED);
+    expect(storeSuspensionHoldService.applyHoldForStore).toHaveBeenCalledWith('store-1');
+    expect(storeSuspensionHoldService.restoreHoldForStore).not.toHaveBeenCalled();
+    expect(callOrder.indexOf('save')).toBeLessThan(callOrder.indexOf('applyHold'));
+  });
+
+  it('updateAsAdmin suspended→approved calls restoreHoldForStore (admin UI path)', async () => {
+    const callOrder: string[] = [];
+    storeRepository.findOne
+      .mockResolvedValueOnce({ id: 'store-1', status: StoreStatus.SUSPENDED })
+      .mockResolvedValueOnce({
+        id: 'store-1',
+        status: StoreStatus.APPROVED,
+        approvedBy: 'admin-1',
+      });
+    storeRepository.save.mockImplementation(async (s) => {
+      callOrder.push('save');
+      return s;
+    });
+    storeSuspensionHoldService.restoreHoldForStore.mockImplementation(async () => {
+      callOrder.push('restoreHold');
+      return { ordersTouched: 1, itemsRestored: 1 };
+    });
+
+    const result = await service.updateAsAdmin({
+      id: 'store-1',
+      status: StoreStatus.APPROVED,
+      adminId: 'admin-1',
+    });
+
+    expect(result.status).toBe(StoreStatus.APPROVED);
+    expect(storeSuspensionHoldService.restoreHoldForStore).toHaveBeenCalledWith('store-1');
+    expect(storeSuspensionHoldService.applyHoldForStore).not.toHaveBeenCalled();
+    expect(callOrder.indexOf('save')).toBeLessThan(callOrder.indexOf('restoreHold'));
+  });
+
+  it('updateAsAdmin without status change does not call hold hooks', async () => {
+    storeRepository.findOne
+      .mockResolvedValueOnce({ id: 'store-1', status: StoreStatus.APPROVED, name: 'Old' })
+      .mockResolvedValueOnce({ id: 'store-1', status: StoreStatus.APPROVED, name: 'New' });
+    storeRepository.save.mockImplementation(async (s) => s);
+
+    await service.updateAsAdmin({
+      id: 'store-1',
+      name: 'New',
+      adminId: 'admin-1',
+    });
+
+    expect(storeSuspensionHoldService.applyHoldForStore).not.toHaveBeenCalled();
+    expect(storeSuspensionHoldService.restoreHoldForStore).not.toHaveBeenCalled();
   });
 
   describe('getVendorInsightsForAdmin', () => {

@@ -93,4 +93,89 @@ describe('deriveOrderStatusFromFulfillment', () => {
       ]),
     ).toBe(OrderStatus.DELIVERED);
   });
+
+  /**
+   * Early verification matrix — Design Doc §2 / Decision #15 / AC-011–AC-012.
+   * Held peers must not invent shipped|delivered; unpaid must not elevate to order on_hold.
+   */
+  it.each([
+    {
+      name: 'Decision #15: unpaid + all on_hold stays pending_payment (not order on_hold)',
+      current: OrderStatus.PENDING_PAYMENT,
+      statuses: [FulfillmentStatus.ON_HOLD, FulfillmentStatus.ON_HOLD],
+      expected: OrderStatus.PENDING_PAYMENT,
+    },
+    {
+      name: 'Decision #15: unpaid + mixed held + pending stays pending_payment',
+      current: OrderStatus.PENDING_PAYMENT,
+      statuses: [FulfillmentStatus.ON_HOLD, FulfillmentStatus.PENDING],
+      expected: OrderStatus.PENDING_PAYMENT,
+    },
+    {
+      name: 'AC-011: paid + all non-terminal on_hold → order on_hold',
+      current: OrderStatus.PAID,
+      statuses: [FulfillmentStatus.ON_HOLD, FulfillmentStatus.ON_HOLD],
+      expected: OrderStatus.ON_HOLD,
+    },
+    {
+      name: 'AC-011: processing + all on_hold → order on_hold',
+      current: OrderStatus.PROCESSING,
+      statuses: [FulfillmentStatus.ON_HOLD],
+      expected: OrderStatus.ON_HOLD,
+    },
+    {
+      name: 'AC-011: paid + cancelled terminal excluded; remaining all on_hold → on_hold',
+      current: OrderStatus.PAID,
+      statuses: [FulfillmentStatus.CANCELLED, FulfillmentStatus.ON_HOLD],
+      expected: OrderStatus.ON_HOLD,
+    },
+    {
+      name: 'AC-012: mixed held + pending → paid (not on_hold; held ignored for ladder)',
+      current: OrderStatus.PAID,
+      statuses: [FulfillmentStatus.ON_HOLD, FulfillmentStatus.PENDING],
+      expected: OrderStatus.PAID,
+    },
+    {
+      name: 'AC-012: mixed held + processing → processing',
+      current: OrderStatus.PAID,
+      statuses: [FulfillmentStatus.ON_HOLD, FulfillmentStatus.PROCESSING],
+      expected: OrderStatus.PROCESSING,
+    },
+    {
+      name: 'mixed held + shipped + pending → processing (not shipped/delivered)',
+      current: OrderStatus.PROCESSING,
+      statuses: [FulfillmentStatus.ON_HOLD, FulfillmentStatus.SHIPPED, FulfillmentStatus.PENDING],
+      expected: OrderStatus.PROCESSING,
+    },
+    {
+      name: 'mixed held + shipped sibling → shipped (not delivered; held excluded from every)',
+      current: OrderStatus.PROCESSING,
+      statuses: [FulfillmentStatus.ON_HOLD, FulfillmentStatus.SHIPPED],
+      expected: OrderStatus.SHIPPED,
+    },
+    {
+      name: 'held peers do not block all-shipped progressing set → shipped',
+      current: OrderStatus.PROCESSING,
+      statuses: [FulfillmentStatus.ON_HOLD, FulfillmentStatus.SHIPPED, FulfillmentStatus.SHIPPED],
+      expected: OrderStatus.SHIPPED,
+    },
+    {
+      name: 'held peers do not block all-delivered progressing set → delivered',
+      current: OrderStatus.SHIPPED,
+      statuses: [
+        FulfillmentStatus.ON_HOLD,
+        FulfillmentStatus.DELIVERED,
+        FulfillmentStatus.DELIVERED,
+      ],
+      expected: OrderStatus.DELIVERED,
+    },
+    {
+      name: 'never treat on_hold as processing for some() ladder alone',
+      current: OrderStatus.PAID,
+      statuses: [FulfillmentStatus.ON_HOLD, FulfillmentStatus.PENDING],
+      expected: OrderStatus.PAID,
+    },
+  ])('$name', ({ current, statuses, expected }) => {
+    expect(deriveOrderStatusFromFulfillment(current, statuses)).toBe(expected);
+  });
 });

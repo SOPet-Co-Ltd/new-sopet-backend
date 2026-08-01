@@ -10,6 +10,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, LessThanOrEqual, Repository } from 'typeorm';
 import { Payment } from '../../database/entities/payment.entity';
 import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
+import { OrderItem } from '../../database/entities/order-item.entity';
 import { Customer } from '../../database/entities/customer.entity';
 import { SavedPaymentMethod } from '../../database/entities/saved-payment-method.entity';
 import { CreateChargeDto } from './dto';
@@ -24,6 +25,7 @@ import {
   CheckoutPaymentMethod,
   normalizeCheckoutPaymentMethod,
 } from '../../common/utils/checkout-payment.util';
+import { orderHasHeldItems } from '../orders/order-totals.util';
 
 interface OmiseCharge {
   id: string;
@@ -210,12 +212,20 @@ export class PaymentsService {
         status: OrderStatus.PENDING_PAYMENT,
         createdAt: LessThanOrEqual(cutoff),
       },
+      relations: ['items'],
     });
 
     let cancelledCount = 0;
     for (const order of candidates) {
       try {
         if (order.status !== OrderStatus.PENDING_PAYMENT) {
+          continue;
+        }
+
+        if (orderHasHeldItems(order.items)) {
+          this.logger.log(
+            `Skipping stale unpaid cancel for order ${order.id}: one or more items on_hold`,
+          );
           continue;
         }
 
@@ -458,6 +468,26 @@ export class PaymentsService {
         message: 'This order is no longer awaiting payment',
       });
     }
+    if (orderHasHeldItems(order.items)) {
+      throw new BadRequestException({
+        code: 'PAYMENT_HELD_PORTION_BLOCKED',
+        message: 'Payment is blocked while any order item is on hold',
+      });
+    }
+  }
+
+  private async loadOrderItemsIfNeeded(
+    order: Order,
+    manager?: EntityManager,
+  ): Promise<OrderItem[]> {
+    if (order.items?.length) {
+      return order.items;
+    }
+    const items = manager
+      ? await manager.find(OrderItem, { where: { orderId: order.id } })
+      : await this.orderRepository.manager.find(OrderItem, { where: { orderId: order.id } });
+    order.items = items;
+    return items;
   }
 
   private toOrderPaymentMethod(method: CheckoutPaymentMethod): PaymentMethod {
@@ -725,7 +755,10 @@ export class PaymentsService {
   }
 
   async assertCanPayForOrder(orderId: string, customerId?: string): Promise<Order> {
-    const order = await this.orderRepository.findOne({ where: { id: orderId } });
+    const order = await this.orderRepository.findOne({
+      where: { id: orderId },
+      relations: ['items'],
+    });
     if (!order) {
       throw new BadRequestException({
         code: 'ORDER_NOT_FOUND',
@@ -831,6 +864,8 @@ export class PaymentsService {
             message: 'Order not found',
           });
         }
+
+        await this.loadOrderItemsIfNeeded(lockedOrder, manager);
 
         const latestUnderLock = await manager.findOne(Payment, {
           where: { orderId },

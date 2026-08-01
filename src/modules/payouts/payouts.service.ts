@@ -1,11 +1,13 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, IsNull, Repository } from 'typeorm';
 import { Payout, PayoutStatus } from '../../database/entities/payout.entity';
-import { OrderItem } from '../../database/entities/order-item.entity';
+import { FulfillmentStatus, OrderItem } from '../../database/entities/order-item.entity';
 import { Order, OrderStatus } from '../../database/entities/order.entity';
 import { Store, OmiseRecipientStatus } from '../../database/entities/store.entity';
+import { Promotion, PromotionScope } from '../../database/entities/promotion.entity';
+import { PromotionUsage } from '../../database/entities/promotion-usage.entity';
 import { OmiseService, OmiseTransfer } from '../omise/omise.service';
 import { CreatePayoutOptions, PayoutSummary, TriggerPayoutOptions } from './payouts.types';
 
@@ -23,6 +25,7 @@ export class PayoutsService {
     private readonly storeRepository: Repository<Store>,
     @InjectRepository(OrderItem)
     private readonly orderItemRepository: Repository<OrderItem>,
+    private readonly dataSource: DataSource,
     private readonly omiseService: OmiseService,
     private readonly configService: ConfigService,
   ) {}
@@ -157,14 +160,29 @@ export class PayoutsService {
 
     const fee = 0;
     const netAmount = amount - fee;
-    const payout = this.payoutRepository.create({
-      storeId,
-      amount,
-      fee,
-      netAmount,
-      status: PayoutStatus.PENDING,
-      processedBy: options.processedBy ?? null,
-      notes: options.notes ?? null,
+
+    // Both requestPayout (vendor) and triggerPayout (admin) read the pending-payout summary
+    // and only create a payout if it's zero, with no lock in between - two concurrent calls
+    // (double-click, or vendor + admin racing) can otherwise both pass that check and each
+    // create their own PENDING payout for the same available balance, double-paying the
+    // store once Omise transfers are applied below. Locking the store row inside a
+    // transaction serializes concurrent creates for the same store; the recheck after
+    // acquiring the lock is what actually catches the race (the pre-check above is just a
+    // fast-fail for the common case).
+    const payout = await this.dataSource.transaction(async (manager) => {
+      await this.lockStoreRowForPayout(manager, storeId);
+      await this.assertNoConcurrentPendingPayout(manager, storeId);
+
+      const created = manager.getRepository(Payout).create({
+        storeId,
+        amount,
+        fee,
+        netAmount,
+        status: PayoutStatus.PENDING,
+        processedBy: options.processedBy ?? null,
+        notes: options.notes ?? null,
+      });
+      return manager.getRepository(Payout).save(created);
     });
 
     if (
@@ -176,6 +194,35 @@ export class PayoutsService {
     }
 
     return this.payoutRepository.save(payout);
+  }
+
+  private async lockStoreRowForPayout(manager: EntityManager, storeId: string): Promise<void> {
+    const store = await manager
+      .getRepository(Store)
+      .createQueryBuilder('store')
+      .where('store.id = :storeId', { storeId })
+      .setLock('pessimistic_write')
+      .getOne();
+
+    if (!store) {
+      throw new NotFoundException({ code: 'STORE_NOT_FOUND', message: 'Store not found' });
+    }
+  }
+
+  private async assertNoConcurrentPendingPayout(
+    manager: EntityManager,
+    storeId: string,
+  ): Promise<void> {
+    const pending = await manager
+      .getRepository(Payout)
+      .findOne({ where: { storeId, status: In(PENDING_STATUSES) } });
+
+    if (pending) {
+      throw new BadRequestException({
+        code: 'PAYOUT_ALREADY_PENDING',
+        message: 'A payout is already pending for this store',
+      });
+    }
   }
 
   /**
@@ -276,17 +323,55 @@ export class PayoutsService {
 
     this.assertRecipientReadyForTransfer(store);
 
+    // Two concurrent requestPayout/triggerPayout calls can both load the same orphan payout
+    // (PENDING, no transferReference) before either submits it - without a claim step here,
+    // both would call Omise's createTransfer for the same amount, i.e. a real double payment.
+    // Atomically flip it to PROCESSING inside a row lock first; only the caller that wins the
+    // claim proceeds to call Omise.
+    const claimed = await this.claimOrphanPayoutForSubmission(payout.id);
+    if (!claimed) {
+      const latest = await this.payoutRepository.findOne({ where: { id: payout.id } });
+      if (!latest) {
+        throw new NotFoundException({ code: 'PAYOUT_NOT_FOUND', message: 'Payout not found' });
+      }
+      return latest;
+    }
+
     try {
       await this.applyOmiseTransfer(
-        payout,
+        claimed,
         store.omiseRecipientId as string,
-        Number(payout.netAmount),
+        Number(claimed.netAmount),
       );
     } catch (error) {
-      await this.payoutRepository.save(payout);
+      await this.payoutRepository.save(claimed);
       throw error;
     }
-    return this.payoutRepository.save(payout);
+    return this.payoutRepository.save(claimed);
+  }
+
+  /**
+   * Atomically claims an orphan pending payout for Omise submission by flipping it to
+   * PROCESSING inside a row lock, so a concurrent submitPayoutToOmise call on the same row
+   * backs off instead of also calling Omise. Returns null if another caller already claimed
+   * or completed it by the time the lock was acquired.
+   */
+  private async claimOrphanPayoutForSubmission(payoutId: string): Promise<Payout | null> {
+    return this.dataSource.transaction(async (manager) => {
+      const payout = await manager
+        .getRepository(Payout)
+        .createQueryBuilder('payout')
+        .where('payout.id = :payoutId', { payoutId })
+        .setLock('pessimistic_write')
+        .getOne();
+
+      if (!payout || payout.status !== PayoutStatus.PENDING || payout.transferReference) {
+        return null;
+      }
+
+      payout.status = PayoutStatus.PROCESSING;
+      return manager.getRepository(Payout).save(payout);
+    });
   }
 
   private async applyOmiseTransfer(
@@ -376,6 +461,22 @@ export class PayoutsService {
   }
 
   private async calculateGrossRevenue(storeId: string): Promise<number> {
+    const [itemSubtotal, storePromotionDiscounts] = await Promise.all([
+      this.calculateItemSubtotal(storeId),
+      this.calculateStorePromotionDiscounts(storeId),
+    ]);
+
+    // A vendor's OWN store-scoped promotion is a discount the vendor chose to give -
+    // OrderItem.subtotal is always the raw pre-discount line amount (discountAmount only
+    // ever lived at the Order header level), so without this the vendor was credited the
+    // full undiscounted amount while the customer paid less, with nobody actually bearing
+    // the cost of the vendor's own promo. Platform-wide promotions are intentionally left
+    // untouched here - the platform funds those out of its own margin, which is a business
+    // policy choice, not this bug.
+    return Math.max(0, itemSubtotal - storePromotionDiscounts);
+  }
+
+  private async calculateItemSubtotal(storeId: string): Promise<number> {
     const result = await this.orderItemRepository
       .createQueryBuilder('item')
       .innerJoin(Order, 'order', 'order.id = item.order_id')
@@ -383,7 +484,32 @@ export class PayoutsService {
       .andWhere('order.status IN (:...statuses)', {
         statuses: [OrderStatus.PAID, OrderStatus.DELIVERED],
       })
+      // Held item portions are not payout-eligible (AC-030); restore re-includes under PAID|DELIVERED.
+      .andWhere('item.fulfillment_status <> :heldFulfillment', {
+        heldFulfillment: FulfillmentStatus.ON_HOLD,
+      })
+      // Defense in depth: order-level on_hold must never contribute via item join.
+      .andWhere('order.status <> :heldOrderStatus', {
+        heldOrderStatus: OrderStatus.ON_HOLD,
+      })
       .select('COALESCE(SUM(item.subtotal), 0)', 'total')
+      .getRawOne<{ total: string }>();
+
+    return Number(result?.total ?? 0);
+  }
+
+  private async calculateStorePromotionDiscounts(storeId: string): Promise<number> {
+    const result = await this.dataSource
+      .createQueryBuilder(PromotionUsage, 'usage')
+      .innerJoin(Order, 'order', 'order.id = usage.order_id')
+      .innerJoin(Promotion, 'promotion', 'promotion.id = usage.promotion_id')
+      .where('promotion.store_id = :storeId', { storeId })
+      .andWhere('promotion.scope = :scope', { scope: PromotionScope.STORE })
+      .andWhere('order.status IN (:...statuses)', {
+        statuses: [OrderStatus.PAID, OrderStatus.DELIVERED],
+      })
+      .andWhere('order.status <> :heldOrderStatus', { heldOrderStatus: OrderStatus.ON_HOLD })
+      .select('COALESCE(SUM(usage.discount_amount), 0)', 'total')
       .getRawOne<{ total: string }>();
 
     return Number(result?.total ?? 0);

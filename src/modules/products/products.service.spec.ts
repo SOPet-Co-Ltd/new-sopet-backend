@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ProductsService } from './products.service';
 import { ProductStatus } from '../../database/entities/product.entity';
+import { StoreStatus } from '../../database/entities/store.entity';
 import { VariantRemovalBlockReason } from './variant-removal.types';
 
 describe('ProductsService', () => {
@@ -8,6 +9,7 @@ describe('ProductsService', () => {
   let productRepository: {
     findOne: jest.Mock;
     findOneOrFail: jest.Mock;
+    find: jest.Mock;
     create: jest.Mock;
     save: jest.Mock;
     createQueryBuilder: jest.Mock;
@@ -37,14 +39,23 @@ describe('ProductsService', () => {
   let storesService: {
     userHasStoreAccess: jest.Mock;
     resolveDefaultStoreId: jest.Mock;
+    isStoreSuspended: jest.Mock;
   };
   let taxonomyService: {
     getApprovedCategory: jest.Mock;
     getApprovedTags: jest.Mock;
     getApprovedCategoryByName: jest.Mock;
     getApprovedTagsByNames: jest.Mock;
+    getApprovedPetTypeByName: jest.Mock;
+    getApprovedBrandByName: jest.Mock;
+    getApprovedPetType: jest.Mock;
+    getApprovedBrand: jest.Mock;
     resolveApprovedCategoryFilter: jest.Mock;
     resolveApprovedTagFilter: jest.Mock;
+  };
+  let shippingOptionsService: {
+    hasShippingOptions: jest.Mock;
+    countByStore: jest.Mock;
   };
 
   const product = {
@@ -59,6 +70,7 @@ describe('ProductsService', () => {
     productRepository = {
       findOne: jest.fn(),
       findOneOrFail: jest.fn(),
+      find: jest.fn().mockResolvedValue([]),
       create: jest.fn((data: Record<string, unknown>) => data),
       save: jest.fn((data: Record<string, unknown>) =>
         Promise.resolve({ ...data, id: (data.id as string | undefined) ?? 'prod-1' }),
@@ -100,14 +112,23 @@ describe('ProductsService', () => {
         Promise.resolve(userId === 'user-1' && storeId === 'store-1'),
       ),
       resolveDefaultStoreId: jest.fn(() => Promise.resolve('store-1')),
+      isStoreSuspended: jest.fn(() => Promise.resolve(false)),
     };
     taxonomyService = {
       getApprovedCategory: jest.fn(),
       getApprovedTags: jest.fn(() => Promise.resolve([])),
       getApprovedCategoryByName: jest.fn(),
       getApprovedTagsByNames: jest.fn(() => Promise.resolve([])),
+      getApprovedPetTypeByName: jest.fn(),
+      getApprovedBrandByName: jest.fn(),
+      getApprovedPetType: jest.fn(),
+      getApprovedBrand: jest.fn(),
       resolveApprovedCategoryFilter: jest.fn(() => Promise.resolve(null)),
       resolveApprovedTagFilter: jest.fn(() => Promise.resolve(null)),
+    };
+    shippingOptionsService = {
+      hasShippingOptions: jest.fn(() => Promise.resolve(true)),
+      countByStore: jest.fn(() => Promise.resolve(1)),
     };
 
     service = new ProductsService(
@@ -118,6 +139,7 @@ describe('ProductsService', () => {
       cartItemRepository as never,
       storesService as never,
       taxonomyService as never,
+      shippingOptionsService as never,
     );
   });
 
@@ -171,6 +193,21 @@ describe('ProductsService', () => {
     expect(result.status).toBe(ProductStatus.DRAFT);
   });
 
+  it('forbids updating a product when its store is suspended, even for a vendor with valid store access', async () => {
+    productRepository.findOne.mockResolvedValue({ ...product });
+    storesService.isStoreSuspended.mockResolvedValue(true);
+
+    await expect(
+      service.update('prod-1', 'user-1', { name: 'Hacked while suspended' }),
+    ).rejects.toMatchObject({ response: { code: 'STORE_SUSPENDED' } });
+  });
+
+  it('still allows read-only store resolution (resolveActiveStoreId) while the store is suspended', async () => {
+    storesService.isStoreSuspended.mockResolvedValue(true);
+
+    await expect(service.resolveActiveStoreId('user-1', 'store-1')).resolves.toBe('store-1');
+  });
+
   it('forces draft status on create even when status is requested', async () => {
     productRepository.findOne.mockResolvedValue(null);
 
@@ -194,6 +231,22 @@ describe('ProductsService', () => {
       categoryId: null,
     });
     productRepository.save.mockImplementation((p: Record<string, unknown>) => p);
+
+    await expect(
+      service.update('prod-1', 'user-1', { status: ProductStatus.PUBLISHED }),
+    ).rejects.toMatchObject({ response: { code: 'PRODUCT_NOT_PUBLISHABLE' } });
+  });
+
+  it('rejects publishing when store has no shipping options', async () => {
+    productRepository.findOne.mockResolvedValue({
+      ...product,
+      basePrice: 299,
+      categoryId: 'cat-1',
+      petTypeId: 'pet-1',
+      images: [{ id: 'img-1' }],
+      variants: [{ id: 'var-1', stockQuantity: 5, priceAdjustment: 0 }],
+    });
+    shippingOptionsService.hasShippingOptions.mockResolvedValue(false);
 
     await expect(
       service.update('prod-1', 'user-1', { status: ProductStatus.PUBLISHED }),
@@ -225,6 +278,60 @@ describe('ProductsService', () => {
     });
 
     await expect(service.findOnePublished('prod-1')).rejects.toThrow(NotFoundException);
+  });
+
+  it('hides published products from suspended stores on findOnePublished (AC-002)', async () => {
+    productRepository.findOne.mockResolvedValue({
+      ...product,
+      status: ProductStatus.PUBLISHED,
+      store: { id: 'store-1', status: StoreStatus.SUSPENDED },
+    });
+
+    await expect(service.findOnePublished('prod-1')).rejects.toMatchObject({
+      response: { code: 'PRODUCT_NOT_FOUND' },
+    });
+  });
+
+  it('returns published products from approved stores on findOnePublished', async () => {
+    const published = {
+      ...product,
+      status: ProductStatus.PUBLISHED,
+      store: { id: 'store-1', status: StoreStatus.APPROVED },
+    };
+    productRepository.findOne.mockResolvedValue(published);
+
+    await expect(service.findOnePublished('prod-1')).resolves.toEqual(published);
+  });
+
+  it('hides published products from suspended stores on findBySlugPublished (AC-002)', async () => {
+    productRepository.findOne.mockResolvedValue({
+      ...product,
+      status: ProductStatus.PUBLISHED,
+      store: { id: 'store-1', status: StoreStatus.SUSPENDED },
+    });
+
+    await expect(service.findBySlugPublished('store-1', 'dog-food')).rejects.toMatchObject({
+      response: { code: 'PRODUCT_NOT_FOUND' },
+    });
+  });
+
+  it('filters suspended-store products from findPublishedByIds (AC-001)', async () => {
+    productRepository.find.mockResolvedValue([
+      {
+        id: 'prod-approved',
+        status: ProductStatus.PUBLISHED,
+        store: { id: 'store-a', status: StoreStatus.APPROVED },
+      },
+      {
+        id: 'prod-suspended',
+        status: ProductStatus.PUBLISHED,
+        store: { id: 'store-s', status: StoreStatus.SUSPENDED },
+      },
+    ]);
+
+    const result = await service.findPublishedByIds(['prod-suspended', 'prod-approved']);
+
+    expect(result.map((p) => p.id)).toEqual(['prod-approved']);
   });
 
   it('publish sets status when checklist passes', async () => {
@@ -469,6 +576,137 @@ describe('ProductsService', () => {
     await expect(service.updateVariant('var-1', 'user-1', { priceModifier: 120 })).rejects.toThrow(
       ForbiddenException,
     );
+  });
+
+  describe('public API product / variant updates', () => {
+    it('findOneInStore returns product when store matches', async () => {
+      productRepository.findOne.mockResolvedValue({
+        ...product,
+        storeId: 'store-1',
+        variants: [],
+      });
+
+      const result = await service.findOneInStore('prod-1', 'store-1');
+      expect(result.id).toBe('prod-1');
+    });
+
+    it('findOneInStore returns 404 when product is in another store', async () => {
+      productRepository.findOne.mockResolvedValue({
+        ...product,
+        storeId: 'store-other',
+        variants: [],
+      });
+
+      await expect(service.findOneInStore('prod-1', 'store-1')).rejects.toThrow(NotFoundException);
+    });
+
+    it('updateProductForPublicApi resolves taxonomy names and updates', async () => {
+      productRepository.findOne.mockResolvedValue({
+        ...product,
+        storeId: 'store-1',
+        status: ProductStatus.DRAFT,
+        variants: [],
+      });
+      taxonomyService.getApprovedCategoryByName.mockResolvedValue({
+        id: 'cat-1',
+        name: 'อาหารแมว',
+      });
+      taxonomyService.getApprovedPetTypeByName.mockResolvedValue({ id: 'pet-1', name: 'แมว' });
+      taxonomyService.getApprovedBrandByName.mockResolvedValue({ id: 'brand-1', name: 'RC' });
+      taxonomyService.getApprovedCategory.mockResolvedValue({ id: 'cat-1', name: 'อาหารแมว' });
+      taxonomyService.getApprovedPetType.mockResolvedValue({ id: 'pet-1', name: 'แมว' });
+      taxonomyService.getApprovedBrand.mockResolvedValue({ id: 'brand-1', name: 'RC' });
+
+      await service.updateProductForPublicApi('prod-1', 'store-1', 'user-1', {
+        name: 'Updated',
+        category: 'อาหารแมว',
+        petType: 'แมว',
+        brand: 'RC',
+      });
+
+      expect(taxonomyService.getApprovedCategoryByName).toHaveBeenCalledWith('อาหารแมว');
+      expect(productRepository.save).toHaveBeenCalled();
+    });
+
+    it('updateProductForPublicApi rejects empty patch', async () => {
+      await expect(
+        service.updateProductForPublicApi('prod-1', 'store-1', 'user-1', {}),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('updateVariantStockPriceForPublicApi sets stock and absolute price', async () => {
+      const variant = {
+        id: 'var-1',
+        productId: 'prod-1',
+        sku: 'SKU-1',
+        stockQuantity: 5,
+        priceAdjustment: 0,
+        product: { storeId: 'store-1', basePrice: 499 },
+      };
+      variantRepository.findOne.mockResolvedValue(variant);
+      variantRepository.save.mockImplementation((v: Record<string, unknown>) => Promise.resolve(v));
+
+      const result = await service.updateVariantStockPriceForPublicApi('store-1', 'user-1', {
+        variantId: 'var-1',
+        productId: 'prod-1',
+        stock: 20,
+        price: 549,
+      });
+
+      expect(result.stockQuantity).toBe(20);
+      expect(result.priceAdjustment).toBe(50);
+    });
+
+    it('updateVariantStockPriceForPublicApi allows price below basePrice', async () => {
+      const variant = {
+        id: 'var-1',
+        productId: 'prod-1',
+        sku: 'SKU-1',
+        stockQuantity: 5,
+        priceAdjustment: 0,
+        product: { storeId: 'store-1', basePrice: 499 },
+      };
+      variantRepository.findOne.mockResolvedValue(variant);
+      variantRepository.save.mockImplementation((v: Record<string, unknown>) => Promise.resolve(v));
+
+      const result = await service.updateVariantStockPriceForPublicApi('store-1', 'user-1', {
+        sku: 'SKU-1',
+        price: 450,
+      });
+
+      expect(result.priceAdjustment).toBe(-49);
+    });
+
+    it('updateVariantStockPriceForPublicApi returns 404 for wrong store', async () => {
+      variantRepository.findOne.mockResolvedValue({
+        id: 'var-1',
+        productId: 'prod-1',
+        product: { storeId: 'store-other', basePrice: 100 },
+      });
+
+      await expect(
+        service.updateVariantStockPriceForPublicApi('store-1', 'user-1', {
+          variantId: 'var-1',
+          stock: 1,
+        }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('updateVariantStockPriceForPublicApi returns 404 when productId mismatches', async () => {
+      variantRepository.findOne.mockResolvedValue({
+        id: 'var-1',
+        productId: 'prod-other',
+        product: { storeId: 'store-1', basePrice: 100 },
+      });
+
+      await expect(
+        service.updateVariantStockPriceForPublicApi('store-1', 'user-1', {
+          variantId: 'var-1',
+          productId: 'prod-1',
+          stock: 1,
+        }),
+      ).rejects.toThrow(NotFoundException);
+    });
   });
 
   it('adds image to own product', async () => {

@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { EntityManager } from 'typeorm';
+import { EntityManager, In } from 'typeorm';
 import { OrderItem } from '../../database/entities/order-item.entity';
 import { ProductVariant } from '../../database/entities/product-variant.entity';
 import {
@@ -21,6 +21,36 @@ export class InventoryService {
     notes?: string,
   ): Promise<boolean> {
     const items = await manager.find(OrderItem, { where: { orderId } });
+    return this.restoreStockForItems(orderId, items, manager, notes ?? 'Order stock restored');
+  }
+
+  /**
+   * Item-scoped stock restore for partial cancel (e.g. hold SLA). Idempotent per
+   * order+variant RETURN — same keying as restoreOrderStock. Do not use whole-order
+   * restore for partial held-item exits.
+   */
+  async restoreItemStock(
+    orderId: string,
+    itemIds: string[],
+    manager: EntityManager,
+    notes?: string,
+  ): Promise<boolean> {
+    if (itemIds.length === 0) {
+      return false;
+    }
+
+    const items = await manager.find(OrderItem, {
+      where: { orderId, id: In(itemIds) },
+    });
+    return this.restoreStockForItems(orderId, items, manager, notes ?? 'Order item stock restored');
+  }
+
+  private async restoreStockForItems(
+    orderId: string,
+    items: OrderItem[],
+    manager: EntityManager,
+    notes: string,
+  ): Promise<boolean> {
     if (items.length === 0) {
       return false;
     }
@@ -68,7 +98,7 @@ export class InventoryService {
           quantityAfter: newStock,
           referenceId: orderId,
           referenceType: 'order',
-          notes: notes ?? 'Order stock restored',
+          notes,
         }),
       );
 

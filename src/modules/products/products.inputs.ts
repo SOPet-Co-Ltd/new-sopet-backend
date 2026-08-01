@@ -142,9 +142,15 @@ export class SyncProductVariantItemInput {
   @Min(0)
   stockQuantity!: number;
 
+  // CreateProductVariantInput/UpdateProductVariantInput both guard this with @Min(0) - it was
+  // missing here on the batch-sync path, so a vendor could push a variant's priceAdjustment
+  // negative enough (price = basePrice + priceAdjustment in mappers.ts) to make the variant's
+  // final price zero or negative via syncProductVariants, bypassing a guard the single
+  // create/update mutations already enforce.
   @Field(() => Float, { nullable: true })
   @IsOptional()
   @IsNumber()
+  @Min(0)
   priceModifier?: number;
 
   @Field(() => String, {

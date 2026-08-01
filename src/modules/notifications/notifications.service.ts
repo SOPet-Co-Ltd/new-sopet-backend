@@ -369,6 +369,98 @@ export class NotificationsService {
   }
 
   /**
+   * Notify customer + vendor that store items on an order entered hold (AC-028, AC-038).
+   * Best-effort: callers must catch — failure must not roll back hold (ADR-0010).
+   */
+  async notifyOrderItemsOnHold(orderId: string, storeId: string): Promise<void> {
+    await this.notifyHoldEvent(orderId, storeId, 'enter');
+  }
+
+  /**
+   * Notify customer + vendor that held store items resumed after reactivation (AC-019, AC-029).
+   */
+  async notifyOrderItemsHoldResumed(orderId: string, storeId: string): Promise<void> {
+    await this.notifyHoldEvent(orderId, storeId, 'resume');
+  }
+
+  private async notifyHoldEvent(
+    orderId: string,
+    storeId: string,
+    event: 'enter' | 'resume',
+  ): Promise<void> {
+    const order = await this.orderRepository.findOne({
+      where: { id: orderId },
+      relations: ['items'],
+    });
+    if (!order) {
+      this.logger.warn(`Hold notify skipped — order not found order=${orderId}`);
+      return;
+    }
+
+    const customerType = event === 'enter' ? 'order_items_on_hold' : 'order_items_hold_resumed';
+    const vendorType =
+      event === 'enter' ? 'vendor_order_items_on_hold' : 'vendor_order_items_hold_resumed';
+    const customerMessage =
+      event === 'enter'
+        ? `ออเดอร์ #${order.orderNumber} มีรายการจากร้านที่ถูกระงับ — กำลังพักจัดส่งบางรายการ`
+        : `ออเดอร์ #${order.orderNumber} — รายการที่พักไว้กลับมาดำเนินการต่อแล้ว`;
+    const vendorMessage =
+      event === 'enter'
+        ? `ออเดอร์ #${order.orderNumber} — รายการของร้านถูกพักจัดส่งเนื่องจากร้านถูกระงับ`
+        : `ออเดอร์ #${order.orderNumber} — รายการที่พักไว้กลับมาดำเนินการต่อแล้วหลังเปิดร้านอีกครั้ง`;
+    const emailStatus = event === 'enter' ? 'on_hold' : 'hold_resumed';
+    const metadata = {
+      orderId: order.id,
+      storeId,
+      orderNumber: order.orderNumber,
+    };
+
+    if (order.customerId) {
+      try {
+        await this.createUserNotification(
+          order.customerId,
+          customerType,
+          customerMessage,
+          metadata,
+          ['orderId', 'storeId'],
+        );
+      } catch (error) {
+        this.logger.warn(
+          `Hold customer notify failed for order=${order.orderNumber}`,
+          error instanceof Error ? error.message : undefined,
+        );
+      }
+    }
+
+    try {
+      await this.notifyOrderStatusChanged(order, emailStatus);
+    } catch (error) {
+      this.logger.warn(
+        `Hold email notify failed for order=${order.orderNumber}`,
+        error instanceof Error ? error.message : undefined,
+      );
+    }
+
+    try {
+      const store = await this.storeRepository.findOne({
+        where: { id: storeId },
+        relations: ['owner'],
+      });
+      if (store?.owner) {
+        await this.createUserNotification(store.owner.id, vendorType, vendorMessage, metadata, [
+          'orderId',
+          'storeId',
+        ]);
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Hold vendor notify failed for order=${order.orderNumber} store=${storeId}`,
+        error instanceof Error ? error.message : undefined,
+      );
+    }
+  }
+
+  /**
    * Notify store owners whose products were unbound after a taxonomy item was deleted.
    */
   async notifyVendorsAboutTaxonomyDeleted(

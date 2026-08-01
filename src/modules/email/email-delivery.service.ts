@@ -63,7 +63,7 @@ export class EmailDeliveryService {
   }
 
   async sendAdminInvite(email: string, token: string): Promise<void> {
-    const inviteUrl = `${this.adminPanelUrl}/register?adminToken=${token}`;
+    const inviteUrl = `${this.adminPanelUrl}/register/invite/admin?token=${token}`;
     await this.sendTemplate(
       email,
       adminInviteTemplate(this.brand, { inviteUrl }),

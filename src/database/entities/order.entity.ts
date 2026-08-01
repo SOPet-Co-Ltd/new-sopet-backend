@@ -62,6 +62,14 @@ export class Order {
   @IsEnum(OrderStatus)
   status!: OrderStatus;
 
+  @Column({
+    name: 'previous_status',
+    type: 'enum',
+    enum: OrderStatus,
+    nullable: true,
+  })
+  previousStatus!: OrderStatus | null;
+
   @Column({ name: 'subtotal', type: 'decimal', precision: 10, scale: 2 })
   @IsNumber()
   @Min(0)

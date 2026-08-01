@@ -130,4 +130,22 @@ describe('PayoutSchedulerService', () => {
     expect(service.isDue(PayoutSchedule.WEEKLY, monday)).toBe(true);
     expect(service.isDue(PayoutSchedule.WEEKLY, new Date('2026-07-07'))).toBe(false);
   });
+
+  /**
+   * Regression (QA-hunt): biweekly previously matched the ranges 1-7 and 15-21 (7 days
+   * wide each), which - since this cron runs once per day - fired a scheduled payout on
+   * every one of those ~14 days per month instead of twice a month, once a pending payout
+   * cleared and any new balance accrued mid-window.
+   */
+  it('evaluates biweekly schedule only on the 1st and 15th, not the whole 1-7/15-21 range', () => {
+    expect(service.isDue(PayoutSchedule.BIWEEKLY, new Date('2026-07-01'))).toBe(true);
+    expect(service.isDue(PayoutSchedule.BIWEEKLY, new Date('2026-07-15'))).toBe(true);
+
+    expect(service.isDue(PayoutSchedule.BIWEEKLY, new Date('2026-07-02'))).toBe(false);
+    expect(service.isDue(PayoutSchedule.BIWEEKLY, new Date('2026-07-07'))).toBe(false);
+    expect(service.isDue(PayoutSchedule.BIWEEKLY, new Date('2026-07-16'))).toBe(false);
+    expect(service.isDue(PayoutSchedule.BIWEEKLY, new Date('2026-07-21'))).toBe(false);
+    expect(service.isDue(PayoutSchedule.BIWEEKLY, new Date('2026-07-22'))).toBe(false);
+    expect(service.isDue(PayoutSchedule.BIWEEKLY, new Date('2026-07-31'))).toBe(false);
+  });
 });

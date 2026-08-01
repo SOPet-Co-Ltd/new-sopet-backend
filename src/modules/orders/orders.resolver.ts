@@ -90,7 +90,7 @@ export class OrdersResolver {
       filter,
     });
     return {
-      items: result.items.map(mapOrder),
+      items: result.items.map((order) => mapOrder(order)),
       pagination: result.pagination,
     };
   }
@@ -113,7 +113,7 @@ export class OrdersResolver {
   @Public()
   async guestOrders(@Args('guestPhone') guestPhone: string): Promise<OrderType[]> {
     const orders = await this.ordersService.findByGuestPhone(guestPhone);
-    return orders.map(mapOrder);
+    return orders.map((order) => mapOrder(order));
   }
 
   @Query(() => OrderTrackingType)
@@ -130,16 +130,10 @@ export class OrdersResolver {
     @Args('storeId') storeId: string,
     @CurrentUser('id') userId: string,
   ): Promise<OrderType[]> {
-    const hasAccess = await this.storesService.userHasStoreAccess(userId, storeId);
-    if (!hasAccess) {
-      throw new ForbiddenException({
-        code: 'STORE_ACCESS_DENIED',
-        message: 'No access to this store',
-      });
-    }
+    await this.storesService.assertStoreAccess(userId, storeId);
 
     const orders = await this.ordersService.findByStore(storeId);
-    return orders.map(mapOrder);
+    return orders.map((order) => mapOrder(order, storeId));
   }
 
   @Mutation(() => OrderType)
@@ -216,13 +210,13 @@ export class OrdersResolver {
     @CurrentUser('id') userId: string,
     @CurrentUser('storeId') storeId: string,
   ): Promise<OrderType> {
-    await this.storesService.assertStoreOwner(userId, storeId);
+    await this.storesService.assertStoreAccess(userId, storeId);
     const updated = await this.orderFulfillmentService.markVendorOrderPaid(
       userId,
       storeId,
       orderId,
     );
-    return mapOrder(updated);
+    return mapOrder(updated, storeId);
   }
 
   @Mutation(() => OrderType)
@@ -233,13 +227,13 @@ export class OrdersResolver {
     @CurrentUser('id') userId: string,
     @CurrentUser('storeId') storeId: string,
   ): Promise<OrderType> {
-    await this.storesService.assertStoreOwner(userId, storeId);
+    await this.storesService.assertStoreAccess(userId, storeId);
     const updated = await this.orderFulfillmentService.acknowledgeVendorOrder(
       userId,
       storeId,
       orderId,
     );
-    return mapOrder(updated);
+    return mapOrder(updated, storeId);
   }
 
   @Mutation(() => OrderType)
@@ -250,7 +244,7 @@ export class OrdersResolver {
     @CurrentUser('id') userId: string,
     @CurrentUser('storeId') storeId: string,
   ): Promise<OrderType> {
-    await this.storesService.assertStoreOwner(userId, storeId);
+    await this.storesService.assertStoreAccess(userId, storeId);
     const updated = await this.orderFulfillmentService.shipVendorOrder(
       userId,
       storeId,
@@ -259,7 +253,7 @@ export class OrdersResolver {
       input.fulfillmentProvider,
       input.trackingUrl,
     );
-    return mapOrder(updated);
+    return mapOrder(updated, storeId);
   }
 
   @Mutation(() => OrderType)
@@ -303,8 +297,8 @@ export class OrdersResolver {
     @CurrentUser('id') userId: string,
     @CurrentUser('storeId') storeId: string,
   ): Promise<OrderType> {
-    await this.storesService.assertStoreOwner(userId, storeId);
+    await this.storesService.assertStoreAccess(userId, storeId);
     const updated = await this.orderFulfillmentService.cancelVendorOrder(userId, storeId, orderId);
-    return mapOrder(updated);
+    return mapOrder(updated, storeId);
   }
 }

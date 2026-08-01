@@ -381,7 +381,7 @@ describe('AuthService', () => {
     expect(await bcrypt.compare('password', hash)).toBe(true);
   });
 
-  it('blocks switching into a suspended store', async () => {
+  it('allows switching into a suspended store for read-only access', async () => {
     userRepo.findOne.mockResolvedValue({
       id: 'user-1',
       role: 'vendor',
@@ -393,9 +393,9 @@ describe('AuthService', () => {
       status: StoreStatus.SUSPENDED,
     });
 
-    await expect(service.switchStore('user-1', 'store-1')).rejects.toMatchObject({
-      response: { code: 'STORE_SUSPENDED' },
-    });
+    const result = await service.switchStore('user-1', 'store-1');
+
+    expect(result.accessToken).toBe('token-access');
   });
 
   it('switches into an active store', async () => {

@@ -82,36 +82,36 @@ Transitive / peer infrastructure modules (not always listed on `AppModule`):
 
 ## Feature modules
 
-| Module        | Path                     | GraphQL   | REST           | Primary responsibility                                                    |
-| ------------- | ------------------------ | --------- | -------------- | ------------------------------------------------------------------------- |
-| auth          | `modules/auth/`          | ✓         | —              | OTP, JWT, login, password reset, email verification                       |
-| users         | `modules/users/`         | ✓         | —              | Customer account, addresses, favorites                                    |
-| customers     | `modules/customers/`     | ✓         | —              | Admin customer management                                                 |
-| stores        | `modules/stores/`        | ✓         | —              | Store CRUD, team, shipping, invitations                                   |
-| products      | `modules/products/`      | ✓         | —              | Product catalog, variants, images                                         |
-| taxonomy      | `modules/taxonomy/`      | ✓         | —              | Categories, pet types, brands, tags                                       |
-| cart          | `modules/cart/`          | ✓         | —              | Guest + auth carts, merge on login                                        |
-| orders        | `modules/orders/`        | ✓         | —              | Order creation, fulfillment, status, tracking                             |
-| payments      | `modules/payments/`      | ✓         | ✓ webhook      | Omise charges, payment expiry                                             |
-| payouts       | `modules/payouts/`       | ✓         | —              | Vendor payout scheduling (BullMQ)                                         |
-| promotions    | `modules/promotions/`    | ✓         | —              | Platform + store promotions                                               |
-| reviews       | `modules/reviews/`       | ✓         | —              | Product reviews, vendor replies                                           |
-| analytics     | `modules/analytics/`     | ✓         | —              | Dashboard metrics                                                         |
-| platform      | `modules/platform/`      | ✓         | —              | Banners, sponsors, ads                                                    |
-| admin-team    | `modules/admin-team/`    | ✓         | —              | Admin team invitations                                                    |
-| notifications | `modules/notifications/` | ✓         | —              | In-app + email notifications                                              |
-| storage       | `modules/storage/`       | ✓         | —              | Image upload (S3/MinIO/R2)                                                |
-| search        | `modules/search/`        | ✓         | —              | Smart search, synonyms, embeddings, analytics                             |
-| api-keys      | `modules/api-keys/`      | ✓         | —              | Store API key management                                                  |
-| audit-logs    | `modules/audit-logs/`    | ✓         | —              | `@Global()` admin action audit trail                                      |
-| public-api    | `modules/public-api/`    | —         | ✓              | `POST /api/v1/stores/:id/products`                                        |
-| health        | `modules/health/`        | ✓ (query) | ✓ (`/health*`) | Terminus-ready REST checks; GraphQL `health` in `graphql/app.resolver.ts` |
-| email         | `modules/email/`         | —         | —              | `@Global()` Resend; templates use logo at `${API_URL}/images/email/…`     |
-| sms           | `modules/sms/`           | —         | —              | OTP SMS delivery                                                          |
-| redis         | `modules/redis/`         | —         | —              | `@Global()` Redis client (disabled when `REDIS_HOST` unset)               |
-| omise         | `modules/omise/`         | —         | —              | Omise SDK wrapper                                                         |
-| queue         | `modules/queue/`         | —         | —              | `@Global()` BullMQ connection setup (`QueueModule.forRoot()`)             |
-| inventory     | `modules/inventory/`     | —         | —              | Inventory transactions (service only)                                     |
+| Module        | Path                     | GraphQL   | REST           | Primary responsibility                                                       |
+| ------------- | ------------------------ | --------- | -------------- | ---------------------------------------------------------------------------- |
+| auth          | `modules/auth/`          | ✓         | —              | OTP, JWT, login, password reset, email verification                          |
+| users         | `modules/users/`         | ✓         | —              | Customer account, addresses, favorites                                       |
+| customers     | `modules/customers/`     | ✓         | —              | Admin customer management                                                    |
+| stores        | `modules/stores/`        | ✓         | —              | Store CRUD, team, shipping, invitations                                      |
+| products      | `modules/products/`      | ✓         | —              | Product catalog, variants, images                                            |
+| taxonomy      | `modules/taxonomy/`      | ✓         | —              | Categories, pet types, brands, tags                                          |
+| cart          | `modules/cart/`          | ✓         | —              | Guest + auth carts, merge on login                                           |
+| orders        | `modules/orders/`        | ✓         | —              | Order creation, fulfillment, status, tracking                                |
+| payments      | `modules/payments/`      | ✓         | ✓ webhook      | Omise charges, payment expiry                                                |
+| payouts       | `modules/payouts/`       | ✓         | —              | Vendor payout scheduling (BullMQ)                                            |
+| promotions    | `modules/promotions/`    | ✓         | —              | Platform + store promotions                                                  |
+| reviews       | `modules/reviews/`       | ✓         | —              | Product reviews, vendor replies                                              |
+| analytics     | `modules/analytics/`     | ✓         | —              | Dashboard metrics                                                            |
+| platform      | `modules/platform/`      | ✓         | —              | Banners, sponsors, ads                                                       |
+| admin-team    | `modules/admin-team/`    | ✓         | —              | Admin team invitations                                                       |
+| notifications | `modules/notifications/` | ✓         | —              | In-app + email notifications                                                 |
+| storage       | `modules/storage/`       | ✓         | —              | Image upload (S3/MinIO/R2)                                                   |
+| search        | `modules/search/`        | ✓         | —              | Smart search, synonyms, embeddings, analytics                                |
+| api-keys      | `modules/api-keys/`      | ✓         | —              | Store API key management                                                     |
+| audit-logs    | `modules/audit-logs/`    | ✓         | —              | `@Global()` admin action audit trail                                         |
+| public-api    | `modules/public-api/`    | —         | ✓              | Vendor product REST: create draft + PATCH product info / variant stock·price |
+| health        | `modules/health/`        | ✓ (query) | ✓ (`/health*`) | Terminus-ready REST checks; GraphQL `health` in `graphql/app.resolver.ts`    |
+| email         | `modules/email/`         | —         | —              | `@Global()` Resend; templates use logo at `${API_URL}/images/email/…`        |
+| sms           | `modules/sms/`           | —         | —              | OTP SMS delivery                                                             |
+| redis         | `modules/redis/`         | —         | —              | `@Global()` Redis client (disabled when `REDIS_HOST` unset)                  |
+| omise         | `modules/omise/`         | —         | —              | Omise SDK wrapper                                                            |
+| queue         | `modules/queue/`         | —         | —              | `@Global()` BullMQ connection setup (`QueueModule.forRoot()`)                |
+| inventory     | `modules/inventory/`     | —         | —              | Inventory transactions (service only)                                        |
 
 **Reserved, not wired:** `Dispute`, `DisputeItem`, `DisputeMessage`, `DisputeImage` entities and their migrations exist under `src/database/entities/` for a returns/disputes feature, but there is no `modules/disputes/` service, resolver, or GraphQL surface — columns/relations such as `Order.disputes` are unused by running code paths.
 

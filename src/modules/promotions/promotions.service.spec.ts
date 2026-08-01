@@ -355,6 +355,92 @@ describe('PromotionsService', () => {
     expect(result.discountAmount).toBe(50);
   });
 
+  describe('shipping-type discounts (rows 24/25 regression)', () => {
+    it('FREE_SHIPPING discounts the full shipping fee, not the subtotal', async () => {
+      promotionRepository.findOne.mockResolvedValue({
+        ...mockPromotion,
+        type: PromotionType.FREE_SHIPPING,
+        discountValue: 0,
+      });
+
+      const result = await validateCodeExtended(service, 'FREESHIP', 1000, undefined, undefined, {
+        shippingFee: 40,
+      });
+      expect(result.discountAmount).toBe(40);
+    });
+
+    it('FREE_SHIPPING with no shippingFee supplied discounts nothing (defaults to 0, not subtotal)', async () => {
+      promotionRepository.findOne.mockResolvedValue({
+        ...mockPromotion,
+        type: PromotionType.FREE_SHIPPING,
+        discountValue: 0,
+      });
+
+      const result = await service.validateCode('FREESHIP', 1000);
+      expect(result.discountAmount).toBe(0);
+    });
+
+    it('FIXED_SHIPPING_DISCOUNT deducts the flat amount, clamped to the shipping fee', async () => {
+      promotionRepository.findOne.mockResolvedValue({
+        ...mockPromotion,
+        type: PromotionType.FIXED_SHIPPING_DISCOUNT,
+        discountValue: 20,
+      });
+
+      const result = await validateCodeExtended(service, 'SHIP20', 1000, undefined, undefined, {
+        shippingFee: 60,
+      });
+      expect(result.discountAmount).toBe(20);
+    });
+
+    it('FIXED_SHIPPING_DISCOUNT clamps to the shipping fee, not the (larger) subtotal', async () => {
+      promotionRepository.findOne.mockResolvedValue({
+        ...mockPromotion,
+        type: PromotionType.FIXED_SHIPPING_DISCOUNT,
+        discountValue: 100,
+      });
+
+      const result = await validateCodeExtended(service, 'SHIP100', 1000, undefined, undefined, {
+        shippingFee: 40,
+      });
+      expect(result.discountAmount).toBe(40);
+    });
+
+    it('PERCENTAGE_SHIPPING_DISCOUNT computes a percentage of the shipping fee, not the subtotal', async () => {
+      promotionRepository.findOne.mockResolvedValue({
+        ...mockPromotion,
+        type: PromotionType.PERCENTAGE_SHIPPING_DISCOUNT,
+        discountValue: 50,
+      });
+
+      const result = await validateCodeExtended(service, 'SHIP50PCT', 1000, undefined, undefined, {
+        shippingFee: 40,
+      });
+      expect(result.discountAmount).toBe(20);
+    });
+
+    it('applyStackedPromotions clamps shipping and item discounts against separate bases', async () => {
+      promotionRepository.findOne.mockResolvedValue({
+        ...mockPromotion,
+        code: 'FREESHIP',
+        type: PromotionType.FREE_SHIPPING,
+        discountValue: 0,
+      });
+
+      const result = await applyStackedExtended(
+        service,
+        1000,
+        new Map(),
+        'FREESHIP',
+        undefined,
+        undefined,
+        { mode: 'apply', shippingFee: 40 },
+      );
+      // A free-shipping promo must not be clamped against the (much larger) subtotal.
+      expect(result.discountAmount).toBe(40);
+    });
+  });
+
   it('finds active platform promotions', async () => {
     const qb = {
       where: jest.fn().mockReturnThis(),
@@ -385,6 +471,90 @@ describe('PromotionsService', () => {
 
     expect(result.code).toBe('NEW10');
     expect(promotionRepository.save).toHaveBeenCalled();
+  });
+
+  describe('promotion date-range validation (QA-hunt regression)', () => {
+    it('rejects create() when expiresAt is before startsAt', async () => {
+      await expect(
+        service.create(
+          {
+            code: 'BADDATES',
+            name: 'Bad dates',
+            type: PromotionType.PERCENTAGE,
+            discountValue: 10,
+            startsAt: new Date('2026-06-15T00:00:00Z'),
+            expiresAt: new Date('2026-06-01T00:00:00Z'),
+          },
+          PromotionScope.PLATFORM,
+        ),
+      ).rejects.toMatchObject({
+        response: { code: 'INVALID_PROMOTION_DATE_RANGE' },
+      });
+    });
+
+    it('rejects create() when expiresAt equals startsAt', async () => {
+      const sameInstant = new Date('2026-06-15T00:00:00Z');
+      await expect(
+        service.create(
+          {
+            code: 'SAMEDATE',
+            name: 'Same instant',
+            type: PromotionType.PERCENTAGE,
+            discountValue: 10,
+            startsAt: sameInstant,
+            expiresAt: sameInstant,
+          },
+          PromotionScope.PLATFORM,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('allows create() when expiresAt is after startsAt', async () => {
+      const created = { ...mockPromotion, code: 'GOODDATES' };
+      promotionRepository.create = jest.fn().mockReturnValue(created);
+      promotionRepository.save = jest.fn().mockResolvedValue(created);
+
+      await expect(
+        service.create(
+          {
+            code: 'GOODDATES',
+            name: 'Good dates',
+            type: PromotionType.PERCENTAGE,
+            discountValue: 10,
+            startsAt: new Date('2026-06-01T00:00:00Z'),
+            expiresAt: new Date('2026-06-15T00:00:00Z'),
+          },
+          PromotionScope.PLATFORM,
+        ),
+      ).resolves.toMatchObject({ code: 'GOODDATES' });
+    });
+
+    it('rejects update() when the resulting date range is inverted, even mixing a stored startsAt with a new expiresAt', async () => {
+      promotionRepository.findOne = jest.fn().mockResolvedValue({
+        ...mockPromotion,
+        startsAt: new Date('2026-06-15T00:00:00Z'),
+        expiresAt: null,
+      });
+
+      await expect(
+        service.update('promo-1', { expiresAt: new Date('2026-06-01T00:00:00Z') }),
+      ).rejects.toMatchObject({
+        response: { code: 'INVALID_PROMOTION_DATE_RANGE' },
+      });
+    });
+
+    it('does not re-validate dates on update() when neither startsAt nor expiresAt is being changed', async () => {
+      promotionRepository.findOne = jest.fn().mockResolvedValue({
+        ...mockPromotion,
+        startsAt: new Date('2026-06-15T00:00:00Z'),
+        expiresAt: new Date('2026-06-01T00:00:00Z'),
+      });
+      promotionRepository.save = jest.fn().mockImplementation((p) => Promise.resolve(p));
+
+      await expect(service.update('promo-1', { name: 'Renamed only' })).resolves.toMatchObject({
+        name: 'Renamed only',
+      });
+    });
   });
 
   it('soft deletes a promotion', async () => {

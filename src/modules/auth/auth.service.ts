@@ -14,7 +14,7 @@ import { randomBytes } from 'node:crypto';
 import * as bcrypt from 'bcrypt';
 import { Customer } from '../../database/entities/customer.entity';
 import { User, UserRole } from '../../database/entities/user.entity';
-import { Store, StoreStatus } from '../../database/entities/store.entity';
+import { Store } from '../../database/entities/store.entity';
 import { StoreMember } from '../../database/entities/store-member.entity';
 import { pickDefaultAccessibleStoreId } from '../stores/store-selection.util';
 import { OtpCode } from '../../database/entities/otp-code.entity';
@@ -418,16 +418,8 @@ export class AuthService {
       });
     }
 
-    const store = await this.storeRepository.findOne({
-      where: { id: storeId },
-      select: ['id', 'status'],
-    });
-    if (store?.status === StoreStatus.SUSPENDED) {
-      throw new ForbiddenException({
-        code: 'STORE_SUSPENDED',
-        message: 'This store has been suspended. Please contact support to restore access.',
-      });
-    }
+    // Suspended stores are allowed as the active JWT store so vendors can enter
+    // read-only (banner + reactivation). Mutations remain blocked by StoreStatusGuard.
 
     const payload: Omit<JwtPayload, 'type'> = {
       sub: user.id,
@@ -558,6 +550,31 @@ export class AuthService {
     return {
       message: 'If an account exists for this email, a password reset link has been sent',
     };
+  }
+
+  /**
+   * Public, side-effect-free preview so the reset-password page can show an
+   * "expired/already used" message immediately on load instead of only discovering
+   * an invalid token when the user submits a new password (row 33 regression).
+   */
+  async getPasswordResetTokenStatus(
+    token: string,
+  ): Promise<{ valid: boolean; status: 'valid' | 'expired' | 'used' | 'invalid' }> {
+    const resetToken = await this.passwordResetTokenRepository.findOne({
+      where: { token },
+    });
+
+    if (!resetToken) {
+      return { valid: false, status: 'invalid' };
+    }
+    if (resetToken.usedAt) {
+      return { valid: false, status: 'used' };
+    }
+    if (resetToken.expiresAt < new Date()) {
+      return { valid: false, status: 'expired' };
+    }
+
+    return { valid: true, status: 'valid' };
   }
 
   async resetPassword(token: string, newPassword: string): Promise<{ message: string }> {

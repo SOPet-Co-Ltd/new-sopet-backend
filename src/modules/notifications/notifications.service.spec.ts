@@ -366,4 +366,147 @@ describe('NotificationsService', () => {
       expect(userNotificationRepo.save).toHaveBeenCalledTimes(2);
     });
   });
+
+  describe('notifyOrderItemsOnHold / notifyOrderItemsHoldResumed', () => {
+    function mockNoDedupeHit() {
+      const qb = {
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(null),
+      };
+      userNotificationRepo.createQueryBuilder.mockReturnValue(qb);
+    }
+
+    it('creates customer + vendor enter-hold notifications with Design Doc types and dedupe keys', async () => {
+      mockNoDedupeHit();
+      orderRepo.findOne.mockResolvedValue({
+        id: 'order-1',
+        orderNumber: 'ORD-HOLD-1',
+        customerId: 'cust-1',
+        guestEmail: null,
+        createdAt: new Date('2026-07-01T00:00:00.000Z'),
+        items: [{ storeId: 'store-1' }],
+      });
+      customerRepo.findOne.mockResolvedValue({ id: 'cust-1', email: 'c@example.com' });
+      storeRepo.findOne.mockResolvedValue({
+        id: 'store-1',
+        owner: { id: 'vendor-1' },
+      });
+      userNotificationRepo.save.mockImplementation(async (x) => ({ id: 'n-new', ...x }));
+
+      await service.notifyOrderItemsOnHold('order-1', 'store-1');
+
+      expect(userNotificationRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'cust-1',
+          type: 'order_items_on_hold',
+          metadata: expect.objectContaining({ orderId: 'order-1', storeId: 'store-1' }),
+        }),
+      );
+      expect(userNotificationRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'vendor-1',
+          type: 'vendor_order_items_on_hold',
+          metadata: expect.objectContaining({ orderId: 'order-1', storeId: 'store-1' }),
+        }),
+      );
+      expect(emailDeliveryService.sendOrderStatusChanged).toHaveBeenCalledWith(
+        'c@example.com',
+        expect.objectContaining({ status: 'on_hold', orderNumber: 'ORD-HOLD-1' }),
+      );
+    });
+
+    it('creates resume notifications with Design Doc types', async () => {
+      mockNoDedupeHit();
+      orderRepo.findOne.mockResolvedValue({
+        id: 'order-1',
+        orderNumber: 'ORD-HOLD-1',
+        customerId: 'cust-1',
+        guestEmail: null,
+        createdAt: new Date('2026-07-01T00:00:00.000Z'),
+        items: [{ storeId: 'store-1' }],
+      });
+      customerRepo.findOne.mockResolvedValue({ id: 'cust-1', email: 'c@example.com' });
+      storeRepo.findOne.mockResolvedValue({
+        id: 'store-1',
+        owner: { id: 'vendor-1' },
+      });
+      userNotificationRepo.save.mockImplementation(async (x) => ({ id: 'n-new', ...x }));
+
+      await service.notifyOrderItemsHoldResumed('order-1', 'store-1');
+
+      expect(userNotificationRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'order_items_hold_resumed', userId: 'cust-1' }),
+      );
+      expect(userNotificationRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'vendor_order_items_hold_resumed',
+          userId: 'vendor-1',
+        }),
+      );
+      expect(emailDeliveryService.sendOrderStatusChanged).toHaveBeenCalledWith(
+        'c@example.com',
+        expect.objectContaining({ status: 'hold_resumed' }),
+      );
+    });
+
+    it('dedupes enter-hold notification per orderId+storeId', async () => {
+      const existing = { id: 'notif-existing', type: 'order_items_on_hold' };
+      const qb = {
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(existing),
+      };
+      userNotificationRepo.createQueryBuilder.mockReturnValue(qb);
+      orderRepo.findOne.mockResolvedValue({
+        id: 'order-1',
+        orderNumber: 'ORD-HOLD-1',
+        customerId: 'cust-1',
+        createdAt: new Date(),
+        items: [],
+      });
+      customerRepo.findOne.mockResolvedValue({ id: 'cust-1', email: null });
+      storeRepo.findOne.mockResolvedValue({
+        id: 'store-1',
+        owner: { id: 'vendor-1' },
+      });
+
+      await service.notifyOrderItemsOnHold('order-1', 'store-1');
+
+      expect(userNotificationRepo.save).not.toHaveBeenCalled();
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining("metadata->>'orderId'"),
+        expect.objectContaining({ meta_orderId: 'order-1' }),
+      );
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining("metadata->>'storeId'"),
+        expect.objectContaining({ meta_storeId: 'store-1' }),
+      );
+    });
+
+    it('continues vendor notify when customer notification throws', async () => {
+      mockNoDedupeHit();
+      orderRepo.findOne.mockResolvedValue({
+        id: 'order-1',
+        orderNumber: 'ORD-HOLD-1',
+        customerId: 'cust-1',
+        createdAt: new Date(),
+        items: [],
+      });
+      customerRepo.findOne.mockResolvedValue({ id: 'cust-1', email: null });
+      storeRepo.findOne.mockResolvedValue({
+        id: 'store-1',
+        owner: { id: 'vendor-1' },
+      });
+      userNotificationRepo.save
+        .mockRejectedValueOnce(new Error('fk boom'))
+        .mockResolvedValueOnce({ id: 'vendor-notif' });
+
+      await expect(service.notifyOrderItemsOnHold('order-1', 'store-1')).resolves.toBeUndefined();
+
+      expect(userNotificationRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'vendor_order_items_on_hold', userId: 'vendor-1' }),
+      );
+    });
+  });
 });

@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { Order } from '../../database/entities/order.entity';
 import { OrderItem, FulfillmentStatus } from '../../database/entities/order-item.entity';
 import { Store, StoreStatus } from '../../database/entities/store.entity';
+import { StoreRequest, StoreRequestStatus } from '../../database/entities/store-request.entity';
 import { Customer } from '../../database/entities/customer.entity';
 import { Product } from '../../database/entities/product.entity';
 import { OrderStatus } from '../../database/entities/enums/order.enums';
@@ -65,6 +66,8 @@ export class AnalyticsService {
     private readonly orderItemRepository: Repository<OrderItem>,
     @InjectRepository(Store)
     private readonly storeRepository: Repository<Store>,
+    @InjectRepository(StoreRequest)
+    private readonly storeRequestRepository: Repository<StoreRequest>,
     @InjectRepository(Customer)
     private readonly customerRepository: Repository<Customer>,
     @InjectRepository(Product)
@@ -148,8 +151,11 @@ export class AnalyticsService {
       where: { status: StoreStatus.APPROVED },
     });
 
-    const pendingStores = await this.storeRepository.count({
-      where: { status: StoreStatus.PENDING },
+    // Vendor onboarding creates a StoreRequest first; the Store row itself is
+    // only created (as APPROVED) once an admin approves the request, so
+    // pending approvals must be counted from StoreRequest, not Store.
+    const pendingStores = await this.storeRequestRepository.count({
+      where: { status: StoreRequestStatus.PENDING },
     });
 
     const totalCustomers = await this.customerRepository.count();

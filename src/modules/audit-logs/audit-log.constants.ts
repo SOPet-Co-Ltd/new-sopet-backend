@@ -14,6 +14,10 @@ export const AuditAction = {
   STORE_APPROVED: 'store.approved',
   STORE_REJECTED: 'store.rejected',
   PAYOUT_TRIGGERED: 'payout.triggered',
+  ADMIN_INVITED: 'admin.invited',
+  ADMIN_INVITATION_REVOKED: 'admin.invitation_revoked',
+  ADMIN_INVITATION_ACCEPTED: 'admin.invitation_accepted',
+  ADMIN_STATUS_CHANGED: 'admin.status_changed',
 } as const;
 
 export type AuditActionValue = (typeof AuditAction)[keyof typeof AuditAction];
@@ -24,6 +28,7 @@ export const AuditResourceType = {
   CUSTOMER: 'customer',
   STORE: 'store',
   PAYOUT: 'payout',
+  ADMIN_INVITATION: 'admin_invitation',
 } as const;
 
 export type AuditResourceTypeValue = (typeof AuditResourceType)[keyof typeof AuditResourceType];

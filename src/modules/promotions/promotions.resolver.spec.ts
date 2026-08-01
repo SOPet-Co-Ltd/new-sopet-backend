@@ -39,7 +39,7 @@ describe('PromotionsResolver.validatePromotion', () => {
       500,
       undefined,
       undefined,
-      { mode: 'preview', lines: undefined },
+      { mode: 'preview', lines: undefined, shippingFee: undefined },
     );
     expect(result).toEqual({
       code: 'NEWCUST',
@@ -71,7 +71,7 @@ describe('PromotionsResolver.validatePromotion', () => {
       300,
       undefined,
       { customerId: 'cust-1' },
-      { mode: 'preview', lines },
+      { mode: 'preview', lines, shippingFee: undefined },
     );
     expect(result.freeUnits).toBe(1);
     expect(result.ineligibilityReason).toBeNull();
@@ -132,6 +132,7 @@ describe('PromotionsResolver.validatePromotions (Decision 6)', () => {
       undefined,
       undefined,
       undefined,
+      undefined,
     );
     expect(result.items).toHaveLength(1);
     expect(result.items[0].eligible).toBe(true);
@@ -172,6 +173,7 @@ describe('PromotionsResolver.validatePromotions (Decision 6)', () => {
       storeId,
       { customerId: 'cust-jwt-1' },
       lines,
+      undefined,
     );
     expect(result.items[0].ineligibilityReason).toBe('ORDER_HISTORY');
     expect(result.items[0].eligible).toBe(false);

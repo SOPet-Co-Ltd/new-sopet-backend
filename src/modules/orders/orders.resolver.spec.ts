@@ -108,8 +108,15 @@ describe('OrdersResolver mapOrder extensions', () => {
   let productsService: jest.Mocked<
     Pick<ProductsService, 'findOnePublished' | 'findPublishedByIds'>
   >;
-  let storesService: jest.Mocked<Pick<StoresService, 'assertStoreOwner' | 'getAccessibleStores'>>;
-  let orderFulfillmentService: jest.Mocked<Pick<OrderFulfillmentService, never>>;
+  let storesService: jest.Mocked<
+    Pick<StoresService, 'assertStoreAccess' | 'assertStoreOwner' | 'getAccessibleStores'>
+  >;
+  let orderFulfillmentService: jest.Mocked<
+    Pick<
+      OrderFulfillmentService,
+      'markVendorOrderPaid' | 'acknowledgeVendorOrder' | 'shipVendorOrder' | 'cancelVendorOrder'
+    >
+  >;
   let resolver: OrdersResolver;
 
   beforeEach(() => {
@@ -131,10 +138,16 @@ describe('OrdersResolver mapOrder extensions', () => {
       findPublishedByIds: jest.fn(),
     };
     storesService = {
+      assertStoreAccess: jest.fn().mockResolvedValue(undefined),
       assertStoreOwner: jest.fn(),
       getAccessibleStores: jest.fn(),
     };
-    orderFulfillmentService = {};
+    orderFulfillmentService = {
+      markVendorOrderPaid: jest.fn(),
+      acknowledgeVendorOrder: jest.fn(),
+      shipVendorOrder: jest.fn(),
+      cancelVendorOrder: jest.fn(),
+    };
     resolver = new OrdersResolver(
       ordersService as unknown as OrdersService,
       orderFulfillmentService as unknown as OrderFulfillmentService,
@@ -347,6 +360,86 @@ describe('OrdersResolver mapOrder extensions', () => {
 
       expect(mapOrderSpy).not.toHaveBeenCalled();
       mapOrderSpy.mockRestore();
+    });
+  });
+
+  describe('vendor order fulfillment mutations', () => {
+    const order = buildOrderFixture();
+
+    beforeEach(() => {
+      orderFulfillmentService.markVendorOrderPaid.mockResolvedValue(order);
+      orderFulfillmentService.acknowledgeVendorOrder.mockResolvedValue(order);
+      orderFulfillmentService.shipVendorOrder.mockResolvedValue(order);
+      orderFulfillmentService.cancelVendorOrder.mockResolvedValue(order);
+    });
+
+    it('markVendorOrderPaid allows any store member via assertStoreAccess', async () => {
+      await resolver.markVendorOrderPaid('order-1', 'staff-1', 'store-1');
+
+      expect(storesService.assertStoreAccess).toHaveBeenCalledWith('staff-1', 'store-1');
+      expect(storesService.assertStoreOwner).not.toHaveBeenCalled();
+      expect(orderFulfillmentService.markVendorOrderPaid).toHaveBeenCalledWith(
+        'staff-1',
+        'store-1',
+        'order-1',
+      );
+    });
+
+    it('acknowledgeVendorOrder allows any store member via assertStoreAccess', async () => {
+      await resolver.acknowledgeVendorOrder('order-1', 'manager-1', 'store-1');
+
+      expect(storesService.assertStoreAccess).toHaveBeenCalledWith('manager-1', 'store-1');
+      expect(storesService.assertStoreOwner).not.toHaveBeenCalled();
+      expect(orderFulfillmentService.acknowledgeVendorOrder).toHaveBeenCalledWith(
+        'manager-1',
+        'store-1',
+        'order-1',
+      );
+    });
+
+    it('shipVendorOrder allows any store member via assertStoreAccess', async () => {
+      await resolver.shipVendorOrder(
+        {
+          orderId: 'order-1',
+          trackingNumber: 'TH123',
+          fulfillmentProvider: 'kerry',
+          trackingUrl: null,
+        },
+        'staff-1',
+        'store-1',
+      );
+
+      expect(storesService.assertStoreAccess).toHaveBeenCalledWith('staff-1', 'store-1');
+      expect(storesService.assertStoreOwner).not.toHaveBeenCalled();
+      expect(orderFulfillmentService.shipVendorOrder).toHaveBeenCalledWith(
+        'staff-1',
+        'store-1',
+        'order-1',
+        'TH123',
+        'kerry',
+        null,
+      );
+    });
+
+    it('cancelVendorOrder allows any store member via assertStoreAccess', async () => {
+      await resolver.cancelVendorOrder('order-1', 'staff-1', 'store-1');
+
+      expect(storesService.assertStoreAccess).toHaveBeenCalledWith('staff-1', 'store-1');
+      expect(storesService.assertStoreOwner).not.toHaveBeenCalled();
+      expect(orderFulfillmentService.cancelVendorOrder).toHaveBeenCalledWith(
+        'staff-1',
+        'store-1',
+        'order-1',
+      );
+    });
+
+    it('vendorOrders allows any store member via assertStoreAccess', async () => {
+      ordersService.findByStore.mockResolvedValue([order]);
+
+      await resolver.vendorOrders('store-1', 'staff-1');
+
+      expect(storesService.assertStoreAccess).toHaveBeenCalledWith('staff-1', 'store-1');
+      expect(ordersService.findByStore).toHaveBeenCalledWith('store-1');
     });
   });
 });

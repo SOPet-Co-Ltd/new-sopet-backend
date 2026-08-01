@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
 import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
-import { OrderItem } from '../../database/entities/order-item.entity';
+import { FulfillmentStatus, OrderItem } from '../../database/entities/order-item.entity';
 import { OrderShippingAddress } from '../../database/entities/order-shipping-address.entity';
 import { OrderStoreShipping } from '../../database/entities/order-store-shipping.entity';
 import { OrderStatusHistory } from '../../database/entities/order-status-history.entity';
@@ -22,7 +22,7 @@ import { PromotionsService, PromotionCartLine } from '../promotions/promotions.s
 import { GuestOrderLinkService } from './guest-order-link.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { CartService } from '../cart/cart.service';
-import { Store } from '../../database/entities/store.entity';
+import { Store, StoreStatus } from '../../database/entities/store.entity';
 import { normalizeCheckoutPaymentMethod } from '../../common/utils/checkout-payment.util';
 import { guestPhoneLookupValues, normalizeThaiPhoneToLocal } from '../../common/utils/phone.util';
 import { PaginatedResponse } from '../../common/interfaces';
@@ -32,6 +32,7 @@ import {
   normalizeCustomerOrdersLimit,
   normalizeCustomerOrdersPage,
 } from './order-list-filter.util';
+import { assertNotManualHoldTransition } from './store-suspension-hold.service';
 export interface StoreShippingSelection {
   storeId: string;
   shippingOptionId: string;
@@ -220,12 +221,18 @@ export class OrdersService {
       }
       const variant = await this.variantRepository.findOne({
         where: { id: item.variantId },
-        relations: ['product'],
+        relations: ['product', 'product.store'],
       });
       if (!variant?.product) {
         throw new BadRequestException({
           code: 'VARIANT_NOT_FOUND',
           message: `Variant ${item.variantId} not found`,
+        });
+      }
+      if (variant.product.store?.status === StoreStatus.SUSPENDED) {
+        throw new BadRequestException({
+          code: 'ORDER_CONTAINS_SUSPENDED_STORE',
+          message: 'Order contains items from a suspended store',
         });
       }
       const storeId = variant.product.storeId;
@@ -261,7 +268,7 @@ export class OrdersService {
           : normalizedGuestPhone
             ? { guestPhone: normalizedGuestPhone }
             : undefined,
-        { mode: 'apply', lines: promotionLines },
+        { mode: 'apply', lines: promotionLines, shippingFee },
       );
       discountAmount = stacked.discountAmount;
       appliedPromotions = stacked.promotions;
@@ -589,12 +596,37 @@ export class OrdersService {
     const order = await this.findOne(id);
     const previousStatus = order.status;
 
+    assertNotManualHoldTransition(previousStatus, status);
+
+    const isAdminHoldExit =
+      (status === OrderStatus.CANCELLED || status === OrderStatus.REFUNDED) &&
+      (previousStatus === OrderStatus.ON_HOLD ||
+        order.items.some((item) => item.fulfillmentStatus === FulfillmentStatus.ON_HOLD));
+
     order.status = status;
 
     await this.dataSource.transaction(async (manager) => {
       if (status === OrderStatus.PAID) {
         order.paidAt = new Date();
       }
+
+      if (isAdminHoldExit) {
+        const now = new Date();
+        for (const item of order.items) {
+          if (item.fulfillmentStatus === FulfillmentStatus.ON_HOLD) {
+            item.fulfillmentStatus = FulfillmentStatus.CANCELLED;
+            item.previousFulfillmentStatus = null;
+            item.holdStartedAt = null;
+            item.updatedAt = now;
+          } else if (status === OrderStatus.CANCELLED || status === OrderStatus.REFUNDED) {
+            item.fulfillmentStatus = FulfillmentStatus.CANCELLED;
+            item.updatedAt = now;
+          }
+        }
+        order.previousStatus = null;
+        await manager.save(OrderItem, order.items);
+      }
+
       await manager.save(order);
 
       if (status === OrderStatus.CANCELLED || status === OrderStatus.REFUNDED) {

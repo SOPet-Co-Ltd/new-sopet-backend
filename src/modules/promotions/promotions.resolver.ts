@@ -18,7 +18,6 @@ import {
   ValidatePromotionsInput,
 } from './promotions.inputs';
 import { StoresService } from '../stores/stores.service';
-import { StoreMemberRole } from '../../database/entities/store-member.entity';
 
 @Resolver()
 export class PromotionsResolver {
@@ -39,7 +38,7 @@ export class PromotionsResolver {
         input.subtotal,
         input.storeId,
         customerId ? { customerId } : undefined,
-        { mode: 'preview', lines: input.lines },
+        { mode: 'preview', lines: input.lines, shippingFee: input.shippingFee },
       );
     return {
       code: promotion.code,
@@ -62,6 +61,7 @@ export class PromotionsResolver {
       input.storeId,
       customerId ? { customerId } : undefined,
       input.lines,
+      input.shippingFee,
     );
   }
 
@@ -86,7 +86,7 @@ export class PromotionsResolver {
     @Args('storeId') storeId: string,
     @CurrentUser('id') userId: string,
   ): Promise<PromotionGraphqlType[]> {
-    await this.assertPromotionManager(userId, storeId);
+    await this.storesService.assertStoreAccess(userId, storeId);
     const promotions = await this.promotionsService.findByStore(storeId);
     return promotions.map(mapPromotion);
   }
@@ -120,7 +120,7 @@ export class PromotionsResolver {
         message: 'Store ID required for vendor promotions',
       });
     }
-    await this.assertPromotionManager(userId, targetStoreId);
+    await this.storesService.assertStoreAccess(userId, targetStoreId);
     const promotion = await this.promotionsService.create(
       input,
       PromotionScope.STORE,
@@ -141,7 +141,7 @@ export class PromotionsResolver {
   ): Promise<PromotionGraphqlType> {
     const promotion = await this.promotionsService.findOne(id);
     if (role === 'vendor') {
-      await this.assertPromotionManager(userId, promotion.storeId!);
+      await this.storesService.assertStoreAccess(userId, promotion.storeId!);
       this.promotionsService.assertCanManage(promotion, PromotionScope.STORE, storeId);
     } else {
       this.promotionsService.assertCanManage(promotion, PromotionScope.PLATFORM);
@@ -161,7 +161,7 @@ export class PromotionsResolver {
   ): Promise<boolean> {
     const promotion = await this.promotionsService.findOne(id);
     if (role === 'vendor') {
-      await this.assertPromotionManager(userId, promotion.storeId!);
+      await this.storesService.assertStoreAccess(userId, promotion.storeId!);
       this.promotionsService.assertCanManage(promotion, PromotionScope.STORE, storeId);
     } else {
       this.promotionsService.assertCanManage(promotion, PromotionScope.PLATFORM);
@@ -182,32 +182,12 @@ export class PromotionsResolver {
   ): Promise<PromotionGraphqlType> {
     const promotion = await this.promotionsService.findOne(id);
     if (role === 'vendor') {
-      await this.assertPromotionManager(userId, promotion.storeId!);
+      await this.storesService.assertStoreAccess(userId, promotion.storeId!);
       this.promotionsService.assertCanManage(promotion, PromotionScope.STORE, storeId);
     } else {
       this.promotionsService.assertCanManage(promotion, PromotionScope.PLATFORM);
     }
     const updated = await this.promotionsService.toggle(id, isActive);
     return mapPromotion(updated);
-  }
-
-  private async assertPromotionManager(userId: string, storeId: string): Promise<void> {
-    const isOwner = await this.storesService.isStoreOwner(userId, storeId);
-    if (isOwner) return;
-
-    const accessible = await this.storesService.getAccessibleStores(userId);
-    const membership = accessible.find((a) => a.store.id === storeId);
-    if (
-      membership &&
-      (membership.membershipRole === StoreMemberRole.MANAGER ||
-        membership.membershipRole === 'manager')
-    ) {
-      return;
-    }
-
-    throw new BadRequestException({
-      code: 'PROMOTION_MANAGER_REQUIRED',
-      message: 'Only store owner or manager can manage promotions',
-    });
   }
 }

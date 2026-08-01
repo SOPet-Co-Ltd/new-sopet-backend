@@ -72,4 +72,11 @@ describe('getProductPublishChecklist', () => {
     expect(checklist.canPublish).toBe(false);
     expect(checklist.missingKeys).toContain('stock');
   });
+
+  it('flags missing store shipping when hasShipping is false', () => {
+    const checklist = getProductPublishChecklist(buildProduct(), { hasShipping: false });
+
+    expect(checklist.canPublish).toBe(false);
+    expect(checklist.missingKeys).toContain('shipping');
+  });
 });

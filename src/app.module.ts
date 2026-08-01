@@ -12,6 +12,7 @@ import thaibulksmsConfig from './config/thaibulksms.config';
 import redisConfig from './config/redis.config';
 import searchConfig from './config/search.config';
 import paymentConfig from './config/payment.config';
+import storeHoldConfig from './config/store-hold.config';
 
 // Filters, Interceptors, Pipes
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
@@ -58,6 +59,7 @@ import { getPostgresSslOptions } from './database/postgres-ssl.util';
         redisConfig,
         searchConfig,
         paymentConfig,
+        storeHoldConfig,
       ],
     }),
 

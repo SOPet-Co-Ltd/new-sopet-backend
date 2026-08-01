@@ -4,12 +4,18 @@ import {
   IsEmail,
   IsNotEmpty,
   IsOptional,
+  IsPhoneNumber,
   IsString,
   IsUUID,
   Length,
+  Matches,
   MinLength,
   ValidateIf,
 } from 'class-validator';
+
+// `Length`/`IsNotEmpty` alone let whitespace-only input (e.g. "   ") through,
+// since neither trims before checking. Require at least one non-whitespace char.
+const NOT_BLANK_MESSAGE = 'This field cannot be blank or whitespace-only';
 
 @InputType()
 export class RegisterVendorInput {
@@ -27,6 +33,7 @@ export class RegisterVendorInput {
   @IsNotEmpty()
   @IsString()
   @Length(1, 255)
+  @Matches(/\S/, { message: NOT_BLANK_MESSAGE })
   fullName!: string;
 }
 
@@ -45,7 +52,7 @@ export class SubmitStoreRequestInput {
 
   @Field({ nullable: true })
   @IsOptional()
-  @IsString()
+  @IsPhoneNumber('TH')
   contactPhone?: string;
 
   @Field({ nullable: true })
@@ -70,10 +77,10 @@ export class RejectStoreRequestInput {
   @IsUUID()
   id!: string;
 
-  @Field()
-  @IsNotEmpty()
+  @Field({ nullable: true })
+  @IsOptional()
   @IsString()
-  reason!: string;
+  reason?: string;
 }
 
 @InputType()
@@ -134,6 +141,7 @@ export class AcceptVendorInvitationInput {
   @IsNotEmpty()
   @IsString()
   @Length(1, 255)
+  @Matches(/\S/, { message: NOT_BLANK_MESSAGE })
   fullName!: string;
 }
 
@@ -147,6 +155,7 @@ export class UpdateStoreAsAdminInput {
   @IsOptional()
   @IsString()
   @Length(1, 255)
+  @Matches(/\S/, { message: NOT_BLANK_MESSAGE })
   name?: string;
 
   @Field({ nullable: true })
@@ -177,7 +186,7 @@ export class UpdateStoreAsAdminInput {
 
   @Field({ nullable: true })
   @IsOptional()
-  @IsString()
+  @IsPhoneNumber('TH')
   contactPhone?: string;
 
   @Field({ nullable: true })
@@ -206,6 +215,7 @@ export class CreateStoreAsAdminInput {
   @IsNotEmpty()
   @IsString()
   @Length(1, 255)
+  @Matches(/\S/, { message: NOT_BLANK_MESSAGE })
   name!: string;
 
   @Field({ nullable: true })
@@ -215,7 +225,7 @@ export class CreateStoreAsAdminInput {
 
   @Field({ nullable: true })
   @IsOptional()
-  @IsString()
+  @IsPhoneNumber('TH')
   contactPhone?: string;
 
   @Field({ nullable: true })

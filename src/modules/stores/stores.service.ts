@@ -4,6 +4,8 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository, ILike } from 'typeorm';
@@ -23,6 +25,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { StorageService } from '../storage/storage.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constants';
+import { StoreSuspensionHoldService } from '../orders/store-suspension-hold.service';
 
 const VENDOR_REVENUE_EXCLUDED_STATUSES = [
   OrderStatus.CANCELLED,
@@ -99,6 +102,8 @@ export class StoresService {
     private readonly notificationsService: NotificationsService,
     private readonly storageService: StorageService,
     private readonly auditLogsService: AuditLogsService,
+    @Inject(forwardRef(() => StoreSuspensionHoldService))
+    private readonly storeSuspensionHoldService: StoreSuspensionHoldService,
   ) {}
 
   private async logAdminStoreAction(
@@ -191,14 +196,14 @@ export class StoresService {
     return store;
   }
 
-  // Get store by slug
+  // Get store by slug (public discovery — approved stores only)
   async findBySlug(slug: string): Promise<Store> {
     const store = await this.storeRepository.findOne({
       where: { slug },
       relations: ['owner', 'products'],
     });
 
-    if (!store) {
+    if (!store || store.status !== StoreStatus.APPROVED) {
       throw new NotFoundException({
         code: 'STORE_NOT_FOUND',
         message: 'Store not found',
@@ -281,6 +286,7 @@ export class StoresService {
 
     const saved = await this.storeRepository.save(store);
     await this.logAdminStoreAction(adminId, AuditAction.STORE_SUSPENDED, saved);
+    await this.storeSuspensionHoldService.applyHoldForStore(saved.id);
     return saved;
   }
 
@@ -301,6 +307,7 @@ export class StoresService {
 
     const saved = await this.storeRepository.save(store);
     await this.logAdminStoreAction(adminId, AuditAction.STORE_REACTIVATED, saved);
+    await this.storeSuspensionHoldService.restoreHoldForStore(saved.id);
     return saved;
   }
 
@@ -369,6 +376,15 @@ export class StoresService {
     return !!membership;
   }
 
+  /** Lightweight live check used to block vendor mutations against a suspended store. */
+  async isStoreSuspended(storeId: string): Promise<boolean> {
+    const store = await this.storeRepository.findOne({
+      where: { id: storeId },
+      select: ['id', 'status'],
+    });
+    return store?.status === StoreStatus.SUSPENDED;
+  }
+
   async resolveDefaultStoreId(userId: string): Promise<string | undefined> {
     const accessible = await this.getAccessibleStores(userId);
     return pickDefaultAccessibleStoreId(accessible.map((entry) => entry.store));
@@ -391,6 +407,17 @@ export class StoresService {
       throw new ForbiddenException({
         code: 'STORE_OWNER_REQUIRED',
         message: 'Only the store owner can perform this action',
+      });
+    }
+  }
+
+  /** Any store member (owner, manager, or staff) may perform the action. */
+  async assertStoreAccess(userId: string, storeId: string): Promise<void> {
+    const hasAccess = await this.userHasStoreAccess(userId, storeId);
+    if (!hasAccess) {
+      throw new ForbiddenException({
+        code: 'STORE_ACCESS_DENIED',
+        message: 'No access to this store',
       });
     }
   }
@@ -641,10 +668,11 @@ export class StoresService {
       });
     }
 
-    const slug = await this.resolveUniqueStoreSlug(input.name);
+    const name = input.name.trim();
+    const slug = await this.resolveUniqueStoreSlug(name);
 
     const store = this.storeRepository.create({
-      name: input.name,
+      name,
       slug,
       description: input.description ?? null,
       contactPhone: input.contactPhone ?? null,
@@ -679,8 +707,11 @@ export class StoresService {
     logoUrl?: string;
     bannerUrl?: string;
     status?: StoreStatus;
+    /** Admin actor for suspend/reactivate audit + hold side effects (GraphQL updateStoreAsAdmin). */
+    adminId?: string;
   }): Promise<Store> {
     const store = await this.findOne(input.id);
+    const previousStatus = store.status;
 
     if (input.ownerUserId !== undefined) {
       if (input.ownerUserId === null) {
@@ -708,7 +739,7 @@ export class StoresService {
       }
     }
 
-    if (input.name !== undefined) store.name = input.name;
+    if (input.name !== undefined) store.name = input.name.trim();
     if (input.slug !== undefined) store.slug = input.slug;
     if (input.description !== undefined) store.description = input.description;
     if (input.contactPhone !== undefined) store.contactPhone = input.contactPhone;
@@ -716,10 +747,37 @@ export class StoresService {
     if (input.address !== undefined) store.address = input.address;
     if (input.logoUrl !== undefined) store.logoUrl = input.logoUrl;
     if (input.bannerUrl !== undefined) store.bannerUrl = input.bannerUrl;
-    if (input.status !== undefined) store.status = input.status;
+    if (input.status !== undefined) {
+      // Match reactivate() metadata when admin UI reopens a suspended store via updateStoreAsAdmin.
+      if (
+        input.status === StoreStatus.APPROVED &&
+        previousStatus === StoreStatus.SUSPENDED &&
+        input.adminId
+      ) {
+        store.approvedBy = input.adminId;
+        store.approvedAt = new Date();
+      }
+      store.status = input.status;
+    }
 
     await this.storeRepository.save(store);
-    return this.findOne(input.id);
+    const saved = await this.findOne(input.id);
+
+    // Production admin suspend/reactivate uses updateStoreAsAdmin (status only) — not
+    // StoresService.suspend/reactivate. Wire the same hold hooks so AC-007+/AC-017+ fire.
+    if (input.status === StoreStatus.SUSPENDED && previousStatus !== StoreStatus.SUSPENDED) {
+      if (input.adminId) {
+        await this.logAdminStoreAction(input.adminId, AuditAction.STORE_SUSPENDED, saved);
+      }
+      await this.storeSuspensionHoldService.applyHoldForStore(saved.id);
+    } else if (previousStatus === StoreStatus.SUSPENDED && input.status === StoreStatus.APPROVED) {
+      if (input.adminId) {
+        await this.logAdminStoreAction(input.adminId, AuditAction.STORE_REACTIVATED, saved);
+      }
+      await this.storeSuspensionHoldService.restoreHoldForStore(saved.id);
+    }
+
+    return saved;
   }
 
   private async syncStoreOwnerMembership(
@@ -1022,7 +1080,7 @@ export class StoresService {
     const user = this.userRepository.create({
       email: input.email,
       passwordHash,
-      fullName: input.fullName,
+      fullName: input.fullName.trim(),
       role: UserRole.VENDOR,
     });
     return this.userRepository.save(user);

@@ -47,7 +47,15 @@ export type ValidateCodeOptions = {
   mode?: 'preview' | 'apply';
   /** Request-local identity cache; used by validatePromotionsBatch. */
   newCustomerGateCache?: NewCustomerGateCache;
+  /** Eligible base for shipping-type promotions (FREE_SHIPPING / *_SHIPPING_DISCOUNT). */
+  shippingFee?: number;
 };
+
+const SHIPPING_PROMOTION_TYPES: ReadonlySet<PromotionType> = new Set([
+  PromotionType.FREE_SHIPPING,
+  PromotionType.FIXED_SHIPPING_DISCOUNT,
+  PromotionType.PERCENTAGE_SHIPPING_DISCOUNT,
+]);
 
 export type ValidateCodeResult = {
   promotion: Promotion;
@@ -175,12 +183,27 @@ export class PromotionsService {
     }
   }
 
+  // Neither CreatePromotionInput nor UpdatePromotionInput has a cross-field validator, and
+  // validateCode()'s own startsAt/expiresAt checks just treat an inverted range as "never
+  // eligible" with no distinct error - a promotion silently never applies with no signal to
+  // the admin/vendor who created it. The frontend form has the same check for immediate
+  // feedback; this is defense-in-depth for any client that bypasses it.
+  private assertValidDateRange(startsAt: Date | null, expiresAt: Date | null): void {
+    if (startsAt && expiresAt && expiresAt <= startsAt) {
+      throw new BadRequestException({
+        code: 'INVALID_PROMOTION_DATE_RANGE',
+        message: 'วันสิ้นสุดต้องอยู่หลังวันเริ่มต้น',
+      });
+    }
+  }
+
   async create(
     input: CreatePromotionInput,
     scope: PromotionScope,
     storeId?: string,
   ): Promise<Promotion> {
     this.assertDiscountBounds(input.type, input.discountValue);
+    this.assertValidDateRange(input.startsAt ?? null, input.expiresAt ?? null);
     const conditions = this.parseConditions(input.conditions);
     await this.assertValidConditions(input.type, scope, storeId, conditions);
     const promotion = this.promotionRepository.create({
@@ -244,6 +267,9 @@ export class PromotionsService {
     }
     if (input.startsAt !== undefined) promotion.startsAt = input.startsAt;
     if (input.expiresAt !== undefined) promotion.expiresAt = input.expiresAt;
+    if (input.startsAt !== undefined || input.expiresAt !== undefined) {
+      this.assertValidDateRange(promotion.startsAt, promotion.expiresAt);
+    }
     return this.promotionRepository.save(promotion);
   }
 
@@ -334,6 +360,7 @@ export class PromotionsService {
       return this.resolveEligibilityFailure(promotion, gateReason, mode);
     }
 
+    const shippingFee = options?.shippingFee ?? 0;
     let discountAmount = 0;
     let freeUnits = 0;
 
@@ -341,6 +368,12 @@ export class PromotionsService {
       discountAmount = (subtotal * Number(promotion.discountValue)) / 100;
     } else if (promotion.type === PromotionType.FIXED_AMOUNT) {
       discountAmount = Number(promotion.discountValue);
+    } else if (promotion.type === PromotionType.FREE_SHIPPING) {
+      discountAmount = shippingFee;
+    } else if (promotion.type === PromotionType.FIXED_SHIPPING_DISCOUNT) {
+      discountAmount = Number(promotion.discountValue);
+    } else if (promotion.type === PromotionType.PERCENTAGE_SHIPPING_DISCOUNT) {
+      discountAmount = (shippingFee * Number(promotion.discountValue)) / 100;
     } else if (promotion.type === PromotionType.BUY_X_GET_Y) {
       const bxgy = this.evaluateBuyXGetY(promotion, options?.lines);
       if (bxgy.kind === 'eligibility') {
@@ -370,8 +403,11 @@ export class PromotionsService {
     if (promotion.maxDiscountAmount) {
       discountAmount = Math.min(discountAmount, Number(promotion.maxDiscountAmount));
     }
-    // Rule C: clamp to eligible base (subtotal) after optional maxDiscountAmount
-    discountAmount = Math.min(discountAmount, subtotal);
+    // Rule C: clamp to eligible base after optional maxDiscountAmount. Shipping-type
+    // promotions discount the shipping fee, not the item subtotal - clamp accordingly,
+    // or a percentage/fixed shipping discount could otherwise exceed the actual fee.
+    const eligibleBase = SHIPPING_PROMOTION_TYPES.has(promotion.type) ? shippingFee : subtotal;
+    discountAmount = Math.min(discountAmount, eligibleBase);
 
     return {
       promotion,
@@ -392,6 +428,7 @@ export class PromotionsService {
     storeId?: string,
     customer?: PromotionCustomerIdentity,
     lines?: PromotionCartLine[],
+    shippingFee?: number,
   ): Promise<ValidatePromotionsBatchResult> {
     if (targets.length < 1 || targets.length > MAX_VALIDATE_PROMOTIONS_TARGETS) {
       throw new BadRequestException({
@@ -405,7 +442,15 @@ export class PromotionsService {
 
     for (const target of targets) {
       items.push(
-        await this.evaluateBatchTarget(target, subtotal, storeId, customer, lines, gateCache),
+        await this.evaluateBatchTarget(
+          target,
+          subtotal,
+          storeId,
+          customer,
+          lines,
+          gateCache,
+          shippingFee,
+        ),
       );
     }
 
@@ -462,6 +507,7 @@ export class PromotionsService {
     customer: PromotionCustomerIdentity | undefined,
     lines: PromotionCartLine[] | undefined,
     gateCache: NewCustomerGateCache,
+    shippingFee?: number,
   ): Promise<PromotionEligibilityItem> {
     const inputCode = typeof target.code === 'string' ? target.code : undefined;
     const inputId =
@@ -499,6 +545,7 @@ export class PromotionsService {
         mode: 'preview',
         lines,
         newCustomerGateCache: gateCache,
+        shippingFee,
       });
       return this.toEligibilityItem(result);
     } catch (error) {
@@ -642,9 +689,11 @@ export class PromotionsService {
     freeUnits: number;
   }> {
     const mode = options?.mode ?? 'apply';
+    const shippingFee = options?.shippingFee ?? 0;
     const promotions: Promotion[] = [];
     const discountsByPromotionId: Record<string, number> = {};
-    let discountAmount = 0;
+    let itemDiscountAmount = 0;
+    let shippingDiscountAmount = 0;
     let freeUnits = 0;
 
     const absorb = (result: ValidateCodeResult): void => {
@@ -659,7 +708,11 @@ export class PromotionsService {
       }
       promotions.push(result.promotion);
       discountsByPromotionId[result.promotion.id] = result.discountAmount;
-      discountAmount += result.discountAmount;
+      if (SHIPPING_PROMOTION_TYPES.has(result.promotion.type)) {
+        shippingDiscountAmount += result.discountAmount;
+      } else {
+        itemDiscountAmount += result.discountAmount;
+      }
       freeUnits += result.freeUnits;
     };
 
@@ -686,7 +739,12 @@ export class PromotionsService {
       }
     }
 
-    discountAmount = Math.min(discountAmount, subtotal);
+    // Clamp each family to its own eligible base (item discounts vs subtotal, shipping
+    // discounts vs the shipping fee) - a stacked shipping + item promo must not let one
+    // family's cap bleed into the other's base.
+    itemDiscountAmount = Math.min(itemDiscountAmount, subtotal);
+    shippingDiscountAmount = Math.min(shippingDiscountAmount, shippingFee);
+    const discountAmount = itemDiscountAmount + shippingDiscountAmount;
     return { promotions, discountAmount, discountsByPromotionId, freeUnits };
   }
 

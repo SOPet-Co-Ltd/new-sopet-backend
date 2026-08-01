@@ -4,9 +4,11 @@ import {
   IsEnum,
   IsNotEmpty,
   IsOptional,
+  IsPhoneNumber,
   IsString,
   IsUUID,
   Length,
+  Matches,
   MinLength,
 } from 'class-validator';
 import { StoreMemberRole } from '../../database/entities/store-member.entity';
@@ -39,6 +41,8 @@ export class AcceptStoreMemberInvitationInput {
   @IsNotEmpty()
   @IsString()
   @Length(1, 255)
+  // Length/IsNotEmpty alone let whitespace-only input (e.g. "   ") through.
+  @Matches(/\S/, { message: 'fullName cannot be blank or whitespace-only' })
   fullName!: string;
 }
 
@@ -68,7 +72,7 @@ export class UpdateStoreSettingsInput {
 
   @Field({ nullable: true })
   @IsOptional()
-  @IsString()
+  @IsPhoneNumber('TH')
   contactPhone?: string;
 
   @Field({ nullable: true })
