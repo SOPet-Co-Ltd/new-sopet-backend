@@ -63,6 +63,7 @@ Dummy env vars: `JWT_SECRET`, `OMISE_*`.
 3. Build/push Docker image to ECR on GitHub Actions (if not already present for this commit)
    - `linux/amd64`: `ubuntu-latest` (native amd64)
    - `linux/arm64`: `ubuntu-24.04-arm` (native arm64 — no QEMU, no EC2 build)
+   - Runner is chosen by a `resolve-runner` job that reads **Environment** var `DOCKER_PLATFORM` (Environment vars are not reliable on the same job’s `runs-on` at schedule time)
    - Escape hatch: set Environment var `BUILD_ON_HOST=true` to build on EC2 via `infra/ec2/build-on-host.sh` instead
 4. Render runtime `.env` from GitHub Environment
 5. **Deploy on EC2** via AWS Systems Manager (`infra/deploy-via-ssm.sh` → pull image + `/opt/sopet/deploy.sh`; optional build-on-host if `BUILD_ON_HOST=true`)

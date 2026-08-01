@@ -8,8 +8,9 @@ AWS_ROLE_ARN
 AWS_REGION
 ECR_REPOSITORY
 EC2_INSTANCE_ID
-# Optional: linux/arm64 (Graviton) or linux/amd64 (t3). Selects GHA runner + docker --platform.
-# arm64 → ubuntu-24.04-arm (native build + ECR push); amd64 → ubuntu-latest.
+# Optional: linux/arm64 (Graviton) or linux/amd64 (t3). Docker --platform + GHA runner.
+# Set on each GitHub Environment (deploy/uat, deploy/production). resolve-runner job
+# reads it and outputs runs-on (arm64 → ubuntu-24.04-arm; amd64 → ubuntu-latest).
 DOCKER_PLATFORM
 # Optional escape hatch: true = build image on EC2 (infra/ec2/build-on-host.sh) instead of GHA.
 # Default OFF — arm64 builds on GitHub-hosted ARM runners now.

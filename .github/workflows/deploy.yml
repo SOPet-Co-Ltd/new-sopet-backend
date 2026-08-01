@@ -3,6 +3,11 @@
 #
 # GitHub Environment vars/secrets are mapped once in "Load GitHub Environment"
 # (step-level env → GITHUB_ENV). Keys: infra/github-env.keys
+#
+# Runner selection: Environment-scoped vars are reliable inside a job with
+# `environment:`, but NOT when evaluating that same job's `runs-on` (chicken-and-egg
+# at schedule time). A tiny resolve-runner job reads Environment DOCKER_PLATFORM and
+# outputs the runner label; deploy uses needs.*.outputs.runner.
 
 name: Deploy
 
@@ -20,9 +25,42 @@ permissions:
   contents: read
 
 jobs:
+  # Read Environment DOCKER_PLATFORM on a fixed runner, then hand the label to deploy.
+  resolve-runner:
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'deploy/production' && 'deploy/production' || 'deploy/uat' }}
+    outputs:
+      runner: ${{ steps.resolve.outputs.runner }}
+      platform: ${{ steps.resolve.outputs.platform }}
+    steps:
+      - name: Resolve runner from Environment DOCKER_PLATFORM
+        id: resolve
+        env:
+          DOCKER_PLATFORM: ${{ vars.DOCKER_PLATFORM }}
+        run: |
+          PLATFORM="${DOCKER_PLATFORM:-linux/amd64}"
+          case "$PLATFORM" in
+            linux/arm64)
+              RUNNER="ubuntu-24.04-arm"
+              ;;
+            linux/amd64)
+              RUNNER="ubuntu-latest"
+              ;;
+            *)
+              echo "::error::Unsupported DOCKER_PLATFORM='$PLATFORM' (use linux/arm64 or linux/amd64)"
+              exit 1
+              ;;
+          esac
+          {
+            echo "platform=$PLATFORM"
+            echo "runner=$RUNNER"
+          } >> "$GITHUB_OUTPUT"
+          echo "DOCKER_PLATFORM=$PLATFORM → runs-on=$RUNNER"
+
   deploy:
+    needs: resolve-runner
     # Native arm64 on ubuntu-24.04-arm (avoids QEMU); amd64 on ubuntu-latest.
-    runs-on: ${{ vars.DOCKER_PLATFORM == 'linux/arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    runs-on: ${{ needs.resolve-runner.outputs.runner }}
     environment: ${{ github.ref_name == 'deploy/production' && 'deploy/production' || 'deploy/uat' }}
 
     steps:
@@ -145,9 +183,37 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
           DOCKER_PLATFORM: ${{ vars.DOCKER_PLATFORM }}
+          RESOLVED_PLATFORM: ${{ needs.resolve-runner.outputs.platform }}
         run: |
           PLATFORM="${DOCKER_PLATFORM:-linux/amd64}"
-          echo "Building image on GHA ($(uname -m)) for platform: $PLATFORM"
+          HOST_ARCH="$(uname -m)"
+          echo "Building image on GHA ($HOST_ARCH) for platform: $PLATFORM"
+
+          if [ -n "$RESOLVED_PLATFORM" ] && [ "$PLATFORM" != "$RESOLVED_PLATFORM" ]; then
+            echo "::error::DOCKER_PLATFORM mismatch: Environment='$PLATFORM' vs resolve-runner='$RESOLVED_PLATFORM'"
+            exit 1
+          fi
+
+          case "$PLATFORM" in
+            linux/arm64)
+              if [ "$HOST_ARCH" != "aarch64" ] && [ "$HOST_ARCH" != "arm64" ]; then
+                echo "::error::DOCKER_PLATFORM=linux/arm64 requires a native ARM runner (uname -m=$HOST_ARCH)."
+                echo "::error::Expected runs-on=ubuntu-24.04-arm. Refusing QEMU/cross-build (exec format error)."
+                exit 1
+              fi
+              ;;
+            linux/amd64)
+              if [ "$HOST_ARCH" != "x86_64" ] && [ "$HOST_ARCH" != "amd64" ]; then
+                echo "::error::DOCKER_PLATFORM=linux/amd64 requires an amd64 runner (uname -m=$HOST_ARCH)."
+                echo "::error::Expected runs-on=ubuntu-latest."
+                exit 1
+              fi
+              ;;
+            *)
+              echo "::error::Unsupported DOCKER_PLATFORM='$PLATFORM' (use linux/arm64 or linux/amd64)"
+              exit 1
+              ;;
+          esac
 
           # Fresh login immediately before push (avoids stale/Buildx auth failures)
           aws ecr get-login-password --region "$AWS_REGION" \
