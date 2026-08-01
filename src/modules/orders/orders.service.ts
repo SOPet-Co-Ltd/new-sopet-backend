@@ -268,7 +268,7 @@ export class OrdersService {
           : normalizedGuestPhone
             ? { guestPhone: normalizedGuestPhone }
             : undefined,
-        { mode: 'apply', lines: promotionLines },
+        { mode: 'apply', lines: promotionLines, shippingFee },
       );
       discountAmount = stacked.discountAmount;
       appliedPromotions = stacked.promotions;

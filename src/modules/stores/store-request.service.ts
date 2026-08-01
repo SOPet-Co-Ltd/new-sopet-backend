@@ -111,6 +111,14 @@ export class StoreRequestService {
     });
   }
 
+  /** Full history for the admin request center — includes approved/rejected, not just pending. */
+  async findAll(): Promise<StoreRequest[]> {
+    return this.storeRequestRepository.find({
+      relations: ['vendorUser'],
+      order: { createdAt: 'DESC' },
+    });
+  }
+
   async findOne(id: string): Promise<StoreRequest> {
     const request = await this.storeRequestRepository.findOne({
       where: { id },

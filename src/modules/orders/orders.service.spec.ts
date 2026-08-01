@@ -548,7 +548,54 @@ describe('OrdersService', () => {
             storeId: 'store-1',
           },
         ],
+        shippingFee: 0,
       },
+    );
+  });
+
+  it('passes the resolved shipping fee to applyStackedPromotions (rows 24/25 regression)', async () => {
+    variantRepository.findOne.mockResolvedValue(variant);
+    shippingOptionRepository.findOne.mockResolvedValue({
+      id: 'ship-opt-1',
+      storeId: 'store-1',
+      name: 'Standard',
+      price: 45,
+      isActive: true,
+    });
+    promotionsService.applyStackedPromotions.mockResolvedValue({
+      discountAmount: 45,
+      promotions: [{ id: 'promo-freeship', type: 'free_shipping', discountValue: 0 }],
+      discountsByPromotionId: { 'promo-freeship': 45 },
+      freeUnits: 0,
+    });
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-4',
+      status: OrderStatus.PENDING_PAYMENT,
+      items: [],
+      shippingAddress: {},
+      storeShippings: [],
+      statusHistory: [],
+    });
+
+    await service.create(
+      {
+        items: [{ productId: 'p1', variantId: 'var-1', quantity: 1, price: 100 }],
+        paymentMethod: 'promptpay',
+        guestPhone: '+66812345678',
+        shippingAddress,
+        platformPromotionCode: 'FREESHIP',
+        storeShipping: [{ storeId: 'store-1', shippingOptionId: 'ship-opt-1' }],
+      },
+      undefined,
+    );
+
+    expect(promotionsService.applyStackedPromotions).toHaveBeenCalledWith(
+      100,
+      expect.any(Map),
+      'FREESHIP',
+      [],
+      { guestPhone: '0812345678' },
+      expect.objectContaining({ shippingFee: 45 }),
     );
   });
 

@@ -38,7 +38,7 @@ export class PromotionsResolver {
         input.subtotal,
         input.storeId,
         customerId ? { customerId } : undefined,
-        { mode: 'preview', lines: input.lines },
+        { mode: 'preview', lines: input.lines, shippingFee: input.shippingFee },
       );
     return {
       code: promotion.code,
@@ -61,6 +61,7 @@ export class PromotionsResolver {
       input.storeId,
       customerId ? { customerId } : undefined,
       input.lines,
+      input.shippingFee,
     );
   }
 

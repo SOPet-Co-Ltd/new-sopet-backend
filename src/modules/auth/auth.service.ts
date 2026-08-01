@@ -552,6 +552,31 @@ export class AuthService {
     };
   }
 
+  /**
+   * Public, side-effect-free preview so the reset-password page can show an
+   * "expired/already used" message immediately on load instead of only discovering
+   * an invalid token when the user submits a new password (row 33 regression).
+   */
+  async getPasswordResetTokenStatus(
+    token: string,
+  ): Promise<{ valid: boolean; status: 'valid' | 'expired' | 'used' | 'invalid' }> {
+    const resetToken = await this.passwordResetTokenRepository.findOne({
+      where: { token },
+    });
+
+    if (!resetToken) {
+      return { valid: false, status: 'invalid' };
+    }
+    if (resetToken.usedAt) {
+      return { valid: false, status: 'used' };
+    }
+    if (resetToken.expiresAt < new Date()) {
+      return { valid: false, status: 'expired' };
+    }
+
+    return { valid: true, status: 'valid' };
+  }
+
   async resetPassword(token: string, newPassword: string): Promise<{ message: string }> {
     const resetToken = await this.passwordResetTokenRepository.findOne({
       where: { token },

@@ -39,6 +39,7 @@ describe('ProductsService', () => {
   let storesService: {
     userHasStoreAccess: jest.Mock;
     resolveDefaultStoreId: jest.Mock;
+    isStoreSuspended: jest.Mock;
   };
   let taxonomyService: {
     getApprovedCategory: jest.Mock;
@@ -111,6 +112,7 @@ describe('ProductsService', () => {
         Promise.resolve(userId === 'user-1' && storeId === 'store-1'),
       ),
       resolveDefaultStoreId: jest.fn(() => Promise.resolve('store-1')),
+      isStoreSuspended: jest.fn(() => Promise.resolve(false)),
     };
     taxonomyService = {
       getApprovedCategory: jest.fn(),
@@ -189,6 +191,21 @@ describe('ProductsService', () => {
 
     expect(result.name).toBe('Premium Dog Food');
     expect(result.status).toBe(ProductStatus.DRAFT);
+  });
+
+  it('forbids updating a product when its store is suspended, even for a vendor with valid store access', async () => {
+    productRepository.findOne.mockResolvedValue({ ...product });
+    storesService.isStoreSuspended.mockResolvedValue(true);
+
+    await expect(
+      service.update('prod-1', 'user-1', { name: 'Hacked while suspended' }),
+    ).rejects.toMatchObject({ response: { code: 'STORE_SUSPENDED' } });
+  });
+
+  it('still allows read-only store resolution (resolveActiveStoreId) while the store is suspended', async () => {
+    storesService.isStoreSuspended.mockResolvedValue(true);
+
+    await expect(service.resolveActiveStoreId('user-1', 'store-1')).resolves.toBe('store-1');
   });
 
   it('forces draft status on create even when status is requested', async () => {

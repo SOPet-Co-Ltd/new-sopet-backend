@@ -156,6 +156,64 @@ describe('AuthService password reset', () => {
     });
   });
 
+  describe('getPasswordResetTokenStatus (row 33 regression)', () => {
+    it('returns valid for a fresh, unused token', async () => {
+      passwordResetRepo.findOne.mockResolvedValue({
+        token: 'valid-token',
+        usedAt: null,
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      });
+
+      const result = await service.getPasswordResetTokenStatus('valid-token');
+
+      expect(result).toEqual({ valid: true, status: 'valid' });
+    });
+
+    it('returns expired for a token past expiresAt', async () => {
+      passwordResetRepo.findOne.mockResolvedValue({
+        token: 'expired-token',
+        usedAt: null,
+        expiresAt: new Date(Date.now() - 1000),
+      });
+
+      const result = await service.getPasswordResetTokenStatus('expired-token');
+
+      expect(result).toEqual({ valid: false, status: 'expired' });
+    });
+
+    it('returns used for an already-consumed token', async () => {
+      passwordResetRepo.findOne.mockResolvedValue({
+        token: 'used-token',
+        usedAt: new Date(),
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      });
+
+      const result = await service.getPasswordResetTokenStatus('used-token');
+
+      expect(result).toEqual({ valid: false, status: 'used' });
+    });
+
+    it('returns invalid for a token that does not exist', async () => {
+      passwordResetRepo.findOne.mockResolvedValue(null);
+
+      const result = await service.getPasswordResetTokenStatus('nonexistent-token');
+
+      expect(result).toEqual({ valid: false, status: 'invalid' });
+    });
+
+    it('never mutates the token row (side-effect-free preview)', async () => {
+      passwordResetRepo.findOne.mockResolvedValue({
+        token: 'valid-token',
+        usedAt: null,
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      });
+
+      await service.getPasswordResetTokenStatus('valid-token');
+
+      expect(passwordResetRepo.save).not.toHaveBeenCalled();
+    });
+  });
+
   it('adminTriggerVendorPasswordReset sends email for vendor', async () => {
     userRepo.findOne.mockResolvedValue({
       id: 'vendor-1',

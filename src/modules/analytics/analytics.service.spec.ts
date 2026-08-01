@@ -4,8 +4,10 @@ import { AnalyticsService } from './analytics.service';
 import { Order } from '../../database/entities/order.entity';
 import { OrderItem } from '../../database/entities/order-item.entity';
 import { Store, StoreStatus } from '../../database/entities/store.entity';
+import { StoreRequestStatus } from '../../database/entities/store-request.entity';
 import { Customer } from '../../database/entities/customer.entity';
 import { Product } from '../../database/entities/product.entity';
+import { StoreRequest } from '../../database/entities/store-request.entity';
 
 describe('AnalyticsService', () => {
   let service: AnalyticsService;
@@ -13,6 +15,7 @@ describe('AnalyticsService', () => {
   const orderRepository = { createQueryBuilder: jest.fn() };
   const orderItemRepository = { createQueryBuilder: jest.fn() };
   const storeRepository = { count: jest.fn() };
+  const storeRequestRepository = { count: jest.fn() };
   const customerRepository = { count: jest.fn() };
   const productRepository = { count: jest.fn() };
 
@@ -47,6 +50,7 @@ describe('AnalyticsService', () => {
         { provide: getRepositoryToken(Order), useValue: orderRepository },
         { provide: getRepositoryToken(OrderItem), useValue: orderItemRepository },
         { provide: getRepositoryToken(Store), useValue: storeRepository },
+        { provide: getRepositoryToken(StoreRequest), useValue: storeRequestRepository },
         { provide: getRepositoryToken(Customer), useValue: customerRepository },
         { provide: getRepositoryToken(Product), useValue: productRepository },
       ],
@@ -122,7 +126,8 @@ describe('AnalyticsService', () => {
     it('computes averageOrderValue from totals', async () => {
       const qb = createOrderQb({ count: '10', total: '5000' });
       orderRepository.createQueryBuilder.mockReturnValue(qb);
-      storeRepository.count.mockResolvedValueOnce(25).mockResolvedValueOnce(3);
+      storeRepository.count.mockResolvedValueOnce(25);
+      storeRequestRepository.count.mockResolvedValueOnce(3);
       customerRepository.count.mockResolvedValue(100);
 
       const result = await service.getPlatformAnalytics();
@@ -138,8 +143,10 @@ describe('AnalyticsService', () => {
       expect(storeRepository.count).toHaveBeenNthCalledWith(1, {
         where: { status: StoreStatus.APPROVED },
       });
-      expect(storeRepository.count).toHaveBeenNthCalledWith(2, {
-        where: { status: StoreStatus.PENDING },
+      // pendingStores reflects pending vendor onboarding requests (StoreRequest),
+      // not the Store table — a Store row is only created once approved.
+      expect(storeRequestRepository.count).toHaveBeenNthCalledWith(1, {
+        where: { status: StoreRequestStatus.PENDING },
       });
     });
 
@@ -147,6 +154,7 @@ describe('AnalyticsService', () => {
       const qb = createOrderQb({ count: '0', total: '0' });
       orderRepository.createQueryBuilder.mockReturnValue(qb);
       storeRepository.count.mockResolvedValue(0);
+      storeRequestRepository.count.mockResolvedValue(0);
       customerRepository.count.mockResolvedValue(0);
 
       const result = await service.getPlatformAnalytics();

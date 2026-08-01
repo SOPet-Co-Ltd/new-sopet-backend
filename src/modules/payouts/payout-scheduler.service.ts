@@ -106,7 +106,10 @@ export class PayoutSchedulerService implements OnModuleInit, OnModuleDestroy {
       case PayoutSchedule.WEEKLY:
         return now.getDay() === 1;
       case PayoutSchedule.BIWEEKLY:
-        return now.getDate() <= 7 || (now.getDate() >= 15 && now.getDate() <= 21);
+        // Twice a month, on fixed anchor days - not a 1-7/15-21 "window" (which matched
+        // every day in those ranges since this cron runs daily, firing ~14 payouts/month
+        // instead of 2 once a payout cleared and new balance accrued mid-window).
+        return now.getDate() === 1 || now.getDate() === 15;
       case PayoutSchedule.MONTHLY:
         return now.getDate() === 1;
       default:

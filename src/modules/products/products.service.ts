@@ -104,7 +104,12 @@ export class ProductsService {
     return materialKeys.some((key) => updateProductDto[key] !== undefined);
   }
 
-  private async assertStoreAccess(userId: string, storeId: string, action: string): Promise<void> {
+  private async assertStoreAccess(
+    userId: string,
+    storeId: string,
+    action: string,
+    requireActive = true,
+  ): Promise<void> {
     const hasAccess = await this.storesService.userHasStoreAccess(userId, storeId);
     if (!hasAccess) {
       throw new ForbiddenException({
@@ -112,11 +117,24 @@ export class ProductsService {
         message: `You do not have permission to ${action} for this store`,
       });
     }
+
+    // Suspension is enforced live (not just via the JWT's cached storeId), so a
+    // vendor with access to another active store can't keep managing a
+    // suspended one's products/variants/images through it.
+    if (requireActive && (await this.storesService.isStoreSuspended(storeId))) {
+      throw new ForbiddenException({
+        code: 'STORE_SUSPENDED',
+        message: `Cannot ${action} — this store is suspended`,
+      });
+    }
   }
 
   async resolveActiveStoreId(userId: string, storeId?: string): Promise<string> {
     if (storeId) {
-      await this.assertStoreAccess(userId, storeId, 'access');
+      // Read-only resolution (viewing own products/checklist) stays allowed even
+      // while suspended; mutations re-assert with requireActive via the
+      // dedicated assertStoreAccess calls in create/update/delete/publish below.
+      await this.assertStoreAccess(userId, storeId, 'access', false);
       return storeId;
     }
 

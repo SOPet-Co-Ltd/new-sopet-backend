@@ -90,7 +90,7 @@ export class OrdersResolver {
       filter,
     });
     return {
-      items: result.items.map(mapOrder),
+      items: result.items.map((order) => mapOrder(order)),
       pagination: result.pagination,
     };
   }
@@ -113,7 +113,7 @@ export class OrdersResolver {
   @Public()
   async guestOrders(@Args('guestPhone') guestPhone: string): Promise<OrderType[]> {
     const orders = await this.ordersService.findByGuestPhone(guestPhone);
-    return orders.map(mapOrder);
+    return orders.map((order) => mapOrder(order));
   }
 
   @Query(() => OrderTrackingType)
@@ -133,7 +133,7 @@ export class OrdersResolver {
     await this.storesService.assertStoreAccess(userId, storeId);
 
     const orders = await this.ordersService.findByStore(storeId);
-    return orders.map(mapOrder);
+    return orders.map((order) => mapOrder(order, storeId));
   }
 
   @Mutation(() => OrderType)
@@ -216,7 +216,7 @@ export class OrdersResolver {
       storeId,
       orderId,
     );
-    return mapOrder(updated);
+    return mapOrder(updated, storeId);
   }
 
   @Mutation(() => OrderType)
@@ -233,7 +233,7 @@ export class OrdersResolver {
       storeId,
       orderId,
     );
-    return mapOrder(updated);
+    return mapOrder(updated, storeId);
   }
 
   @Mutation(() => OrderType)
@@ -253,7 +253,7 @@ export class OrdersResolver {
       input.fulfillmentProvider,
       input.trackingUrl,
     );
-    return mapOrder(updated);
+    return mapOrder(updated, storeId);
   }
 
   @Mutation(() => OrderType)
@@ -299,6 +299,6 @@ export class OrdersResolver {
   ): Promise<OrderType> {
     await this.storesService.assertStoreAccess(userId, storeId);
     const updated = await this.orderFulfillmentService.cancelVendorOrder(userId, storeId, orderId);
-    return mapOrder(updated);
+    return mapOrder(updated, storeId);
   }
 }

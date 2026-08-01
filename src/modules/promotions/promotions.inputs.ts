@@ -96,6 +96,13 @@ export class ValidatePromotionInput {
   @ValidateNested({ each: true })
   @Type(() => ValidatePromotionLineInput)
   lines?: ValidatePromotionLineInput[];
+
+  /** Eligible base for shipping-type promotions (free/fixed/percentage shipping discount). */
+  @Field(() => Float, { nullable: true })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  shippingFee?: number;
 }
 
 @InputType()
@@ -145,6 +152,13 @@ export class ValidatePromotionsInput {
   @ValidateNested({ each: true })
   @Type(() => ValidatePromotionLineInput)
   lines?: ValidatePromotionLineInput[];
+
+  /** Eligible base for shipping-type promotions (free/fixed/percentage shipping discount). */
+  @Field(() => Float, { nullable: true })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  shippingFee?: number;
 }
 
 @InputType()

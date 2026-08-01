@@ -352,6 +352,14 @@ export class StoresResolver {
     return requests.map(mapStoreRequest);
   }
 
+  @Query(() => [StoreRequestType])
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async adminStoreRequests(): Promise<StoreRequestType[]> {
+    const requests = await this.storeRequestService.findAll();
+    return requests.map(mapStoreRequest);
+  }
+
   @Mutation(() => StoreRequestType)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')

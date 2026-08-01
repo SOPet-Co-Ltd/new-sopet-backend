@@ -87,6 +87,22 @@ export class AdminInvitationService {
     return this.invitationRepository.save(invitation);
   }
 
+  /** Public preview so the accept page can show which email was invited before the recipient sets a password. */
+  async previewByToken(token: string): Promise<AdminInvitation> {
+    const invitation = await this.invitationRepository.findOne({
+      where: { token },
+    });
+
+    if (!invitation) {
+      throw new NotFoundException({
+        code: 'INVITATION_NOT_FOUND',
+        message: 'Invitation not found',
+      });
+    }
+
+    return invitation;
+  }
+
   async accept(token: string, password: string, fullName: string): Promise<User> {
     const invitation = await this.invitationRepository.findOne({
       where: { token },
@@ -119,7 +135,7 @@ export class AdminInvitationService {
     const user = this.userRepository.create({
       email: invitation.email,
       passwordHash,
-      fullName,
+      fullName: fullName.trim(),
       role: UserRole.ADMIN,
     });
     const savedUser = await this.userRepository.save(user);

@@ -44,8 +44,14 @@ export class ShippingOptionsService {
     return this.shippingOptionRepository.count({ where: { storeId } });
   }
 
+  /**
+   * Used by the product-publish checklist gate: a store with shipping option
+   * rows that are all soft-disabled (isActive: false) has no way to actually
+   * ship an order, so this only counts active options - unlike countByStore,
+   * which intentionally counts every row for the "last option" delete guard.
+   */
   async hasShippingOptions(storeId: string): Promise<boolean> {
-    return (await this.countByStore(storeId)) > 0;
+    return (await this.shippingOptionRepository.count({ where: { storeId, isActive: true } })) > 0;
   }
 
   private async assertNotLastShippingOption(storeId: string): Promise<void> {
@@ -54,6 +60,34 @@ export class ShippingOptionsService {
       throw new BadRequestException({
         code: 'LAST_SHIPPING_OPTION',
         message: 'Cannot delete the only shipping option. Add another option first.',
+      });
+    }
+  }
+
+  /**
+   * `assertNotLastShippingOption` only guards the ROW count, so a store with e.g. 3 rows
+   * where 2 are already soft-disabled could still deactivate (or delete) its one remaining
+   * active option - leaving isActive:true count at 0 with no code stopping it, silently
+   * breaking checkout for that store (no shippable option left) despite its products
+   * staying published. This checks the ACTIVE count specifically, and is a no-op unless the
+   * option being removed/deactivated is itself currently active.
+   */
+  private async assertKeepsAtLeastOneOtherActiveOption(
+    storeId: string,
+    optionIsCurrentlyActive: boolean,
+  ): Promise<void> {
+    if (!optionIsCurrentlyActive) {
+      return;
+    }
+
+    const activeCount = await this.shippingOptionRepository.count({
+      where: { storeId, isActive: true },
+    });
+    if (activeCount <= 1) {
+      throw new BadRequestException({
+        code: 'LAST_ACTIVE_SHIPPING_OPTION',
+        message:
+          'Cannot deactivate or remove the only active shipping option. Activate or add another option first.',
       });
     }
   }
@@ -78,6 +112,9 @@ export class ShippingOptionsService {
     data: UpdateShippingOptionData,
   ): Promise<StoreShippingOption> {
     const option = await this.findOneForStore(id, storeId);
+    if (data.isActive === false) {
+      await this.assertKeepsAtLeastOneOtherActiveOption(storeId, option.isActive);
+    }
     Object.assign(option, data);
     return this.shippingOptionRepository.save(option);
   }
@@ -85,6 +122,7 @@ export class ShippingOptionsService {
   async delete(id: string, storeId: string): Promise<void> {
     const option = await this.findOneForStore(id, storeId);
     await this.assertNotLastShippingOption(storeId);
+    await this.assertKeepsAtLeastOneOtherActiveOption(storeId, option.isActive);
     await this.shippingOptionRepository.softRemove(option);
   }
 
@@ -94,6 +132,9 @@ export class ShippingOptionsService {
 
   async adminUpdate(id: string, data: UpdateShippingOptionData): Promise<StoreShippingOption> {
     const option = await this.findOneById(id);
+    if (data.isActive === false) {
+      await this.assertKeepsAtLeastOneOtherActiveOption(option.storeId, option.isActive);
+    }
     Object.assign(option, data);
     return this.shippingOptionRepository.save(option);
   }
@@ -101,6 +142,7 @@ export class ShippingOptionsService {
   async adminDelete(id: string): Promise<void> {
     const option = await this.findOneById(id);
     await this.assertNotLastShippingOption(option.storeId);
+    await this.assertKeepsAtLeastOneOtherActiveOption(option.storeId, option.isActive);
     await this.shippingOptionRepository.softRemove(option);
   }
 

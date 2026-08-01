@@ -161,9 +161,24 @@ export class OrderFulfillmentService {
       });
     }
 
+    // Route through the same fulfillment-derived status ladder as acknowledge/ship, using
+    // PAID (not the current PENDING_PAYMENT) as the base so the "sticky unpaid" rule
+    // doesn't apply here - this transition IS the payment event. If another store's items
+    // on this multi-vendor order are ON_HOLD (store suspended), the order should land on
+    // ON_HOLD instead of PAID, matching how the other vendor actions already reconcile
+    // held items with the order header status.
+    const nextStatus = deriveOrderStatusFromFulfillment(
+      OrderStatus.PAID,
+      order.items.map((item) => item.fulfillmentStatus),
+    );
+    // Payment happened regardless of which header status it lands on - set paidAt here
+    // rather than relying on persistOrderTransition's `nextStatus === PAID` check, since
+    // nextStatus can now be ON_HOLD.
+    order.paidAt = order.paidAt ?? new Date();
+
     return this.persistOrderTransition(
       order,
-      OrderStatus.PAID,
+      nextStatus,
       userId,
       `Vendor marked order paid (store ${storeId})`,
     );

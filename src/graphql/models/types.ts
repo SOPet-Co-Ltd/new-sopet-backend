@@ -110,6 +110,15 @@ export class MessagePayload {
 }
 
 @ObjectType()
+export class PasswordResetTokenStatusType {
+  @Field()
+  valid!: boolean;
+
+  @Field()
+  status!: string;
+}
+
+@ObjectType()
 export class StoreType {
   @Field()
   id!: string;

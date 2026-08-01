@@ -361,6 +361,19 @@ describe('StoresService', () => {
     expect(result.ownerId).toBe('owner-2');
   });
 
+  it('trims surrounding whitespace from name before saving (row 46 regression)', async () => {
+    const store = { id: 'store-1', ownerId: 'owner-1', owner: { id: 'owner-1' }, name: 'Old Name' };
+    storeRepository.findOne.mockResolvedValueOnce(store).mockResolvedValueOnce(store);
+    storeRepository.save.mockImplementation(async (saved) => saved);
+
+    await service.updateAsAdmin({
+      id: 'store-1',
+      name: '  New Name  ',
+    });
+
+    expect(store.name).toBe('New Name');
+  });
+
   it('rejects clearing store owner', async () => {
     storeRepository.findOne.mockResolvedValue({
       id: 'store-1',

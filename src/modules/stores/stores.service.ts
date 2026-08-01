@@ -376,6 +376,15 @@ export class StoresService {
     return !!membership;
   }
 
+  /** Lightweight live check used to block vendor mutations against a suspended store. */
+  async isStoreSuspended(storeId: string): Promise<boolean> {
+    const store = await this.storeRepository.findOne({
+      where: { id: storeId },
+      select: ['id', 'status'],
+    });
+    return store?.status === StoreStatus.SUSPENDED;
+  }
+
   async resolveDefaultStoreId(userId: string): Promise<string | undefined> {
     const accessible = await this.getAccessibleStores(userId);
     return pickDefaultAccessibleStoreId(accessible.map((entry) => entry.store));
@@ -659,10 +668,11 @@ export class StoresService {
       });
     }
 
-    const slug = await this.resolveUniqueStoreSlug(input.name);
+    const name = input.name.trim();
+    const slug = await this.resolveUniqueStoreSlug(name);
 
     const store = this.storeRepository.create({
-      name: input.name,
+      name,
       slug,
       description: input.description ?? null,
       contactPhone: input.contactPhone ?? null,
@@ -729,7 +739,7 @@ export class StoresService {
       }
     }
 
-    if (input.name !== undefined) store.name = input.name;
+    if (input.name !== undefined) store.name = input.name.trim();
     if (input.slug !== undefined) store.slug = input.slug;
     if (input.description !== undefined) store.description = input.description;
     if (input.contactPhone !== undefined) store.contactPhone = input.contactPhone;
@@ -1070,7 +1080,7 @@ export class StoresService {
     const user = this.userRepository.create({
       email: input.email,
       passwordHash,
-      fullName: input.fullName,
+      fullName: input.fullName.trim(),
       role: UserRole.VENDOR,
     });
     return this.userRepository.save(user);

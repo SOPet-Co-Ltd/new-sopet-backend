@@ -11,6 +11,7 @@ import {
   AuthTokens,
   MeResult,
   MessagePayload,
+  PasswordResetTokenStatusType,
   UserProfile,
 } from '../../graphql/models/types';
 import { mapCustomerProfile, mapUserProfile } from '../../graphql/models/mappers';
@@ -193,6 +194,14 @@ export class AuthResolver {
   @Public()
   async resetPassword(@Args('input') input: ResetPasswordInput): Promise<MessagePayload> {
     return this.authService.resetPassword(input.token, input.newPassword);
+  }
+
+  @Query(() => PasswordResetTokenStatusType)
+  @Public()
+  async getPasswordResetTokenStatus(
+    @Args('token') token: string,
+  ): Promise<PasswordResetTokenStatusType> {
+    return this.authService.getPasswordResetTokenStatus(token);
   }
 
   @Mutation(() => MessagePayload)
