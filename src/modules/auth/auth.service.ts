@@ -612,6 +612,15 @@ export class AuthService {
     resetToken.usedAt = new Date();
     await this.passwordResetTokenRepository.save(resetToken);
 
+    // Defense in depth: invalidate any other unused tokens for this email.
+    await this.passwordResetTokenRepository
+      .createQueryBuilder()
+      .update(PasswordResetToken)
+      .set({ usedAt: new Date() })
+      .where('email = :email', { email: user.email })
+      .andWhere('used_at IS NULL')
+      .execute();
+
     return { message: 'Password reset successfully' };
   }
 
@@ -645,6 +654,15 @@ export class AuthService {
     user: User,
     triggeredBy?: { actorType: AuditActorType; actorId?: string; actorLabel?: string },
   ): Promise<void> {
+    // Only the newest reset link should work (row 34): mark prior unused tokens used.
+    await this.passwordResetTokenRepository
+      .createQueryBuilder()
+      .update(PasswordResetToken)
+      .set({ usedAt: new Date() })
+      .where('email = :email', { email: user.email })
+      .andWhere('used_at IS NULL')
+      .execute();
+
     const token = randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
 
