@@ -5,6 +5,7 @@ import {
   orderStatusChangedTemplate,
   passwordResetTemplate,
   storeMemberInviteTemplate,
+  vendorAccountSuspendedTemplate,
   vendorInviteTemplate,
 } from './email-templates';
 
@@ -55,6 +56,14 @@ const templates = [
         orderNumber: 'ORD-1',
         status: 'shipped',
         orderUrl: 'https://example.com/orders/1',
+      }),
+  ],
+  [
+    'vendor account suspended',
+    () =>
+      vendorAccountSuspendedTemplate(brand, {
+        vendorName: 'Vendor One',
+        storeName: 'Pet Shop',
       }),
   ],
 ] as const;
