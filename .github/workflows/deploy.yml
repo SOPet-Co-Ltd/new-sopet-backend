@@ -21,7 +21,8 @@ permissions:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    # Native arm64 on ubuntu-24.04-arm (avoids QEMU); amd64 on ubuntu-latest.
+    runs-on: ${{ vars.DOCKER_PLATFORM == 'linux/arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     environment: ${{ github.ref_name == 'deploy/production' && 'deploy/production' || 'deploy/uat' }}
 
     steps:
@@ -136,16 +137,17 @@ jobs:
 
       # Plain docker build/push (not buildx --push): Buildx's container driver often
       # fails to receive host docker login, and ECR reports that as an expired token.
-      # ubuntu-latest is amd64, so QEMU/Buildx are unnecessary for linux/amd64.
-      - name: Build, tag, and push image to Amazon ECR (GHA — amd64 only)
-        if: vars.DOCKER_PLATFORM != 'linux/arm64' && steps.check-image.outputs.exists != 'true'
+      # Runner matches platform (ubuntu-latest = amd64, ubuntu-24.04-arm = arm64),
+      # so no QEMU. Optional escape hatch: vars.BUILD_ON_HOST=true builds on EC2 instead.
+      - name: Build, tag, and push image to Amazon ECR
+        if: vars.BUILD_ON_HOST != 'true' && steps.check-image.outputs.exists != 'true'
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
           DOCKER_PLATFORM: ${{ vars.DOCKER_PLATFORM }}
         run: |
           PLATFORM="${DOCKER_PLATFORM:-linux/amd64}"
-          echo "Building image on GHA for platform: $PLATFORM"
+          echo "Building image on GHA ($(uname -m)) for platform: $PLATFORM"
 
           # Fresh login immediately before push (avoids stale/Buildx auth failures)
           aws ecr get-login-password --region "$AWS_REGION" \
@@ -157,10 +159,10 @@ jobs:
             .
           docker push "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
 
-      - name: Note arm64 build on EC2
-        if: vars.DOCKER_PLATFORM == 'linux/arm64' && steps.check-image.outputs.exists != 'true'
+      - name: Note build on EC2 (escape hatch)
+        if: vars.BUILD_ON_HOST == 'true' && steps.check-image.outputs.exists != 'true'
         run: |
-          echo "linux/arm64: image will be built natively on EC2 (QEMU cross-build is unreliable for yarn install)."
+          echo "BUILD_ON_HOST=true: image will be built on EC2 via infra/ec2/build-on-host.sh"
 
       - name: Render runtime env file
         run: bash infra/render-env-file.sh .env.deploy
@@ -172,14 +174,18 @@ jobs:
           echo "--- Rendered Caddyfile ---"
           cat .caddy.deploy
 
+      # Default: EC2 only pulls + restarts (SSM ~1800s). Optional BUILD_ON_HOST=true
+      # enables native docker build on EC2 (3600s poll/execution in deploy-via-ssm.sh).
+      # Optional: set GitHub var SSM_CLOUDWATCH_LOG_GROUP (e.g. /sopet/ssm/deploy)
+      # after creating the log group + updating EC2 IAM.
       - name: Deploy to EC2 via SSM
         env:
           IMAGE_URI: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
-          SSM_TIMEOUT_SECONDS: 1800
-          BUILD_ON_HOST: ${{ vars.DOCKER_PLATFORM == 'linux/arm64' && steps.check-image.outputs.exists != 'true' }}
+          BUILD_ON_HOST: ${{ vars.BUILD_ON_HOST == 'true' && steps.check-image.outputs.exists != 'true' }}
           GIT_COMMIT: ${{ github.sha }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SSM_CLOUDWATCH_LOG_GROUP: ${{ vars.SSM_CLOUDWATCH_LOG_GROUP }}
         run: |
-          chmod +x infra/deploy-via-ssm.sh
+          chmod +x infra/deploy-via-ssm.sh infra/ec2/*.sh
           infra/deploy-via-ssm.sh .env.deploy .caddy.deploy

@@ -8,8 +8,14 @@ AWS_ROLE_ARN
 AWS_REGION
 ECR_REPOSITORY
 EC2_INSTANCE_ID
-# Optional: linux/arm64 (Graviton) or linux/amd64 (t3). Default in workflow: linux/arm64
+# Optional: linux/arm64 (Graviton) or linux/amd64 (t3). Selects GHA runner + docker --platform.
+# arm64 → ubuntu-24.04-arm (native build + ECR push); amd64 → ubuntu-latest.
 DOCKER_PLATFORM
+# Optional escape hatch: true = build image on EC2 (infra/ec2/build-on-host.sh) instead of GHA.
+# Default OFF — arm64 builds on GitHub-hosted ARM runners now.
+# BUILD_ON_HOST
+# Optional: CloudWatch log group for live SSM stdout/stderr (e.g. /sopet/ssm/deploy)
+# SSM_CLOUDWATCH_LOG_GROUP is read from vars in deploy.yml (not exported via GITHUB_ENV)
 # Caddy reverse proxy (variables)
 CADDY_HOSTNAME
 CADDY_ADMIN_EMAIL

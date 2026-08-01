@@ -31,7 +31,8 @@
         "ssm:SendCommand",
         "ssm:GetCommandInvocation",
         "ssm:ListCommandInvocations",
-        "ssm:ListCommands"
+        "ssm:ListCommands",
+        "ssm:CancelCommand"
       ],
       "Resource": "*"
     }
