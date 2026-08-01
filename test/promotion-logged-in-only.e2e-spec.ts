@@ -311,14 +311,15 @@ describe('Promotion loggedInOnly createOrder (service-integration-e2e)', () => {
         conditions: { loggedInOnly: { enabled: true } },
       });
 
-      const ordersBefore = await orderRepo.count();
+      const guestPhone = '0899997777';
+      const ordersBefore = await orderRepo.count({ where: { guestPhone } });
 
       await expect(
         ordersService.create(
           {
             items: orderItems(product, variant, 1),
             paymentMethod: 'cod',
-            guestPhone: '0899997777',
+            guestPhone,
             platformPromotionCode: guestCode,
             shippingAddress: SHIPPING_ADDRESS,
           },
@@ -328,7 +329,7 @@ describe('Promotion loggedInOnly createOrder (service-integration-e2e)', () => {
         response: { code: 'GUEST' },
       });
 
-      expect(await orderRepo.count()).toBe(ordersBefore);
+      expect(await orderRepo.count({ where: { guestPhone } })).toBe(ordersBefore);
     },
   );
 
@@ -381,14 +382,15 @@ describe('Promotion loggedInOnly createOrder (service-integration-e2e)', () => {
         conditions: { loggedInOnly: { enabled: true } },
       });
 
-      const ordersBefore = await orderRepo.count();
+      const guestPhone = '0888886666';
+      const ordersBefore = await orderRepo.count({ where: { guestPhone } });
 
       await expect(
         ordersService.create(
           {
             items: orderItems(product, variant, 1),
             paymentMethod: 'cod',
-            guestPhone: '0888886666',
+            guestPhone,
             platformPromotionCode: phoneCode,
             shippingAddress: SHIPPING_ADDRESS,
           },
@@ -398,7 +400,7 @@ describe('Promotion loggedInOnly createOrder (service-integration-e2e)', () => {
         response: { code: 'GUEST' },
       });
 
-      expect(await orderRepo.count()).toBe(ordersBefore);
+      expect(await orderRepo.count({ where: { guestPhone } })).toBe(ordersBefore);
     },
   );
 });

@@ -326,7 +326,7 @@ describe('Promotion list-time eligibility createOrder (service-integration-e2e)'
       await seedPriorPaidOrder(customer.id);
 
       const code = `LTEHIST-${seedContext.runId}`.slice(0, 50);
-      await seedPromotion({
+      const promo = await seedPromotion({
         code,
         type: PromotionType.PERCENTAGE,
         scope: PromotionScope.PLATFORM,
@@ -357,8 +357,9 @@ describe('Promotion list-time eligibility createOrder (service-integration-e2e)'
       expect(preview.ineligibilityReason).toBe('ORDER_HISTORY');
       expect(preview.discountAmount).toBe(0);
 
-      const ordersBefore = await orderRepo.count();
-      const usagesBefore = await usageRepo.count();
+      // Scope counts to this customer/promo — global counts race under parallel Jest workers.
+      const ordersBefore = await orderRepo.count({ where: { customerId: customer.id } });
+      const usagesBefore = await usageRepo.count({ where: { promotionId: promo.id } });
 
       await expect(
         ordersService.create(
@@ -374,8 +375,8 @@ describe('Promotion list-time eligibility createOrder (service-integration-e2e)'
         response: { code: 'ORDER_HISTORY' },
       });
 
-      expect(await orderRepo.count()).toBe(ordersBefore);
-      expect(await usageRepo.count()).toBe(usagesBefore);
+      expect(await orderRepo.count({ where: { customerId: customer.id } })).toBe(ordersBefore);
+      expect(await usageRepo.count({ where: { promotionId: promo.id } })).toBe(usagesBefore);
     },
   );
 
@@ -463,7 +464,7 @@ describe('Promotion list-time eligibility createOrder (service-integration-e2e)'
       expect(batch.items[0].ineligibilityReason).toBe('PROMOTION_MIN_PURCHASE');
       expect(batch.items[0].discountAmount).toBe(0);
 
-      const ordersBefore = await orderRepo.count();
+      const ordersBefore = await orderRepo.count({ where: { customerId: customer.id } });
 
       await expect(
         ordersService.create(
@@ -479,7 +480,7 @@ describe('Promotion list-time eligibility createOrder (service-integration-e2e)'
         response: { code: 'PROMOTION_MIN_PURCHASE' },
       });
 
-      expect(await orderRepo.count()).toBe(ordersBefore);
+      expect(await orderRepo.count({ where: { customerId: customer.id } })).toBe(ordersBefore);
     },
   );
 
@@ -488,7 +489,7 @@ describe('Promotion list-time eligibility createOrder (service-integration-e2e)'
     async () => {
       const { product, variant } = await seedCatalog('guest');
       const code = `LTEGUEST-${seedContext.runId}`.slice(0, 50);
-      await seedPromotion({
+      const promo = await seedPromotion({
         code,
         type: PromotionType.PERCENTAGE,
         scope: PromotionScope.PLATFORM,
@@ -501,14 +502,16 @@ describe('Promotion list-time eligibility createOrder (service-integration-e2e)'
       expect(batch.items[0].ineligibilityReason).toBe('GUEST');
       expect(batch.items[0].discountAmount).toBe(0);
 
-      const ordersBefore = await orderRepo.count();
+      const guestPhone = '0899995555';
+      const ordersBefore = await orderRepo.count({ where: { guestPhone } });
+      const usagesBefore = await usageRepo.count({ where: { promotionId: promo.id } });
 
       await expect(
         ordersService.create(
           {
             items: orderItems(product, variant, 1),
             paymentMethod: 'cod',
-            guestPhone: '0899995555',
+            guestPhone,
             platformPromotionCode: code,
             shippingAddress: SHIPPING_ADDRESS,
           },
@@ -518,7 +521,8 @@ describe('Promotion list-time eligibility createOrder (service-integration-e2e)'
         response: { code: 'GUEST' },
       });
 
-      expect(await orderRepo.count()).toBe(ordersBefore);
+      expect(await orderRepo.count({ where: { guestPhone } })).toBe(ordersBefore);
+      expect(await usageRepo.count({ where: { promotionId: promo.id } })).toBe(usagesBefore);
     },
   );
 

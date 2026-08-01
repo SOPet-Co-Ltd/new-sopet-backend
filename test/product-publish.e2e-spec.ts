@@ -10,6 +10,7 @@ describe('Product publish (e2e)', () => {
   };
   let storesService: {
     userHasStoreAccess: jest.Mock;
+    isStoreSuspended: jest.Mock;
   };
   let shippingOptionsService: {
     hasShippingOptions: jest.Mock;
@@ -32,6 +33,7 @@ describe('Product publish (e2e)', () => {
     };
     storesService = {
       userHasStoreAccess: jest.fn(() => Promise.resolve(true)),
+      isStoreSuspended: jest.fn(() => Promise.resolve(false)),
     };
     shippingOptionsService = {
       hasShippingOptions: jest.fn().mockResolvedValue(true),

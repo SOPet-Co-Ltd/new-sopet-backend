@@ -286,7 +286,7 @@ describe('Promotion universal conditions createOrder (service-integration-e2e)',
     async () => {
       const { product, variant } = await seedCatalog('guest');
       const guestCode = `GUESTNC-${seedContext.runId}`.slice(0, 50);
-      await seedPromotion({
+      const promo = await seedPromotion({
         code: guestCode,
         type: PromotionType.PERCENTAGE,
         scope: PromotionScope.PLATFORM,
@@ -294,14 +294,17 @@ describe('Promotion universal conditions createOrder (service-integration-e2e)',
         conditions: { newCustomer: { enabled: true, nDays: 7 } },
       });
 
-      const ordersBefore = await orderRepo.count();
+      // Scope counts to this guest/promo — global counts race under parallel Jest workers.
+      const guestPhone = '0899998888';
+      const ordersBefore = await orderRepo.count({ where: { guestPhone } });
+      const usagesBefore = await usageRepo.count({ where: { promotionId: promo.id } });
 
       await expect(
         ordersService.create(
           {
             items: orderItems(product, variant, 1),
             paymentMethod: 'cod',
-            guestPhone: '0899998888',
+            guestPhone,
             platformPromotionCode: guestCode,
             shippingAddress: SHIPPING_ADDRESS,
           },
@@ -311,7 +314,8 @@ describe('Promotion universal conditions createOrder (service-integration-e2e)',
         response: { code: 'GUEST' },
       });
 
-      expect(await orderRepo.count()).toBe(ordersBefore);
+      expect(await orderRepo.count({ where: { guestPhone } })).toBe(ordersBefore);
+      expect(await usageRepo.count({ where: { promotionId: promo.id } })).toBe(usagesBefore);
     },
   );
 
