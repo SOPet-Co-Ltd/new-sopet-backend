@@ -128,6 +128,7 @@ describe('NotificationsService', () => {
           orderNumber: 'ORD-001',
           total: 1500,
           customerName: 'คุณสมชาย',
+          orderUrl: 'https://store.example.com/user/orders/order-1',
           items: expect.arrayContaining([
             expect.objectContaining({
               productName: 'Dog Food Premium',
@@ -220,6 +221,29 @@ describe('NotificationsService', () => {
           orderNumber: 'ORD-001',
           status: 'shipped',
           orderDate: expect.any(String),
+          orderUrl: 'https://store.example.com/user/orders/order-1',
+        }),
+      );
+    });
+
+    it('uses public track URL for guest orders', async () => {
+      const order = {
+        id: 'order-guest',
+        orderNumber: 'ORD-GUEST-1',
+        customerId: null,
+        guestEmail: 'guest@example.com',
+        createdAt: new Date('2025-07-11T12:00:00.000Z'),
+        items: [],
+      } as unknown as Order;
+
+      await service.notifyOrderStatusChanged(order, 'shipped');
+
+      expect(customerRepo.findOne).not.toHaveBeenCalled();
+      expect(userNotificationRepo.create).not.toHaveBeenCalled();
+      expect(emailDeliveryService.sendOrderStatusChanged).toHaveBeenCalledWith(
+        'guest@example.com',
+        expect.objectContaining({
+          orderUrl: 'https://store.example.com/track/ORD-GUEST-1',
         }),
       );
     });

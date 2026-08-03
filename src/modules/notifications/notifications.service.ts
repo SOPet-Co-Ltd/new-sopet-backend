@@ -73,6 +73,13 @@ export class NotificationsService {
     }));
   }
 
+  private buildCustomerOrderUrl(order: Order): string {
+    if (order.customerId) {
+      return `${this.storefrontUrl}/user/orders/${order.id}`;
+    }
+    return `${this.storefrontUrl}/track/${encodeURIComponent(order.orderNumber)}`;
+  }
+
   async notifyOrderPaid(order: Order): Promise<void> {
     const orderWithItems = await this.resolveOrderWithItems(order);
     const customer = orderWithItems.customerId
@@ -105,9 +112,7 @@ export class NotificationsService {
       return;
     }
 
-    const orderUrl = orderWithItems.customerId
-      ? `${this.storefrontUrl}/account/orders/${orderWithItems.id}`
-      : `${this.storefrontUrl}/checkout/success?orderId=${orderWithItems.id}`;
+    const orderUrl = this.buildCustomerOrderUrl(orderWithItems);
     await this.emailDeliveryService.sendOrderPaid(email, {
       orderNumber: orderWithItems.orderNumber,
       orderDate: this.formatOrderDate(orderWithItems.paidAt ?? orderWithItems.createdAt),
@@ -155,9 +160,7 @@ export class NotificationsService {
       return;
     }
 
-    const orderUrl = orderWithItems.customerId
-      ? `${this.storefrontUrl}/account/orders/${orderWithItems.id}`
-      : `${this.storefrontUrl}/checkout/success?orderId=${orderWithItems.id}`;
+    const orderUrl = this.buildCustomerOrderUrl(orderWithItems);
     await this.emailDeliveryService.sendOrderStatusChanged(email, {
       orderNumber: orderWithItems.orderNumber,
       status,
