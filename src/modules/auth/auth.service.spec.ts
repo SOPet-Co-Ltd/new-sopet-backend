@@ -393,7 +393,40 @@ describe('AuthService', () => {
     });
     customerRepo.findOne.mockResolvedValue({ id: 'cust-1', isActive: false });
 
-    await expect(service.refreshToken('valid-refresh')).rejects.toThrow(UnauthorizedException);
+    await expect(service.refreshToken('valid-refresh')).rejects.toMatchObject({
+      response: { code: 'CUSTOMER_SUSPENDED' },
+    });
+  });
+
+  it('rejects refresh token for suspended vendor', async () => {
+    jwtService.verify.mockReturnValue({
+      sub: 'vendor-1',
+      email: 'vendor@test.com',
+      role: 'vendor',
+      type: 'refresh',
+      storeId: 'store-1',
+    });
+    userRepo.findOne.mockResolvedValue({ id: 'vendor-1', isActive: false });
+
+    await expect(service.refreshToken('valid-refresh')).rejects.toMatchObject({
+      response: { code: 'ACCOUNT_SUSPENDED' },
+    });
+  });
+
+  it('refreshes tokens for active vendor', async () => {
+    jwtService.verify.mockReturnValue({
+      sub: 'vendor-1',
+      email: 'vendor@test.com',
+      role: 'vendor',
+      type: 'refresh',
+      storeId: 'store-1',
+    });
+    userRepo.findOne.mockResolvedValue({ id: 'vendor-1', isActive: true });
+
+    const result = await service.refreshToken('valid-refresh');
+
+    expect(result.accessToken).toBe('token-access');
+    expect(result.refreshToken).toBe('token-refresh');
   });
 
   it('returns customer profile from getMe', async () => {
@@ -417,6 +450,18 @@ describe('AuthService', () => {
 
     await expect(service.getMe('cust-1', 'customer')).rejects.toMatchObject({
       response: { code: 'CUSTOMER_SUSPENDED' },
+    });
+  });
+
+  it('rejects getMe for suspended vendor', async () => {
+    userRepo.findOne.mockResolvedValue({
+      id: 'vendor-1',
+      email: 'vendor@test.com',
+      isActive: false,
+    });
+
+    await expect(service.getMe('vendor-1', 'vendor')).rejects.toMatchObject({
+      response: { code: 'ACCOUNT_SUSPENDED' },
     });
   });
 

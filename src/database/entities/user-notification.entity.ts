@@ -1,16 +1,11 @@
-import {
-  Entity,
-  PrimaryGeneratedColumn,
-  Column,
-  CreateDateColumn,
-  ManyToOne,
-  JoinColumn,
-  Index,
-} from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index } from 'typeorm';
 import { IsNotEmpty, IsEnum } from 'class-validator';
-import { User } from './user.entity';
 import { NotificationChannel } from './notification.entity';
 
+/**
+ * In-app notifications for vendors/admins (users.id) and customers (customers.id).
+ * userId is polymorphic — no FK to users (see migration 0041).
+ */
 @Entity('user_notifications')
 @Index(['userId', 'createdAt'])
 @Index(['userId', 'isRead'])
@@ -54,8 +49,4 @@ export class UserNotification {
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
   createdAt!: Date;
-
-  @ManyToOne(() => User)
-  @JoinColumn({ name: 'user_id' })
-  user!: User;
 }

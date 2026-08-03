@@ -55,6 +55,7 @@ flowchart TB
 { provide: APP_PIPE, useClass: ValidationPipe },
 { provide: APP_GUARD, useClass: JwtAuthGuard },
 { provide: APP_GUARD, useExisting: StoreStatusGuard },
+{ provide: APP_GUARD, useExisting: VendorStatusGuard },
 { provide: APP_GUARD, useExisting: CustomerStatusGuard },
 { provide: APP_FILTER, useClass: HttpExceptionFilter },
 { provide: APP_INTERCEPTOR, useClass: LoggingInterceptor },

@@ -4,7 +4,6 @@ import { StorageService } from './storage.service';
 import { UPLOAD_FOLDERS, type UploadFolder } from './storage.inputs';
 import { UploadResultType } from '../../graphql/models/types';
 import { Roles } from '../../common/decorators';
-import { AllowSuspendedStore } from '../../common/decorators/allow-suspended-store.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 
@@ -15,7 +14,6 @@ export class StorageResolver {
   @Mutation(() => UploadResultType)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('vendor', 'admin', 'customer')
-  @AllowSuspendedStore()
   async uploadImage(
     @Args('base64') base64: string,
     @Args('folder', { nullable: true }) folder?: string,

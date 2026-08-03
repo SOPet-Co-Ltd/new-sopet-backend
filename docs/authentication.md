@@ -111,9 +111,10 @@ async createProduct(...) {}
 | Guard                 | Blocks                           |
 | --------------------- | -------------------------------- |
 | `StoreStatusGuard`    | Suspended vendor store mutations |
+| `VendorStatusGuard`   | Suspended vendor account actions |
 | `CustomerStatusGuard` | Suspended customer actions       |
 
-Both registered globally in `app.module.ts`.
+All registered globally in `app.module.ts`.
 
 ### Rate limiting
 

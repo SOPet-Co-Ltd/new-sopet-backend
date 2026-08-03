@@ -136,7 +136,7 @@ yarn lint              # ESLint with fix
 
 ## Authorization
 
-- Global: `JwtAuthGuard`, `StoreStatusGuard`, `CustomerStatusGuard`
+- Global: `JwtAuthGuard`, `StoreStatusGuard`, `VendorStatusGuard`, `CustomerStatusGuard`
 - `@Public()` skips required auth (token still parsed when present)
 - Role checks: `@UseGuards(RolesGuard)` + `@Roles(...)` (RolesGuard is not global)
 

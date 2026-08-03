@@ -25,6 +25,7 @@ import { StorageModule } from '../storage/storage.module';
 import { AuthRateLimitGuard } from './guards/auth-rate-limit.guard';
 import { CustomerStatusGuard } from './guards/customer-status.guard';
 import { StoreStatusGuard } from './guards/store-status.guard';
+import { VendorStatusGuard } from './guards/vendor-status.guard';
 
 @Module({
   imports: [
@@ -63,6 +64,7 @@ import { StoreStatusGuard } from './guards/store-status.guard';
     AuthRateLimitGuard,
     StoreStatusGuard,
     CustomerStatusGuard,
+    VendorStatusGuard,
     AuthResolver,
     CustomerRepository,
   ],
@@ -73,6 +75,7 @@ import { StoreStatusGuard } from './guards/store-status.guard';
     AuthRateLimitGuard,
     StoreStatusGuard,
     CustomerStatusGuard,
+    VendorStatusGuard,
     JwtModule,
   ],
 })
