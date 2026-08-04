@@ -75,6 +75,11 @@ else
   "${BUILD_CMD[@]}"
 fi
 
+# SSM Default Host Management may inject AWS_SHARED_CREDENTIALS_FILE; prefer
+# the EC2 instance profile via IMDS for ECR auth.
+unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_SECURITY_TOKEN \
+  AWS_PROFILE AWS_DEFAULT_PROFILE AWS_SHARED_CREDENTIALS_FILE || true
+
 # Fresh login immediately before push — ECR tokens expire after ~12h; stale
 # docker credentials on the host otherwise fail with "authorization token has expired".
 log "Logging in to ECR registry $ECR_REGISTRY (region $AWS_REGION)"
