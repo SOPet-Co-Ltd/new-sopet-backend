@@ -690,6 +690,7 @@ type Mutation {
   requestPayout: PayoutType!
   resendEmailVerification: MessagePayload!
   resetPassword(input: ResetPasswordInput!): MessagePayload!
+  resetSearchAnalytics: Boolean!
   revokeAdminInvitation(invitationId: String!): AdminInvitationType!
   revokeStoreApiKey(id: String!, storeId: String!): Boolean!
   revokeStoreInvitation(invitationId: String!): StoreMemberInvitationType!

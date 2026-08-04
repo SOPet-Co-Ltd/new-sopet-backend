@@ -5,6 +5,8 @@ import type { SearchSuggestionEvent } from '../../database/entities/search-sugge
 
 describe('SearchAnalyticsService', () => {
   const saveSearchEvent = jest.fn();
+  const deleteExecute = jest.fn();
+  const suggestionDeleteExecute = jest.fn();
   const searchEventRepository = {
     save: saveSearchEvent,
     createQueryBuilder: jest.fn(),
@@ -84,5 +86,33 @@ describe('SearchAnalyticsService', () => {
     const range = service.resolveDateRange(undefined, now);
     expect(range.toDate).toEqual(now);
     expect(range.fromDate.toISOString()).toBe('2026-07-03T00:00:00.000Z');
+  });
+
+  it('resets all search and suggestion analytics events', async () => {
+    deleteExecute.mockResolvedValue({ affected: 12 });
+    suggestionDeleteExecute.mockResolvedValue({ affected: 4 });
+
+    const searchDeleteBuilder = {
+      delete: jest.fn().mockReturnThis(),
+      execute: deleteExecute,
+    };
+    const suggestionDeleteBuilder = {
+      delete: jest.fn().mockReturnThis(),
+      execute: suggestionDeleteExecute,
+    };
+
+    (searchEventRepository.createQueryBuilder as jest.Mock).mockReturnValue(searchDeleteBuilder);
+    (searchSuggestionEventRepository.createQueryBuilder as jest.Mock).mockReturnValue(
+      suggestionDeleteBuilder,
+    );
+
+    await expect(service.resetAll()).resolves.toEqual({
+      deletedSearchEvents: 12,
+      deletedSuggestionEvents: 4,
+    });
+    expect(searchDeleteBuilder.delete).toHaveBeenCalled();
+    expect(suggestionDeleteBuilder.delete).toHaveBeenCalled();
+    expect(deleteExecute).toHaveBeenCalled();
+    expect(suggestionDeleteExecute).toHaveBeenCalled();
   });
 });

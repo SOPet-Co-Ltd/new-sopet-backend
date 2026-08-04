@@ -166,6 +166,14 @@ export class SearchResolver {
     return this.searchAnalyticsService.exportCsv(fromDate, toDate);
   }
 
+  @Mutation(() => Boolean)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async resetSearchAnalytics(): Promise<boolean> {
+    await this.searchAnalyticsService.resetAll();
+    return true;
+  }
+
   private mapWeights(weights: SearchRankingWeights): SearchRankingWeightsType {
     return {
       text: weights.text,

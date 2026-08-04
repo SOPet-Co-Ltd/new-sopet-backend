@@ -330,6 +330,25 @@ export class SearchAnalyticsService {
     return `${CSV_BOM}${header}\n${lines.join('\n')}`;
   }
 
+  async resetAll(): Promise<{
+    deletedSearchEvents: number;
+    deletedSuggestionEvents: number;
+  }> {
+    const [searchResult, suggestionResult] = await Promise.all([
+      this.searchEventRepository.createQueryBuilder().delete().execute(),
+      this.searchSuggestionEventRepository.createQueryBuilder().delete().execute(),
+    ]);
+
+    const deletedSearchEvents = searchResult.affected ?? 0;
+    const deletedSuggestionEvents = suggestionResult.affected ?? 0;
+
+    this.logger.log(
+      `Reset search analytics: deleted ${deletedSearchEvents} search events and ${deletedSuggestionEvents} suggestion events`,
+    );
+
+    return { deletedSearchEvents, deletedSuggestionEvents };
+  }
+
   private async writeSearchEvent(input: SearchEventInput): Promise<void> {
     await this.searchEventRepository.save({
       query: input.query.trim().slice(0, 500),
