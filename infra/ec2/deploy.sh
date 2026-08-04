@@ -9,6 +9,12 @@ PORT="${PORT:-3002}"
 
 echo "=== deploy.sh: start ==="
 
+# SSM Default Host Management may inject AWS_SHARED_CREDENTIALS_FILE pointing at
+# AWSSystemsManagerDefaultEC2InstanceManagementRole (often lacks ECR). Prefer the
+# EC2 instance profile via IMDS for aws/ecr calls.
+unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_SECURITY_TOKEN \
+  AWS_PROFILE AWS_DEFAULT_PROFILE AWS_SHARED_CREDENTIALS_FILE || true
+
 if [ ! -f "$ENV_FILE" ]; then
   echo "Missing env file: $ENV_FILE" >&2
   exit 1

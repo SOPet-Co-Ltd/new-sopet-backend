@@ -102,6 +102,7 @@ TAIL_COMMANDS='
       ,("export IMAGE_URI=" + ($image | @sh)),
       "export ENV_FILE=/opt/sopet/.env",
       ("export AWS_REGION=" + ($region | @sh)),
+      "unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_SECURITY_TOKEN AWS_PROFILE AWS_DEFAULT_PROFILE AWS_SHARED_CREDENTIALS_FILE || true",
       "echo \"=== deploy.sh begin $(date -u +%Y-%m-%dT%H:%M:%SZ) ===\"",
       "/opt/sopet/deploy.sh",
       "echo \"=== setup-caddy begin $(date -u +%Y-%m-%dT%H:%M:%SZ) ===\"",
