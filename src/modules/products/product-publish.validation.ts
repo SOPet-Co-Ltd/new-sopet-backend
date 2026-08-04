@@ -9,6 +9,7 @@ export const PRODUCT_PUBLISH_CHECKLIST_KEYS = [
   'variants',
   'price',
   'stock',
+  'shipping',
 ] as const;
 
 export type ProductPublishChecklistKey = (typeof PRODUCT_PUBLISH_CHECKLIST_KEYS)[number];
@@ -24,11 +25,19 @@ export interface ProductPublishChecklist {
   canPublish: boolean;
 }
 
+export interface ProductPublishStoreContext {
+  /** Store has at least one shipping option configured. */
+  hasShipping: boolean;
+}
+
 function effectiveVariantPrice(basePrice: number, variant: ProductVariant): number {
   return Number(basePrice) + Number(variant.priceAdjustment ?? 0);
 }
 
-export function getProductPublishChecklist(product: Product): ProductPublishChecklist {
+export function getProductPublishChecklist(
+  product: Product,
+  storeContext: ProductPublishStoreContext = { hasShipping: true },
+): ProductPublishChecklist {
   const variants = product.variants ?? [];
   const images = product.images ?? [];
   const hasName = Boolean(product.name?.trim());
@@ -42,6 +51,7 @@ export function getProductPublishChecklist(product: Product): ProductPublishChec
     variants.every((variant) => effectiveVariantPrice(basePrice, variant) >= 0) &&
     variants.some((variant) => effectiveVariantPrice(basePrice, variant) > 0);
   const hasStock = variants.some((variant) => Number(variant.stockQuantity ?? 0) > 0);
+  const hasShipping = storeContext.hasShipping;
 
   const items: ProductPublishChecklistItem[] = [
     { key: 'name', complete: hasName },
@@ -51,6 +61,7 @@ export function getProductPublishChecklist(product: Product): ProductPublishChec
     { key: 'variants', complete: hasVariants },
     { key: 'price', complete: hasValidPrice },
     { key: 'stock', complete: hasStock },
+    { key: 'shipping', complete: hasShipping },
   ];
 
   const missingKeys = items.filter((item) => !item.complete).map((item) => item.key);
@@ -70,6 +81,7 @@ export const PRODUCT_PUBLISH_CHECKLIST_LABELS: Record<ProductPublishChecklistKey
   variants: 'ตัวเลือกสินค้า (อย่างน้อย 1 รายการ)',
   price: 'ราคา',
   stock: 'สต็อก',
+  shipping: 'ตัวเลือกการจัดส่งของร้าน (อย่างน้อย 1 รายการ)',
 };
 
 export function formatPublishChecklistMessage(missingKeys: ProductPublishChecklistKey[]): string {

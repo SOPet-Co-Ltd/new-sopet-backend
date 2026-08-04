@@ -5,21 +5,21 @@ import { IsNotEmpty, IsNumber, IsOptional, IsString, IsUUID, Min } from 'class-v
 export class CreatePaymentInput {
   @Field()
   @IsUUID()
-  orderId: string;
+  orderId!: string;
 
   @Field(() => Float)
   @IsNumber()
   @Min(0)
-  amount: number;
+  amount!: number;
 
   @Field({ defaultValue: 'THB' })
   @IsString()
-  currency: string;
+  currency!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
-  paymentMethod: string;
+  paymentMethod!: string;
 
   @Field({ nullable: true })
   @IsOptional()

@@ -1,17 +1,42 @@
 # SOPET Backend CI
-# Triggers on pull request open, update, and reopen.
-# Runs: yarn build → yarn test (unit) → yarn test:e2e
+# Lite (format + lint): PRs whose base is NOT deploy/production or deploy/uat
+# Full (format + build + unit + e2e): PRs targeting deploy/production or deploy/uat
 # E2E tests use mocked repositories/services — no PostgreSQL, Redis, or MinIO required.
 
 name: CI
 
 on:
   pull_request:
-    branches: [main, uat]
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 jobs:
-  test:
+  lite:
+    if: github.base_ref != 'deploy/production' && github.base_ref != 'deploy/uat'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Format check
+        run: yarn format:check
+
+      - name: Lint
+        # package.json `lint` uses --fix; CI must not rewrite the tree.
+        # Type-aware unsafe-* rules are warn-only (pre-existing debt); fail on errors only.
+        run: yarn eslint "{src,apps,libs,test}/**/*.ts"
+
+  full:
+    if: github.base_ref == 'deploy/production' || github.base_ref == 'deploy/uat'
     runs-on: ubuntu-latest
 
     env:
@@ -28,7 +53,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: yarn
 
       - name: Install dependencies

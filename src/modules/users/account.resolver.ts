@@ -57,7 +57,7 @@ function mapAddress(address: SavedAddress): SavedAddressType {
 export class FavoriteProductInput {
   @Field()
   @IsUUID()
-  productId: string;
+  productId!: string;
 }
 
 @Resolver()

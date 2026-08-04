@@ -13,9 +13,11 @@ Conventions observed in the `sopet-backend` codebase.
 | DB columns  | snake_case                | `created_at`         |
 | Error codes | SCREAMING_SNAKE           | `INSUFFICIENT_STOCK` |
 
+For every suffix (`.entity`, `.inputs`, `.resolver`, `.guard`, …) — what it is, when to edit, and how it is wired — see [file-types.md](file-types.md).
+
 ## Module structure
 
-Every feature module follows:
+Typical feature module layout:
 
 ```
 modules/<feature>/
@@ -24,8 +26,11 @@ modules/<feature>/
 ├── <feature>.resolver.ts      # if GraphQL
 ├── <feature>.inputs.ts        # GraphQL inputs
 ├── dto/                       # REST DTOs only
+├── guards/                    # module-specific (e.g. auth, api-keys)
 └── <feature>.service.spec.ts
 ```
+
+Infrastructure-only modules (`email`, `sms`, `redis`, `queue`, `omise`, `inventory`, `health`) may omit resolvers/inputs.
 
 ## Imports
 
@@ -125,13 +130,20 @@ yarn lint              # ESLint with fix
 ```
 
 - Husky pre-commit → lint-staged → Prettier on `*.{ts,tsx,js,jsx,json,md,yml,yaml}`
+- Husky pre-push → `yarn test` (unit tests; e2e stays in CI)
 - ESLint flat config: `eslint.config.mjs`
 - `@typescript-eslint/no-explicit-any`: off
+
+## Authorization
+
+- Global: `JwtAuthGuard`, `StoreStatusGuard`, `VendorStatusGuard`, `CustomerStatusGuard`
+- `@Public()` skips required auth (token still parsed when present)
+- Role checks: `@UseGuards(RolesGuard)` + `@Roles(...)` (RolesGuard is not global)
 
 ## Git
 
 - Yarn only (`preinstall: npx only-allow yarn`)
-- CI on PR: format → build → test → e2e
+- CI on PR to `main` / `uat`: format → build → test → e2e (Node 22)
 
 ## Related docs
 

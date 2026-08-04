@@ -1,4 +1,6 @@
 import {
+  lexicalNameMatchExpression,
+  nameContainsExpression,
   queryGraphemeLength,
   resolveSuggestionMinSimilarity,
   resolveTrigramMinSimilarity,
@@ -22,5 +24,19 @@ describe('trigram-match.util', () => {
   it('counts Thai graphemes for length thresholds', () => {
     expect(queryGraphemeLength('หม่')).toBe(3);
     expect(resolveSuggestionMinSimilarity('prt')).toBe(0.12);
+  });
+
+  it('builds bilingual lexical name match with substring contains', () => {
+    expect(nameContainsExpression('product.name', ':suggestContains')).toBe(
+      'product.name ILIKE :suggestContains',
+    );
+    expect(
+      lexicalNameMatchExpression('product.name', {
+        containsParam: ':suggestContains',
+        prefixParam: ':suggestPrefix',
+        queryParam: ':suggestQuery',
+        minSimilarityParam: ':suggestMinSimilarity',
+      }),
+    ).toContain('product.name ILIKE :suggestContains');
   });
 });

@@ -15,7 +15,7 @@ import { Type } from 'class-transformer';
 export class OrderItemInput {
   @Field()
   @IsString()
-  productId: string;
+  productId!: string;
 
   @Field({ nullable: true })
   @IsOptional()
@@ -25,27 +25,27 @@ export class OrderItemInput {
   @Field(() => Int)
   @IsNumber()
   @Min(1)
-  quantity: number;
+  quantity!: number;
 
   @Field(() => Float)
   @IsNumber()
   @Min(0)
-  price: number;
+  price!: number;
 }
 
 @InputType()
 export class ShippingAddressInput {
   @Field()
   @IsString()
-  recipientName: string;
+  recipientName!: string;
 
   @Field()
   @IsString()
-  recipientPhone: string;
+  recipientPhone!: string;
 
   @Field()
   @IsString()
-  addressLine1: string;
+  addressLine1!: string;
 
   @Field({ nullable: true })
   @IsOptional()
@@ -59,7 +59,7 @@ export class ShippingAddressInput {
 
   @Field()
   @IsString()
-  amphoe: string;
+  amphoe!: string;
 
   @Field({ nullable: true })
   @IsOptional()
@@ -68,22 +68,22 @@ export class ShippingAddressInput {
 
   @Field()
   @IsString()
-  province: string;
+  province!: string;
 
   @Field()
   @IsString()
-  postalCode: string;
+  postalCode!: string;
 }
 
 @InputType()
 export class StoreShippingSelectionInput {
   @Field()
   @IsString()
-  storeId: string;
+  storeId!: string;
 
   @Field()
   @IsUUID()
-  shippingOptionId: string;
+  shippingOptionId!: string;
 }
 
 @InputType()
@@ -92,7 +92,7 @@ export class CreateOrderInput {
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => OrderItemInput)
-  items: OrderItemInput[];
+  items!: OrderItemInput[];
 
   @Field({ nullable: true })
   @IsOptional()
@@ -151,7 +151,7 @@ export class CreateOrderInput {
   @Field()
   @IsNotEmpty()
   @IsString()
-  paymentMethod: string;
+  paymentMethod!: string;
 
   @Field(() => [String], { nullable: true })
   @IsOptional()
@@ -169,28 +169,28 @@ export class CreateOrderInput {
 export class UpdateOrderStatusInput {
   @Field()
   @IsUUID()
-  orderId: string;
+  orderId!: string;
 
   @Field()
   @IsString()
-  status: string;
+  status!: string;
 }
 
 @InputType()
 export class ShipVendorOrderInput {
   @Field()
   @IsUUID()
-  orderId: string;
+  orderId!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
-  trackingNumber: string;
+  trackingNumber!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
-  fulfillmentProvider: string;
+  fulfillmentProvider!: string;
 
   @Field(() => String, { nullable: true })
   @IsOptional()
@@ -202,7 +202,7 @@ export class ShipVendorOrderInput {
 export class ConfirmOrderDeliveredInput {
   @Field()
   @IsUUID()
-  orderId: string;
+  orderId!: string;
 
   @Field(() => String, { nullable: true })
   @IsOptional()

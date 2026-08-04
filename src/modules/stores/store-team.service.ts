@@ -149,7 +149,7 @@ export class StoreTeamService {
     const user = this.userRepository.create({
       email: invitation.email,
       passwordHash,
-      fullName,
+      fullName: fullName.trim(),
       role: UserRole.VENDOR,
     });
     const savedUser = await this.userRepository.save(user);
@@ -279,6 +279,22 @@ export class StoreTeamService {
       where: { storeId, status: StoreMemberInvitationStatus.PENDING },
       order: { createdAt: 'DESC' },
     });
+  }
+
+  async listPendingInvitationsForEmail(email: string): Promise<StoreMemberInvitation[]> {
+    const normalizedEmail = email.toLowerCase();
+    const now = new Date();
+
+    return this.invitationRepository
+      .createQueryBuilder('invitation')
+      .leftJoinAndSelect('invitation.store', 'store')
+      .where('LOWER(invitation.email) = :email', { email: normalizedEmail })
+      .andWhere('invitation.status = :status', {
+        status: StoreMemberInvitationStatus.PENDING,
+      })
+      .andWhere('invitation.expiresAt > :now', { now })
+      .orderBy('invitation.createdAt', 'DESC')
+      .getMany();
   }
 
   async updateMemberRole(

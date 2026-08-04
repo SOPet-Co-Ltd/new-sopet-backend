@@ -4,10 +4,12 @@ import { EmailService } from './email.service';
 import {
   adminInviteTemplate,
   EmailTemplateBrand,
+  emailVerificationTemplate,
   orderPaidTemplate,
   orderStatusChangedTemplate,
   passwordResetTemplate,
   storeMemberInviteTemplate,
+  vendorAccountSuspendedTemplate,
   vendorInviteTemplate,
 } from './email-templates';
 
@@ -15,7 +17,6 @@ import {
 export class EmailDeliveryService {
   private readonly logger = new Logger(EmailDeliveryService.name);
   private readonly adminPanelUrl: string;
-  private readonly storefrontUrl: string;
   private readonly brand: EmailTemplateBrand;
 
   constructor(
@@ -26,12 +27,12 @@ export class EmailDeliveryService {
       this.configService.get<string>('app.adminPanelUrl') ||
       process.env.ADMIN_PANEL_URL ||
       'http://localhost:3001';
-    this.storefrontUrl =
-      this.configService.get<string>('app.storefrontUrl') ||
-      process.env.STOREFRONT_URL ||
-      'http://localhost:3000';
+    const apiUrl =
+      this.configService.get<string>('app.apiUrl') ||
+      process.env.API_URL?.replace(/\/$/, '') ||
+      'http://localhost:3002';
     this.brand = {
-      logoUrl: `${this.storefrontUrl}/images/email/sopet-logo-white.svg`,
+      logoUrl: `${apiUrl}/images/email/sopet-logo-white.png`,
     };
   }
 
@@ -63,7 +64,7 @@ export class EmailDeliveryService {
   }
 
   async sendAdminInvite(email: string, token: string): Promise<void> {
-    const inviteUrl = `${this.adminPanelUrl}/register?adminToken=${token}`;
+    const inviteUrl = `${this.adminPanelUrl}/register/invite/admin?token=${token}`;
     await this.sendTemplate(
       email,
       adminInviteTemplate(this.brand, { inviteUrl }),
@@ -94,6 +95,16 @@ export class EmailDeliveryService {
       passwordResetTemplate(this.brand, { resetUrl }),
       'Password reset',
       resetUrl,
+    );
+  }
+
+  async sendEmailVerification(email: string, token: string): Promise<void> {
+    const verifyUrl = `${this.adminPanelUrl}/verify-email?token=${token}`;
+    await this.sendTemplate(
+      email,
+      emailVerificationTemplate(this.brand, { verifyUrl }),
+      'Email verification',
+      verifyUrl,
     );
   }
 
@@ -135,6 +146,17 @@ export class EmailDeliveryService {
       orderStatusChangedTemplate(this.brand, params),
       'Order status changed',
       params.orderUrl,
+    );
+  }
+
+  async sendVendorAccountSuspended(
+    email: string,
+    params: { vendorName?: string | null; storeName?: string | null } = {},
+  ): Promise<void> {
+    await this.sendTemplate(
+      email,
+      vendorAccountSuspendedTemplate(this.brand, params),
+      'Vendor account suspended',
     );
   }
 }

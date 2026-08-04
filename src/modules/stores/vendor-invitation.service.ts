@@ -103,7 +103,7 @@ export class VendorInvitationService {
     const user = this.userRepository.create({
       email: invitation.email,
       passwordHash,
-      fullName,
+      fullName: fullName.trim(),
       role: UserRole.VENDOR,
     });
     const savedUser = await this.userRepository.save(user);

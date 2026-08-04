@@ -14,22 +14,22 @@ import { Dispute } from './dispute.entity';
 @Index(['disputeId', 'sortOrder'])
 export class DisputeImage {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'dispute_id', type: 'uuid' })
-  disputeId: string;
+  disputeId!: string;
 
   @Column({ name: 'image_url', type: 'varchar', length: 500 })
   @IsNotEmpty()
-  imageUrl: string;
+  imageUrl!: string;
 
   @Column({ name: 'sort_order', type: 'integer', default: 0 })
-  sortOrder: number;
+  sortOrder!: number;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 
   @ManyToOne(() => Dispute, (dispute) => dispute.images, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'dispute_id' })
-  dispute: Dispute;
+  dispute!: Dispute;
 }

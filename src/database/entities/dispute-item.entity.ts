@@ -16,24 +16,24 @@ import { OrderItem } from './order-item.entity';
 @Index(['orderItemId'])
 export class DisputeItem {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'dispute_id', type: 'uuid' })
   @IsNotEmpty()
-  disputeId: string;
+  disputeId!: string;
 
   @Column({ name: 'order_item_id', type: 'uuid' })
   @IsNotEmpty()
-  orderItemId: string;
+  orderItemId!: string;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 
   @ManyToOne(() => Dispute, (dispute) => dispute.items, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'dispute_id' })
-  dispute: Dispute;
+  dispute!: Dispute;
 
   @ManyToOne(() => OrderItem)
   @JoinColumn({ name: 'order_item_id' })
-  orderItem: OrderItem;
+  orderItem!: OrderItem;
 }

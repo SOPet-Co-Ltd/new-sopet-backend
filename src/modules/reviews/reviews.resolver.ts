@@ -45,19 +45,19 @@ import { Review } from '../../database/entities/review.entity';
 @ObjectType()
 export class CustomerReviewableItemType {
   @Field()
-  orderId: string;
+  orderId!: string;
 
   @Field()
-  orderNumber: string;
+  orderNumber!: string;
 
   @Field()
-  orderItemId: string;
+  orderItemId!: string;
 
   @Field()
-  productId: string;
+  productId!: string;
 
   @Field()
-  productName: string;
+  productName!: string;
 
   @Field(() => String, { nullable: true })
   productSlug?: string | null;
@@ -66,7 +66,7 @@ export class CustomerReviewableItemType {
   productImageUrl?: string | null;
 
   @Field()
-  deliveredAt: Date;
+  deliveredAt!: Date;
 
   @Field(() => Date, { nullable: true })
   reviewDeadline?: Date | null;
@@ -75,13 +75,13 @@ export class CustomerReviewableItemType {
 @ObjectType()
 export class CustomerReviewType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  productId: string;
+  productId!: string;
 
   @Field()
-  productName: string;
+  productName!: string;
 
   @Field(() => String, { nullable: true })
   productSlug?: string | null;
@@ -90,49 +90,49 @@ export class CustomerReviewType {
   productImageUrl?: string | null;
 
   @Field()
-  orderId: string;
+  orderId!: string;
 
   @Field(() => Int)
-  rating: number;
+  rating!: number;
 
   @Field(() => String, { nullable: true })
   comment?: string | null;
 
   @Field()
-  status: string;
+  status!: string;
 
   @Field()
-  createdAt: Date;
+  createdAt!: Date;
 
   @Field(() => [ReviewImageType])
-  images: ReviewImageType[];
+  images!: ReviewImageType[];
 }
 
 @ObjectType()
 export class ReviewType {
   @Field()
-  id: string;
+  id!: string;
 
   @Field()
-  productId: string;
+  productId!: string;
 
   @Field(() => Int)
-  rating: number;
+  rating!: number;
 
   @Field(() => String, { nullable: true })
   comment?: string | null;
 
   @Field()
-  status: string;
+  status!: string;
 
   @Field()
-  createdAt: Date;
+  createdAt!: Date;
 
   @Field()
-  customerName: string;
+  customerName!: string;
 
   @Field(() => [ReviewImageType])
-  images: ReviewImageType[];
+  images!: ReviewImageType[];
 
   @Field(() => ReviewReplyType, { nullable: true })
   reply?: ReviewReplyType | null;
@@ -172,17 +172,17 @@ function mapReviewToType(review: Review): ReviewType {
 export class CreateReviewInput {
   @Field()
   @IsUUID()
-  productId: string;
+  productId!: string;
 
   @Field()
   @IsUUID()
-  orderId: string;
+  orderId!: string;
 
   @Field(() => Int)
   @IsInt()
   @Min(1)
   @Max(5)
-  rating: number;
+  rating!: number;
 
   @Field({ nullable: true })
   @IsOptional()
@@ -201,26 +201,26 @@ export class CreateReviewInput {
 export class CreateReviewReplyInput {
   @Field()
   @IsUUID()
-  reviewId: string;
+  reviewId!: string;
 
   @Field()
   @IsString()
   @IsNotEmpty()
   @MaxLength(REVIEW_REPLY_MAX_LENGTH)
-  body: string;
+  body!: string;
 }
 
 @InputType()
 export class UpdateReviewReplyInput {
   @Field()
   @IsUUID()
-  replyId: string;
+  replyId!: string;
 
   @Field()
   @IsString()
   @IsNotEmpty()
   @MaxLength(REVIEW_REPLY_MAX_LENGTH)
-  body: string;
+  body!: string;
 }
 
 @Resolver()

@@ -7,7 +7,7 @@ export class CreateShippingProviderInput {
   @IsNotEmpty()
   @IsString()
   @Length(1, 100)
-  name: string;
+  name!: string;
 }
 
 @InputType()

@@ -1,8 +1,11 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { InventoryModule } from '../inventory/inventory.module';
+import { PayoutsModule } from '../payouts/payouts.module';
+import { StoresModule } from '../stores/stores.module';
+import { OrdersModule } from '../orders/orders.module';
 import { PaymentsService } from './payments.service';
 import { PaymentEventsService } from './payment-events.service';
 import { PaymentsWebhookController } from './payments-webhook.controller';
@@ -18,6 +21,9 @@ import { PaymentExpiryScheduler } from './payment-expiry.scheduler';
     AuthModule,
     NotificationsModule,
     InventoryModule,
+    forwardRef(() => PayoutsModule),
+    StoresModule,
+    forwardRef(() => OrdersModule),
     TypeOrmModule.forFeature([Payment, Order, Customer, SavedPaymentMethod]),
   ],
   controllers: [PaymentsWebhookController],

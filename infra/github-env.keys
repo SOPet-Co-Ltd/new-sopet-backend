@@ -1,21 +1,44 @@
 # GitHub Environment keys loaded by .github/workflows/deploy.yml
-# Lines starting with # are ignored.
+# (Settings → Environments → deploy/uat | deploy/production).
+# Lines starting with # are ignored by infra/export-github-env.sh.
+#
+# Production checklist (same structure as UAT — different values except ECR):
+#   Secret:  AWS_ROLE_ARN
+#   Vars:    AWS_REGION,
+#            ECR_REPOSITORY (recommended: EXACT same string as deploy/uat,
+#              e.g. both sopet/backend-uat or both sopet/backend),
+#            EC2_INSTANCE_ID, DOCKER_PLATFORM=linux/arm64 (Graviton),
+#            CADDY_*, app vars below, plus all secrets below
+#   Leave unset: BUILD_ON_HOST (default OFF — GHA builds, EC2 pull-only)
+#   Optional:  SSM_CLOUDWATCH_LOG_GROUP (read in deploy.yml, not via GITHUB_ENV)
+#   Promote: deploy UAT first (push :github.sha), then prod at same SHA
+#            so check-image reuses the ECR tag (see docs/deploy-production.md)
+# Full steps: docs/deploy-production.md
 
 # Deploy auth (secret)
 AWS_ROLE_ARN
 
 # Deploy infrastructure (variables)
 AWS_REGION
+# Shared UAT+prod recommended — set production to the same value as UAT.
 ECR_REPOSITORY
-ECS_CLUSTER
-ECS_SERVICE
-ECS_TASK_DEFINITION_FAMILY
-ECS_CONTAINER_NAME
-ECS_EXECUTION_ROLE_ARN
-ECS_TASK_ROLE_ARN
-ECS_LOG_GROUP
-ECS_CPU
-ECS_MEMORY
+EC2_INSTANCE_ID
+# Required for Graviton: linux/arm64 → resolve-runner picks ubuntu-24.04-arm.
+# Use linux/amd64 only for x86 EC2 (ubuntu-latest).
+DOCKER_PLATFORM
+# Optional escape hatch: true = build image on EC2 (infra/ec2/build-on-host.sh).
+# Default OFF — leave unset on production/UAT (pull-only). Only export when set.
+BUILD_ON_HOST
+# Optional: CloudWatch log group for live SSM stdout/stderr (e.g. /sopet/ssm/deploy).
+# Read from vars.SSM_CLOUDWATCH_LOG_GROUP in deploy.yml (not exported via GITHUB_ENV).
+# SSM_CLOUDWATCH_LOG_GROUP
+
+# Caddy reverse proxy (variables)
+CADDY_HOSTNAME
+CADDY_ADMIN_EMAIL
+CADDY_TLS_CERT
+CADDY_TLS_KEY
+CADDY_TLS_ENABLED
 
 # Application variables (infra/env.manifest.json → variables)
 NODE_ENV
@@ -40,6 +63,7 @@ PAYMENT_QR_EXPIRY_MINUTES
 PAYMENT_EXPIRY_CHECK_INTERVAL_MS
 EMAIL_FROM
 EMAIL_FROM_NAME
+API_URL
 STOREFRONT_URL
 ADMIN_PANEL_URL
 CORS_ORIGINS

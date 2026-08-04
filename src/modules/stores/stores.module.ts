@@ -1,9 +1,10 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { StorageModule } from '../storage/storage.module';
 import { OmiseModule } from '../omise/omise.module';
+import { OrdersModule } from '../orders/orders.module';
 import { StoresService } from './stores.service';
 import { StoreTeamService } from './store-team.service';
 import { ShippingOptionsService } from './shipping-options.service';
@@ -21,6 +22,9 @@ import { StoreRequest } from '../../database/entities/store-request.entity';
 import { StoreReactivationRequest } from '../../database/entities/store-reactivation-request.entity';
 import { StoreReactivationRequestImage } from '../../database/entities/store-reactivation-request-image.entity';
 import { VendorInvitation } from '../../database/entities/vendor-invitation.entity';
+import { Order } from '../../database/entities/order.entity';
+import { OrderItem } from '../../database/entities/order-item.entity';
+import { AuditLog } from '../../database/entities/audit-log.entity';
 import { StoresResolver } from './stores.resolver';
 
 @Module({
@@ -29,6 +33,7 @@ import { StoresResolver } from './stores.resolver';
     NotificationsModule,
     StorageModule,
     OmiseModule,
+    forwardRef(() => OrdersModule),
     TypeOrmModule.forFeature([
       Store,
       User,
@@ -40,6 +45,9 @@ import { StoresResolver } from './stores.resolver';
       StoreReactivationRequest,
       StoreReactivationRequestImage,
       VendorInvitation,
+      Order,
+      OrderItem,
+      AuditLog,
     ]),
   ],
   providers: [

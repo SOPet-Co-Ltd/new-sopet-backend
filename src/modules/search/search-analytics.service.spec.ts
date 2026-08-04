@@ -4,8 +4,9 @@ import type { SearchEvent } from '../../database/entities/search-event.entity';
 import type { SearchSuggestionEvent } from '../../database/entities/search-suggestion-event.entity';
 
 describe('SearchAnalyticsService', () => {
+  const saveSearchEvent = jest.fn();
   const searchEventRepository = {
-    save: jest.fn(),
+    save: saveSearchEvent,
     createQueryBuilder: jest.fn(),
   } as unknown as Repository<SearchEvent>;
 
@@ -28,7 +29,7 @@ describe('SearchAnalyticsService', () => {
   });
 
   it('records search events asynchronously', async () => {
-    (searchEventRepository.save as jest.Mock).mockResolvedValue({});
+    saveSearchEvent.mockResolvedValue({});
 
     service.recordSearchEvent({
       query: 'cat food',
@@ -38,7 +39,7 @@ describe('SearchAnalyticsService', () => {
     });
 
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(searchEventRepository.save).toHaveBeenCalledWith(
+    expect(saveSearchEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         query: 'cat food',
         resultCount: 0,

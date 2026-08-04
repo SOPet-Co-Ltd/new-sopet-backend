@@ -30,7 +30,7 @@ export class PublicVariantGroupDto {
   @IsNotEmpty()
   @IsString()
   @Length(1, 100)
-  name: string;
+  name!: string;
 
   @ApiProperty({
     description: 'Possible values for this option group (ค่าตัวเลือก)',
@@ -40,7 +40,7 @@ export class PublicVariantGroupDto {
   @IsArray()
   @ArrayNotEmpty()
   @IsString({ each: true })
-  values: string[];
+  values!: string[];
 }
 
 /**
@@ -58,7 +58,7 @@ export class PublicVariantItemDto {
   @IsNotEmpty()
   @IsString()
   @Length(1, 100)
-  sku: string;
+  sku!: string;
 
   @ApiProperty({
     description: 'Inventory quantity in stock (จำนวนสต็อก)',
@@ -67,7 +67,7 @@ export class PublicVariantItemDto {
   })
   @IsInt()
   @Min(0)
-  stock: number;
+  stock!: number;
 
   @ApiProperty({
     description: 'Absolute price for this variant item in THB (ราคา)',
@@ -76,7 +76,7 @@ export class PublicVariantItemDto {
   })
   @IsNumber()
   @Min(0)
-  price: number;
+  price!: number;
 
   @ApiProperty({
     description:
@@ -86,7 +86,7 @@ export class PublicVariantItemDto {
     additionalProperties: { type: 'string' },
   })
   @IsObject()
-  options: Record<string, string>;
+  options!: Record<string, string>;
 }
 
 export class CreatePublicProductDto {
@@ -99,7 +99,7 @@ export class CreatePublicProductDto {
   @IsNotEmpty()
   @IsString()
   @Length(1, 255)
-  name: string;
+  name!: string;
 
   @ApiPropertyOptional({
     description: 'Product description (รายละเอียด)',
@@ -186,7 +186,7 @@ export class CreatePublicProductDto {
   @ArrayNotEmpty()
   @ValidateNested({ each: true })
   @Type(() => PublicVariantGroupDto)
-  variants: PublicVariantGroupDto[];
+  variants!: PublicVariantGroupDto[];
 
   @ApiProperty({
     description:
@@ -197,5 +197,5 @@ export class CreatePublicProductDto {
   @ArrayNotEmpty()
   @ValidateNested({ each: true })
   @Type(() => PublicVariantItemDto)
-  variantItems: PublicVariantItemDto[];
+  variantItems!: PublicVariantItemDto[];
 }

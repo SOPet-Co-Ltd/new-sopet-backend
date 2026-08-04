@@ -12,6 +12,8 @@ import {
   SetPetTypeImageInput,
   UpdateCategoryInput,
   UpdatePetTypeInput,
+  UpdateTagInput,
+  UpdateBrandInput,
 } from './taxonomy.inputs';
 import {
   CategoryType,
@@ -101,6 +103,22 @@ export class TaxonomyResolver {
     return tags.map(mapTag);
   }
 
+  @Query(() => [PetTypeType])
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async rejectedPetTypes(): Promise<PetTypeType[]> {
+    const petTypes = await this.taxonomyService.findRejectedPetTypes();
+    return petTypes.map(mapPetType);
+  }
+
+  @Query(() => [BrandType])
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async rejectedBrands(): Promise<BrandType[]> {
+    const brands = await this.taxonomyService.findRejectedBrands();
+    return brands.map(mapBrand);
+  }
+
   @Mutation(() => CategoryType)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('vendor', 'admin')
@@ -122,7 +140,11 @@ export class TaxonomyResolver {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   async updateCategory(@Args('input') input: UpdateCategoryInput): Promise<CategoryType> {
-    const category = await this.taxonomyService.updateCategory(input.categoryId, input.name);
+    const category = await this.taxonomyService.updateCategory(
+      input.categoryId,
+      input.name,
+      input.slug,
+    );
     return mapCategory(category);
   }
 
@@ -143,6 +165,14 @@ export class TaxonomyResolver {
     @Args('input') input: CreateTagInput,
   ): Promise<TagType> {
     const tag = await this.taxonomyService.createTag(input.name, userId, role);
+    return mapTag(tag);
+  }
+
+  @Mutation(() => TagType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async updateTag(@Args('input') input: UpdateTagInput): Promise<TagType> {
+    const tag = await this.taxonomyService.updateTag(input.tagId, input.name, input.slug);
     return mapTag(tag);
   }
 
@@ -229,9 +259,15 @@ export class TaxonomyResolver {
   @Roles('vendor', 'admin')
   async createPetType(
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: UserRole,
     @Args('input') input: CreatePetTypeInput,
   ): Promise<PetTypeType> {
-    const petType = await this.taxonomyService.createPetType(input.name, userId, input.imageUrl);
+    const petType = await this.taxonomyService.createPetType(
+      input.name,
+      userId,
+      role,
+      input.imageUrl,
+    );
     return mapPetType(petType);
   }
 
@@ -239,7 +275,11 @@ export class TaxonomyResolver {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   async updatePetType(@Args('input') input: UpdatePetTypeInput): Promise<PetTypeType> {
-    const petType = await this.taxonomyService.updatePetType(input.petTypeId, input.name);
+    const petType = await this.taxonomyService.updatePetType(
+      input.petTypeId,
+      input.name,
+      input.slug,
+    );
     return mapPetType(petType);
   }
 
@@ -260,6 +300,14 @@ export class TaxonomyResolver {
     @Args('input') input: CreateBrandInput,
   ): Promise<BrandType> {
     const brand = await this.taxonomyService.createBrand(input.name, userId, role);
+    return mapBrand(brand);
+  }
+
+  @Mutation(() => BrandType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async updateBrand(@Args('input') input: UpdateBrandInput): Promise<BrandType> {
+    const brand = await this.taxonomyService.updateBrand(input.brandId, input.name, input.slug);
     return mapBrand(brand);
   }
 

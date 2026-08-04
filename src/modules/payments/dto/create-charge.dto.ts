@@ -8,7 +8,7 @@ export class CreateChargeDto {
   })
   @IsNotEmpty()
   @IsString()
-  orderId: string;
+  orderId!: string;
 
   @ApiProperty({
     description: 'Amount to charge in the smallest currency unit expected by the provider',
@@ -18,7 +18,7 @@ export class CreateChargeDto {
   @IsNotEmpty()
   @IsNumber()
   @Min(0)
-  amount: number;
+  amount!: number;
 
   @ApiProperty({
     description: 'Payment method used for the charge',
@@ -27,7 +27,7 @@ export class CreateChargeDto {
   })
   @IsNotEmpty()
   @IsEnum(['promptpay', 'credit_card', 'cod'])
-  paymentMethod: 'promptpay' | 'credit_card' | 'cod';
+  paymentMethod!: 'promptpay' | 'credit_card' | 'cod';
 
   @ApiProperty({
     description: 'ISO 4217 currency code',

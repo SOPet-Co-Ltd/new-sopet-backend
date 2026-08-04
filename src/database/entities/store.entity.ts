@@ -46,32 +46,32 @@ export enum OmiseRecipientStatus {
 @Index(['ownerId'])
 export class Store {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'owner_id', type: 'uuid' })
-  ownerId: string;
+  ownerId!: string;
 
   @Column({ name: 'name', type: 'varchar', length: 255 })
   @IsNotEmpty()
   @Length(1, 255)
-  name: string;
+  name!: string;
 
   @Column({ name: 'slug', type: 'varchar', length: 255 })
   @IsNotEmpty()
   @Length(1, 255)
-  slug: string;
+  slug!: string;
 
   @Column({ name: 'description', type: 'text', nullable: true })
   @IsOptional()
-  description: string | null;
+  description!: string | null;
 
   @Column({ name: 'logo_url', type: 'varchar', length: 500, nullable: true })
   @IsOptional()
-  logoUrl: string | null;
+  logoUrl!: string | null;
 
   @Column({ name: 'banner_url', type: 'varchar', length: 500, nullable: true })
   @IsOptional()
-  bannerUrl: string | null;
+  bannerUrl!: string | null;
 
   @Column({
     name: 'status',
@@ -80,17 +80,17 @@ export class Store {
     default: StoreStatus.PENDING,
   })
   @IsEnum(StoreStatus)
-  status: StoreStatus;
+  status!: StoreStatus;
 
   @Column({ name: 'approved_by', type: 'uuid', nullable: true })
-  approvedBy: string | null;
+  approvedBy!: string | null;
 
   @Column({ name: 'approved_at', type: 'timestamp', nullable: true })
-  approvedAt: Date | null;
+  approvedAt!: Date | null;
 
   @Column({ name: 'rejection_reason', type: 'text', nullable: true })
   @IsOptional()
-  rejectionReason: string | null;
+  rejectionReason!: string | null;
 
   @Column({
     name: 'contact_phone',
@@ -99,7 +99,7 @@ export class Store {
     nullable: true,
   })
   @IsOptional()
-  contactPhone: string | null;
+  contactPhone!: string | null;
 
   @Column({
     name: 'contact_email',
@@ -108,27 +108,27 @@ export class Store {
     nullable: true,
   })
   @IsOptional()
-  contactEmail: string | null;
+  contactEmail!: string | null;
 
   @Column({ name: 'address', type: 'text', nullable: true })
   @IsOptional()
-  address: string | null;
+  address!: string | null;
 
   @Column({ name: 'bank_account_name', type: 'varchar', length: 255, nullable: true })
   @IsOptional()
-  bankAccountName: string | null;
+  bankAccountName!: string | null;
 
   @Column({ name: 'bank_account_number', type: 'varchar', length: 50, nullable: true })
   @IsOptional()
-  bankAccountNumber: string | null;
+  bankAccountNumber!: string | null;
 
   @Column({ name: 'bank_name', type: 'varchar', length: 100, nullable: true })
   @IsOptional()
-  bankName: string | null;
+  bankName!: string | null;
 
   @Column({ name: 'bank_code', type: 'varchar', length: 20, nullable: true })
   @IsOptional()
-  bankCode: string | null;
+  bankCode!: string | null;
 
   @Column({
     name: 'omise_recipient_id',
@@ -137,7 +137,7 @@ export class Store {
     nullable: true,
   })
   @IsOptional()
-  omiseRecipientId: string | null;
+  omiseRecipientId!: string | null;
 
   @Column({
     name: 'omise_recipient_status',
@@ -146,7 +146,7 @@ export class Store {
     enumName: 'store_omise_recipient_status_enum',
     default: OmiseRecipientStatus.NOT_CONNECTED,
   })
-  omiseRecipientStatus: OmiseRecipientStatus;
+  omiseRecipientStatus!: OmiseRecipientStatus;
 
   @Column({
     name: 'omise_recipient_failure_message',
@@ -154,7 +154,7 @@ export class Store {
     nullable: true,
   })
   @IsOptional()
-  omiseRecipientFailureMessage: string | null;
+  omiseRecipientFailureMessage!: string | null;
 
   @Column({
     name: 'payout_schedule',
@@ -162,37 +162,37 @@ export class Store {
     enum: PayoutSchedule,
     default: PayoutSchedule.MANUAL,
   })
-  payoutSchedule: PayoutSchedule;
+  payoutSchedule!: PayoutSchedule;
 
   @Column({ name: 'payout_schedule_paused', type: 'boolean', default: false })
-  payoutSchedulePaused: boolean;
+  payoutSchedulePaused!: boolean;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamp' })
-  updatedAt: Date;
+  updatedAt!: Date;
 
   @DeleteDateColumn({ name: 'deleted_at', type: 'timestamp', nullable: true })
-  deletedAt: Date | null;
+  deletedAt!: Date | null;
 
   // Relations
   @ManyToOne(() => User, (user) => user.ownedStores)
   @JoinColumn({ name: 'owner_id' })
-  owner: User;
+  owner!: User;
 
   @OneToMany(() => StoreMember, (member) => member.store)
-  members: StoreMember[];
+  members!: StoreMember[];
 
   @OneToMany(() => Product, (product) => product.store)
-  products: Product[];
+  products!: Product[];
 
   @OneToMany(() => Promotion, (promotion) => promotion.store)
-  promotions: Promotion[];
+  promotions!: Promotion[];
 
   @OneToMany(() => StoreShippingOption, (option) => option.store)
-  shippingOptions: StoreShippingOption[];
+  shippingOptions!: StoreShippingOption[];
 
   @OneToMany(() => StoreMemberInvitation, (invitation) => invitation.store)
-  memberInvitations: StoreMemberInvitation[];
+  memberInvitations!: StoreMemberInvitation[];
 }

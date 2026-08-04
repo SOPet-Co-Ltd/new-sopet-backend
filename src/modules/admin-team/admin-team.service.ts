@@ -36,6 +36,14 @@ export class AdminTeamService {
     return this.adminInvitationService.revoke(invitationId);
   }
 
+  async previewInvitationByToken(token: string): Promise<AdminInvitation> {
+    return this.adminInvitationService.previewByToken(token);
+  }
+
+  async acceptInvitation(token: string, password: string, fullName: string): Promise<User> {
+    return this.adminInvitationService.accept(token, password, fullName);
+  }
+
   async setAdminActive(actorId: string, userId: string, isActive: boolean): Promise<User> {
     if (actorId === userId && !isActive) {
       throw new ForbiddenException({

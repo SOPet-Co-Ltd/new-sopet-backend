@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
 import { EmailDeliveryService } from '../email/email-delivery.service';
+import { formatOrderStatus } from '../email/email-templates';
 import { Order } from '../../database/entities/order.entity';
 import { OrderItem } from '../../database/entities/order-item.entity';
 import { Customer } from '../../database/entities/customer.entity';
@@ -11,6 +12,9 @@ import { NotificationChannel } from '../../database/entities/notification.entity
 import { Store } from '../../database/entities/store.entity';
 import { StoreRequest } from '../../database/entities/store-request.entity';
 import { User, UserRole } from '../../database/entities/user.entity';
+
+/** Hold events already create dedicated in-app types; email-only via status notify. */
+const EMAIL_ONLY_STATUS_NOTIFICATIONS = new Set(['on_hold', 'hold_resumed']);
 
 @Injectable()
 export class NotificationsService {
@@ -69,21 +73,46 @@ export class NotificationsService {
     }));
   }
 
+  private buildCustomerOrderUrl(order: Order): string {
+    if (order.customerId) {
+      return `${this.storefrontUrl}/user/orders/${order.id}`;
+    }
+    return `${this.storefrontUrl}/track/${encodeURIComponent(order.orderNumber)}`;
+  }
+
   async notifyOrderPaid(order: Order): Promise<void> {
     const orderWithItems = await this.resolveOrderWithItems(order);
     const customer = orderWithItems.customerId
       ? await this.customerRepository.findOne({ where: { id: orderWithItems.customerId } })
       : null;
 
+    if (orderWithItems.customerId) {
+      try {
+        await this.createUserNotification(
+          orderWithItems.customerId,
+          'payment_received',
+          `ชำระเงินสำเร็จสำหรับออเดอร์ #${orderWithItems.orderNumber}`,
+          {
+            orderId: orderWithItems.id,
+            orderNumber: orderWithItems.orderNumber,
+          },
+          ['orderId'],
+        );
+      } catch (error) {
+        this.logger.warn(
+          `Paid in-app notify failed for order=${orderWithItems.orderNumber}`,
+          error instanceof Error ? error.message : undefined,
+        );
+      }
+    }
+
     const email = customer?.email ?? orderWithItems.guestEmail;
     if (!email) {
-      this.logger.log(`No email for order ${orderWithItems.orderNumber} — skip paid notification`);
+      this.logger.log(`No email for order ${orderWithItems.orderNumber} — skip paid email`);
       return;
     }
 
-    const orderUrl = orderWithItems.customerId
-      ? `${this.storefrontUrl}/account/orders/${orderWithItems.id}`
-      : `${this.storefrontUrl}/checkout/success?orderId=${orderWithItems.id}`;
+    const orderUrl = this.buildCustomerOrderUrl(orderWithItems);
     await this.emailDeliveryService.sendOrderPaid(email, {
       orderNumber: orderWithItems.orderNumber,
       orderDate: this.formatOrderDate(orderWithItems.paidAt ?? orderWithItems.createdAt),
@@ -104,14 +133,34 @@ export class NotificationsService {
       ? await this.customerRepository.findOne({ where: { id: orderWithItems.customerId } })
       : null;
 
+    if (orderWithItems.customerId && !EMAIL_ONLY_STATUS_NOTIFICATIONS.has(status)) {
+      try {
+        const statusLabel = formatOrderStatus(status);
+        await this.createUserNotification(
+          orderWithItems.customerId,
+          'order_status_changed',
+          `ออเดอร์ #${orderWithItems.orderNumber} เปลี่ยนเป็น "${statusLabel}"`,
+          {
+            orderId: orderWithItems.id,
+            orderNumber: orderWithItems.orderNumber,
+            status,
+          },
+          ['orderId', 'status'],
+        );
+      } catch (error) {
+        this.logger.warn(
+          `Status in-app notify failed for order=${orderWithItems.orderNumber}`,
+          error instanceof Error ? error.message : undefined,
+        );
+      }
+    }
+
     const email = customer?.email ?? orderWithItems.guestEmail;
     if (!email) {
       return;
     }
 
-    const orderUrl = orderWithItems.customerId
-      ? `${this.storefrontUrl}/account/orders/${orderWithItems.id}`
-      : `${this.storefrontUrl}/checkout/success?orderId=${orderWithItems.id}`;
+    const orderUrl = this.buildCustomerOrderUrl(orderWithItems);
     await this.emailDeliveryService.sendOrderStatusChanged(email, {
       orderNumber: orderWithItems.orderNumber,
       status,
@@ -168,8 +217,12 @@ export class NotificationsService {
       if (value === undefined || value === null) {
         continue;
       }
+      const metaValue =
+        typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
+          ? String(value)
+          : JSON.stringify(value);
       qb.andWhere(`notification.metadata->>'${key}' = :meta_${key}`, {
-        [`meta_${key}`]: String(value),
+        [`meta_${key}`]: metaValue,
       });
     }
 
@@ -362,6 +415,98 @@ export class NotificationsService {
       },
       ['requestId', 'type', 'success'],
     );
+  }
+
+  /**
+   * Notify customer + vendor that store items on an order entered hold (AC-028, AC-038).
+   * Best-effort: callers must catch — failure must not roll back hold (ADR-0010).
+   */
+  async notifyOrderItemsOnHold(orderId: string, storeId: string): Promise<void> {
+    await this.notifyHoldEvent(orderId, storeId, 'enter');
+  }
+
+  /**
+   * Notify customer + vendor that held store items resumed after reactivation (AC-019, AC-029).
+   */
+  async notifyOrderItemsHoldResumed(orderId: string, storeId: string): Promise<void> {
+    await this.notifyHoldEvent(orderId, storeId, 'resume');
+  }
+
+  private async notifyHoldEvent(
+    orderId: string,
+    storeId: string,
+    event: 'enter' | 'resume',
+  ): Promise<void> {
+    const order = await this.orderRepository.findOne({
+      where: { id: orderId },
+      relations: ['items'],
+    });
+    if (!order) {
+      this.logger.warn(`Hold notify skipped — order not found order=${orderId}`);
+      return;
+    }
+
+    const customerType = event === 'enter' ? 'order_items_on_hold' : 'order_items_hold_resumed';
+    const vendorType =
+      event === 'enter' ? 'vendor_order_items_on_hold' : 'vendor_order_items_hold_resumed';
+    const customerMessage =
+      event === 'enter'
+        ? `ออเดอร์ #${order.orderNumber} มีรายการจากร้านที่ถูกระงับ — กำลังพักจัดส่งบางรายการ`
+        : `ออเดอร์ #${order.orderNumber} — รายการที่พักไว้กลับมาดำเนินการต่อแล้ว`;
+    const vendorMessage =
+      event === 'enter'
+        ? `ออเดอร์ #${order.orderNumber} — รายการของร้านถูกพักจัดส่งเนื่องจากร้านถูกระงับ`
+        : `ออเดอร์ #${order.orderNumber} — รายการที่พักไว้กลับมาดำเนินการต่อแล้วหลังเปิดร้านอีกครั้ง`;
+    const emailStatus = event === 'enter' ? 'on_hold' : 'hold_resumed';
+    const metadata = {
+      orderId: order.id,
+      storeId,
+      orderNumber: order.orderNumber,
+    };
+
+    if (order.customerId) {
+      try {
+        await this.createUserNotification(
+          order.customerId,
+          customerType,
+          customerMessage,
+          metadata,
+          ['orderId', 'storeId'],
+        );
+      } catch (error) {
+        this.logger.warn(
+          `Hold customer notify failed for order=${order.orderNumber}`,
+          error instanceof Error ? error.message : undefined,
+        );
+      }
+    }
+
+    try {
+      await this.notifyOrderStatusChanged(order, emailStatus);
+    } catch (error) {
+      this.logger.warn(
+        `Hold email notify failed for order=${order.orderNumber}`,
+        error instanceof Error ? error.message : undefined,
+      );
+    }
+
+    try {
+      const store = await this.storeRepository.findOne({
+        where: { id: storeId },
+        relations: ['owner'],
+      });
+      if (store?.owner) {
+        await this.createUserNotification(store.owner.id, vendorType, vendorMessage, metadata, [
+          'orderId',
+          'storeId',
+        ]);
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Hold vendor notify failed for order=${order.orderNumber} store=${storeId}`,
+        error instanceof Error ? error.message : undefined,
+      );
+    }
   }
 
   /**

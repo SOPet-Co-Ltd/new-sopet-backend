@@ -15,11 +15,11 @@ import { OrderStatus } from './enums/order.enums';
 @Index(['orderId', 'createdAt'])
 export class OrderStatusHistory {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'order_id', type: 'uuid' })
   @IsNotEmpty()
-  orderId: string;
+  orderId!: string;
 
   @Column({
     name: 'status',
@@ -27,20 +27,20 @@ export class OrderStatusHistory {
     enum: OrderStatus,
   })
   @IsEnum(OrderStatus)
-  status: OrderStatus;
+  status!: OrderStatus;
 
   @Column({ name: 'changed_by', type: 'uuid', nullable: true })
-  changedBy: string | null;
+  changedBy!: string | null;
 
   @Column({ name: 'notes', type: 'text', nullable: true })
   @IsOptional()
-  notes: string | null;
+  notes!: string | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 
   // Relations
   @ManyToOne(() => Order, (order) => order.statusHistory)
   @JoinColumn({ name: 'order_id' })
-  order: Order;
+  order!: Order;
 }

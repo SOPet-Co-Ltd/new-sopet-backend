@@ -1,15 +1,35 @@
 import { config } from 'dotenv';
 import { execSync } from 'child_process';
-import { assertLocalDevOnly } from './guards';
+import { createDataSource } from './helpers';
+import { dropApplicationSchema } from './drop-application-schema';
+import { assertDatabaseResetAllowed } from './guards';
 
 config();
 
-assertLocalDevOnly('database reset');
+/**
+ * Drop all tables and re-apply migrations. Does not seed data.
+ */
+export async function runDatabaseReset(): Promise<void> {
+  assertDatabaseResetAllowed('database reset');
 
-console.log('Dropping schema...');
-execSync('yarn schema:drop', { stdio: 'inherit' });
+  const dataSource = await createDataSource();
 
-console.log('Running migrations...');
-execSync('yarn migration:run', { stdio: 'inherit' });
+  try {
+    console.log('Dropping application schema (tables, enums, routines)...');
+    await dropApplicationSchema(dataSource);
+  } finally {
+    await dataSource.destroy();
+  }
 
-console.log('\nDatabase reset complete. Seeding development data...\n');
+  console.log('Running migrations...');
+  execSync('yarn migration:run', { stdio: 'inherit' });
+
+  console.log('\nDatabase reset complete (schema dropped, migrations applied, no seed data).');
+}
+
+if (require.main === module) {
+  runDatabaseReset().catch((error) => {
+    console.error('Database reset failed:', error);
+    process.exit(1);
+  });
+}

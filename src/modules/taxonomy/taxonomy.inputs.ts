@@ -7,7 +7,7 @@ export class CreateCategoryInput {
   @IsString()
   @IsNotEmpty()
   @Length(1, 255)
-  name: string;
+  name!: string;
 
   @Field(() => String, { nullable: true })
   @IsOptional()
@@ -20,13 +20,19 @@ export class UpdateCategoryInput {
   @Field()
   @IsString()
   @IsNotEmpty()
-  categoryId: string;
+  categoryId!: string;
 
   @Field()
   @IsString()
   @IsNotEmpty()
   @Length(1, 255)
-  name: string;
+  name!: string;
+
+  @Field({ nullable: true })
+  @IsOptional()
+  @IsString()
+  @Length(1, 255)
+  slug?: string;
 }
 
 @InputType()
@@ -34,12 +40,12 @@ export class SetCategoryImageInput {
   @Field()
   @IsString()
   @IsNotEmpty()
-  categoryId: string;
+  categoryId!: string;
 
   @Field()
   @IsString()
   @IsNotEmpty()
-  imageUrl: string;
+  imageUrl!: string;
 }
 
 @InputType()
@@ -48,7 +54,27 @@ export class CreateTagInput {
   @IsString()
   @IsNotEmpty()
   @Length(1, 255)
-  name: string;
+  name!: string;
+}
+
+@InputType()
+export class UpdateTagInput {
+  @Field()
+  @IsString()
+  @IsNotEmpty()
+  tagId!: string;
+
+  @Field()
+  @IsString()
+  @IsNotEmpty()
+  @Length(1, 255)
+  name!: string;
+
+  @Field({ nullable: true })
+  @IsOptional()
+  @IsString()
+  @Length(1, 255)
+  slug?: string;
 }
 
 @InputType()
@@ -57,7 +83,7 @@ export class CreatePetTypeInput {
   @IsString()
   @IsNotEmpty()
   @Length(1, 255)
-  name: string;
+  name!: string;
 
   @Field(() => String, { nullable: true })
   @IsOptional()
@@ -70,13 +96,19 @@ export class UpdatePetTypeInput {
   @Field()
   @IsString()
   @IsNotEmpty()
-  petTypeId: string;
+  petTypeId!: string;
 
   @Field()
   @IsString()
   @IsNotEmpty()
   @Length(1, 255)
-  name: string;
+  name!: string;
+
+  @Field({ nullable: true })
+  @IsOptional()
+  @IsString()
+  @Length(1, 255)
+  slug?: string;
 }
 
 @InputType()
@@ -84,12 +116,12 @@ export class SetPetTypeImageInput {
   @Field()
   @IsString()
   @IsNotEmpty()
-  petTypeId: string;
+  petTypeId!: string;
 
   @Field()
   @IsString()
   @IsNotEmpty()
-  imageUrl: string;
+  imageUrl!: string;
 }
 
 @InputType()
@@ -98,7 +130,27 @@ export class CreateBrandInput {
   @IsString()
   @IsNotEmpty()
   @Length(1, 255)
-  name: string;
+  name!: string;
+}
+
+@InputType()
+export class UpdateBrandInput {
+  @Field()
+  @IsString()
+  @IsNotEmpty()
+  brandId!: string;
+
+  @Field()
+  @IsString()
+  @IsNotEmpty()
+  @Length(1, 255)
+  name!: string;
+
+  @Field({ nullable: true })
+  @IsOptional()
+  @IsString()
+  @Length(1, 255)
+  slug?: string;
 }
 
 @InputType()
@@ -106,7 +158,7 @@ export class DeleteTaxonomyInput {
   @Field()
   @IsString()
   @IsNotEmpty()
-  id: string;
+  id!: string;
 
   @Field({ nullable: true })
   @IsOptional()

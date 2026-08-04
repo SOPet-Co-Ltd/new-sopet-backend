@@ -112,6 +112,10 @@ export class OmiseService {
     return this.request<OmiseRecipient>(`/recipients/${recipientId}`);
   }
 
+  async getTransfer(transferId: string): Promise<OmiseTransfer> {
+    return this.request<OmiseTransfer>(`/transfers/${transferId}`);
+  }
+
   async createTransfer(recipientId: string, amountSatang: number): Promise<OmiseTransfer> {
     return this.request<OmiseTransfer>('/transfers', 'POST', {
       recipient: recipientId,

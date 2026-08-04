@@ -1,6 +1,5 @@
-import { Args, Field, Float, InputType, Mutation, Query, Resolver } from '@nestjs/graphql';
+import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { BadRequestException, UseGuards } from '@nestjs/common';
-import { IsNotEmpty, IsString } from 'class-validator';
 import { PromotionsService } from './promotions.service';
 import { Public, CurrentUser, Roles } from '../../common/decorators';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -9,25 +8,16 @@ import { PromotionScope } from '../../database/entities/promotion.entity';
 import {
   PromotionType as PromotionGraphqlType,
   PromotionValidationResult,
+  ValidatePromotionsResult,
 } from '../../graphql/models/types';
 import { mapPromotion } from '../../graphql/models/mappers';
-import { CreatePromotionInput, UpdatePromotionInput } from './promotions.inputs';
+import {
+  CreatePromotionInput,
+  UpdatePromotionInput,
+  ValidatePromotionInput,
+  ValidatePromotionsInput,
+} from './promotions.inputs';
 import { StoresService } from '../stores/stores.service';
-import { StoreMemberRole } from '../../database/entities/store-member.entity';
-
-@InputType()
-export class ValidatePromotionInput {
-  @Field()
-  @IsString()
-  @IsNotEmpty()
-  code: string;
-
-  @Field(() => Float)
-  subtotal: number;
-
-  @Field({ nullable: true })
-  storeId?: string;
-}
 
 @Resolver()
 export class PromotionsResolver {
@@ -40,13 +30,39 @@ export class PromotionsResolver {
   @Public()
   async validatePromotion(
     @Args('input') input: ValidatePromotionInput,
+    @CurrentUser('id') customerId?: string,
   ): Promise<PromotionValidationResult> {
-    const { promotion, discountAmount } = await this.promotionsService.validateCode(
-      input.code,
+    const { promotion, discountAmount, freeUnits, ineligibilityReason } =
+      await this.promotionsService.validateCode(
+        input.code,
+        input.subtotal,
+        input.storeId,
+        customerId ? { customerId } : undefined,
+        { mode: 'preview', lines: input.lines, shippingFee: input.shippingFee },
+      );
+    return {
+      code: promotion.code,
+      name: promotion.name,
+      discountAmount,
+      ineligibilityReason: ineligibilityReason ?? null,
+      freeUnits: freeUnits ?? 0,
+    };
+  }
+
+  @Query(() => ValidatePromotionsResult)
+  @Public()
+  async validatePromotions(
+    @Args('input') input: ValidatePromotionsInput,
+    @CurrentUser('id') customerId?: string,
+  ): Promise<ValidatePromotionsResult> {
+    return this.promotionsService.validatePromotionsBatch(
+      input.promotions.map((t) => ({ id: t.id, code: t.code })),
       input.subtotal,
       input.storeId,
+      customerId ? { customerId } : undefined,
+      input.lines,
+      input.shippingFee,
     );
-    return { code: promotion.code, name: promotion.name, discountAmount };
   }
 
   @Query(() => [PromotionGraphqlType])
@@ -70,7 +86,7 @@ export class PromotionsResolver {
     @Args('storeId') storeId: string,
     @CurrentUser('id') userId: string,
   ): Promise<PromotionGraphqlType[]> {
-    await this.assertPromotionManager(userId, storeId);
+    await this.storesService.assertStoreAccess(userId, storeId);
     const promotions = await this.promotionsService.findByStore(storeId);
     return promotions.map(mapPromotion);
   }
@@ -104,7 +120,7 @@ export class PromotionsResolver {
         message: 'Store ID required for vendor promotions',
       });
     }
-    await this.assertPromotionManager(userId, targetStoreId);
+    await this.storesService.assertStoreAccess(userId, targetStoreId);
     const promotion = await this.promotionsService.create(
       input,
       PromotionScope.STORE,
@@ -125,7 +141,7 @@ export class PromotionsResolver {
   ): Promise<PromotionGraphqlType> {
     const promotion = await this.promotionsService.findOne(id);
     if (role === 'vendor') {
-      await this.assertPromotionManager(userId, promotion.storeId!);
+      await this.storesService.assertStoreAccess(userId, promotion.storeId!);
       this.promotionsService.assertCanManage(promotion, PromotionScope.STORE, storeId);
     } else {
       this.promotionsService.assertCanManage(promotion, PromotionScope.PLATFORM);
@@ -145,7 +161,7 @@ export class PromotionsResolver {
   ): Promise<boolean> {
     const promotion = await this.promotionsService.findOne(id);
     if (role === 'vendor') {
-      await this.assertPromotionManager(userId, promotion.storeId!);
+      await this.storesService.assertStoreAccess(userId, promotion.storeId!);
       this.promotionsService.assertCanManage(promotion, PromotionScope.STORE, storeId);
     } else {
       this.promotionsService.assertCanManage(promotion, PromotionScope.PLATFORM);
@@ -166,32 +182,12 @@ export class PromotionsResolver {
   ): Promise<PromotionGraphqlType> {
     const promotion = await this.promotionsService.findOne(id);
     if (role === 'vendor') {
-      await this.assertPromotionManager(userId, promotion.storeId!);
+      await this.storesService.assertStoreAccess(userId, promotion.storeId!);
       this.promotionsService.assertCanManage(promotion, PromotionScope.STORE, storeId);
     } else {
       this.promotionsService.assertCanManage(promotion, PromotionScope.PLATFORM);
     }
     const updated = await this.promotionsService.toggle(id, isActive);
     return mapPromotion(updated);
-  }
-
-  private async assertPromotionManager(userId: string, storeId: string): Promise<void> {
-    const isOwner = await this.storesService.isStoreOwner(userId, storeId);
-    if (isOwner) return;
-
-    const accessible = await this.storesService.getAccessibleStores(userId);
-    const membership = accessible.find((a) => a.store.id === storeId);
-    if (
-      membership &&
-      (membership.membershipRole === StoreMemberRole.MANAGER ||
-        membership.membershipRole === 'manager')
-    ) {
-      return;
-    }
-
-    throw new BadRequestException({
-      code: 'PROMOTION_MANAGER_REQUIRED',
-      message: 'Only store owner or manager can manage promotions',
-    });
   }
 }

@@ -14,7 +14,11 @@ import { ProductStatus } from '../src/database/entities/product.entity';
 describe('Public API products (e2e)', () => {
   let app: INestApplication<App>;
   let apiKeysService: { verifyAndAuthenticate: jest.Mock };
-  let productsService: { createWithVariants: jest.Mock };
+  let productsService: {
+    createWithVariants: jest.Mock;
+    updateProductForPublicApi: jest.Mock;
+    updateVariantStockPriceForPublicApi: jest.Mock;
+  };
 
   const storeId = 'store-1';
   const validBody = {
@@ -44,17 +48,25 @@ describe('Public API products (e2e)', () => {
         id: 'var-1',
         sku: 'TEST-CHK-001',
         stockQuantity: 10,
-        priceModifier: 0,
+        priceAdjustment: 0,
         options: { รสชาติ: 'ไก่' },
       },
       {
         id: 'var-2',
         sku: 'TEST-FISH-001',
         stockQuantity: 5,
-        priceModifier: 20,
+        priceAdjustment: 20,
         options: { รสชาติ: 'ปลา' },
       },
     ],
+  };
+
+  const updatedVariant = {
+    id: 'var-1',
+    sku: 'TEST-CHK-001',
+    stockQuantity: 20,
+    priceAdjustment: 50,
+    product: { basePrice: 499, storeId },
   };
 
   beforeEach(async () => {
@@ -68,6 +80,12 @@ describe('Public API products (e2e)', () => {
     };
     productsService = {
       createWithVariants: jest.fn().mockResolvedValue(createdProduct),
+      updateProductForPublicApi: jest.fn().mockResolvedValue({
+        ...createdProduct,
+        name: 'Updated name',
+        description: 'Updated desc',
+      }),
+      updateVariantStockPriceForPublicApi: jest.fn().mockResolvedValue(updatedVariant),
     };
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -96,6 +114,13 @@ describe('Public API products (e2e)', () => {
       .post(`/api/v1/stores/${storeId}/products`)
       .set('Authorization', 'Bearer sopet_sk_valid_key')
       .set(headers)
+      .send(body);
+  }
+
+  function authPatch(path: string, body: Record<string, unknown>) {
+    return request(app.getHttpServer())
+      .patch(`/api/v1/stores/${storeId}${path}`)
+      .set('Authorization', 'Bearer sopet_sk_valid_key')
       .send(body);
   }
 
@@ -207,5 +232,68 @@ describe('Public API products (e2e)', () => {
       'sopet_sk_header_key',
       storeId,
     );
+  });
+
+  it('PATCH /products/:productId updates product info', async () => {
+    const res = await authPatch('/products/prod-1', {
+      name: 'Updated name',
+      description: 'Updated desc',
+      petType: 'แมว',
+    }).expect(200);
+
+    expect(res.body.name).toBe('Updated name');
+    expect(productsService.updateProductForPublicApi).toHaveBeenCalledWith(
+      'prod-1',
+      storeId,
+      'user-1',
+      expect.objectContaining({
+        name: 'Updated name',
+        description: 'Updated desc',
+        petType: 'แมว',
+      }),
+    );
+  });
+
+  it('PATCH /products/:productId/variants/:variantId updates stock and price', async () => {
+    const res = await authPatch('/products/prod-1/variants/var-1', {
+      stock: 20,
+      price: 549,
+    }).expect(200);
+
+    expect(res.body.stockQuantity).toBe(20);
+    expect(res.body.price).toBe(549);
+    expect(productsService.updateVariantStockPriceForPublicApi).toHaveBeenCalledWith(
+      storeId,
+      'user-1',
+      {
+        variantId: 'var-1',
+        productId: 'prod-1',
+        stock: 20,
+        price: 549,
+      },
+    );
+  });
+
+  it('PATCH /variants/by-sku/:sku updates by sku', async () => {
+    await authPatch('/variants/by-sku/TEST-CHK-001', { stock: 7 }).expect(200);
+
+    expect(productsService.updateVariantStockPriceForPublicApi).toHaveBeenCalledWith(
+      storeId,
+      'user-1',
+      {
+        sku: 'TEST-CHK-001',
+        stock: 7,
+        price: undefined,
+      },
+    );
+  });
+
+  it('PATCH product returns 401 without API key', async () => {
+    await request(app.getHttpServer())
+      .patch(`/api/v1/stores/${storeId}/products/prod-1`)
+      .send({ name: 'X' })
+      .expect(401);
+
+    expect(productsService.updateProductForPublicApi).not.toHaveBeenCalled();
   });
 });

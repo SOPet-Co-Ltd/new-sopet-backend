@@ -7,12 +7,14 @@ import { OtpCode } from '../../database/entities/otp-code.entity';
 import { Store } from '../../database/entities/store.entity';
 import { StoreMember } from '../../database/entities/store-member.entity';
 import { PasswordResetToken } from '../../database/entities/password-reset-token.entity';
+import { EmailVerificationToken } from '../../database/entities/email-verification-token.entity';
 import { CustomerRepository } from '../../database/repositories/customer.repository';
 import { SmsService } from '../sms/sms.service';
 import { CartService } from '../cart/cart.service';
 import { GuestOrderLinkService } from '../orders/guest-order-link.service';
 import { EmailDeliveryService } from '../email/email-delivery.service';
 import { StorageService } from '../storage/storage.service';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuthService } from './auth.service';
 
 export interface AuthServiceTestMocks {
@@ -81,6 +83,10 @@ export function createAuthServiceTestProviders(mocks: AuthServiceTestMocks) {
       useValue: { findOne: jest.fn(), save: jest.fn(), delete: jest.fn() },
     },
     {
+      provide: getRepositoryToken(EmailVerificationToken),
+      useValue: { findOne: jest.fn(), save: jest.fn(), create: jest.fn() },
+    },
+    {
       provide: JwtService,
       useValue: { signAsync: jest.fn(async (p) => `tok-${p.type}`), verify: jest.fn() },
     },
@@ -98,5 +104,6 @@ export function createAuthServiceTestProviders(mocks: AuthServiceTestMocks) {
         assertFolderImageUrl: jest.fn().mockResolvedValue(undefined),
       },
     },
+    { provide: AuditLogsService, useValue: { log: jest.fn() } },
   ];
 }

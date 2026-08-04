@@ -362,19 +362,6 @@ export class UsersService {
     );
   }
 
-  private async finalizeExistingPaymentMethod(
-    method: SavedPaymentMethod,
-    shouldBeDefault: boolean,
-  ): Promise<SavedPaymentMethod> {
-    if (shouldBeDefault && !method.isDefault) {
-      await this.clearDefaultPaymentMethods(method.customerId);
-      method.isDefault = true;
-      return this.paymentMethodRepository.save(method);
-    }
-
-    return method;
-  }
-
   private async findActivePaymentMethodByDetails(
     customerId: string,
     details: {
@@ -488,7 +475,10 @@ export class UsersService {
 
     const existingActive = await this.findActivePaymentMethodByDetails(customerId, cardDetails);
     if (existingActive) {
-      return this.finalizeExistingPaymentMethod(existingActive, shouldBeDefault);
+      throw new ConflictException({
+        code: 'PAYMENT_METHOD_ALREADY_EXISTS',
+        message: 'This payment method already exists',
+      });
     }
 
     const savedCard = await this.paymentsService.saveCustomerCard(customerId, input.omiseCardToken);
@@ -498,12 +488,18 @@ export class UsersService {
       cardFingerprint: savedCard.cardFingerprint,
     });
     if (existingAfterOmise) {
-      return this.finalizeExistingPaymentMethod(existingAfterOmise, shouldBeDefault);
+      throw new ConflictException({
+        code: 'PAYMENT_METHOD_ALREADY_EXISTS',
+        message: 'This payment method already exists',
+      });
     }
 
     const activeMethod = await this.findActivePaymentMethod(customerId, savedCard);
     if (activeMethod) {
-      return this.finalizeExistingPaymentMethod(activeMethod, shouldBeDefault);
+      throw new ConflictException({
+        code: 'PAYMENT_METHOD_ALREADY_EXISTS',
+        message: 'This payment method already exists',
+      });
     }
 
     const restorableMethod = await this.findRestorablePaymentMethod(customerId, savedCard);
@@ -520,6 +516,7 @@ export class UsersService {
       restorableMethod.expiryMonth = savedCard.expiryMonth;
       restorableMethod.expiryYear = savedCard.expiryYear;
       restorableMethod.isDefault = shouldBeDefault;
+      restorableMethod.deletedAt = null;
 
       return this.paymentMethodRepository.save(restorableMethod);
     }
@@ -553,7 +550,10 @@ export class UsersService {
             cardFingerprint: savedCard.cardFingerprint,
           })) ?? (await this.findActivePaymentMethod(customerId, savedCard));
         if (existing) {
-          return this.finalizeExistingPaymentMethod(existing, shouldBeDefault);
+          throw new ConflictException({
+            code: 'PAYMENT_METHOD_ALREADY_EXISTS',
+            message: 'This payment method already exists',
+          });
         }
       }
 

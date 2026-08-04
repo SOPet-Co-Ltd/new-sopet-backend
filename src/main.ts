@@ -1,3 +1,4 @@
+import { join } from 'path';
 import { configurePgUtcTimestampParsing } from './database/pg-timestamp.util';
 
 configurePgUtcTimestampParsing();
@@ -25,6 +26,9 @@ async function bootstrap() {
   app.useBodyParser('json', { limit: BODY_LIMIT });
   app.useBodyParser('urlencoded', { extended: true, limit: BODY_LIMIT });
 
+  // Public email/brand assets (e.g. /images/email/sopet-logo-white.png)
+  app.useStaticAssets(join(process.cwd(), 'public'));
+
   const configService = app.get(ConfigService);
 
   const corsOrigins = configService.get<string[]>('app.corsOrigins');
@@ -40,7 +44,10 @@ async function bootstrap() {
   const port = configService.get<number>('app.port') || 3002;
   await app.listen(port);
 
-  const apiUrl = process.env.API_URL?.replace(/\/$/, '') || `http://localhost:${port}`;
+  const apiUrl =
+    configService.get<string>('app.apiUrl') ||
+    process.env.API_URL?.replace(/\/$/, '') ||
+    `http://localhost:${port}`;
 
   console.log(`🚀 SOPet API: ${apiUrl}/graphql`);
   console.log(`🔌 GraphQL subscriptions: ${apiUrl.replace(/^http/, 'ws')}/graphql`);

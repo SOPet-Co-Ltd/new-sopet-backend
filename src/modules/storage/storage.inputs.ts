@@ -11,6 +11,7 @@ export const UPLOAD_FOLDERS = [
   'ads',
   'categories',
   'pet-types',
+  'login-images',
 ] as const;
 export type UploadFolder = (typeof UPLOAD_FOLDERS)[number];
 
@@ -19,7 +20,7 @@ export class UploadImageInput {
   @Field()
   @IsString()
   @IsNotEmpty()
-  base64: string;
+  base64!: string;
 
   @Field({ nullable: true })
   @IsOptional()

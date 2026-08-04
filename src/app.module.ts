@@ -12,6 +12,7 @@ import thaibulksmsConfig from './config/thaibulksms.config';
 import redisConfig from './config/redis.config';
 import searchConfig from './config/search.config';
 import paymentConfig from './config/payment.config';
+import storeHoldConfig from './config/store-hold.config';
 
 // Filters, Interceptors, Pipes
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
@@ -19,6 +20,7 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { ValidationPipe } from './common/pipes/validation.pipe';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { StoreStatusGuard } from './modules/auth/guards/store-status.guard';
+import { VendorStatusGuard } from './modules/auth/guards/vendor-status.guard';
 import { CustomerStatusGuard } from './modules/auth/guards/customer-status.guard';
 
 // Modules
@@ -39,6 +41,7 @@ import { AdminTeamModule } from './modules/admin-team/admin-team.module';
 import { PublicApiModule } from './modules/public-api/public-api.module';
 import { SearchModule } from './modules/search/search.module';
 import { HealthModule } from './modules/health/health.module';
+import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
 import { getPostgresSslOptions } from './database/postgres-ssl.util';
 
 @Module({
@@ -57,6 +60,7 @@ import { getPostgresSslOptions } from './database/postgres-ssl.util';
         redisConfig,
         searchConfig,
         paymentConfig,
+        storeHoldConfig,
       ],
     }),
 
@@ -97,6 +101,7 @@ import { getPostgresSslOptions } from './database/postgres-ssl.util';
     SearchModule,
     AppGraphqlModule,
     HealthModule,
+    AuditLogsModule,
   ],
   providers: [
     // Global exception filter
@@ -123,6 +128,11 @@ import { getPostgresSslOptions } from './database/postgres-ssl.util';
     {
       provide: APP_GUARD,
       useExisting: StoreStatusGuard,
+    },
+    // Global vendor-account suspension guard
+    {
+      provide: APP_GUARD,
+      useExisting: VendorStatusGuard,
     },
     // Global customer-suspension guard
     {

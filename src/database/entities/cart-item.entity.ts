@@ -16,33 +16,33 @@ import { ProductVariant } from './product-variant.entity';
 @Index(['cartId', 'variantId'], { unique: true })
 export class CartItem {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'cart_id', type: 'uuid' })
   @IsNotEmpty()
-  cartId: string;
+  cartId!: string;
 
   @Column({ name: 'variant_id', type: 'uuid' })
   @IsNotEmpty()
-  variantId: string;
+  variantId!: string;
 
   @Column({ name: 'quantity', type: 'integer' })
   @IsNumber()
   @Min(1)
-  quantity: number;
+  quantity!: number;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamp' })
-  updatedAt: Date;
+  updatedAt!: Date;
 
   // Relations
   @ManyToOne(() => Cart, (cart) => cart.items, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'cart_id' })
-  cart: Cart;
+  cart!: Cart;
 
   @ManyToOne(() => ProductVariant, (variant) => variant.cartItems)
   @JoinColumn({ name: 'variant_id' })
-  productVariant: ProductVariant;
+  productVariant!: ProductVariant;
 }

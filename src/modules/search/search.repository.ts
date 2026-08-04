@@ -15,6 +15,9 @@ import type {
 } from './search.types';
 import { VectorSearchSupport } from './vector-search.support';
 import {
+  lexicalNameMatchExpression,
+  nameContainsExpression,
+  queryGraphemeLength,
   resolveSuggestionMinSimilarity,
   trigramMatchExpression,
   trigramScoreExpression,
@@ -123,10 +126,13 @@ export class SearchRepository {
       .select('product.id', 'id')
       .addSelect(trigramScoreExpression('product.name', ':smartTrigramQuery'), 'trigram_rank')
       .andWhere(
-        trigramMatchExpression('product.name', ':smartTrigramQuery', ':smartMinSimilarity'),
+        `(${trigramMatchExpression('product.name', ':smartTrigramQuery', ':smartMinSimilarity')}
+          OR ${nameContainsExpression('product.name', ':smartTrigramContains')}
+          OR ${nameContainsExpression('product.description', ':smartTrigramContains')})`,
         {
           smartTrigramQuery: expandedQuery,
           smartMinSimilarity: minSimilarity,
+          smartTrigramContains: `%${expandedQuery}%`,
         },
       );
 
@@ -297,22 +303,32 @@ export class SearchRepository {
 
     if (search?.trim() && searchMatch) {
       const ftsClause = `${alias}.search_vector @@ plainto_tsquery(sopet_search_ts_config(), :smartSearchQuery)`;
-      queryBuilder.setParameter('smartSearchQuery', searchMatch.expandedQuery);
+      // Substring ILIKE covers Thai/English name fragments when FTS tokenization
+      // (especially `simple` fallback without `thai` dictionaries) misses mid-string matches.
+      const containsClause = `(${nameContainsExpression(`${alias}.name`, ':smartContainsQuery')} OR ${nameContainsExpression(`${alias}.description`, ':smartContainsQuery')})`;
+      queryBuilder
+        .setParameter('smartSearchQuery', searchMatch.expandedQuery)
+        .setParameter('smartContainsQuery', `%${search.trim()}%`);
 
       if (searchMatch.includeTrigram) {
         queryBuilder
           .andWhere(
-            `(${ftsClause} OR ${trigramMatchExpression(`${alias}.name`, ':smartTrigramQuery', ':smartMinSimilarity')})`,
+            `(${ftsClause} OR ${trigramMatchExpression(`${alias}.name`, ':smartTrigramQuery', ':smartMinSimilarity')} OR ${containsClause})`,
           )
           .setParameter('smartTrigramQuery', searchMatch.expandedQuery)
           .setParameter('smartMinSimilarity', searchMatch.minSimilarity);
       } else {
-        queryBuilder.andWhere(ftsClause);
+        queryBuilder.andWhere(`(${ftsClause} OR ${containsClause})`);
       }
     } else if (search?.trim()) {
       queryBuilder.andWhere(
-        `${alias}.search_vector @@ plainto_tsquery(sopet_search_ts_config(), :smartSearchQuery)`,
-        { smartSearchQuery: search.trim() },
+        `(${alias}.search_vector @@ plainto_tsquery(sopet_search_ts_config(), :smartSearchQuery)
+          OR ${nameContainsExpression(`${alias}.name`, ':smartContainsQuery')}
+          OR ${nameContainsExpression(`${alias}.description`, ':smartContainsQuery')})`,
+        {
+          smartSearchQuery: search.trim(),
+          smartContainsQuery: `%${search.trim()}%`,
+        },
       );
     }
 
@@ -441,10 +457,16 @@ export class SearchRepository {
       .addSelect(trigramScoreExpression('product.name', ':suggestQuery'), 'sim')
       .andWhere('product.status = :publishedStatus', { publishedStatus: ProductStatus.PUBLISHED })
       .andWhere(
-        `(product.name ILIKE :suggestPrefix OR ${trigramMatchExpression('product.name', ':suggestQuery', ':suggestMinSimilarity')})`,
+        lexicalNameMatchExpression('product.name', {
+          containsParam: ':suggestContains',
+          prefixParam: ':suggestPrefix',
+          queryParam: ':suggestQuery',
+          minSimilarityParam: ':suggestMinSimilarity',
+        }),
         {
           suggestQuery: query,
           suggestPrefix: `${query}%`,
+          suggestContains: `%${query}%`,
           suggestMinSimilarity: minSimilarity,
         },
       )
@@ -469,10 +491,16 @@ export class SearchRepository {
       .addSelect(trigramScoreExpression('product.name', ':suggestQuery'), 'sim')
       .andWhere('product.status = :publishedStatus', { publishedStatus: ProductStatus.PUBLISHED })
       .andWhere(
-        `(product.name ILIKE :suggestPrefix OR ${trigramMatchExpression('product.name', ':suggestQuery', ':suggestMinSimilarity')})`,
+        lexicalNameMatchExpression('product.name', {
+          containsParam: ':suggestContains',
+          prefixParam: ':suggestPrefix',
+          queryParam: ':suggestQuery',
+          minSimilarityParam: ':suggestMinSimilarity',
+        }),
         {
           suggestQuery: query,
           suggestPrefix: `${query}%`,
+          suggestContains: `%${query}%`,
           suggestMinSimilarity: minSimilarity,
         },
       )
@@ -488,7 +516,7 @@ export class SearchRepository {
 
   async suggestFuzzyQueries(query: string, limit: number): Promise<string[]> {
     const trimmed = query.trim();
-    if (trimmed.length < 2) {
+    if (queryGraphemeLength(trimmed) < 2) {
       return [];
     }
 
@@ -497,10 +525,20 @@ export class SearchRepository {
       .select('DISTINCT product.name', 'name')
       .addSelect(trigramScoreExpression('product.name', ':suggestQuery'), 'sim')
       .andWhere('product.status = :publishedStatus', { publishedStatus: ProductStatus.PUBLISHED })
-      .andWhere(trigramMatchExpression('product.name', ':suggestQuery', ':suggestMinSimilarity'), {
-        suggestQuery: trimmed,
-        suggestMinSimilarity: minSimilarity,
-      })
+      .andWhere(
+        lexicalNameMatchExpression('product.name', {
+          containsParam: ':suggestContains',
+          prefixParam: ':suggestPrefix',
+          queryParam: ':suggestQuery',
+          minSimilarityParam: ':suggestMinSimilarity',
+        }),
+        {
+          suggestQuery: trimmed,
+          suggestPrefix: `${trimmed}%`,
+          suggestContains: `%${trimmed}%`,
+          suggestMinSimilarity: minSimilarity,
+        },
+      )
       .orderBy('sim', 'DESC')
       .addOrderBy('product.name', 'ASC')
       .limit(limit)

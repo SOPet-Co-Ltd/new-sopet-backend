@@ -7,8 +7,6 @@ import { Repository } from 'typeorm';
 import { PayoutsService } from './payouts.service';
 import { PAYOUT_SCHEDULER_JOB, PAYOUT_SCHEDULER_QUEUE } from './payout-scheduler.constants';
 import { Store, PayoutSchedule, StoreStatus } from '../../database/entities/store.entity';
-import { OrderItem } from '../../database/entities/order-item.entity';
-import { Order, OrderStatus } from '../../database/entities/order.entity';
 
 @Injectable()
 export class PayoutSchedulerService implements OnModuleInit, OnModuleDestroy {
@@ -19,8 +17,6 @@ export class PayoutSchedulerService implements OnModuleInit, OnModuleDestroy {
     private readonly configService: ConfigService,
     @InjectRepository(Store)
     private readonly storeRepository: Repository<Store>,
-    @InjectRepository(OrderItem)
-    private readonly orderItemRepository: Repository<OrderItem>,
     @Optional()
     @InjectQueue(PAYOUT_SCHEDULER_QUEUE)
     private readonly payoutQueue?: Queue,
@@ -69,7 +65,9 @@ export class PayoutSchedulerService implements OnModuleInit, OnModuleDestroy {
       },
     });
 
+    const minimumPayoutAmount = this.configService.get<number>('payout.minPayoutAmount') ?? 500;
     const now = new Date();
+
     for (const store of stores) {
       if (store.payoutSchedule === PayoutSchedule.MANUAL) {
         continue;
@@ -79,14 +77,22 @@ export class PayoutSchedulerService implements OnModuleInit, OnModuleDestroy {
         continue;
       }
 
-      const balance = await this.calculateStoreBalance(store.id);
-      if (balance <= 0) {
-        continue;
-      }
-
       try {
-        await this.payoutsService.createManualPayout(store.id, balance);
-        this.logger.log(`Scheduled payout created for store ${store.id}: ฿${balance}`);
+        const summary = await this.payoutsService.getPayoutSummary(store.id);
+        if (summary.availableBalance < minimumPayoutAmount) {
+          continue;
+        }
+
+        if (summary.pendingPayoutAmount > 0) {
+          continue;
+        }
+
+        await this.payoutsService.createManualPayout(store.id, summary.availableBalance, {
+          notes: 'Scheduled payout',
+        });
+        this.logger.log(
+          `Scheduled payout created for store ${store.id}: ฿${summary.availableBalance}`,
+        );
       } catch (err) {
         this.logger.error(`Scheduled payout failed for store ${store.id}`, err);
       }
@@ -100,25 +106,14 @@ export class PayoutSchedulerService implements OnModuleInit, OnModuleDestroy {
       case PayoutSchedule.WEEKLY:
         return now.getDay() === 1;
       case PayoutSchedule.BIWEEKLY:
-        return now.getDate() <= 7 || (now.getDate() >= 15 && now.getDate() <= 21);
+        // Twice a month, on fixed anchor days - not a 1-7/15-21 "window" (which matched
+        // every day in those ranges since this cron runs daily, firing ~14 payouts/month
+        // instead of 2 once a payout cleared and new balance accrued mid-window).
+        return now.getDate() === 1 || now.getDate() === 15;
       case PayoutSchedule.MONTHLY:
         return now.getDate() === 1;
       default:
         return false;
     }
-  }
-
-  private async calculateStoreBalance(storeId: string): Promise<number> {
-    const result = await this.orderItemRepository
-      .createQueryBuilder('item')
-      .innerJoin(Order, 'order', 'order.id = item.order_id')
-      .where('item.store_id = :storeId', { storeId })
-      .andWhere('order.status IN (:...statuses)', {
-        statuses: [OrderStatus.PAID, OrderStatus.DELIVERED],
-      })
-      .select('COALESCE(SUM(item.subtotal), 0)', 'total')
-      .getRawOne<{ total: string }>();
-
-    return Number(result?.total ?? 0);
   }
 }

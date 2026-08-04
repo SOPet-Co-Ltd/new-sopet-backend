@@ -5,5 +5,6 @@ export default registerAs('thaibulksms', () => ({
   apiSecret: process.env.THAIBULKSMS_API_SECRET || '',
   sender: process.env.THAIBULKSMS_SENDER || 'sopet',
   force: process.env.THAIBULKSMS_FORCE || 'corporate',
-  shortenUrl: process.env.THAIBULKSMS_SHORTEN_URL === 'false',
+  shortenUrl: process.env.THAIBULKSMS_SHORTEN_URL === 'true',
+  otpLogOnly: process.env.SMS_OTP_LOG_ONLY === 'true',
 }));

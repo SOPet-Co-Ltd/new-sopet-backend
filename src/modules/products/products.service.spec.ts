@@ -1,12 +1,15 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ProductsService } from './products.service';
 import { ProductStatus } from '../../database/entities/product.entity';
+import { StoreStatus } from '../../database/entities/store.entity';
+import { VariantRemovalBlockReason } from './variant-removal.types';
 
 describe('ProductsService', () => {
   let service: ProductsService;
   let productRepository: {
     findOne: jest.Mock;
     findOneOrFail: jest.Mock;
+    find: jest.Mock;
     create: jest.Mock;
     save: jest.Mock;
     createQueryBuilder: jest.Mock;
@@ -27,17 +30,32 @@ describe('ProductsService', () => {
     save: jest.Mock;
     softDelete: jest.Mock;
   };
+  let orderItemRepository: {
+    find: jest.Mock;
+  };
+  let cartItemRepository: {
+    find: jest.Mock;
+  };
   let storesService: {
     userHasStoreAccess: jest.Mock;
     resolveDefaultStoreId: jest.Mock;
+    isStoreSuspended: jest.Mock;
   };
   let taxonomyService: {
     getApprovedCategory: jest.Mock;
     getApprovedTags: jest.Mock;
     getApprovedCategoryByName: jest.Mock;
     getApprovedTagsByNames: jest.Mock;
+    getApprovedPetTypeByName: jest.Mock;
+    getApprovedBrandByName: jest.Mock;
+    getApprovedPetType: jest.Mock;
+    getApprovedBrand: jest.Mock;
     resolveApprovedCategoryFilter: jest.Mock;
     resolveApprovedTagFilter: jest.Mock;
+  };
+  let shippingOptionsService: {
+    hasShippingOptions: jest.Mock;
+    countByStore: jest.Mock;
   };
 
   const product = {
@@ -51,23 +69,29 @@ describe('ProductsService', () => {
   beforeEach(() => {
     productRepository = {
       findOne: jest.fn(),
-      create: jest.fn((data) => data),
-      save: jest.fn(async (data) => ({ ...data, id: data.id ?? 'prod-1' })),
+      findOneOrFail: jest.fn(),
+      find: jest.fn().mockResolvedValue([]),
+      create: jest.fn((data: Record<string, unknown>) => data),
+      save: jest.fn((data: Record<string, unknown>) =>
+        Promise.resolve({ ...data, id: (data.id as string | undefined) ?? 'prod-1' }),
+      ),
       createQueryBuilder: jest.fn(),
       softDelete: jest.fn(),
     };
     variantRepository = {
       findOne: jest.fn(),
-      create: jest.fn((data) => data),
-      save: jest.fn(async (data) => ({ ...data, id: 'var-1' })),
+      create: jest.fn((data: Record<string, unknown>) => data),
+      save: jest.fn((data: Record<string, unknown>) => Promise.resolve({ ...data, id: 'var-1' })),
       softDelete: jest.fn(),
     };
     imageRepository = {
       find: jest.fn().mockResolvedValue([]),
       findOne: jest.fn(),
-      findOneOrFail: jest.fn(async ({ where }) => ({ id: where.id })),
-      create: jest.fn((data) => data),
-      save: jest.fn(async (data) => ({ ...data, id: 'img-1' })),
+      findOneOrFail: jest.fn((opts: { where: { id: string } }) =>
+        Promise.resolve({ id: opts.where.id }),
+      ),
+      create: jest.fn((data: Record<string, unknown>) => data),
+      save: jest.fn((data: Record<string, unknown>) => Promise.resolve({ ...data, id: 'img-1' })),
       softDelete: jest.fn(),
       createQueryBuilder: jest.fn(() => ({
         update: jest.fn().mockReturnThis(),
@@ -77,27 +101,45 @@ describe('ProductsService', () => {
         execute: jest.fn().mockResolvedValue(undefined),
       })),
     };
+    orderItemRepository = {
+      find: jest.fn().mockResolvedValue([]),
+    };
+    cartItemRepository = {
+      find: jest.fn().mockResolvedValue([]),
+    };
     storesService = {
-      userHasStoreAccess: jest.fn(async (userId: string, storeId: string) => {
-        return userId === 'user-1' && storeId === 'store-1';
-      }),
-      resolveDefaultStoreId: jest.fn(async () => 'store-1'),
+      userHasStoreAccess: jest.fn((userId: string, storeId: string) =>
+        Promise.resolve(userId === 'user-1' && storeId === 'store-1'),
+      ),
+      resolveDefaultStoreId: jest.fn(() => Promise.resolve('store-1')),
+      isStoreSuspended: jest.fn(() => Promise.resolve(false)),
     };
     taxonomyService = {
       getApprovedCategory: jest.fn(),
-      getApprovedTags: jest.fn(async () => []),
+      getApprovedTags: jest.fn(() => Promise.resolve([])),
       getApprovedCategoryByName: jest.fn(),
-      getApprovedTagsByNames: jest.fn(async () => []),
-      resolveApprovedCategoryFilter: jest.fn(async () => null),
-      resolveApprovedTagFilter: jest.fn(async () => null),
+      getApprovedTagsByNames: jest.fn(() => Promise.resolve([])),
+      getApprovedPetTypeByName: jest.fn(),
+      getApprovedBrandByName: jest.fn(),
+      getApprovedPetType: jest.fn(),
+      getApprovedBrand: jest.fn(),
+      resolveApprovedCategoryFilter: jest.fn(() => Promise.resolve(null)),
+      resolveApprovedTagFilter: jest.fn(() => Promise.resolve(null)),
+    };
+    shippingOptionsService = {
+      hasShippingOptions: jest.fn(() => Promise.resolve(true)),
+      countByStore: jest.fn(() => Promise.resolve(1)),
     };
 
     service = new ProductsService(
       productRepository as never,
       variantRepository as never,
       imageRepository as never,
+      orderItemRepository as never,
+      cartItemRepository as never,
       storesService as never,
       taxonomyService as never,
+      shippingOptionsService as never,
     );
   });
 
@@ -129,7 +171,7 @@ describe('ProductsService', () => {
 
   it('updates own product', async () => {
     productRepository.findOne.mockResolvedValue({ ...product });
-    productRepository.save.mockImplementation(async (p) => p);
+    productRepository.save.mockImplementation((p: Record<string, unknown>) => p);
 
     const result = await service.update('prod-1', 'user-1', {
       name: 'Premium Dog Food',
@@ -140,7 +182,7 @@ describe('ProductsService', () => {
 
   it('preserves status when update omits status (undefined)', async () => {
     productRepository.findOne.mockResolvedValue({ ...product, status: ProductStatus.DRAFT });
-    productRepository.save.mockImplementation(async (p) => p);
+    productRepository.save.mockImplementation((p: Record<string, unknown>) => p);
 
     const result = await service.update('prod-1', 'user-1', {
       name: 'Premium Dog Food',
@@ -149,6 +191,21 @@ describe('ProductsService', () => {
 
     expect(result.name).toBe('Premium Dog Food');
     expect(result.status).toBe(ProductStatus.DRAFT);
+  });
+
+  it('forbids updating a product when its store is suspended, even for a vendor with valid store access', async () => {
+    productRepository.findOne.mockResolvedValue({ ...product });
+    storesService.isStoreSuspended.mockResolvedValue(true);
+
+    await expect(
+      service.update('prod-1', 'user-1', { name: 'Hacked while suspended' }),
+    ).rejects.toMatchObject({ response: { code: 'STORE_SUSPENDED' } });
+  });
+
+  it('still allows read-only store resolution (resolveActiveStoreId) while the store is suspended', async () => {
+    storesService.isStoreSuspended.mockResolvedValue(true);
+
+    await expect(service.resolveActiveStoreId('user-1', 'store-1')).resolves.toBe('store-1');
   });
 
   it('forces draft status on create even when status is requested', async () => {
@@ -173,7 +230,23 @@ describe('ProductsService', () => {
       variants: [],
       categoryId: null,
     });
-    productRepository.save.mockImplementation(async (p) => p);
+    productRepository.save.mockImplementation((p: Record<string, unknown>) => p);
+
+    await expect(
+      service.update('prod-1', 'user-1', { status: ProductStatus.PUBLISHED }),
+    ).rejects.toMatchObject({ response: { code: 'PRODUCT_NOT_PUBLISHABLE' } });
+  });
+
+  it('rejects publishing when store has no shipping options', async () => {
+    productRepository.findOne.mockResolvedValue({
+      ...product,
+      basePrice: 299,
+      categoryId: 'cat-1',
+      petTypeId: 'pet-1',
+      images: [{ id: 'img-1' }],
+      variants: [{ id: 'var-1', stockQuantity: 5, priceAdjustment: 0 }],
+    });
+    shippingOptionsService.hasShippingOptions.mockResolvedValue(false);
 
     await expect(
       service.update('prod-1', 'user-1', { status: ProductStatus.PUBLISHED }),
@@ -189,7 +262,7 @@ describe('ProductsService', () => {
       images: [{ id: 'img-1' }],
       variants: [{ id: 'var-1', stockQuantity: 5, priceAdjustment: 0 }],
     });
-    productRepository.save.mockImplementation(async (p) => p);
+    productRepository.save.mockImplementation((p: Record<string, unknown>) => p);
 
     const result = await service.update('prod-1', 'user-1', {
       status: ProductStatus.PUBLISHED,
@@ -207,6 +280,60 @@ describe('ProductsService', () => {
     await expect(service.findOnePublished('prod-1')).rejects.toThrow(NotFoundException);
   });
 
+  it('hides published products from suspended stores on findOnePublished (AC-002)', async () => {
+    productRepository.findOne.mockResolvedValue({
+      ...product,
+      status: ProductStatus.PUBLISHED,
+      store: { id: 'store-1', status: StoreStatus.SUSPENDED },
+    });
+
+    await expect(service.findOnePublished('prod-1')).rejects.toMatchObject({
+      response: { code: 'PRODUCT_NOT_FOUND' },
+    });
+  });
+
+  it('returns published products from approved stores on findOnePublished', async () => {
+    const published = {
+      ...product,
+      status: ProductStatus.PUBLISHED,
+      store: { id: 'store-1', status: StoreStatus.APPROVED },
+    };
+    productRepository.findOne.mockResolvedValue(published);
+
+    await expect(service.findOnePublished('prod-1')).resolves.toEqual(published);
+  });
+
+  it('hides published products from suspended stores on findBySlugPublished (AC-002)', async () => {
+    productRepository.findOne.mockResolvedValue({
+      ...product,
+      status: ProductStatus.PUBLISHED,
+      store: { id: 'store-1', status: StoreStatus.SUSPENDED },
+    });
+
+    await expect(service.findBySlugPublished('store-1', 'dog-food')).rejects.toMatchObject({
+      response: { code: 'PRODUCT_NOT_FOUND' },
+    });
+  });
+
+  it('filters suspended-store products from findPublishedByIds (AC-001)', async () => {
+    productRepository.find.mockResolvedValue([
+      {
+        id: 'prod-approved',
+        status: ProductStatus.PUBLISHED,
+        store: { id: 'store-a', status: StoreStatus.APPROVED },
+      },
+      {
+        id: 'prod-suspended',
+        status: ProductStatus.PUBLISHED,
+        store: { id: 'store-s', status: StoreStatus.SUSPENDED },
+      },
+    ]);
+
+    const result = await service.findPublishedByIds(['prod-suspended', 'prod-approved']);
+
+    expect(result.map((p) => p.id)).toEqual(['prod-approved']);
+  });
+
   it('publish sets status when checklist passes', async () => {
     productRepository.findOne.mockResolvedValue({
       ...product,
@@ -216,7 +343,7 @@ describe('ProductsService', () => {
       images: [{ id: 'img-1' }],
       variants: [{ id: 'var-1', stockQuantity: 5, priceAdjustment: 0 }],
     });
-    productRepository.save.mockImplementation(async (p) => p);
+    productRepository.save.mockImplementation((p: Record<string, unknown>) => p);
 
     const result = await service.publish('prod-1', 'user-1');
     expect(result.status).toBe(ProductStatus.PUBLISHED);
@@ -228,8 +355,9 @@ describe('ProductsService', () => {
 
     await expect(
       service.addVariant('prod-1', 'user-1', {
+        name: 'Default',
         sku: 'SKU-1',
-        price: 100,
+        priceModifier: 100,
         stockQuantity: 5,
       }),
     ).rejects.toMatchObject({ response: { code: 'SKU_EXISTS' } });
@@ -240,8 +368,9 @@ describe('ProductsService', () => {
     variantRepository.findOne.mockResolvedValue(null);
 
     const variant = await service.addVariant('prod-1', 'user-1', {
+      name: 'New Variant',
       sku: 'SKU-NEW',
-      price: 150,
+      priceModifier: 150,
       stockQuantity: 10,
     });
 
@@ -430,7 +559,7 @@ describe('ProductsService', () => {
       stockQuantity: 5,
     };
     variantRepository.findOne.mockResolvedValue(variant);
-    variantRepository.save.mockImplementation(async (v) => v);
+    variantRepository.save.mockImplementation((v: Record<string, unknown>) => v);
 
     const result = await service.updateVariant('var-1', 'user-1', {
       stockQuantity: 10,
@@ -444,9 +573,140 @@ describe('ProductsService', () => {
       product: { storeId: 'store-other' },
     });
 
-    await expect(service.updateVariant('var-1', 'user-1', { price: 120 })).rejects.toThrow(
+    await expect(service.updateVariant('var-1', 'user-1', { priceModifier: 120 })).rejects.toThrow(
       ForbiddenException,
     );
+  });
+
+  describe('public API product / variant updates', () => {
+    it('findOneInStore returns product when store matches', async () => {
+      productRepository.findOne.mockResolvedValue({
+        ...product,
+        storeId: 'store-1',
+        variants: [],
+      });
+
+      const result = await service.findOneInStore('prod-1', 'store-1');
+      expect(result.id).toBe('prod-1');
+    });
+
+    it('findOneInStore returns 404 when product is in another store', async () => {
+      productRepository.findOne.mockResolvedValue({
+        ...product,
+        storeId: 'store-other',
+        variants: [],
+      });
+
+      await expect(service.findOneInStore('prod-1', 'store-1')).rejects.toThrow(NotFoundException);
+    });
+
+    it('updateProductForPublicApi resolves taxonomy names and updates', async () => {
+      productRepository.findOne.mockResolvedValue({
+        ...product,
+        storeId: 'store-1',
+        status: ProductStatus.DRAFT,
+        variants: [],
+      });
+      taxonomyService.getApprovedCategoryByName.mockResolvedValue({
+        id: 'cat-1',
+        name: 'อาหารแมว',
+      });
+      taxonomyService.getApprovedPetTypeByName.mockResolvedValue({ id: 'pet-1', name: 'แมว' });
+      taxonomyService.getApprovedBrandByName.mockResolvedValue({ id: 'brand-1', name: 'RC' });
+      taxonomyService.getApprovedCategory.mockResolvedValue({ id: 'cat-1', name: 'อาหารแมว' });
+      taxonomyService.getApprovedPetType.mockResolvedValue({ id: 'pet-1', name: 'แมว' });
+      taxonomyService.getApprovedBrand.mockResolvedValue({ id: 'brand-1', name: 'RC' });
+
+      await service.updateProductForPublicApi('prod-1', 'store-1', 'user-1', {
+        name: 'Updated',
+        category: 'อาหารแมว',
+        petType: 'แมว',
+        brand: 'RC',
+      });
+
+      expect(taxonomyService.getApprovedCategoryByName).toHaveBeenCalledWith('อาหารแมว');
+      expect(productRepository.save).toHaveBeenCalled();
+    });
+
+    it('updateProductForPublicApi rejects empty patch', async () => {
+      await expect(
+        service.updateProductForPublicApi('prod-1', 'store-1', 'user-1', {}),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('updateVariantStockPriceForPublicApi sets stock and absolute price', async () => {
+      const variant = {
+        id: 'var-1',
+        productId: 'prod-1',
+        sku: 'SKU-1',
+        stockQuantity: 5,
+        priceAdjustment: 0,
+        product: { storeId: 'store-1', basePrice: 499 },
+      };
+      variantRepository.findOne.mockResolvedValue(variant);
+      variantRepository.save.mockImplementation((v: Record<string, unknown>) => Promise.resolve(v));
+
+      const result = await service.updateVariantStockPriceForPublicApi('store-1', 'user-1', {
+        variantId: 'var-1',
+        productId: 'prod-1',
+        stock: 20,
+        price: 549,
+      });
+
+      expect(result.stockQuantity).toBe(20);
+      expect(result.priceAdjustment).toBe(50);
+    });
+
+    it('updateVariantStockPriceForPublicApi allows price below basePrice', async () => {
+      const variant = {
+        id: 'var-1',
+        productId: 'prod-1',
+        sku: 'SKU-1',
+        stockQuantity: 5,
+        priceAdjustment: 0,
+        product: { storeId: 'store-1', basePrice: 499 },
+      };
+      variantRepository.findOne.mockResolvedValue(variant);
+      variantRepository.save.mockImplementation((v: Record<string, unknown>) => Promise.resolve(v));
+
+      const result = await service.updateVariantStockPriceForPublicApi('store-1', 'user-1', {
+        sku: 'SKU-1',
+        price: 450,
+      });
+
+      expect(result.priceAdjustment).toBe(-49);
+    });
+
+    it('updateVariantStockPriceForPublicApi returns 404 for wrong store', async () => {
+      variantRepository.findOne.mockResolvedValue({
+        id: 'var-1',
+        productId: 'prod-1',
+        product: { storeId: 'store-other', basePrice: 100 },
+      });
+
+      await expect(
+        service.updateVariantStockPriceForPublicApi('store-1', 'user-1', {
+          variantId: 'var-1',
+          stock: 1,
+        }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('updateVariantStockPriceForPublicApi returns 404 when productId mismatches', async () => {
+      variantRepository.findOne.mockResolvedValue({
+        id: 'var-1',
+        productId: 'prod-other',
+        product: { storeId: 'store-1', basePrice: 100 },
+      });
+
+      await expect(
+        service.updateVariantStockPriceForPublicApi('store-1', 'user-1', {
+          variantId: 'var-1',
+          productId: 'prod-1',
+          stock: 1,
+        }),
+      ).rejects.toThrow(NotFoundException);
+    });
   });
 
   it('adds image to own product', async () => {
@@ -461,12 +721,330 @@ describe('ProductsService', () => {
   it('removes variant from own product', async () => {
     variantRepository.findOne.mockResolvedValue({
       id: 'var-1',
+      sku: 'SKU-1',
       product: { storeId: 'store-1' },
     });
 
     await service.removeVariant('var-1', 'user-1');
 
     expect(variantRepository.softDelete).toHaveBeenCalledWith('var-1');
+  });
+
+  describe('variant removal safety', () => {
+    const keepVariant = {
+      id: 'var-keep',
+      sku: 'KEEP-1',
+      stockQuantity: 5,
+      priceAdjustment: 0,
+      options: { Size: '1kg' },
+    };
+    const removeVariant = {
+      id: 'var-remove',
+      sku: 'REMOVE-1',
+      stockQuantity: 3,
+      priceAdjustment: 0,
+      options: { Size: '2kg' },
+    };
+    const productWithVariants = {
+      ...product,
+      basePrice: 100,
+      variants: [keepVariant, removeVariant],
+    };
+
+    const keepOnlyPayload = [
+      {
+        id: keepVariant.id,
+        sku: keepVariant.sku,
+        stockQuantity: 5,
+        attributes: { Size: '1kg' },
+      },
+    ];
+
+    beforeEach(() => {
+      productRepository.findOne.mockResolvedValue(productWithVariants);
+      variantRepository.save.mockImplementation((data) => Promise.resolve(data));
+    });
+
+    it('soft-deletes unreferenced sync removals', async () => {
+      await service.syncVariants('prod-1', 'user-1', keepOnlyPayload);
+
+      expect(variantRepository.softDelete).toHaveBeenCalledWith('var-remove');
+      expect(variantRepository.softDelete).toHaveBeenCalledTimes(1);
+    });
+
+    it('blocks syncVariants when removal has order_items only', async () => {
+      orderItemRepository.find.mockResolvedValue([{ variantId: 'var-remove' }]);
+
+      await expect(service.syncVariants('prod-1', 'user-1', keepOnlyPayload)).rejects.toMatchObject(
+        {
+          response: {
+            code: 'VARIANT_REMOVAL_BLOCKED',
+            blockedVariants: [
+              {
+                id: 'var-remove',
+                sku: 'REMOVE-1',
+                reasons: [VariantRemovalBlockReason.HAS_ORDERS],
+              },
+            ],
+          },
+        },
+      );
+      expect(variantRepository.softDelete).not.toHaveBeenCalled();
+    });
+
+    it('blocks syncVariants when removal has cart_items only', async () => {
+      cartItemRepository.find.mockResolvedValue([{ variantId: 'var-remove' }]);
+
+      await expect(service.syncVariants('prod-1', 'user-1', keepOnlyPayload)).rejects.toMatchObject(
+        {
+          response: {
+            code: 'VARIANT_REMOVAL_BLOCKED',
+            blockedVariants: [
+              {
+                id: 'var-remove',
+                sku: 'REMOVE-1',
+                reasons: [VariantRemovalBlockReason.HAS_OPEN_CARTS],
+              },
+            ],
+          },
+        },
+      );
+      expect(variantRepository.softDelete).not.toHaveBeenCalled();
+    });
+
+    it('blocks syncVariants when removal has orders and carts', async () => {
+      orderItemRepository.find.mockResolvedValue([{ variantId: 'var-remove' }]);
+      cartItemRepository.find.mockResolvedValue([{ variantId: 'var-remove' }]);
+
+      await expect(service.syncVariants('prod-1', 'user-1', keepOnlyPayload)).rejects.toMatchObject(
+        {
+          response: {
+            code: 'VARIANT_REMOVAL_BLOCKED',
+            blockedVariants: [
+              {
+                id: 'var-remove',
+                sku: 'REMOVE-1',
+                reasons: [
+                  VariantRemovalBlockReason.HAS_ORDERS,
+                  VariantRemovalBlockReason.HAS_OPEN_CARTS,
+                ],
+              },
+            ],
+          },
+        },
+      );
+      expect(variantRepository.softDelete).not.toHaveBeenCalled();
+    });
+
+    it('soft-deletes unreferenced removeVariant', async () => {
+      variantRepository.findOne.mockResolvedValue({
+        ...removeVariant,
+        product: { storeId: 'store-1' },
+      });
+
+      await service.removeVariant('var-remove', 'user-1');
+
+      expect(variantRepository.softDelete).toHaveBeenCalledWith('var-remove');
+    });
+
+    it('blocks removeVariant when variant has order_items only', async () => {
+      variantRepository.findOne.mockResolvedValue({
+        ...removeVariant,
+        product: { storeId: 'store-1' },
+      });
+      orderItemRepository.find.mockResolvedValue([{ variantId: 'var-remove' }]);
+
+      await expect(service.removeVariant('var-remove', 'user-1')).rejects.toMatchObject({
+        response: {
+          code: 'VARIANT_REMOVAL_BLOCKED',
+          blockedVariants: [
+            expect.objectContaining({
+              id: 'var-remove',
+              reasons: [VariantRemovalBlockReason.HAS_ORDERS],
+            }),
+          ],
+        },
+      });
+      expect(variantRepository.softDelete).not.toHaveBeenCalled();
+    });
+
+    it('blocks removeVariant when variant has cart_items only', async () => {
+      variantRepository.findOne.mockResolvedValue({
+        ...removeVariant,
+        product: { storeId: 'store-1' },
+      });
+      cartItemRepository.find.mockResolvedValue([{ variantId: 'var-remove' }]);
+
+      await expect(service.removeVariant('var-remove', 'user-1')).rejects.toMatchObject({
+        response: {
+          code: 'VARIANT_REMOVAL_BLOCKED',
+          blockedVariants: [
+            expect.objectContaining({
+              id: 'var-remove',
+              reasons: [VariantRemovalBlockReason.HAS_OPEN_CARTS],
+            }),
+          ],
+        },
+      });
+      expect(variantRepository.softDelete).not.toHaveBeenCalled();
+    });
+
+    it('blocks removeVariant when variant has orders and carts', async () => {
+      variantRepository.findOne.mockResolvedValue({
+        ...removeVariant,
+        product: { storeId: 'store-1' },
+      });
+      orderItemRepository.find.mockResolvedValue([{ variantId: 'var-remove' }]);
+      cartItemRepository.find.mockResolvedValue([{ variantId: 'var-remove' }]);
+
+      await expect(service.removeVariant('var-remove', 'user-1')).rejects.toMatchObject({
+        response: {
+          code: 'VARIANT_REMOVAL_BLOCKED',
+          blockedVariants: [
+            expect.objectContaining({
+              id: 'var-remove',
+              reasons: [
+                VariantRemovalBlockReason.HAS_ORDERS,
+                VariantRemovalBlockReason.HAS_OPEN_CARTS,
+              ],
+            }),
+          ],
+        },
+      });
+      expect(variantRepository.softDelete).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      {
+        label: 'unreferenced',
+        orderRefs: [] as Array<{ variantId: string }>,
+        cartRefs: [] as Array<{ variantId: string }>,
+        expectBlocked: false,
+      },
+      {
+        label: 'orders-only',
+        orderRefs: [{ variantId: 'var-remove' }],
+        cartRefs: [],
+        expectBlocked: true,
+      },
+      {
+        label: 'carts-only',
+        orderRefs: [],
+        cartRefs: [{ variantId: 'var-remove' }],
+        expectBlocked: true,
+      },
+      {
+        label: 'both',
+        orderRefs: [{ variantId: 'var-remove' }],
+        cartRefs: [{ variantId: 'var-remove' }],
+        expectBlocked: true,
+      },
+    ])(
+      'impact.blocked agrees with sync reject for $label fixtures',
+      async ({ orderRefs, cartRefs, expectBlocked }) => {
+        orderItemRepository.find.mockResolvedValue(orderRefs);
+        cartItemRepository.find.mockResolvedValue(cartRefs);
+
+        const impact = await service.getProductVariantSyncImpact(
+          'prod-1',
+          'user-1',
+          keepOnlyPayload,
+        );
+
+        expect(impact.blocked).toBe(expectBlocked);
+        expect(impact.kept).toBe(1);
+        expect(impact.new).toBe(0);
+        expect(impact.removed).toBe(1);
+        expect(impact.removedVariants[0]).toEqual(
+          expect.objectContaining({
+            id: 'var-remove',
+            sku: 'REMOVE-1',
+            optionKey: 'Size:2kg',
+          }),
+        );
+
+        if (expectBlocked) {
+          await expect(
+            service.syncVariants('prod-1', 'user-1', keepOnlyPayload),
+          ).rejects.toMatchObject({
+            response: { code: 'VARIANT_REMOVAL_BLOCKED' },
+          });
+          expect(variantRepository.softDelete).not.toHaveBeenCalled();
+        } else {
+          await service.syncVariants('prod-1', 'user-1', keepOnlyPayload);
+          expect(variantRepository.softDelete).toHaveBeenCalledWith('var-remove');
+        }
+      },
+    );
+
+    it('returns AC-001 style counts for keep/new/unreferenced remove', async () => {
+      const newItem = {
+        sku: 'NEW-1',
+        stockQuantity: 2,
+        attributes: { Size: '5kg' },
+      };
+      const keepA = {
+        id: 'var-a',
+        sku: 'A',
+        stockQuantity: 1,
+        priceAdjustment: 0,
+        options: { Size: 'S' },
+      };
+      const keepB = {
+        id: 'var-b',
+        sku: 'B',
+        stockQuantity: 1,
+        priceAdjustment: 0,
+        options: { Size: 'M' },
+      };
+      const keepC = {
+        id: 'var-c',
+        sku: 'C',
+        stockQuantity: 1,
+        priceAdjustment: 0,
+        options: { Size: 'L' },
+      };
+      const removeUnreferenced = {
+        id: 'var-old',
+        sku: 'OLD',
+        stockQuantity: 1,
+        priceAdjustment: 0,
+        options: { Size: 'XL' },
+      };
+
+      productRepository.findOne.mockResolvedValue({
+        ...product,
+        variants: [keepA, keepB, keepC, removeUnreferenced],
+      });
+
+      const impact = await service.getProductVariantSyncImpact('prod-1', 'user-1', [
+        { id: keepA.id, sku: keepA.sku, stockQuantity: 1, attributes: { Size: 'S' } },
+        { id: keepB.id, sku: keepB.sku, stockQuantity: 1, attributes: { Size: 'M' } },
+        { id: keepC.id, sku: keepC.sku, stockQuantity: 1, attributes: { Size: 'L' } },
+        newItem,
+        {
+          sku: 'NEW-2',
+          stockQuantity: 2,
+          attributes: { Size: 'XXL' },
+        },
+      ]);
+
+      expect(impact).toEqual(
+        expect.objectContaining({
+          kept: 3,
+          new: 2,
+          removed: 1,
+          blocked: false,
+        }),
+      );
+      expect(impact.removedVariants).toEqual([
+        expect.objectContaining({
+          id: 'var-old',
+          sku: 'OLD',
+          reasons: [],
+        }),
+      ]);
+    });
   });
 
   it('generates unique slug when duplicate exists', async () => {
@@ -590,11 +1168,11 @@ describe('ProductsService', () => {
     });
 
     it('creates a product with variant items and derives base price', async () => {
-      productRepository.findOne.mockImplementation(async ({ where }) => {
-        if (where?.id) {
-          return { id: 'prod-1', storeId: 'store-1', variants: [] };
+      productRepository.findOne.mockImplementation((opts: { where?: { id?: string } }) => {
+        if (opts.where?.id) {
+          return Promise.resolve({ id: 'prod-1', storeId: 'store-1', variants: [] });
         }
-        return null;
+        return Promise.resolve(null);
       });
       variantRepository.findOne.mockResolvedValue(null);
 
@@ -609,7 +1187,12 @@ describe('ProductsService', () => {
 
       expect(result.id).toBe('prod-1');
       // base price = cheapest variant item; adjustments preserve absolute prices
-      const savedProduct = productRepository.save.mock.calls[0][0];
+      const savedProductCall = productRepository.save.mock.calls[0] as
+        [Record<string, unknown>] | undefined;
+      const savedProduct = savedProductCall?.[0] as {
+        basePrice: number;
+        status: ProductStatus;
+      };
       expect(savedProduct.basePrice).toBe(499);
       // products from the public API are always forced to draft
       expect(savedProduct.status).toBe(ProductStatus.DRAFT);
@@ -617,11 +1200,11 @@ describe('ProductsService', () => {
     });
 
     it('resolves category and tags by name on happy path', async () => {
-      productRepository.findOne.mockImplementation(async ({ where }) => {
-        if (where?.id) {
-          return { id: 'prod-1', storeId: 'store-1', variants: [] };
+      productRepository.findOne.mockImplementation((opts: { where?: { id?: string } }) => {
+        if (opts.where?.id) {
+          return Promise.resolve({ id: 'prod-1', storeId: 'store-1', variants: [] });
         }
-        return null;
+        return Promise.resolve(null);
       });
       variantRepository.findOne.mockResolvedValue(null);
       taxonomyService.getApprovedCategoryByName.mockResolvedValue({
@@ -643,17 +1226,22 @@ describe('ProductsService', () => {
 
       expect(taxonomyService.getApprovedCategoryByName).toHaveBeenCalledWith('Cat Food');
       expect(taxonomyService.getApprovedTagsByNames).toHaveBeenCalledWith(['organic']);
-      const savedProduct = productRepository.save.mock.calls[0][0];
+      const savedProductCall = productRepository.save.mock.calls[0] as
+        [Record<string, unknown>] | undefined;
+      const savedProduct = savedProductCall?.[0] as {
+        categoryId: string;
+        taxonomyTags: Array<{ id: string; name: string }>;
+      };
       expect(savedProduct.categoryId).toBe('cat-1');
       expect(savedProduct.taxonomyTags).toEqual([{ id: 'tag-1', name: 'organic' }]);
     });
 
     it('persists variant items with sku, stock, and price adjustments', async () => {
-      productRepository.findOne.mockImplementation(async ({ where }) => {
-        if (where?.id) {
-          return { id: 'prod-1', storeId: 'store-1', variants: [] };
+      productRepository.findOne.mockImplementation((opts: { where?: { id?: string } }) => {
+        if (opts.where?.id) {
+          return Promise.resolve({ id: 'prod-1', storeId: 'store-1', variants: [] });
         }
-        return null;
+        return Promise.resolve(null);
       });
       variantRepository.findOne.mockResolvedValue(null);
 
@@ -666,7 +1254,9 @@ describe('ProductsService', () => {
         ],
       });
 
-      const savedVariants = variantRepository.save.mock.calls.map((call) => call[0]);
+      const savedVariants = (
+        variantRepository.save.mock.calls as Array<[Record<string, unknown>]>
+      ).map((call) => call[0]);
       expect(savedVariants).toEqual(
         expect.arrayContaining([
           expect.objectContaining({

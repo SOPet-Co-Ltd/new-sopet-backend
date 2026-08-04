@@ -22,17 +22,17 @@ import { TaxonomyApprovalStatus } from './enums/taxonomy.enums';
 @Index(['approvalStatus'])
 export class Category {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'name', type: 'varchar', length: 255 })
   @IsNotEmpty()
   @Length(1, 255)
-  name: string;
+  name!: string;
 
   @Column({ name: 'slug', type: 'varchar', length: 255 })
   @IsNotEmpty()
   @Length(1, 255)
-  slug: string;
+  slug!: string;
 
   @Column({
     name: 'approval_status',
@@ -41,25 +41,25 @@ export class Category {
     default: TaxonomyApprovalStatus.PENDING,
   })
   @IsEnum(TaxonomyApprovalStatus)
-  approvalStatus: TaxonomyApprovalStatus;
+  approvalStatus!: TaxonomyApprovalStatus;
 
   @Column({ name: 'image_url', type: 'varchar', length: 500, nullable: true })
   imageUrl?: string | null;
 
   @Column({ name: 'created_by', type: 'uuid' })
   @IsNotEmpty()
-  createdBy: string;
+  createdBy!: string;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamp' })
-  updatedAt: Date;
+  updatedAt!: Date;
 
   @ManyToOne(() => User)
   @JoinColumn({ name: 'created_by' })
-  creator: User;
+  creator!: User;
 
   @OneToMany(() => Product, (product) => product.categoryRelation)
-  products: Product[];
+  products!: Product[];
 }

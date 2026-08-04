@@ -30,29 +30,29 @@ export enum ReviewStatus {
 @Index(['orderId'])
 export class Review {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'product_id', type: 'uuid' })
   @IsNotEmpty()
-  productId: string;
+  productId!: string;
 
   @Column({ name: 'customer_id', type: 'uuid' })
   @IsNotEmpty()
-  customerId: string;
+  customerId!: string;
 
   @Column({ name: 'order_id', type: 'uuid' })
   @IsNotEmpty()
-  orderId: string;
+  orderId!: string;
 
   @Column({ name: 'rating', type: 'integer' })
   @IsNumber()
   @Min(1)
   @Max(5)
-  rating: number;
+  rating!: number;
 
   @Column({ name: 'comment', type: 'text', nullable: true })
   @IsOptional()
-  comment: string | null;
+  comment!: string | null;
 
   @Column({
     name: 'status',
@@ -61,39 +61,39 @@ export class Review {
     default: ReviewStatus.PENDING,
   })
   @IsEnum(ReviewStatus)
-  status: ReviewStatus;
+  status!: ReviewStatus;
 
   @Column({ name: 'moderated_by', type: 'uuid', nullable: true })
-  moderatedBy: string | null;
+  moderatedBy!: string | null;
 
   @Column({ name: 'moderated_at', type: 'timestamp', nullable: true })
-  moderatedAt: Date | null;
+  moderatedAt!: Date | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamp' })
-  updatedAt: Date;
+  updatedAt!: Date;
 
   @DeleteDateColumn({ name: 'deleted_at', type: 'timestamp', nullable: true })
-  deletedAt: Date | null;
+  deletedAt!: Date | null;
 
   // Relations
   @ManyToOne(() => Product, (product) => product.reviews)
   @JoinColumn({ name: 'product_id' })
-  product: Product;
+  product!: Product;
 
   @ManyToOne(() => Customer, (customer) => customer.reviews)
   @JoinColumn({ name: 'customer_id' })
-  customer: Customer;
+  customer!: Customer;
 
   @ManyToOne(() => Order, (order) => order.reviews)
   @JoinColumn({ name: 'order_id' })
-  order: Order;
+  order!: Order;
 
   @OneToMany(() => ReviewImage, (image) => image.review, { cascade: true })
-  images: ReviewImage[];
+  images!: ReviewImage[];
 
   @OneToOne(() => ReviewReply, (reply) => reply.review)
-  reply: ReviewReply | null;
+  reply!: ReviewReply | null;
 }

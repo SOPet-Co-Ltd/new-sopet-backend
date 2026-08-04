@@ -16,13 +16,13 @@ export class CreateProductVariantInput {
   @IsNotEmpty()
   @IsString()
   @Length(1, 255)
-  name: string;
+  name!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
   @Length(1, 100)
-  sku: string;
+  sku!: string;
 
   @Field(() => Float, { nullable: true })
   @IsOptional()
@@ -33,7 +33,7 @@ export class CreateProductVariantInput {
   @Field(() => Int)
   @IsNumber()
   @Min(0)
-  stockQuantity: number;
+  stockQuantity!: number;
 
   @Field(() => String, {
     nullable: true,
@@ -84,7 +84,7 @@ export class AddProductImageInput {
   @Field()
   @IsNotEmpty()
   @IsString()
-  url: string;
+  url!: string;
 
   @Field({ nullable: true })
   @IsOptional()
@@ -135,16 +135,22 @@ export class SyncProductVariantItemInput {
   @IsNotEmpty()
   @IsString()
   @Length(1, 100)
-  sku: string;
+  sku!: string;
 
   @Field(() => Int)
   @IsNumber()
   @Min(0)
-  stockQuantity: number;
+  stockQuantity!: number;
 
+  // CreateProductVariantInput/UpdateProductVariantInput both guard this with @Min(0) - it was
+  // missing here on the batch-sync path, so a vendor could push a variant's priceAdjustment
+  // negative enough (price = basePrice + priceAdjustment in mappers.ts) to make the variant's
+  // final price zero or negative via syncProductVariants, bypassing a guard the single
+  // create/update mutations already enforce.
   @Field(() => Float, { nullable: true })
   @IsOptional()
   @IsNumber()
+  @Min(0)
   priceModifier?: number;
 
   @Field(() => String, {
@@ -152,5 +158,5 @@ export class SyncProductVariantItemInput {
   })
   @IsNotEmpty()
   @IsString()
-  attributes: string;
+  attributes!: string;
 }

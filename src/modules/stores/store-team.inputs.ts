@@ -4,9 +4,11 @@ import {
   IsEnum,
   IsNotEmpty,
   IsOptional,
+  IsPhoneNumber,
   IsString,
   IsUUID,
   Length,
+  Matches,
   MinLength,
 } from 'class-validator';
 import { StoreMemberRole } from '../../database/entities/store-member.entity';
@@ -15,11 +17,11 @@ import { StoreMemberRole } from '../../database/entities/store-member.entity';
 export class InviteStoreMemberInput {
   @Field()
   @IsEmail()
-  email: string;
+  email!: string;
 
   @Field()
   @IsEnum(StoreMemberRole)
-  role: StoreMemberRole;
+  role!: StoreMemberRole;
 }
 
 @InputType()
@@ -27,30 +29,32 @@ export class AcceptStoreMemberInvitationInput {
   @Field()
   @IsNotEmpty()
   @IsString()
-  token: string;
+  token!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
   @MinLength(8)
-  password: string;
+  password!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
   @Length(1, 255)
-  fullName: string;
+  // Length/IsNotEmpty alone let whitespace-only input (e.g. "   ") through.
+  @Matches(/\S/, { message: 'fullName cannot be blank or whitespace-only' })
+  fullName!: string;
 }
 
 @InputType()
 export class UpdateStoreMemberRoleInput {
   @Field()
   @IsUUID()
-  memberId: string;
+  memberId!: string;
 
   @Field()
   @IsEnum(StoreMemberRole)
-  role: StoreMemberRole;
+  role!: StoreMemberRole;
 }
 
 @InputType()
@@ -68,7 +72,7 @@ export class UpdateStoreSettingsInput {
 
   @Field({ nullable: true })
   @IsOptional()
-  @IsString()
+  @IsPhoneNumber('TH')
   contactPhone?: string;
 
   @Field({ nullable: true })

@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { BadRequestException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { AuthService } from './auth.service';
 import { Customer } from '../../database/entities/customer.entity';
@@ -11,12 +11,14 @@ import { OtpCode } from '../../database/entities/otp-code.entity';
 import { Store, StoreStatus } from '../../database/entities/store.entity';
 import { StoreMember } from '../../database/entities/store-member.entity';
 import { PasswordResetToken } from '../../database/entities/password-reset-token.entity';
+import { EmailVerificationToken } from '../../database/entities/email-verification-token.entity';
 import { CustomerRepository } from '../../database/repositories/customer.repository';
 import { SmsService } from '../sms/sms.service';
 import { CartService } from '../cart/cart.service';
 import { GuestOrderLinkService } from '../orders/guest-order-link.service';
 import { EmailDeliveryService } from '../email/email-delivery.service';
 import { StorageService } from '../storage/storage.service';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -69,6 +71,7 @@ describe('AuthService', () => {
         { provide: getRepositoryToken(Store), useValue: storeRepo },
         { provide: getRepositoryToken(StoreMember), useValue: storeMemberRepo },
         { provide: getRepositoryToken(PasswordResetToken), useValue: {} },
+        { provide: getRepositoryToken(EmailVerificationToken), useValue: {} },
         { provide: JwtService, useValue: jwtService },
         { provide: ConfigService, useValue: configService },
         { provide: SmsService, useValue: smsService },
@@ -81,6 +84,7 @@ describe('AuthService', () => {
             assertFolderImageUrl: jest.fn().mockResolvedValue(undefined),
           },
         },
+        { provide: AuditLogsService, useValue: { log: jest.fn() } },
       ],
     }).compile();
 
@@ -218,6 +222,49 @@ describe('AuthService', () => {
       email: 'vendor@test.com',
       passwordHash: hash,
       role: 'vendor',
+      isActive: true,
+      ownedStores: [],
+    });
+
+    await expect(
+      service.login({ email: 'vendor@test.com', password: 'wrong' }),
+    ).rejects.toMatchObject({ response: { code: 'INVALID_CREDENTIALS' } });
+  });
+
+  it('rejects login for suspended vendor after valid password with ACCOUNT_SUSPENDED', async () => {
+    const hash = await bcrypt.hash('secret123', 10);
+    userRepo.findOne.mockResolvedValue({
+      id: 'user-1',
+      email: 'vendor@test.com',
+      passwordHash: hash,
+      role: 'vendor',
+      isActive: false,
+      ownedStores: [],
+    });
+
+    await expect(
+      service.login({ email: 'vendor@test.com', password: 'secret123' }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    await expect(
+      service.login({ email: 'vendor@test.com', password: 'secret123' }),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'ACCOUNT_SUSPENDED',
+        message: 'Your account has been suspended. Please contact support for assistance.',
+      },
+    });
+    expect(userRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('keeps INVALID_CREDENTIALS when suspended vendor uses wrong password', async () => {
+    const hash = await bcrypt.hash('secret123', 10);
+    userRepo.findOne.mockResolvedValue({
+      id: 'user-1',
+      email: 'vendor@test.com',
+      passwordHash: hash,
+      role: 'vendor',
+      isActive: false,
       ownedStores: [],
     });
 
@@ -233,6 +280,7 @@ describe('AuthService', () => {
       email: 'vendor@test.com',
       passwordHash: hash,
       role: 'vendor',
+      isActive: true,
       fullName: 'Vendor',
       ownedStores: [{ id: 'store-1' }],
     });
@@ -262,6 +310,7 @@ describe('AuthService', () => {
       email: 'vendor@test.com',
       passwordHash: hash,
       role: 'vendor',
+      isActive: true,
       fullName: 'Vendor',
       ownedStores: [],
     });
@@ -344,7 +393,40 @@ describe('AuthService', () => {
     });
     customerRepo.findOne.mockResolvedValue({ id: 'cust-1', isActive: false });
 
-    await expect(service.refreshToken('valid-refresh')).rejects.toThrow(UnauthorizedException);
+    await expect(service.refreshToken('valid-refresh')).rejects.toMatchObject({
+      response: { code: 'CUSTOMER_SUSPENDED' },
+    });
+  });
+
+  it('rejects refresh token for suspended vendor', async () => {
+    jwtService.verify.mockReturnValue({
+      sub: 'vendor-1',
+      email: 'vendor@test.com',
+      role: 'vendor',
+      type: 'refresh',
+      storeId: 'store-1',
+    });
+    userRepo.findOne.mockResolvedValue({ id: 'vendor-1', isActive: false });
+
+    await expect(service.refreshToken('valid-refresh')).rejects.toMatchObject({
+      response: { code: 'ACCOUNT_SUSPENDED' },
+    });
+  });
+
+  it('refreshes tokens for active vendor', async () => {
+    jwtService.verify.mockReturnValue({
+      sub: 'vendor-1',
+      email: 'vendor@test.com',
+      role: 'vendor',
+      type: 'refresh',
+      storeId: 'store-1',
+    });
+    userRepo.findOne.mockResolvedValue({ id: 'vendor-1', isActive: true });
+
+    const result = await service.refreshToken('valid-refresh');
+
+    expect(result.accessToken).toBe('token-access');
+    expect(result.refreshToken).toBe('token-refresh');
   });
 
   it('returns customer profile from getMe', async () => {
@@ -371,13 +453,25 @@ describe('AuthService', () => {
     });
   });
 
+  it('rejects getMe for suspended vendor', async () => {
+    userRepo.findOne.mockResolvedValue({
+      id: 'vendor-1',
+      email: 'vendor@test.com',
+      isActive: false,
+    });
+
+    await expect(service.getMe('vendor-1', 'vendor')).rejects.toMatchObject({
+      response: { code: 'ACCOUNT_SUSPENDED' },
+    });
+  });
+
   it('hashes password', async () => {
     const hash = await service.hashPassword('password');
     expect(hash).toBeDefined();
     expect(await bcrypt.compare('password', hash)).toBe(true);
   });
 
-  it('blocks switching into a suspended store', async () => {
+  it('allows switching into a suspended store for read-only access', async () => {
     userRepo.findOne.mockResolvedValue({
       id: 'user-1',
       role: 'vendor',
@@ -389,9 +483,9 @@ describe('AuthService', () => {
       status: StoreStatus.SUSPENDED,
     });
 
-    await expect(service.switchStore('user-1', 'store-1')).rejects.toMatchObject({
-      response: { code: 'STORE_SUSPENDED' },
-    });
+    const result = await service.switchStore('user-1', 'store-1');
+
+    expect(result.accessToken).toBe('token-access');
   });
 
   it('switches into an active store', async () => {

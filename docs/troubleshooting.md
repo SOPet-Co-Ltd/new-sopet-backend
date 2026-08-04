@@ -17,9 +17,11 @@ yarn migration:revert    # Revert last migration
 yarn migration:run
 ```
 
-### `db:reset:dev` refused
+### `db:reset:migrate` / `db:reset:dev` refused
 
-Reset only runs on local hosts. For unrecognized local hosts, set `DB_RESET_ALLOW=1`. Never runs when `NODE_ENV=production`.
+Local reset: point `DB_HOST` at localhost, or set `DB_RESET_ALLOW=1` for unrecognized local hosts.
+
+UAT/prod reset (destructive): set `DB_RESET_ALLOW_PRODUCTION=1` and run `yarn db:reset:migrate` only — not `db:reset:dev` (dev seed stays local-only). Reset drops app tables/enums/routines only (skips extension-owned views on managed Postgres).
 
 ## GraphQL
 
@@ -37,11 +39,23 @@ Playground disabled when `NODE_ENV=production`.
 
 ### OTP not received
 
-Check `sms.service.ts` delivery chain:
+Check `sms.service.ts` delivery chain (order matters):
 
-1. ThaiBulkSMS (if `THAIBULKSMS_API_KEY` set)
-2. Twilio fallback
-3. Dev mode: OTP logged to console
+1. `NODE_ENV=development` **or** `SMS_OTP_LOG_ONLY=true` — OTP logged to console; no provider call
+2. ThaiBulkSMS when `THAIBULKSMS_API_KEY` and `THAIBULKSMS_API_SECRET` are set
+3. Twilio fallback when `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_PHONE_NUMBER` are set
+4. Otherwise `SMS_NOT_CONFIGURED`
+
+GraphQL error codes from `sendCustomerOtp`:
+
+| Code                  | Meaning                                                                             |
+| --------------------- | ----------------------------------------------------------------------------------- |
+| `SMS_NOT_CONFIGURED`  | No ThaiBulkSMS/Twilio credentials on the server                                     |
+| `SMS_DELIVERY_FAILED` | Provider API rejected the send (check backend logs for ThaiBulkSMS/Twilio response) |
+| `INVALID_PHONE`       | Provider rejected the phone number                                                  |
+| `TOO_MANY_ATTEMPTS`   | More than 3 OTP requests in 5 minutes for the same phone                            |
+
+UAT requires GitHub Environment secrets `THAIBULKSMS_API_KEY` and `THAIBULKSMS_API_SECRET` (see `infra/validate-deploy-env.sh`). Optional vars: `THAIBULKSMS_SENDER`, `THAIBULKSMS_FORCE`, `THAIBULKSMS_SHORTEN_URL`.
 
 ### JWT errors
 
@@ -75,6 +89,26 @@ Check `sms.service.ts` delivery chain:
 - `main.ts` requires `rawBody: true` for HMAC
 - Secret must match Omise dashboard (base64)
 
+## Email
+
+### Logo missing in received emails
+
+- Templates use `${API_URL}/images/email/sopet-logo-white.png` (PNG, not SVG).
+- Locally, open `http://localhost:3002/images/email/sopet-logo-white.png` while `yarn start:dev` is running.
+- In UAT/production, set `API_URL` to the **public** HTTPS API hostname (same host clients use for GraphQL). Without it, the logo URL may point at `localhost` and fail for recipients.
+- Confirm the Docker image includes `public/` (see `Dockerfile`).
+
+### Emails not sent in development
+
+Expected: `NODE_ENV=development` logs the email body to the backend console instead of calling Resend. Look for `[DEV EMAIL]` / `[dev] …` lines. Set `RESEND_API_KEY` and use a non-development `NODE_ENV` to send for real.
+
+### Local HTML previews
+
+```bash
+yarn email:previews
+# Open temp/email-previews/*.html in a browser
+```
+
 ## Redis / BullMQ
 
 ### Jobs not processing
@@ -92,7 +126,29 @@ yarn docker:check    # redis-cli ping
 | Coverage below threshold | Add tests for services in `collectCoverageFrom` |
 | E2E timeout              | Check mocked dependencies in test bootstrap     |
 
+## Deploy (SSM) failures
+
+### `Timed out after Ns waiting for SSM` with Status `InProgress`, empty stdout/stderr
+
+Usually **not** “SSM agent offline”. `InProgress` means the agent accepted the command. Empty output is expected until the remote script finishes unless CloudWatch output is enabled.
+
+Most common causes:
+
+1. **`BUILD_ON_HOST=true`**: native `docker build` on EC2 still running longer than the GHA waiter (3600s). Default arm64 path builds on GHA (`ubuntu-24.04-arm`) and EC2 only pulls — if you see long InProgress without that flag, check `deploy.sh` / disk / docker pull.
+2. **Disk full** on a small root volume (pull or leftover build cache)
+3. **Hung docker** (less common) — check processes on the instance
+
+```bash
+aws ssm get-command-invocation \
+  --command-id <COMMAND_ID> \
+  --instance-id <EC2_INSTANCE_ID> \
+  --region <AWS_REGION>
+```
+
+See [Deployment — Inspect a stuck SSM command](deployment.md#inspect-a-stuck--timed-out-ssm-command).
+
 ## Related docs
 
 - [Deployment](deployment.md)
+- [Deploy production](deploy-production.md)
 - [Database](database.md)

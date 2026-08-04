@@ -1,5 +1,13 @@
 import { Field, InputType } from '@nestjs/graphql';
-import { IsEmail, IsNotEmpty, IsOptional, IsString, Length, MinLength } from 'class-validator';
+import {
+  IsEmail,
+  IsNotEmpty,
+  IsOptional,
+  IsPhoneNumber,
+  IsString,
+  Length,
+  MinLength,
+} from 'class-validator';
 
 @InputType()
 export class RegisterStoreInput {
@@ -7,7 +15,7 @@ export class RegisterStoreInput {
   @IsNotEmpty()
   @IsString()
   @Length(1, 255)
-  name: string;
+  name!: string;
 
   @Field({ nullable: true })
   @IsOptional()
@@ -16,7 +24,7 @@ export class RegisterStoreInput {
 
   @Field({ nullable: true })
   @IsOptional()
-  @IsString()
+  @IsPhoneNumber('TH')
   contactPhone?: string;
 
   @Field({ nullable: true })
@@ -32,19 +40,19 @@ export class RegisterStoreInput {
   @Field()
   @IsNotEmpty()
   @IsEmail()
-  ownerEmail: string;
+  ownerEmail!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
   @MinLength(6)
-  ownerPassword: string;
+  ownerPassword!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
   @Length(1, 255)
-  ownerFullName: string;
+  ownerFullName!: string;
 
   @Field({ nullable: true })
   @IsOptional()

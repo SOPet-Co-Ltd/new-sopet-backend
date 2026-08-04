@@ -49,7 +49,7 @@ export function mapCustomerProfile(
 }
 
 export function mapUserProfile(
-  user: Pick<User, 'id' | 'email' | 'fullName' | 'role' | 'profilePhotoUrl'>,
+  user: Pick<User, 'id' | 'email' | 'fullName' | 'role' | 'profilePhotoUrl' | 'emailVerified'>,
   storeId?: string | null,
 ): UserProfile {
   return {
@@ -59,6 +59,7 @@ export function mapUserProfile(
     role: user.role,
     storeId: storeId ?? null,
     profilePhotoUrl: user.profilePhotoUrl,
+    emailVerified: user.emailVerified ?? false,
   };
 }
 

@@ -11,21 +11,23 @@ describe('SearchSettingsService', () => {
     row?: Partial<Setting> | null;
     cached?: string | null;
   } = {}) => {
+    const save = jest.fn(async (value: unknown) => value);
+    const set = jest.fn(async () => undefined);
     const settingsRepository = {
       findOne: jest.fn(async () => row ?? null),
       create: jest.fn((value) => value),
-      save: jest.fn(async (value) => value),
+      save,
     } as unknown as Repository<Setting>;
 
     const redisService = {
       get: jest.fn(async () => cached ?? null),
-      set: jest.fn(async () => undefined),
+      set,
     };
 
     return {
       service: new SearchSettingsService(settingsRepository, redisService as never),
-      settingsRepository,
-      redisService,
+      save,
+      set,
     };
   };
 
@@ -61,11 +63,11 @@ describe('SearchSettingsService', () => {
   });
 
   it('persists merged weights on update', async () => {
-    const { service, settingsRepository, redisService } = createService();
+    const { service, save, set } = createService();
     const updated = await service.updateRankingWeights({ text: 50 });
 
     expect(updated.text).toBe(50);
-    expect(settingsRepository.save).toHaveBeenCalled();
-    expect(redisService.set).toHaveBeenCalled();
+    expect(save).toHaveBeenCalled();
+    expect(set).toHaveBeenCalled();
   });
 });

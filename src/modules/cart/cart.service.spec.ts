@@ -1,5 +1,7 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { In } from 'typeorm';
 import { CartService } from './cart.service';
+import { StoreStatus } from '../../database/entities/store.entity';
 
 describe('CartService', () => {
   let service: CartService;
@@ -84,14 +86,90 @@ describe('CartService', () => {
   });
 
   it('rejects addItem when insufficient stock', async () => {
-    mockTrx.findOne.mockResolvedValue({ id: 'var-1', stockQuantity: 1 });
+    mockTrx.findOne
+      .mockResolvedValueOnce({ id: 'var-1', productId: 'prod-1', stockQuantity: 1 })
+      .mockResolvedValueOnce({ id: 'prod-1', store: { status: StoreStatus.APPROVED } });
     cartRepository.findOne.mockResolvedValue(cartWithItems);
 
     await expect(service.addItem('var-1', 5, 'cust-1')).rejects.toThrow(BadRequestException);
   });
 
+  it('rejects addItem when store is suspended (AC-004)', async () => {
+    mockTrx.findOne
+      .mockResolvedValueOnce({ id: 'var-1', productId: 'prod-1', stockQuantity: 10 })
+      .mockResolvedValueOnce({ id: 'prod-1', store: { status: StoreStatus.SUSPENDED } });
+    cartRepository.findOne.mockResolvedValue({ ...cartWithItems, items: [] });
+
+    await expect(service.addItem('var-1', 1, 'cust-1')).rejects.toMatchObject({
+      response: { code: 'STORE_SUSPENDED' },
+    });
+    expect(mockTrx.save).not.toHaveBeenCalled();
+  });
+
+  it('purges suspended-store lines and returns warning on getCart (AC-005)', async () => {
+    cartRepository.findOne.mockResolvedValue({
+      id: 'cart-1',
+      customerId: 'cust-1',
+      items: [
+        {
+          id: 'item-ok',
+          variantId: 'var-ok',
+          quantity: 1,
+          productVariant: {
+            product: { store: { status: StoreStatus.APPROVED } },
+          },
+        },
+        {
+          id: 'item-sus',
+          variantId: 'var-sus',
+          quantity: 1,
+          productVariant: {
+            product: { store: { status: StoreStatus.SUSPENDED } },
+          },
+        },
+      ],
+    });
+
+    const cart = await service.getCart('cust-1');
+
+    expect(cartItemRepository.delete).toHaveBeenCalledWith({
+      id: In(['item-sus']),
+    });
+    expect(cart.items.map((item) => item.id)).toEqual(['item-ok']);
+    expect(cart.warnings).toEqual([
+      expect.objectContaining({
+        code: 'SUSPENDED_STORE_ITEM_REMOVED',
+        variantId: 'var-sus',
+      }),
+    ]);
+  });
+
+  it('returns empty warnings when no suspended lines on getCart', async () => {
+    cartRepository.findOne.mockResolvedValue({
+      id: 'cart-1',
+      customerId: 'cust-1',
+      items: [
+        {
+          id: 'item-ok',
+          variantId: 'var-ok',
+          quantity: 1,
+          productVariant: {
+            product: { store: { status: StoreStatus.APPROVED } },
+          },
+        },
+      ],
+    });
+
+    const cart = await service.getCart('cust-1');
+
+    expect(cartItemRepository.delete).not.toHaveBeenCalled();
+    expect(cart.warnings).toEqual([]);
+  });
+
   it('adds new item to cart', async () => {
-    mockTrx.findOne.mockResolvedValue({ id: 'var-2', stockQuantity: 10 });
+    mockTrx.findOne
+      .mockResolvedValueOnce({ id: 'var-2', productId: 'prod-2', stockQuantity: 10 })
+      .mockResolvedValueOnce({ id: 'prod-2', store: { status: StoreStatus.APPROVED } });
     cartRepository.findOne
       .mockResolvedValueOnce({ ...cartWithItems, items: [] })
       .mockResolvedValueOnce({ ...cartWithItems, items: [{ variantId: 'var-2', quantity: 1 }] });
@@ -102,7 +180,9 @@ describe('CartService', () => {
   });
 
   it('updates existing cart item quantity', async () => {
-    mockTrx.findOne.mockResolvedValue({ id: 'var-1', stockQuantity: 10 });
+    mockTrx.findOne
+      .mockResolvedValueOnce({ id: 'var-1', productId: 'prod-1', stockQuantity: 10 })
+      .mockResolvedValueOnce({ id: 'prod-1', store: { status: StoreStatus.APPROVED } });
     cartRepository.findOne.mockResolvedValue(cartWithItems);
 
     await service.addItem('var-1', 1, 'cust-1');

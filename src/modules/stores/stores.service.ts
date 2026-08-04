@@ -4,44 +4,142 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, ILike } from 'typeorm';
+import { In, Repository, ILike } from 'typeorm';
 import { Store, StoreStatus, OmiseRecipientStatus } from '../../database/entities/store.entity';
 import { User, UserRole } from '../../database/entities/user.entity';
 import { StoreMember, StoreMemberRole } from '../../database/entities/store-member.entity';
+import { Order } from '../../database/entities/order.entity';
+import { OrderItem } from '../../database/entities/order-item.entity';
+import { AuditLog, AuditActorType } from '../../database/entities/audit-log.entity';
+import { OrderStatus } from '../../database/entities/enums/order.enums';
 import { CreateStoreDto, UpdateStoreDto, ApproveStoreDto, RejectStoreDto } from './dto';
 import * as bcrypt from 'bcrypt';
-import { generateSlug as slugify } from '../../common/utils/slug.util';
+import { generateUniqueStoreSlug } from '../../common/utils/slug.util';
 import { OmiseService } from '../omise/omise.service';
 import { pickDefaultAccessibleStoreId } from './store-selection.util';
 import { NotificationsService } from '../notifications/notifications.service';
 import { StorageService } from '../storage/storage.service';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constants';
+import { StoreSuspensionHoldService } from '../orders/store-suspension-hold.service';
+import { EmailDeliveryService } from '../email/email-delivery.service';
+
+const VENDOR_REVENUE_EXCLUDED_STATUSES = [
+  OrderStatus.CANCELLED,
+  OrderStatus.REFUNDED,
+  OrderStatus.PENDING_PAYMENT,
+];
+
+const AUDIT_ACTION_ACTIVITY_KIND: Partial<Record<string, string>> = {
+  [AuditAction.LOGIN]: 'last_login',
+  [AuditAction.PASSWORD_RESET_SENT]: 'password_reset_sent',
+  [AuditAction.VENDOR_UPDATED]: 'vendor_updated',
+  [AuditAction.STORE_CREATED]: 'store_created',
+  [AuditAction.STORE_APPROVED]: 'admin_store_approved',
+  [AuditAction.STORE_REJECTED]: 'admin_store_rejected',
+  [AuditAction.STORE_SUSPENDED]: 'admin_store_suspended',
+  [AuditAction.STORE_REACTIVATED]: 'store_reactivated',
+  [AuditAction.STORE_OWNER_CHANGED]: 'store_owner_changed',
+};
+
+export type AdminVendorInsightsResult = {
+  storeCount: number;
+  membershipCount: number;
+  totalRevenue: number;
+  orderCount: number;
+  averageOrderValue: number;
+  lastOrderAt: Date | null;
+  lastActivityAt: Date | null;
+  memberships: Array<{
+    storeId: string;
+    storeName: string;
+    storeSlug: string;
+    storeStatus: string;
+    role: string;
+    joinedAt: Date;
+  }>;
+  activities: Array<{
+    kind: string;
+    occurredAt: Date;
+    storeId?: string | null;
+    storeName?: string | null;
+    orderNumber?: string | null;
+  }>;
+  recentOrders: Array<{
+    id: string;
+    orderNumber: string;
+    status: string;
+    total: number;
+    createdAt: Date;
+    items: Array<{
+      productName: string;
+      quantity: number;
+      unitPrice: number;
+      subtotal: number;
+    }>;
+  }>;
+};
 
 @Injectable()
 export class StoresService {
   constructor(
     @InjectRepository(Store)
-    private storeRepository: Repository<Store>,
+    private readonly storeRepository: Repository<Store>,
     @InjectRepository(User)
-    private userRepository: Repository<User>,
+    private readonly userRepository: Repository<User>,
     @InjectRepository(StoreMember)
-    private storeMemberRepository: Repository<StoreMember>,
+    private readonly storeMemberRepository: Repository<StoreMember>,
+    @InjectRepository(Order)
+    private readonly orderRepository: Repository<Order>,
+    @InjectRepository(OrderItem)
+    private readonly orderItemRepository: Repository<OrderItem>,
+    @InjectRepository(AuditLog)
+    private readonly auditLogRepository: Repository<AuditLog>,
     private readonly omiseService: OmiseService,
     private readonly notificationsService: NotificationsService,
     private readonly storageService: StorageService,
+    private readonly auditLogsService: AuditLogsService,
+    @Inject(forwardRef(() => StoreSuspensionHoldService))
+    private readonly storeSuspensionHoldService: StoreSuspensionHoldService,
+    private readonly emailDeliveryService: EmailDeliveryService,
   ) {}
 
-  // Generate slug from store name
-  private generateSlug(name: string): string {
-    return slugify(name, 'store');
+  private async logAdminStoreAction(
+    adminId: string,
+    action: string,
+    store: Store,
+    metadata: Record<string, unknown> = {},
+  ): Promise<void> {
+    const admin = await this.userRepository.findOne({
+      where: { id: adminId },
+      select: ['id', 'fullName', 'email'],
+    });
+
+    await this.auditLogsService.log({
+      actorType: AuditActorType.ADMIN,
+      actorId: adminId,
+      actorLabel: admin?.fullName || admin?.email || null,
+      action,
+      resourceType: AuditResourceType.STORE,
+      resourceId: store.id,
+      metadata: { storeName: store.name, ...metadata },
+    });
   }
 
-  // Register new store (vendor registration)
+  private async resolveUniqueStoreSlug(name: string): Promise<string> {
+    return generateUniqueStoreSlug(name, async (slug) => {
+      const existing = await this.storeRepository.findOne({ where: { slug } });
+      return !!existing;
+    });
+  }
+
   async create(createStoreDto: CreateStoreDto): Promise<Store> {
     const { ownerEmail, ownerPassword, ownerFullName, name, ...storeData } = createStoreDto;
 
-    // Check if email already exists
     const existingUser = await this.userRepository.findOne({
       where: { email: ownerEmail },
     });
@@ -53,7 +151,6 @@ export class StoresService {
       });
     }
 
-    // Create user account
     const passwordHash = await bcrypt.hash(ownerPassword, 12);
     const user = this.userRepository.create({
       email: ownerEmail,
@@ -63,17 +160,8 @@ export class StoresService {
     });
     await this.userRepository.save(user);
 
-    // Generate unique slug
-    let slug = this.generateSlug(name);
-    let slugExists = await this.storeRepository.findOne({ where: { slug } });
-    let counter = 1;
-    while (slugExists) {
-      slug = `${this.generateSlug(name)}-${counter}`;
-      slugExists = await this.storeRepository.findOne({ where: { slug } });
-      counter++;
-    }
+    const slug = await this.resolveUniqueStoreSlug(name);
 
-    // Create store
     const store = this.storeRepository.create({
       ...storeData,
       name,
@@ -85,7 +173,6 @@ export class StoresService {
     return this.storeRepository.save(store);
   }
 
-  // Get all stores (public)
   async findAll(status?: StoreStatus): Promise<Store[]> {
     const where = status ? { status } : { status: StoreStatus.APPROVED };
     return this.storeRepository.find({
@@ -95,7 +182,6 @@ export class StoresService {
     });
   }
 
-  // Get store by ID
   async findOne(id: string): Promise<Store> {
     const store = await this.storeRepository.findOne({
       where: { id },
@@ -112,14 +198,14 @@ export class StoresService {
     return store;
   }
 
-  // Get store by slug
+  // Get store by slug (public discovery — approved stores only)
   async findBySlug(slug: string): Promise<Store> {
     const store = await this.storeRepository.findOne({
       where: { slug },
       relations: ['owner', 'products'],
     });
 
-    if (!store) {
+    if (!store || store.status !== StoreStatus.APPROVED) {
       throw new NotFoundException({
         code: 'STORE_NOT_FOUND',
         message: 'Store not found',
@@ -157,6 +243,8 @@ export class StoresService {
       .notifyVendorAboutStoreStatus(store.ownerId, store, 'approved')
       .catch(() => {});
 
+    await this.logAdminStoreAction(approveStoreDto.adminId, AuditAction.STORE_APPROVED, store);
+
     return store;
   }
 
@@ -185,17 +273,23 @@ export class StoresService {
       )
       .catch(() => {});
 
+    await this.logAdminStoreAction(rejectStoreDto.adminId, AuditAction.STORE_REJECTED, store, {
+      rejectionReason: rejectStoreDto.rejectionReason ?? null,
+    });
+
     return store;
   }
 
-  // Suspend store (admin). adminId is kept for a future audit log entry.
+  // Suspend store (admin)
   async suspend(id: string, adminId: string): Promise<Store> {
-    void adminId;
     const store = await this.findOne(id);
 
     store.status = StoreStatus.SUSPENDED;
 
-    return this.storeRepository.save(store);
+    const saved = await this.storeRepository.save(store);
+    await this.logAdminStoreAction(adminId, AuditAction.STORE_SUSPENDED, saved);
+    await this.storeSuspensionHoldService.applyHoldForStore(saved.id);
+    return saved;
   }
 
   // Reactivate a suspended store (admin)
@@ -213,7 +307,10 @@ export class StoresService {
     store.approvedBy = adminId;
     store.approvedAt = new Date();
 
-    return this.storeRepository.save(store);
+    const saved = await this.storeRepository.save(store);
+    await this.logAdminStoreAction(adminId, AuditAction.STORE_REACTIVATED, saved);
+    await this.storeSuspensionHoldService.restoreHoldForStore(saved.id);
+    return saved;
   }
 
   // Get pending stores (admin)
@@ -281,6 +378,15 @@ export class StoresService {
     return !!membership;
   }
 
+  /** Lightweight live check used to block vendor mutations against a suspended store. */
+  async isStoreSuspended(storeId: string): Promise<boolean> {
+    const store = await this.storeRepository.findOne({
+      where: { id: storeId },
+      select: ['id', 'status'],
+    });
+    return store?.status === StoreStatus.SUSPENDED;
+  }
+
   async resolveDefaultStoreId(userId: string): Promise<string | undefined> {
     const accessible = await this.getAccessibleStores(userId);
     return pickDefaultAccessibleStoreId(accessible.map((entry) => entry.store));
@@ -303,6 +409,17 @@ export class StoresService {
       throw new ForbiddenException({
         code: 'STORE_OWNER_REQUIRED',
         message: 'Only the store owner can perform this action',
+      });
+    }
+  }
+
+  /** Any store member (owner, manager, or staff) may perform the action. */
+  async assertStoreAccess(userId: string, storeId: string): Promise<void> {
+    const hasAccess = await this.userHasStoreAccess(userId, storeId);
+    if (!hasAccess) {
+      throw new ForbiddenException({
+        code: 'STORE_ACCESS_DENIED',
+        message: 'No access to this store',
       });
     }
   }
@@ -395,6 +512,77 @@ export class StoresService {
   }
 
   /**
+   * Re-fetches the Omise recipient and updates local verification status.
+   * Called when vendors open payout settings so Omise dashboard activations
+   * are reflected without requiring a bank-detail re-save.
+   */
+  async refreshOmiseRecipientStatus(storeId: string): Promise<Store> {
+    const store = await this.findOne(storeId);
+    await this.applyOmiseRecipientSnapshot(store);
+    return this.storeRepository.save(store);
+  }
+
+  /**
+   * Handles Omise recipient.* webhooks by refreshing the matching store's
+   * recipient status from the live Omise API.
+   */
+  async handleOmiseRecipientWebhook(payload: {
+    key?: string;
+    data?: { object?: string; id?: string; verified?: boolean; active?: boolean };
+  }): Promise<void> {
+    const recipientId = payload.data?.id;
+    if (!recipientId || payload.data?.object !== 'recipient') {
+      return;
+    }
+
+    const store = await this.storeRepository.findOne({
+      where: { omiseRecipientId: recipientId },
+    });
+    if (!store) {
+      return;
+    }
+
+    await this.applyOmiseRecipientSnapshot(store, payload.data);
+    await this.storeRepository.save(store);
+  }
+
+  /**
+   * Applies Omise recipient verified/active flags onto the store. Prefers a
+   * live API fetch when credentials are available; falls back to webhook
+   * payload fields when present.
+   */
+  private async applyOmiseRecipientSnapshot(
+    store: Store,
+    fallback?: { verified?: boolean; active?: boolean },
+  ): Promise<void> {
+    if (!store.omiseRecipientId) {
+      return;
+    }
+
+    if (this.omiseService.hasCredentials()) {
+      try {
+        const recipient = await this.omiseService.getRecipient(store.omiseRecipientId);
+        this.applyRecipientFlags(store, recipient.verified, recipient.active);
+        return;
+      } catch {
+        // Fall through to webhook payload when API refresh fails.
+      }
+    }
+
+    if (fallback && fallback.verified !== undefined && fallback.active !== undefined) {
+      this.applyRecipientFlags(store, fallback.verified, fallback.active);
+    }
+  }
+
+  private applyRecipientFlags(store: Store, verified: boolean, active: boolean): void {
+    store.omiseRecipientStatus =
+      verified && active ? OmiseRecipientStatus.ACTIVE : OmiseRecipientStatus.PENDING;
+    if (store.omiseRecipientStatus === OmiseRecipientStatus.ACTIVE) {
+      store.omiseRecipientFailureMessage = null;
+    }
+  }
+
+  /**
    * Binds the store's payout bank account to a real Omise recipient. Creates a
    * new recipient (or updates the existing one) via the Omise API and persists
    * the returned recipient id + verification status on the store. Mutates the
@@ -465,6 +653,13 @@ export class StoresService {
     bannerUrl?: string;
     status?: StoreStatus;
   }): Promise<Store> {
+    if (!input.ownerUserId?.trim()) {
+      throw new BadRequestException({
+        code: 'OWNER_REQUIRED',
+        message: 'Store owner is required',
+      });
+    }
+
     const owner = await this.userRepository.findOne({
       where: { id: input.ownerUserId, role: UserRole.VENDOR },
     });
@@ -475,17 +670,11 @@ export class StoresService {
       });
     }
 
-    let slug = this.generateSlug(input.name);
-    let slugExists = await this.storeRepository.findOne({ where: { slug } });
-    let counter = 1;
-    while (slugExists) {
-      slug = `${this.generateSlug(input.name)}-${counter}`;
-      slugExists = await this.storeRepository.findOne({ where: { slug } });
-      counter++;
-    }
+    const name = input.name.trim();
+    const slug = await this.resolveUniqueStoreSlug(name);
 
     const store = this.storeRepository.create({
-      name: input.name,
+      name,
       slug,
       description: input.description ?? null,
       contactPhone: input.contactPhone ?? null,
@@ -510,7 +699,7 @@ export class StoresService {
 
   async updateAsAdmin(input: {
     id: string;
-    ownerUserId?: string;
+    ownerUserId?: string | null;
     name?: string;
     slug?: string;
     description?: string;
@@ -520,10 +709,39 @@ export class StoresService {
     logoUrl?: string;
     bannerUrl?: string;
     status?: StoreStatus;
+    /** Admin actor for suspend/reactivate audit + hold side effects (GraphQL updateStoreAsAdmin). */
+    adminId?: string;
   }): Promise<Store> {
     const store = await this.findOne(input.id);
-    if (input.ownerUserId !== undefined) store.ownerId = input.ownerUserId;
-    if (input.name !== undefined) store.name = input.name;
+    const previousStatus = store.status;
+
+    if (input.ownerUserId !== undefined) {
+      if (input.ownerUserId === null) {
+        throw new BadRequestException({
+          code: 'OWNER_REQUIRED',
+          message: 'Store owner is required',
+        });
+      }
+
+      if (input.ownerUserId !== store.ownerId) {
+        const owner = await this.userRepository.findOne({
+          where: { id: input.ownerUserId, role: UserRole.VENDOR },
+        });
+        if (!owner) {
+          throw new NotFoundException({
+            code: 'VENDOR_NOT_FOUND',
+            message: 'Vendor user not found',
+          });
+        }
+
+        const previousOwnerId = store.ownerId;
+        store.ownerId = owner.id;
+        store.owner = owner;
+        await this.syncStoreOwnerMembership(store.id, previousOwnerId, owner.id);
+      }
+    }
+
+    if (input.name !== undefined) store.name = input.name.trim();
     if (input.slug !== undefined) store.slug = input.slug;
     if (input.description !== undefined) store.description = input.description;
     if (input.contactPhone !== undefined) store.contactPhone = input.contactPhone;
@@ -531,8 +749,71 @@ export class StoresService {
     if (input.address !== undefined) store.address = input.address;
     if (input.logoUrl !== undefined) store.logoUrl = input.logoUrl;
     if (input.bannerUrl !== undefined) store.bannerUrl = input.bannerUrl;
-    if (input.status !== undefined) store.status = input.status;
-    return this.storeRepository.save(store);
+    if (input.status !== undefined) {
+      // Match reactivate() metadata when admin UI reopens a suspended store via updateStoreAsAdmin.
+      if (
+        input.status === StoreStatus.APPROVED &&
+        previousStatus === StoreStatus.SUSPENDED &&
+        input.adminId
+      ) {
+        store.approvedBy = input.adminId;
+        store.approvedAt = new Date();
+      }
+      store.status = input.status;
+    }
+
+    await this.storeRepository.save(store);
+    const saved = await this.findOne(input.id);
+
+    // Production admin suspend/reactivate uses updateStoreAsAdmin (status only) — not
+    // StoresService.suspend/reactivate. Wire the same hold hooks so AC-007+/AC-017+ fire.
+    if (input.status === StoreStatus.SUSPENDED && previousStatus !== StoreStatus.SUSPENDED) {
+      if (input.adminId) {
+        await this.logAdminStoreAction(input.adminId, AuditAction.STORE_SUSPENDED, saved);
+      }
+      await this.storeSuspensionHoldService.applyHoldForStore(saved.id);
+    } else if (previousStatus === StoreStatus.SUSPENDED && input.status === StoreStatus.APPROVED) {
+      if (input.adminId) {
+        await this.logAdminStoreAction(input.adminId, AuditAction.STORE_REACTIVATED, saved);
+      }
+      await this.storeSuspensionHoldService.restoreHoldForStore(saved.id);
+    }
+
+    return saved;
+  }
+
+  private async syncStoreOwnerMembership(
+    storeId: string,
+    previousOwnerId: string,
+    newOwnerId: string,
+  ): Promise<void> {
+    const existingNewMember = await this.storeMemberRepository.findOne({
+      where: { storeId, userId: newOwnerId },
+    });
+    if (existingNewMember) {
+      existingNewMember.role = StoreMemberRole.OWNER;
+      await this.storeMemberRepository.save(existingNewMember);
+    } else {
+      await this.storeMemberRepository.save(
+        this.storeMemberRepository.create({
+          storeId,
+          userId: newOwnerId,
+          role: StoreMemberRole.OWNER,
+        }),
+      );
+    }
+
+    if (previousOwnerId === newOwnerId) {
+      return;
+    }
+
+    const previousMember = await this.storeMemberRepository.findOne({
+      where: { storeId, userId: previousOwnerId },
+    });
+    if (previousMember?.role === StoreMemberRole.OWNER) {
+      previousMember.role = StoreMemberRole.STAFF;
+      await this.storeMemberRepository.save(previousMember);
+    }
   }
 
   async findVendors(search?: string): Promise<User[]> {
@@ -576,6 +857,7 @@ export class StoresService {
     isActive?: boolean;
   }): Promise<User> {
     const user = await this.findVendorById(input.id);
+    const wasActive = user.isActive;
     if (input.email !== undefined) {
       const existing = await this.userRepository.findOne({
         where: { email: input.email },
@@ -590,7 +872,214 @@ export class StoresService {
     }
     if (input.fullName !== undefined) user.fullName = input.fullName;
     if (input.isActive !== undefined) user.isActive = input.isActive;
-    return this.userRepository.save(user);
+
+    const saved = await this.userRepository.save(user);
+
+    // Email only on active → inactive (idempotent for already-suspended accounts)
+    if (wasActive && input.isActive === false) {
+      const storeName =
+        (user.ownedStores ?? [])
+          .map((store) => store.name)
+          .filter((name): name is string => Boolean(name?.trim()))
+          .join(', ') || null;
+      await this.emailDeliveryService
+        .sendVendorAccountSuspended(saved.email, {
+          vendorName: saved.fullName,
+          storeName,
+        })
+        .catch(() => {});
+    }
+
+    return saved;
+  }
+
+  async getVendorInsightsForAdmin(vendorId: string): Promise<AdminVendorInsightsResult> {
+    const vendor = await this.findVendorById(vendorId);
+    const ownedStores = vendor.ownedStores ?? [];
+    const ownedStoreIds = ownedStores.map((store) => store.id);
+
+    let orderCount = 0;
+    let totalRevenue = 0;
+    let lastOrderAt: Date | null = null;
+    let recentOrders: AdminVendorInsightsResult['recentOrders'] = [];
+
+    if (ownedStoreIds.length > 0) {
+      const statsResult = await this.orderItemRepository
+        .createQueryBuilder('item')
+        .innerJoin('item.order', 'order')
+        .select('COUNT(DISTINCT order.id)', 'orderCount')
+        .addSelect('COALESCE(SUM(item.subtotal), 0)', 'totalRevenue')
+        .addSelect('MAX(order.createdAt)', 'lastOrderAt')
+        .where('item.storeId IN (:...storeIds)', { storeIds: ownedStoreIds })
+        .andWhere('order.status NOT IN (:...excludedStatuses)', {
+          excludedStatuses: VENDOR_REVENUE_EXCLUDED_STATUSES,
+        })
+        .getRawOne<{ orderCount: string; totalRevenue: string; lastOrderAt: Date | null }>();
+
+      orderCount = Number(statsResult?.orderCount ?? 0);
+      totalRevenue = Number(statsResult?.totalRevenue ?? 0);
+      lastOrderAt = statsResult?.lastOrderAt ?? null;
+
+      const recentOrderRows = await this.orderItemRepository
+        .createQueryBuilder('item')
+        .innerJoin('item.order', 'order')
+        .select('order.id', 'id')
+        .addSelect('MAX(order.createdAt)', 'createdAt')
+        .where('item.storeId IN (:...storeIds)', { storeIds: ownedStoreIds })
+        .groupBy('order.id')
+        .orderBy('MAX(order.createdAt)', 'DESC')
+        .limit(10)
+        .getRawMany<{ id: string }>();
+
+      const recentOrderIds = recentOrderRows.map((row) => row.id);
+      if (recentOrderIds.length > 0) {
+        const orders = await this.orderRepository.find({
+          where: { id: In(recentOrderIds) },
+          relations: ['items'],
+          order: { createdAt: 'DESC' },
+        });
+        recentOrders = orders.map((order) => ({
+          id: order.id,
+          orderNumber: order.orderNumber,
+          status: order.status,
+          total: Number(order.total),
+          createdAt: order.createdAt,
+          items: (order.items ?? []).map((item) => ({
+            productName: item.productName,
+            quantity: item.quantity,
+            unitPrice: Number(item.unitPrice),
+            subtotal: Number(item.subtotal),
+          })),
+        }));
+      }
+    }
+
+    const averageOrderValue = orderCount > 0 ? totalRevenue / orderCount : 0;
+
+    const storeMembers = await this.storeMemberRepository.find({
+      where: { userId: vendorId },
+      relations: ['store'],
+      order: { createdAt: 'DESC' },
+    });
+
+    const memberships = storeMembers
+      .filter(
+        (member) =>
+          member.store &&
+          (member.role !== StoreMemberRole.OWNER || member.store.ownerId !== vendorId),
+      )
+      .map((member) => ({
+        storeId: member.storeId,
+        storeName: member.store.name,
+        storeSlug: member.store.slug,
+        storeStatus: member.store.status,
+        role: member.role,
+        joinedAt: member.createdAt,
+      }));
+
+    const storeNameById = new Map(ownedStores.map((store) => [store.id, store.name]));
+    const activities: AdminVendorInsightsResult['activities'] = [
+      {
+        kind: 'account_created',
+        occurredAt: vendor.createdAt,
+      },
+    ];
+
+    if (vendor.lastLoginAt) {
+      activities.push({
+        kind: 'last_login',
+        occurredAt: vendor.lastLoginAt,
+      });
+    }
+
+    for (const store of ownedStores) {
+      activities.push({
+        kind: 'store_created',
+        occurredAt: store.createdAt,
+        storeId: store.id,
+        storeName: store.name,
+      });
+      storeNameById.set(store.id, store.name);
+    }
+
+    for (const membership of memberships) {
+      activities.push({
+        kind: 'membership_joined',
+        occurredAt: membership.joinedAt,
+        storeId: membership.storeId,
+        storeName: membership.storeName,
+      });
+    }
+
+    const auditLogQuery = this.auditLogRepository
+      .createQueryBuilder('log')
+      .orderBy('log.createdAt', 'DESC')
+      .take(30);
+
+    if (ownedStoreIds.length > 0) {
+      auditLogQuery.where(
+        '(log.resourceType = :storeType AND log.resourceId IN (:...storeIds)) OR (log.actorType = :vendorActor AND log.actorId = :vendorId) OR (log.resourceType = :vendorType AND log.resourceId = :vendorId)',
+        {
+          storeType: AuditResourceType.STORE,
+          storeIds: ownedStoreIds,
+          vendorActor: AuditActorType.VENDOR,
+          vendorId,
+          vendorType: AuditResourceType.VENDOR,
+        },
+      );
+    } else {
+      auditLogQuery.where(
+        '(log.actorType = :vendorActor AND log.actorId = :vendorId) OR (log.resourceType = :vendorType AND log.resourceId = :vendorId)',
+        {
+          vendorActor: AuditActorType.VENDOR,
+          vendorId,
+          vendorType: AuditResourceType.VENDOR,
+        },
+      );
+    }
+
+    const auditLogs = await auditLogQuery.getMany();
+
+    for (const log of auditLogs) {
+      const kind = AUDIT_ACTION_ACTIVITY_KIND[log.action];
+      if (!kind) continue;
+      const storeNameFromMeta =
+        typeof log.metadata?.storeName === 'string' ? log.metadata.storeName : null;
+      activities.push({
+        kind,
+        occurredAt: log.createdAt,
+        storeId: log.resourceType === AuditResourceType.STORE ? log.resourceId : undefined,
+        storeName:
+          storeNameFromMeta ??
+          (log.resourceId ? (storeNameById.get(log.resourceId) ?? null) : null),
+      });
+    }
+
+    for (const order of recentOrders.slice(0, 5)) {
+      activities.push({
+        kind: 'order_received',
+        occurredAt: order.createdAt,
+        orderNumber: order.orderNumber,
+      });
+    }
+
+    activities.sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime());
+    const trimmedActivities = activities.slice(0, 20);
+    const lastActivityAt =
+      trimmedActivities[0]?.occurredAt ?? vendor.lastLoginAt ?? vendor.createdAt;
+
+    return {
+      storeCount: ownedStores.length,
+      membershipCount: memberships.length,
+      totalRevenue,
+      orderCount,
+      averageOrderValue,
+      lastOrderAt,
+      lastActivityAt,
+      memberships,
+      activities: trimmedActivities,
+      recentOrders,
+    };
   }
 
   async registerVendor(input: {
@@ -612,7 +1101,7 @@ export class StoresService {
     const user = this.userRepository.create({
       email: input.email,
       passwordHash,
-      fullName: input.fullName,
+      fullName: input.fullName.trim(),
       role: UserRole.VENDOR,
     });
     return this.userRepository.save(user);

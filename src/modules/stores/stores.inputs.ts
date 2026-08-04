@@ -4,29 +4,37 @@ import {
   IsEmail,
   IsNotEmpty,
   IsOptional,
+  IsPhoneNumber,
   IsString,
   IsUUID,
   Length,
+  Matches,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
+
+// `Length`/`IsNotEmpty` alone let whitespace-only input (e.g. "   ") through,
+// since neither trims before checking. Require at least one non-whitespace char.
+const NOT_BLANK_MESSAGE = 'This field cannot be blank or whitespace-only';
 
 @InputType()
 export class RegisterVendorInput {
   @Field()
   @IsEmail()
-  email: string;
+  email!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
   @MinLength(6)
-  password: string;
+  password!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
   @Length(1, 255)
-  fullName: string;
+  @Matches(/\S/, { message: NOT_BLANK_MESSAGE })
+  fullName!: string;
 }
 
 @InputType()
@@ -35,7 +43,7 @@ export class SubmitStoreRequestInput {
   @IsNotEmpty()
   @IsString()
   @Length(1, 255)
-  storeName: string;
+  storeName!: string;
 
   @Field({ nullable: true })
   @IsOptional()
@@ -44,7 +52,7 @@ export class SubmitStoreRequestInput {
 
   @Field({ nullable: true })
   @IsOptional()
-  @IsString()
+  @IsPhoneNumber('TH')
   contactPhone?: string;
 
   @Field({ nullable: true })
@@ -67,30 +75,30 @@ export class SubmitStoreRequestInput {
 export class RejectStoreRequestInput {
   @Field()
   @IsUUID()
-  id: string;
+  id!: string;
 
-  @Field()
-  @IsNotEmpty()
+  @Field({ nullable: true })
+  @IsOptional()
   @IsString()
-  reason: string;
+  reason?: string;
 }
 
 @InputType()
 export class SubmitStoreReactivationRequestInput {
   @Field()
   @IsUUID()
-  storeId: string;
+  storeId!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
   @Length(1, 255)
-  title: string;
+  title!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
-  content: string;
+  content!: string;
 
   @Field(() => [String], { nullable: true })
   @IsOptional()
@@ -101,7 +109,7 @@ export class SubmitStoreReactivationRequestInput {
 export class RejectStoreReactivationRequestInput {
   @Field()
   @IsUUID()
-  id: string;
+  id!: string;
 
   @Field({ nullable: true })
   @IsOptional()
@@ -113,7 +121,7 @@ export class RejectStoreReactivationRequestInput {
 export class InviteVendorInput {
   @Field()
   @IsEmail()
-  email: string;
+  email!: string;
 }
 
 @InputType()
@@ -121,31 +129,33 @@ export class AcceptVendorInvitationInput {
   @Field()
   @IsNotEmpty()
   @IsString()
-  token: string;
+  token!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
   @MinLength(6)
-  password: string;
+  password!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
   @Length(1, 255)
-  fullName: string;
+  @Matches(/\S/, { message: NOT_BLANK_MESSAGE })
+  fullName!: string;
 }
 
 @InputType()
 export class UpdateStoreAsAdminInput {
   @Field()
   @IsUUID()
-  id: string;
+  id!: string;
 
   @Field({ nullable: true })
   @IsOptional()
   @IsString()
   @Length(1, 255)
+  @Matches(/\S/, { message: NOT_BLANK_MESSAGE })
   name?: string;
 
   @Field({ nullable: true })
@@ -153,10 +163,11 @@ export class UpdateStoreAsAdminInput {
   @IsString()
   slug?: string;
 
-  @Field({ nullable: true })
+  @Field(() => String, { nullable: true })
   @IsOptional()
+  @ValidateIf((_, value) => value !== null)
   @IsUUID()
-  ownerId?: string;
+  ownerId?: string | null;
 
   @Field({ nullable: true })
   @IsOptional()
@@ -175,7 +186,7 @@ export class UpdateStoreAsAdminInput {
 
   @Field({ nullable: true })
   @IsOptional()
-  @IsString()
+  @IsPhoneNumber('TH')
   contactPhone?: string;
 
   @Field({ nullable: true })
@@ -198,13 +209,14 @@ export class UpdateStoreAsAdminInput {
 export class CreateStoreAsAdminInput {
   @Field()
   @IsUUID()
-  ownerUserId: string;
+  ownerUserId!: string;
 
   @Field()
   @IsNotEmpty()
   @IsString()
   @Length(1, 255)
-  name: string;
+  @Matches(/\S/, { message: NOT_BLANK_MESSAGE })
+  name!: string;
 
   @Field({ nullable: true })
   @IsOptional()
@@ -213,7 +225,7 @@ export class CreateStoreAsAdminInput {
 
   @Field({ nullable: true })
   @IsOptional()
-  @IsString()
+  @IsPhoneNumber('TH')
   contactPhone?: string;
 
   @Field({ nullable: true })
@@ -241,7 +253,7 @@ export class CreateStoreAsAdminInput {
 export class UpdateVendorAsAdminInput {
   @Field()
   @IsUUID()
-  id: string;
+  id!: string;
 
   @Field({ nullable: true })
   @IsOptional()

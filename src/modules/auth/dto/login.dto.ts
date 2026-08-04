@@ -9,7 +9,7 @@ export class LoginDto {
   })
   @IsNotEmpty({ message: 'Email is required' })
   @IsEmail({}, { message: 'Invalid email format' })
-  email: string;
+  email!: string;
 
   @ApiProperty({
     description: 'Account password (minimum 6 characters)',
@@ -19,5 +19,5 @@ export class LoginDto {
   @IsNotEmpty({ message: 'Password is required' })
   @IsString()
   @MinLength(6, { message: 'Password must be at least 6 characters' })
-  password: string;
+  password!: string;
 }

@@ -10,6 +10,10 @@ describe('Product publish (e2e)', () => {
   };
   let storesService: {
     userHasStoreAccess: jest.Mock;
+    isStoreSuspended: jest.Mock;
+  };
+  let shippingOptionsService: {
+    hasShippingOptions: jest.Mock;
   };
 
   const product = {
@@ -25,10 +29,14 @@ describe('Product publish (e2e)', () => {
     jest.clearAllMocks();
     productRepository = {
       findOne: jest.fn(),
-      save: jest.fn(async (data) => data),
+      save: jest.fn((data: Record<string, unknown>) => Promise.resolve(data)),
     };
     storesService = {
-      userHasStoreAccess: jest.fn(async () => true),
+      userHasStoreAccess: jest.fn(() => Promise.resolve(true)),
+      isStoreSuspended: jest.fn(() => Promise.resolve(false)),
+    };
+    shippingOptionsService = {
+      hasShippingOptions: jest.fn().mockResolvedValue(true),
     };
 
     service = new ProductsService(
@@ -41,13 +49,16 @@ describe('Product publish (e2e)', () => {
         softDelete: jest.fn(),
         createQueryBuilder: jest.fn(),
       } as never,
+      { find: jest.fn().mockResolvedValue([]) } as never,
+      { find: jest.fn().mockResolvedValue([]) } as never,
       storesService as never,
       {
         getApprovedCategory: jest.fn(),
-        getApprovedTags: jest.fn(async () => []),
+        getApprovedTags: jest.fn(() => Promise.resolve([])),
         getApprovedCategoryByName: jest.fn(),
-        getApprovedTagsByNames: jest.fn(async () => []),
+        getApprovedTagsByNames: jest.fn(() => Promise.resolve([])),
       } as never,
+      shippingOptionsService as never,
     );
   });
 
@@ -61,14 +72,20 @@ describe('Product publish (e2e)', () => {
       basePrice: 0,
     });
 
-    await expect(service.publish('prod-1', 'user-1')).rejects.toMatchObject({
-      response: {
-        code: 'PRODUCT_NOT_PUBLISHABLE',
-        details: {
-          missingKeys: expect.arrayContaining(['name', 'media', 'category', 'variants']),
-        },
-      },
-    });
+    try {
+      await service.publish('prod-1', 'user-1');
+      throw new Error('expected publish to reject');
+    } catch (err) {
+      expect(err).toBeInstanceOf(BadRequestException);
+      const response = (err as BadRequestException).getResponse() as {
+        code: string;
+        details: { missingKeys: string[] };
+      };
+      expect(response.code).toBe('PRODUCT_NOT_PUBLISHABLE');
+      expect(response.details.missingKeys).toEqual(
+        expect.arrayContaining(['name', 'media', 'category', 'variants']),
+      );
+    }
     expect(productRepository.save).not.toHaveBeenCalled();
   });
 

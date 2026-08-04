@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
 import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
-import { OrderItem } from '../../database/entities/order-item.entity';
+import { FulfillmentStatus, OrderItem } from '../../database/entities/order-item.entity';
 import { OrderShippingAddress } from '../../database/entities/order-shipping-address.entity';
 import { OrderStoreShipping } from '../../database/entities/order-store-shipping.entity';
 import { OrderStatusHistory } from '../../database/entities/order-status-history.entity';
@@ -11,18 +11,18 @@ import { ProductVariant } from '../../database/entities/product-variant.entity';
 import { Product } from '../../database/entities/product.entity';
 import { StoreShippingOption } from '../../database/entities/store-shipping-option.entity';
 import { PromotionUsage } from '../../database/entities/promotion-usage.entity';
-import { Promotion, PromotionType } from '../../database/entities/promotion.entity';
+import { Promotion } from '../../database/entities/promotion.entity';
 import {
   InventoryTransaction,
   InventoryTransactionType,
 } from '../../database/entities/inventory-transaction.entity';
 import { CreateOrderDto, ShippingAddressDto } from './dto';
 import { NotificationsService } from '../notifications/notifications.service';
-import { PromotionsService } from '../promotions/promotions.service';
+import { PromotionsService, PromotionCartLine } from '../promotions/promotions.service';
 import { GuestOrderLinkService } from './guest-order-link.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { CartService } from '../cart/cart.service';
-import { Store } from '../../database/entities/store.entity';
+import { Store, StoreStatus } from '../../database/entities/store.entity';
 import { normalizeCheckoutPaymentMethod } from '../../common/utils/checkout-payment.util';
 import { guestPhoneLookupValues, normalizeThaiPhoneToLocal } from '../../common/utils/phone.util';
 import { PaginatedResponse } from '../../common/interfaces';
@@ -32,7 +32,7 @@ import {
   normalizeCustomerOrdersLimit,
   normalizeCustomerOrdersPage,
 } from './order-list-filter.util';
-
+import { assertNotManualHoldTransition } from './store-suspension-hold.service';
 export interface StoreShippingSelection {
   storeId: string;
   shippingOptionId: string;
@@ -210,6 +210,7 @@ export class OrdersService {
 
     const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
     const storeSubtotals = new Map<string, number>();
+    const promotionLines: PromotionCartLine[] = [];
 
     for (const item of items) {
       if (!item.variantId) {
@@ -220,7 +221,7 @@ export class OrdersService {
       }
       const variant = await this.variantRepository.findOne({
         where: { id: item.variantId },
-        relations: ['product'],
+        relations: ['product', 'product.store'],
       });
       if (!variant?.product) {
         throw new BadRequestException({
@@ -228,8 +229,21 @@ export class OrdersService {
           message: `Variant ${item.variantId} not found`,
         });
       }
+      if (variant.product.store?.status === StoreStatus.SUSPENDED) {
+        throw new BadRequestException({
+          code: 'ORDER_CONTAINS_SUSPENDED_STORE',
+          message: 'Order contains items from a suspended store',
+        });
+      }
       const storeId = variant.product.storeId;
       storeSubtotals.set(storeId, (storeSubtotals.get(storeId) ?? 0) + item.price * item.quantity);
+      promotionLines.push({
+        productId: variant.productId,
+        variantId: variant.id,
+        quantity: item.quantity,
+        unitPrice: item.price,
+        storeId,
+      });
     }
 
     const storeIds = [...storeSubtotals.keys()];
@@ -240,6 +254,7 @@ export class OrdersService {
 
     let discountAmount = 0;
     let appliedPromotions: Promotion[] = [];
+    let discountsByPromotionId: Record<string, number> = {};
 
     const codes = storePromotionCodes ?? (promotionCode ? [promotionCode] : []);
     if (platformPromotionCode || codes.length) {
@@ -248,9 +263,16 @@ export class OrdersService {
         storeSubtotals,
         platformPromotionCode,
         codes,
+        customerId
+          ? { customerId }
+          : normalizedGuestPhone
+            ? { guestPhone: normalizedGuestPhone }
+            : undefined,
+        { mode: 'apply', lines: promotionLines, shippingFee },
       );
       discountAmount = stacked.discountAmount;
       appliedPromotions = stacked.promotions;
+      discountsByPromotionId = stacked.discountsByPromotionId;
     }
 
     const total = subtotal + shippingFee - discountAmount;
@@ -360,15 +382,7 @@ export class OrdersService {
       );
 
       for (const promotion of appliedPromotions) {
-        const promoDiscount =
-          appliedPromotions.length === 1
-            ? discountAmount
-            : Math.min(
-                promotion.type === PromotionType.PERCENTAGE
-                  ? (subtotal * Number(promotion.discountValue)) / 100
-                  : Number(promotion.discountValue),
-                subtotal,
-              );
+        const promoDiscount = discountsByPromotionId[promotion.id] ?? 0;
 
         await manager.save(
           PromotionUsage,
@@ -412,6 +426,8 @@ export class OrdersService {
         'storeShippings',
         'statusHistory',
       ],
+      // Soft-deleted variants remain joinable for extras (image / productId); options use snapshot.
+      withDeleted: true,
     });
 
     if (!order) {
@@ -436,6 +452,7 @@ export class OrdersService {
       where: { customerId },
       relations: ['items', 'items.productVariant', 'shippingAddress', 'storeShippings'],
       order: { createdAt: 'DESC' },
+      withDeleted: true,
     });
   }
 
@@ -476,6 +493,7 @@ export class OrdersService {
   async findLatestPurchaseProductId(customerId: string): Promise<string | null> {
     const row = await this.orderRepository
       .createQueryBuilder('order')
+      .withDeleted()
       .innerJoin('order.items', 'item')
       .innerJoin('item.productVariant', 'variant')
       .select('variant.productId', 'productId')
@@ -491,6 +509,7 @@ export class OrdersService {
   async findLatestPurchaseProductIds(customerId: string, limit: number): Promise<string[]> {
     const rows = await this.orderRepository
       .createQueryBuilder('order')
+      .withDeleted()
       .innerJoin('order.items', 'item')
       .innerJoin('item.productVariant', 'variant')
       .select('variant.productId', 'productId')
@@ -534,6 +553,7 @@ export class OrdersService {
         'items.productVariant.product.images',
         'storeShippings',
       ],
+      withDeleted: true,
     });
 
     if (!order) {
@@ -576,12 +596,37 @@ export class OrdersService {
     const order = await this.findOne(id);
     const previousStatus = order.status;
 
+    assertNotManualHoldTransition(previousStatus, status);
+
+    const isAdminHoldExit =
+      (status === OrderStatus.CANCELLED || status === OrderStatus.REFUNDED) &&
+      (previousStatus === OrderStatus.ON_HOLD ||
+        order.items.some((item) => item.fulfillmentStatus === FulfillmentStatus.ON_HOLD));
+
     order.status = status;
 
     await this.dataSource.transaction(async (manager) => {
       if (status === OrderStatus.PAID) {
         order.paidAt = new Date();
       }
+
+      if (isAdminHoldExit) {
+        const now = new Date();
+        for (const item of order.items) {
+          if (item.fulfillmentStatus === FulfillmentStatus.ON_HOLD) {
+            item.fulfillmentStatus = FulfillmentStatus.CANCELLED;
+            item.previousFulfillmentStatus = null;
+            item.holdStartedAt = null;
+            item.updatedAt = now;
+          } else if (status === OrderStatus.CANCELLED || status === OrderStatus.REFUNDED) {
+            item.fulfillmentStatus = FulfillmentStatus.CANCELLED;
+            item.updatedAt = now;
+          }
+        }
+        order.previousStatus = null;
+        await manager.save(OrderItem, order.items);
+      }
+
       await manager.save(order);
 
       if (status === OrderStatus.CANCELLED || status === OrderStatus.REFUNDED) {

@@ -14,6 +14,7 @@ import { OtpCode } from '../../database/entities/otp-code.entity';
 import { Store } from '../../database/entities/store.entity';
 import { StoreMember } from '../../database/entities/store-member.entity';
 import { PasswordResetToken } from '../../database/entities/password-reset-token.entity';
+import { EmailVerificationToken } from '../../database/entities/email-verification-token.entity';
 import { CustomerRepository } from '../../database/repositories/customer.repository';
 import { EmailModule } from '../email/email.module';
 import { SmsModule } from '../sms/sms.module';
@@ -24,10 +25,19 @@ import { StorageModule } from '../storage/storage.module';
 import { AuthRateLimitGuard } from './guards/auth-rate-limit.guard';
 import { CustomerStatusGuard } from './guards/customer-status.guard';
 import { StoreStatusGuard } from './guards/store-status.guard';
+import { VendorStatusGuard } from './guards/vendor-status.guard';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Customer, User, OtpCode, Store, StoreMember, PasswordResetToken]),
+    TypeOrmModule.forFeature([
+      Customer,
+      User,
+      OtpCode,
+      Store,
+      StoreMember,
+      PasswordResetToken,
+      EmailVerificationToken,
+    ]),
     EmailModule,
     SmsModule,
     CartModule,
@@ -37,7 +47,7 @@ import { StoreStatusGuard } from './guards/store-status.guard';
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
-      useFactory: async (configService: ConfigService) => ({
+      useFactory: (configService: ConfigService) => ({
         secret: configService.get<string>('jwt.secret'),
         signOptions: {
           expiresIn: configService.get<string>('jwt.accessTokenExpiresIn'),
@@ -54,6 +64,7 @@ import { StoreStatusGuard } from './guards/store-status.guard';
     AuthRateLimitGuard,
     StoreStatusGuard,
     CustomerStatusGuard,
+    VendorStatusGuard,
     AuthResolver,
     CustomerRepository,
   ],
@@ -64,6 +75,7 @@ import { StoreStatusGuard } from './guards/store-status.guard';
     AuthRateLimitGuard,
     StoreStatusGuard,
     CustomerStatusGuard,
+    VendorStatusGuard,
     JwtModule,
   ],
 })

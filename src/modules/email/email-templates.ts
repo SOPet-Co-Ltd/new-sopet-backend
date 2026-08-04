@@ -2,13 +2,11 @@ const BRAND_PRIMARY = '#9C6ADE';
 const BRAND_PRIMARY_DARK = '#884ECF';
 const BRAND_PRIMARY_LIGHT = '#F2EBFC';
 const BRAND_PRIMARY_SOFT = '#F9F6FE';
-const BRAND_SECONDARY = '#FF6F61';
 const BRAND_TERTIARY = '#5587A0';
 const TEXT_PRIMARY = '#1A1A1A';
 const TEXT_SECONDARY = '#5C5C5C';
 const TEXT_MUTED = '#888888';
 const BORDER = '#E7DBF9';
-const SUCCESS = '#31B953';
 const SUCCESS_BG = '#EAF8EE';
 
 export interface EmailTemplateBrand {
@@ -41,11 +39,13 @@ function formatCurrency(amount: number): string {
   return Number(amount).toLocaleString('th-TH');
 }
 
-function formatOrderStatus(status: string): string {
+export function formatOrderStatus(status: string): string {
   const labels: Record<string, string> = {
     pending_payment: 'รอชำระเงิน',
     paid: 'ชำระเงินแล้ว',
     processing: 'กำลังเตรียมสินค้า',
+    on_hold: 'พักการจัดส่ง',
+    hold_resumed: 'กลับมาดำเนินการ',
     shipped: 'จัดส่งแล้ว',
     delivered: 'จัดส่งสำเร็จ',
     cancelled: 'ยกเลิกแล้ว',
@@ -362,6 +362,31 @@ export function passwordResetTemplate(
   return { subject, html, text };
 }
 
+export function emailVerificationTemplate(
+  brand: EmailTemplateBrand,
+  params: { verifyUrl: string },
+): EmailTemplateResult {
+  const subject = 'ยืนยันอีเมล SOPet';
+  const text = `กรุณาเปิดลิงก์นี้เพื่อยืนยันอีเมลของคุณ: ${params.verifyUrl}`;
+  const html = layout(
+    brand,
+    `
+    ${heroBadge('ยืนยันอีเมล', 'info')}
+    ${sectionTitle('ยืนยันอีเมลของคุณ', 'กรุณายืนยันอีเมลเพื่อใช้งานบัญชีผู้ขายบน SOPet')}
+    ${highlightBox('หากคุณเป็นผู้ร้องขอ กรุณากดปุ่มด้านล่างเพื่อยืนยันอีเมล หากไม่ใช่ กรุณาเพิกเฉยอีเมลนี้')}
+    ${infoPanel([
+      { label: 'การดำเนินการ', value: 'ยืนยันอีเมล' },
+      { label: 'อายุลิงก์', value: '24 ชั่วโมง' },
+      { label: 'คำแนะนำ', value: 'ใช้ลิงก์เพียงครั้งเดียว' },
+    ])}
+    ${cta(params.verifyUrl, 'ยืนยันอีเมล', 'ลิงก์นี้จะหมดอายุภายใน 24 ชั่วโมง')}
+  `,
+    subject,
+  );
+
+  return { subject, html, text };
+}
+
 export function orderPaidTemplate(
   brand: EmailTemplateBrand,
   params: {
@@ -432,6 +457,40 @@ export function orderStatusChangedTemplate(
     ])}
     ${cta(params.orderUrl, 'ติดตามคำสั่งซื้อ')}
     ${note('คุณสามารถตรวจสอบรายละเอียดและประวัติการจัดส่งได้จากลิงก์ด้านบน')}
+  `,
+    subject,
+  );
+
+  return { subject, html, text };
+}
+
+export function vendorAccountSuspendedTemplate(
+  brand: EmailTemplateBrand,
+  params: { vendorName?: string | null; storeName?: string | null },
+): EmailTemplateResult {
+  const subject = 'บัญชีผู้ขาย SOPet ของคุณถูกระงับ';
+  const displayName = params.vendorName?.trim() || 'ผู้ขาย';
+  const storeLabel = params.storeName?.trim();
+  const text = storeLabel
+    ? `เรียนคุณ${displayName} บัญชีผู้ขายของคุณบน SOPet (ร้าน ${storeLabel}) ถูกระงับชั่วคราว คุณจะไม่สามารถเข้าสู่ระบบได้ กรุณาติดต่อฝ่ายสนับสนุนหากต้องการความช่วยเหลือ`
+    : `เรียนคุณ${displayName} บัญชีผู้ขายของคุณบน SOPet ถูกระงับชั่วคราว คุณจะไม่สามารถเข้าสู่ระบบได้ กรุณาติดต่อฝ่ายสนับสนุนหากต้องการความช่วยเหลือ`;
+
+  const infoRows = [
+    { label: 'บัญชี', value: displayName },
+    ...(storeLabel ? [{ label: 'ร้านค้า', value: storeLabel }] : []),
+    { label: 'สถานะ', value: 'ระงับชั่วคราว' },
+  ];
+
+  const html = layout(
+    brand,
+    `
+    ${heroBadge('บัญชีถูกระงับ', 'info')}
+    ${sectionTitle('บัญชีผู้ขายของคุณถูกระงับ', 'คุณจะไม่สามารถเข้าสู่ระบบแผงผู้ขายได้จนกว่าบัญชีจะได้รับการเปิดใช้งานอีกครั้ง')}
+    ${highlightBox(
+      'ผู้ดูแลระบบได้ระงับบัญชีผู้ขายของคุณบน SOPet ชั่วคราว หากคุณเชื่อว่านี่เป็นความผิดพลาด หรือต้องการขอเปิดใช้งานอีกครั้ง กรุณาติดต่อฝ่ายสนับสนุน',
+    )}
+    ${infoPanel(infoRows)}
+    ${note('หากต้องการความช่วยเหลือ กรุณาติดต่อทีมงาน SOPet ผ่านช่องทางสนับสนุนบนเว็บไซต์')}
   `,
     subject,
   );

@@ -15,6 +15,8 @@ import { SavedPaymentMethod } from '../src/database/entities/saved-payment-metho
 import { NotificationsService } from '../src/modules/notifications/notifications.service';
 import { PaymentEventsService } from '../src/modules/payments/payment-events.service';
 import { InventoryService } from '../src/modules/inventory/inventory.service';
+import { PayoutsService } from '../src/modules/payouts/payouts.service';
+import { StoresService } from '../src/modules/stores/stores.service';
 import { computeOmiseWebhookSignature } from '../src/modules/payments/omise-webhook.util';
 
 describe('Omise webhook (e2e)', () => {
@@ -58,6 +60,14 @@ describe('Omise webhook (e2e)', () => {
         {
           provide: InventoryService,
           useValue: { restoreOrderStock: jest.fn().mockResolvedValue(true) },
+        },
+        {
+          provide: PayoutsService,
+          useValue: { handleOmiseTransferWebhook: jest.fn() },
+        },
+        {
+          provide: StoresService,
+          useValue: { handleOmiseRecipientWebhook: jest.fn() },
         },
       ],
     }).compile();

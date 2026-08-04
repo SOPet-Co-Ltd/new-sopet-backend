@@ -44,3 +44,27 @@ export function trigramMatchExpression(
 ): string {
   return `${trigramScoreExpression(nameColumn, queryParam)} >= ${minSimilarityParam}`;
 }
+
+/**
+ * Exact substring match for product names.
+ * Needed for Thai (and mixed Thai/English) names when FTS uses the `simple`
+ * config — unspaced Thai is one lexeme, so substring FTS/trigram alone can miss.
+ */
+export function nameContainsExpression(nameColumn: string, containsParam: string): string {
+  return `${nameColumn} ILIKE ${containsParam}`;
+}
+
+/** Prefix / contains / trigram — bilingual lexical suggestion match. */
+export function lexicalNameMatchExpression(
+  nameColumn: string,
+  options: {
+    containsParam: string;
+    prefixParam: string;
+    queryParam: string;
+    minSimilarityParam: string;
+  },
+): string {
+  return `(${nameContainsExpression(nameColumn, options.containsParam)}
+    OR ${nameColumn} ILIKE ${options.prefixParam}
+    OR ${trigramMatchExpression(nameColumn, options.queryParam, options.minSimilarityParam)})`;
+}

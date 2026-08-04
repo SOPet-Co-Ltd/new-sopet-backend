@@ -23,24 +23,24 @@ export enum UserRole {
 @Index(['email'], { unique: true, where: 'deleted_at IS NULL' })
 export class User {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'email', type: 'varchar', length: 255 })
   @IsEmail()
   @IsNotEmpty()
-  email: string;
+  email!: string;
 
   @Column({ name: 'password_hash', type: 'varchar', length: 255 })
   @IsNotEmpty()
-  passwordHash: string;
+  passwordHash!: string;
 
   @Column({ name: 'full_name', type: 'varchar', length: 255 })
   @IsNotEmpty()
-  fullName: string;
+  fullName!: string;
 
   @Column({ name: 'profile_photo_url', type: 'varchar', length: 500, nullable: true })
   @IsOptional()
-  profilePhotoUrl: string | null;
+  profilePhotoUrl!: string | null;
 
   @Column({
     name: 'role',
@@ -49,33 +49,33 @@ export class User {
     default: UserRole.VENDOR,
   })
   @IsEnum(UserRole)
-  role: UserRole;
+  role!: UserRole;
 
   @Column({ name: 'is_active', type: 'boolean', default: true })
-  isActive: boolean;
+  isActive!: boolean;
 
   @Column({ name: 'email_verified', type: 'boolean', default: false })
-  emailVerified: boolean;
+  emailVerified!: boolean;
 
   @Column({ name: 'last_login_at', type: 'timestamp', nullable: true })
-  lastLoginAt: Date | null;
+  lastLoginAt!: Date | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamp' })
-  updatedAt: Date;
+  updatedAt!: Date;
 
   @DeleteDateColumn({ name: 'deleted_at', type: 'timestamp', nullable: true })
-  deletedAt: Date | null;
+  deletedAt!: Date | null;
 
   // Relations
   @OneToMany(() => Store, (store) => store.owner)
-  ownedStores: Store[];
+  ownedStores!: Store[];
 
   @OneToMany(() => StoreMember, (member) => member.user)
-  storeMembers: StoreMember[];
+  storeMembers!: StoreMember[];
 
   @OneToMany(() => AdminLog, (log) => log.admin)
-  adminLogs: AdminLog[];
+  adminLogs!: AdminLog[];
 }

@@ -552,7 +552,7 @@ describe('ReviewsService', () => {
         id: 'reply-1',
         reviewId: 'review-1',
         body: 'Thanks',
-      });
+      } as { id: string });
 
       const result = await service.createReviewReply({
         userId: 'vendor-1',
@@ -670,7 +670,7 @@ describe('ReviewsService', () => {
       });
       reviewRepo.findOne.mockResolvedValue(approvedReview);
       storesService.userHasStoreAccess.mockResolvedValue(true);
-      reviewReplyRepo.save.mockImplementation((reply: { body: string }) =>
+      reviewReplyRepo.save.mockImplementation((reply: object) =>
         Promise.resolve({ id: 'reply-1', ...reply }),
       );
 

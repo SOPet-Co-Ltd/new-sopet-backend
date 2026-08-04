@@ -12,6 +12,7 @@ import { StoreStatus } from '../../database/entities/store.entity';
 import { ProductVariant } from '../../database/entities/product-variant.entity';
 import { ProductImage } from '../../database/entities/product-image.entity';
 import { OrderItem } from '../../database/entities/order-item.entity';
+import { CartItem } from '../../database/entities/cart-item.entity';
 import { OrderStatus } from '../../database/entities/enums/order.enums';
 import {
   CreateProductDto,
@@ -23,6 +24,7 @@ import {
 import { PaginatedResponse } from '../../common/interfaces';
 import { generateSlug as slugify } from '../../common/utils/slug.util';
 import { StoresService } from '../stores/stores.service';
+import { ShippingOptionsService } from '../stores/shipping-options.service';
 import { TaxonomyService } from '../taxonomy/taxonomy.service';
 import { Tag } from '../../database/entities/tag.entity';
 import {
@@ -32,6 +34,20 @@ import {
 } from './product-publish.validation';
 import { SearchService } from '../search/search.service';
 import { SearchEmbeddingQueueService } from '../search/embedding/search-embedding-queue.service';
+import {
+  BlockedVariantPayload,
+  ProductVariantSyncImpact,
+  VariantRemovalBlockReason,
+  VariantRemovalBlockerFlags,
+} from './variant-removal.types';
+
+type SyncVariantItem = {
+  id?: string;
+  sku: string;
+  stockQuantity: number;
+  priceModifier?: number;
+  attributes: Record<string, string>;
+};
 
 @Injectable()
 export class ProductsService {
@@ -42,8 +58,13 @@ export class ProductsService {
     private variantRepository: Repository<ProductVariant>,
     @InjectRepository(ProductImage)
     private imageRepository: Repository<ProductImage>,
+    @InjectRepository(OrderItem)
+    private readonly orderItemRepository: Repository<OrderItem>,
+    @InjectRepository(CartItem)
+    private readonly cartItemRepository: Repository<CartItem>,
     private readonly storesService: StoresService,
     private readonly taxonomyService: TaxonomyService,
+    private readonly shippingOptionsService: ShippingOptionsService,
     @Optional() private readonly searchService?: SearchService,
     @Optional() private readonly searchEmbeddingQueueService?: SearchEmbeddingQueueService,
   ) {}
@@ -83,7 +104,12 @@ export class ProductsService {
     return materialKeys.some((key) => updateProductDto[key] !== undefined);
   }
 
-  private async assertStoreAccess(userId: string, storeId: string, action: string): Promise<void> {
+  private async assertStoreAccess(
+    userId: string,
+    storeId: string,
+    action: string,
+    requireActive = true,
+  ): Promise<void> {
     const hasAccess = await this.storesService.userHasStoreAccess(userId, storeId);
     if (!hasAccess) {
       throw new ForbiddenException({
@@ -91,11 +117,24 @@ export class ProductsService {
         message: `You do not have permission to ${action} for this store`,
       });
     }
+
+    // Suspension is enforced live (not just via the JWT's cached storeId), so a
+    // vendor with access to another active store can't keep managing a
+    // suspended one's products/variants/images through it.
+    if (requireActive && (await this.storesService.isStoreSuspended(storeId))) {
+      throw new ForbiddenException({
+        code: 'STORE_SUSPENDED',
+        message: `Cannot ${action} — this store is suspended`,
+      });
+    }
   }
 
   async resolveActiveStoreId(userId: string, storeId?: string): Promise<string> {
     if (storeId) {
-      await this.assertStoreAccess(userId, storeId, 'access');
+      // Read-only resolution (viewing own products/checklist) stays allowed even
+      // while suspended; mutations re-assert with requireActive via the
+      // dedicated assertStoreAccess calls in create/update/delete/publish below.
+      await this.assertStoreAccess(userId, storeId, 'access', false);
       return storeId;
     }
 
@@ -717,6 +756,7 @@ export class ProductsService {
         message: 'Product not found',
       });
     }
+    this.assertPublishedStoreApproved(product);
     return product;
   }
 
@@ -739,7 +779,11 @@ export class ProductsService {
       ],
     });
 
-    const byId = new Map(products.map((product) => [product.id, product]));
+    const byId = new Map(
+      products
+        .filter((product) => product.store?.status === StoreStatus.APPROVED)
+        .map((product) => [product.id, product]),
+    );
     return ids.map((id) => byId.get(id)).filter((product): product is Product => product != null);
   }
 
@@ -777,15 +821,27 @@ export class ProductsService {
         message: 'Product not found',
       });
     }
+    this.assertPublishedStoreApproved(product);
     return product;
   }
 
-  getPublishChecklist(product: Product): ProductPublishChecklist {
-    return getProductPublishChecklist(product);
+  /** Public PDP/recommend: treat non-approved store products as not found. */
+  private assertPublishedStoreApproved(product: Product): void {
+    if (product.store?.status !== StoreStatus.APPROVED) {
+      throw new NotFoundException({
+        code: 'PRODUCT_NOT_FOUND',
+        message: 'Product not found',
+      });
+    }
   }
 
-  assertPublishable(product: Product): void {
-    const checklist = getProductPublishChecklist(product);
+  async getPublishChecklist(product: Product): Promise<ProductPublishChecklist> {
+    const hasShipping = await this.shippingOptionsService.hasShippingOptions(product.storeId);
+    return getProductPublishChecklist(product, { hasShipping });
+  }
+
+  async assertPublishable(product: Product): Promise<void> {
+    const checklist = await this.getPublishChecklist(product);
     if (!checklist.canPublish) {
       throw new BadRequestException({
         code: 'PRODUCT_NOT_PUBLISHABLE',
@@ -800,7 +856,7 @@ export class ProductsService {
   async publish(id: string, userId: string): Promise<Product> {
     const product = await this.findOne(id);
     await this.assertStoreAccess(userId, product.storeId, 'publish products');
-    this.assertPublishable(product);
+    await this.assertPublishable(product);
     product.status = ProductStatus.PUBLISHED;
     const saved = await this.productRepository.save(product);
     await this.enqueueEmbeddingIfPublished(saved);
@@ -825,7 +881,7 @@ export class ProductsService {
     });
 
     if (rest.status === ProductStatus.PUBLISHED && product.status !== ProductStatus.PUBLISHED) {
-      this.assertPublishable(product);
+      await this.assertPublishable(product);
     }
 
     // Apply rest fields (skip undefined so partial updates don't clear existing values)
@@ -948,6 +1004,162 @@ export class ProductsService {
     return this.variantRepository.save(variant);
   }
 
+  /** Product must belong to storeId; otherwise 404 (no cross-store leak). */
+  async findOneInStore(productId: string, storeId: string): Promise<Product> {
+    const product = await this.findOne(productId);
+    if (product.storeId !== storeId) {
+      throw new NotFoundException({
+        code: 'PRODUCT_NOT_FOUND',
+        message: 'Product not found',
+      });
+    }
+    return product;
+  }
+
+  /**
+   * Public API product info update (names for taxonomy, like createWithVariants).
+   * Does not accept stock/price/status.
+   */
+  async updateProductForPublicApi(
+    productId: string,
+    storeId: string,
+    userId: string,
+    input: {
+      name?: string;
+      description?: string;
+      warning?: string;
+      expiryDate?: string;
+      category?: string;
+      tags?: string[];
+      petType?: string;
+      brand?: string;
+    },
+  ): Promise<Product> {
+    this.assertPublicPatchHasFields(input);
+    await this.findOneInStore(productId, storeId);
+
+    let categoryId: string | undefined;
+    if (input.category !== undefined) {
+      const category = await this.taxonomyService.getApprovedCategoryByName(input.category);
+      categoryId = category.id;
+    }
+
+    let tagIds: string[] | undefined;
+    if (input.tags !== undefined) {
+      const tags = await this.taxonomyService.getApprovedTagsByNames(input.tags);
+      tagIds = tags.map((tag) => tag.id);
+    }
+
+    let petTypeId: string | undefined;
+    if (input.petType !== undefined) {
+      const petType = await this.taxonomyService.getApprovedPetTypeByName(input.petType);
+      petTypeId = petType.id;
+    }
+
+    let brandId: string | undefined;
+    if (input.brand !== undefined) {
+      const brand = await this.taxonomyService.getApprovedBrandByName(input.brand);
+      brandId = brand.id;
+    }
+
+    return this.update(productId, userId, {
+      name: input.name,
+      description: input.description,
+      warning: input.warning,
+      expiryDate: input.expiryDate,
+      categoryId,
+      tagIds,
+      petTypeId,
+      brandId,
+    });
+  }
+
+  /**
+   * Public API variant stock / absolute price update.
+   * price → priceAdjustment = price - product.basePrice (may be negative).
+   */
+  async updateVariantStockPriceForPublicApi(
+    storeId: string,
+    userId: string,
+    input: {
+      variantId?: string;
+      sku?: string;
+      productId?: string;
+      stock?: number;
+      price?: number;
+    },
+  ): Promise<ProductVariant> {
+    if (input.stock === undefined && input.price === undefined) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'At least one of stock or price is required',
+      });
+    }
+
+    const variant = await this.findVariantInStoreForPublicApi(storeId, {
+      variantId: input.variantId,
+      sku: input.sku,
+      productId: input.productId,
+    });
+
+    await this.assertStoreAccess(userId, storeId, 'manage product variants');
+
+    if (input.stock !== undefined) {
+      variant.stockQuantity = input.stock;
+    }
+    if (input.price !== undefined) {
+      const basePrice = Number(variant.product.basePrice ?? 0);
+      variant.priceAdjustment = input.price - basePrice;
+    }
+
+    return this.variantRepository.save(variant);
+  }
+
+  private assertPublicPatchHasFields(input: Record<string, unknown>): void {
+    const hasField = Object.values(input).some((value) => value !== undefined);
+    if (!hasField) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'At least one field is required',
+      });
+    }
+  }
+
+  private async findVariantInStoreForPublicApi(
+    storeId: string,
+    lookup: { variantId?: string; sku?: string; productId?: string },
+  ): Promise<ProductVariant> {
+    let variant: ProductVariant | null = null;
+
+    if (lookup.variantId) {
+      variant = await this.variantRepository.findOne({
+        where: { id: lookup.variantId },
+        relations: ['product'],
+      });
+    } else if (lookup.sku) {
+      variant = await this.variantRepository.findOne({
+        where: { sku: lookup.sku, product: { storeId } },
+        relations: ['product'],
+      });
+    }
+
+    if (!variant || variant.product?.storeId !== storeId) {
+      throw new NotFoundException({
+        code: 'VARIANT_NOT_FOUND',
+        message: 'Variant not found',
+      });
+    }
+
+    if (lookup.productId && variant.productId !== lookup.productId) {
+      throw new NotFoundException({
+        code: 'VARIANT_NOT_FOUND',
+        message: 'Variant not found',
+      });
+    }
+
+    return variant;
+  }
+
   // Delete variant
   async removeVariant(variantId: string, userId: string): Promise<void> {
     const variant = await this.variantRepository.findOne({
@@ -963,20 +1175,55 @@ export class ProductsService {
     }
 
     await this.assertStoreAccess(userId, variant.product.storeId, 'manage product variants');
+    await this.assertRemovalsAllowed([variant]);
 
     await this.variantRepository.softDelete(variantId);
+  }
+
+  async getProductVariantSyncImpact(
+    productId: string,
+    userId: string,
+    items: SyncVariantItem[],
+  ): Promise<ProductVariantSyncImpact> {
+    const product = await this.findOne(productId);
+    await this.assertStoreAccess(userId, product.storeId, 'manage product variants');
+
+    if (!items.length) {
+      throw new BadRequestException({
+        code: 'VARIANTS_REQUIRED',
+        message: 'At least one variant is required',
+      });
+    }
+
+    const existingVariants = product.variants ?? [];
+    const plan = this.classifySyncPlan(existingVariants, items);
+    const blockers = await this.evaluateRemovalBlockers(plan.remove.map((variant) => variant.id));
+
+    const removedVariants = plan.remove.map((variant) => {
+      const flags = blockers.get(variant.id) ?? { hasOrders: false, hasOpenCarts: false };
+      const reasons = this.reasonsFromFlags(flags);
+      return {
+        id: variant.id,
+        sku: variant.sku,
+        optionsJson: variant.options ? JSON.stringify(variant.options) : null,
+        optionKey: this.variantOptionKey(variant.options ?? {}),
+        reasons,
+      };
+    });
+
+    return {
+      kept: plan.kept,
+      new: plan.createCount,
+      removed: plan.remove.length,
+      blocked: removedVariants.some((entry) => entry.reasons.length > 0),
+      removedVariants,
+    };
   }
 
   async syncVariants(
     productId: string,
     userId: string,
-    items: Array<{
-      id?: string;
-      sku: string;
-      stockQuantity: number;
-      priceModifier?: number;
-      attributes: Record<string, string>;
-    }>,
+    items: SyncVariantItem[],
   ): Promise<ProductVariant[]> {
     const product = await this.findOne(productId);
 
@@ -990,6 +1237,9 @@ export class ProductsService {
     }
 
     const existingVariants = product.variants ?? [];
+    const plan = this.classifySyncPlan(existingVariants, items);
+    await this.assertRemovalsAllowed(plan.remove);
+
     const keepIds = new Set<string>();
     const savedVariants: ProductVariant[] = [];
 
@@ -1035,13 +1285,128 @@ export class ProductsService {
       keepIds.add(saved.id);
     }
 
-    for (const existing of existingVariants) {
+    for (const existing of plan.remove) {
       if (!keepIds.has(existing.id)) {
         await this.variantRepository.softDelete(existing.id);
       }
     }
 
     return savedVariants;
+  }
+
+  private classifySyncPlan(
+    existingVariants: ProductVariant[],
+    items: SyncVariantItem[],
+  ): { kept: number; createCount: number; remove: ProductVariant[] } {
+    const keepIds = new Set<string>();
+    let kept = 0;
+    let createCount = 0;
+
+    for (const item of items) {
+      const options = this.buildVariantOptions(undefined, item.attributes);
+      const optionKey = this.variantOptionKey(options);
+
+      const match = item.id
+        ? existingVariants.find((existing) => existing.id === item.id)
+        : existingVariants.find(
+            (existing) => this.variantOptionKey(existing.options) === optionKey,
+          );
+
+      if (match) {
+        keepIds.add(match.id);
+        kept += 1;
+      } else {
+        createCount += 1;
+      }
+    }
+
+    return {
+      kept,
+      createCount,
+      remove: existingVariants.filter((existing) => !keepIds.has(existing.id)),
+    };
+  }
+
+  private async evaluateRemovalBlockers(
+    variantIds: string[],
+  ): Promise<Map<string, VariantRemovalBlockerFlags>> {
+    const blockers = new Map<string, VariantRemovalBlockerFlags>();
+    for (const variantId of variantIds) {
+      blockers.set(variantId, { hasOrders: false, hasOpenCarts: false });
+    }
+
+    if (!variantIds.length) {
+      return blockers;
+    }
+
+    const [orderRefs, cartRefs] = await Promise.all([
+      this.orderItemRepository.find({
+        where: { variantId: In(variantIds) },
+        select: ['variantId'],
+      }),
+      this.cartItemRepository.find({
+        where: { variantId: In(variantIds) },
+        select: ['variantId'],
+      }),
+    ]);
+
+    for (const row of orderRefs) {
+      const flags = blockers.get(row.variantId);
+      if (flags) {
+        flags.hasOrders = true;
+      }
+    }
+
+    for (const row of cartRefs) {
+      const flags = blockers.get(row.variantId);
+      if (flags) {
+        flags.hasOpenCarts = true;
+      }
+    }
+
+    return blockers;
+  }
+
+  private reasonsFromFlags(flags: VariantRemovalBlockerFlags): VariantRemovalBlockReason[] {
+    const reasons: VariantRemovalBlockReason[] = [];
+    if (flags.hasOrders) {
+      reasons.push(VariantRemovalBlockReason.HAS_ORDERS);
+    }
+    if (flags.hasOpenCarts) {
+      reasons.push(VariantRemovalBlockReason.HAS_OPEN_CARTS);
+    }
+    return reasons;
+  }
+
+  private async assertRemovalsAllowed(variants: ProductVariant[]): Promise<void> {
+    if (!variants.length) {
+      return;
+    }
+
+    const blockers = await this.evaluateRemovalBlockers(variants.map((variant) => variant.id));
+    const blockedVariants: BlockedVariantPayload[] = [];
+
+    for (const variant of variants) {
+      const flags = blockers.get(variant.id) ?? { hasOrders: false, hasOpenCarts: false };
+      const reasons = this.reasonsFromFlags(flags);
+      if (reasons.length) {
+        blockedVariants.push({
+          id: variant.id,
+          sku: variant.sku,
+          reasons,
+        });
+      }
+    }
+
+    if (!blockedVariants.length) {
+      return;
+    }
+
+    throw new BadRequestException({
+      code: 'VARIANT_REMOVAL_BLOCKED',
+      message: 'One or more variants cannot be removed because they appear in orders or open carts',
+      blockedVariants,
+    });
   }
 
   private variantOptionKey(options: Record<string, string>): string {

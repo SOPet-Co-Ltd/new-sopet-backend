@@ -25,19 +25,19 @@ export enum StoreMemberInvitationStatus {
 @Index(['storeId', 'email'], { unique: true, where: "status = 'pending'" })
 export class StoreMemberInvitation {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ name: 'store_id', type: 'uuid' })
   @IsNotEmpty()
-  storeId: string;
+  storeId!: string;
 
   @Column({ name: 'invited_by', type: 'uuid' })
   @IsNotEmpty()
-  invitedBy: string;
+  invitedBy!: string;
 
   @Column({ name: 'email', type: 'varchar', length: 255 })
   @IsEmail()
-  email: string;
+  email!: string;
 
   @Column({
     name: 'role',
@@ -46,11 +46,11 @@ export class StoreMemberInvitation {
     default: StoreMemberRole.STAFF,
   })
   @IsEnum(StoreMemberRole)
-  role: StoreMemberRole;
+  role!: StoreMemberRole;
 
   @Column({ name: 'token', type: 'varchar', length: 64 })
   @IsNotEmpty()
-  token: string;
+  token!: string;
 
   @Column({
     name: 'status',
@@ -59,27 +59,27 @@ export class StoreMemberInvitation {
     default: StoreMemberInvitationStatus.PENDING,
   })
   @IsEnum(StoreMemberInvitationStatus)
-  status: StoreMemberInvitationStatus;
+  status!: StoreMemberInvitationStatus;
 
   @Column({ name: 'expires_at', type: 'timestamp' })
-  expiresAt: Date;
+  expiresAt!: Date;
 
   @Column({ name: 'accepted_at', type: 'timestamp', nullable: true })
-  acceptedAt: Date | null;
+  acceptedAt!: Date | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamp' })
-  updatedAt: Date;
+  updatedAt!: Date;
 
   @ManyToOne(() => Store, (store) => store.memberInvitations, {
     onDelete: 'CASCADE',
   })
   @JoinColumn({ name: 'store_id' })
-  store: Store;
+  store!: Store;
 
   @ManyToOne(() => User)
   @JoinColumn({ name: 'invited_by' })
-  inviter: User;
+  inviter!: User;
 }

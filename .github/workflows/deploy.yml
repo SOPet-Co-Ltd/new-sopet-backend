@@ -1,8 +1,21 @@
-# SOPET Backend — Deploy to AWS ECS (Fargate)
-# Triggers on push to deploy/production or deploy/uat.
+# SOPET Backend — Build to ECR, deploy on EC2 via SSM
+# Triggers on push to deploy/production or deploy/uat, or workflow_dispatch
+# (choose Environment in the UI). Prefer push/merge for production.
 #
 # GitHub Environment vars/secrets are mapped once in "Load GitHub Environment"
 # (step-level env → GITHUB_ENV). Keys: infra/github-env.keys
+#
+# Runner selection: Environment-scoped vars are reliable inside a job with
+# `environment:`, but NOT when evaluating that same job's `runs-on` (chicken-and-egg
+# at schedule time). A tiny resolve-runner job reads Environment DOCKER_PLATFORM and
+# outputs the runner label; deploy uses needs.*.outputs.runner.
+#
+# Defaults (safe for Graviton): BUILD_ON_HOST unset/false → GHA builds, EC2 pull-only.
+# Set Environment var DOCKER_PLATFORM=linux/arm64 for arm64 EC2 (ubuntu-24.04-arm).
+#
+# ECR: recommend the same ECR_REPOSITORY on deploy/uat and deploy/production so a
+# UAT-built image (tag = github.sha) can be promoted — check-image skips rebuild
+# when that tag already exists. See docs/deploy-production.md.
 
 name: Deploy
 
@@ -10,9 +23,19 @@ on:
   push:
     branches: [deploy/production, deploy/uat]
   workflow_dispatch:
+    inputs:
+      environment:
+        description: 'GitHub Environment (deploy/uat or deploy/production)'
+        required: true
+        type: choice
+        default: deploy/uat
+        options:
+          - deploy/uat
+          - deploy/production
 
 concurrency:
-  group: deploy-${{ github.ref }}
+  # Isolate prod vs uat even when dispatching from the same git ref.
+  group: deploy-${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || github.ref_name }}
   cancel-in-progress: false
 
 permissions:
@@ -20,9 +43,53 @@ permissions:
   contents: read
 
 jobs:
-  deploy:
+  # Read Environment DOCKER_PLATFORM on a fixed runner, then hand the label to deploy.
+  resolve-runner:
     runs-on: ubuntu-latest
-    environment: ${{ github.ref_name == 'deploy/production' && 'deploy/production' || 'deploy/uat' }}
+    environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || github.ref_name }}
+    outputs:
+      runner: ${{ steps.resolve.outputs.runner }}
+      platform: ${{ steps.resolve.outputs.platform }}
+      deploy_env: ${{ steps.resolve.outputs.deploy_env }}
+    steps:
+      - name: Resolve runner from Environment DOCKER_PLATFORM
+        id: resolve
+        env:
+          DOCKER_PLATFORM: ${{ vars.DOCKER_PLATFORM }}
+          BUILD_ON_HOST: ${{ vars.BUILD_ON_HOST }}
+          DEPLOY_ENV: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || github.ref_name }}
+        run: |
+          PLATFORM="${DOCKER_PLATFORM:-linux/amd64}"
+          case "$PLATFORM" in
+            linux/arm64)
+              RUNNER="ubuntu-24.04-arm"
+              ;;
+            linux/amd64)
+              RUNNER="ubuntu-latest"
+              ;;
+            *)
+              echo "::error::Unsupported DOCKER_PLATFORM='$PLATFORM' (use linux/arm64 or linux/amd64)"
+              exit 1
+              ;;
+          esac
+          {
+            echo "platform=$PLATFORM"
+            echo "runner=$RUNNER"
+            echo "deploy_env=$DEPLOY_ENV"
+          } >> "$GITHUB_OUTPUT"
+          echo "Environment=$DEPLOY_ENV DOCKER_PLATFORM=$PLATFORM → runs-on=$RUNNER"
+          if [ -z "${DOCKER_PLATFORM:-}" ]; then
+            echo "::warning::DOCKER_PLATFORM unset — defaulting to linux/amd64. For Graviton set linux/arm64 on Environment $DEPLOY_ENV."
+          fi
+          if [ "${BUILD_ON_HOST:-}" = "true" ]; then
+            echo "::warning::BUILD_ON_HOST=true — EC2 will build the image (slow). Leave unset for normal pull-only deploys."
+          fi
+
+  deploy:
+    needs: resolve-runner
+    # Native arm64 on ubuntu-24.04-arm (avoids QEMU); amd64 on ubuntu-latest.
+    runs-on: ${{ needs.resolve-runner.outputs.runner }}
+    environment: ${{ needs.resolve-runner.outputs.deploy_env }}
 
     steps:
       - name: Checkout
@@ -33,15 +100,14 @@ jobs:
           AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
           AWS_REGION: ${{ vars.AWS_REGION }}
           ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
-          ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
-          ECS_SERVICE: ${{ vars.ECS_SERVICE }}
-          ECS_TASK_DEFINITION_FAMILY: ${{ vars.ECS_TASK_DEFINITION_FAMILY }}
-          ECS_CONTAINER_NAME: ${{ vars.ECS_CONTAINER_NAME }}
-          ECS_EXECUTION_ROLE_ARN: ${{ vars.ECS_EXECUTION_ROLE_ARN }}
-          ECS_TASK_ROLE_ARN: ${{ vars.ECS_TASK_ROLE_ARN }}
-          ECS_LOG_GROUP: ${{ vars.ECS_LOG_GROUP }}
-          ECS_CPU: ${{ vars.ECS_CPU }}
-          ECS_MEMORY: ${{ vars.ECS_MEMORY }}
+          EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+          DOCKER_PLATFORM: ${{ vars.DOCKER_PLATFORM }}
+          BUILD_ON_HOST: ${{ vars.BUILD_ON_HOST }}
+          CADDY_HOSTNAME: ${{ vars.CADDY_HOSTNAME }}
+          CADDY_ADMIN_EMAIL: ${{ vars.CADDY_ADMIN_EMAIL }}
+          CADDY_TLS_CERT: ${{ vars.CADDY_TLS_CERT }}
+          CADDY_TLS_KEY: ${{ vars.CADDY_TLS_KEY }}
+          CADDY_TLS_ENABLED: ${{ vars.CADDY_TLS_ENABLED }}
           NODE_ENV: ${{ vars.NODE_ENV }}
           PORT: ${{ vars.PORT }}
           DB_HOST: ${{ vars.DB_HOST }}
@@ -64,6 +130,7 @@ jobs:
           PAYMENT_EXPIRY_CHECK_INTERVAL_MS: ${{ vars.PAYMENT_EXPIRY_CHECK_INTERVAL_MS }}
           EMAIL_FROM: ${{ vars.EMAIL_FROM }}
           EMAIL_FROM_NAME: ${{ vars.EMAIL_FROM_NAME }}
+          API_URL: ${{ vars.API_URL }}
           STOREFRONT_URL: ${{ vars.STOREFRONT_URL }}
           ADMIN_PANEL_URL: ${{ vars.ADMIN_PANEL_URL }}
           CORS_ORIGINS: ${{ vars.CORS_ORIGINS }}
@@ -95,7 +162,19 @@ jobs:
       - name: Validate GitHub Environment configuration
         run: |
           chmod +x infra/validate-deploy-env.sh
-          infra/validate-deploy-env.sh '${{ github.ref_name == 'deploy/production' && 'production' || 'uat' }}'
+          infra/validate-deploy-env.sh '${{ needs.resolve-runner.outputs.deploy_env }}'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+
+      - name: Run database migrations
+        run: |
+          yarn install --frozen-lockfile --production=false
+          yarn typeorm migration:show -d ormconfig.ts
+          yarn migration:run
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -123,24 +202,88 @@ jobs:
             echo "Image not found — will build and push $ECR_REPOSITORY:$IMAGE_TAG"
           fi
 
+      # Plain docker build/push (not buildx --push): Buildx's container driver often
+      # fails to receive host docker login, and ECR reports that as an expired token.
+      # Runner matches platform (ubuntu-latest = amd64, ubuntu-24.04-arm = arm64),
+      # so no QEMU. Optional escape hatch: vars.BUILD_ON_HOST=true builds on EC2 instead.
       - name: Build, tag, and push image to Amazon ECR
-        if: steps.check-image.outputs.exists != 'true'
+        if: vars.BUILD_ON_HOST != 'true' && steps.check-image.outputs.exists != 'true'
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
+          DOCKER_PLATFORM: ${{ vars.DOCKER_PLATFORM }}
+          RESOLVED_PLATFORM: ${{ needs.resolve-runner.outputs.platform }}
         run: |
-          docker build -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" .
+          PLATFORM="${DOCKER_PLATFORM:-linux/amd64}"
+          HOST_ARCH="$(uname -m)"
+          echo "Building image on GHA ($HOST_ARCH) for platform: $PLATFORM"
+
+          if [ -n "$RESOLVED_PLATFORM" ] && [ "$PLATFORM" != "$RESOLVED_PLATFORM" ]; then
+            echo "::error::DOCKER_PLATFORM mismatch: Environment='$PLATFORM' vs resolve-runner='$RESOLVED_PLATFORM'"
+            exit 1
+          fi
+
+          case "$PLATFORM" in
+            linux/arm64)
+              if [ "$HOST_ARCH" != "aarch64" ] && [ "$HOST_ARCH" != "arm64" ]; then
+                echo "::error::DOCKER_PLATFORM=linux/arm64 requires a native ARM runner (uname -m=$HOST_ARCH)."
+                echo "::error::Expected runs-on=ubuntu-24.04-arm. Refusing QEMU/cross-build (exec format error)."
+                exit 1
+              fi
+              ;;
+            linux/amd64)
+              if [ "$HOST_ARCH" != "x86_64" ] && [ "$HOST_ARCH" != "amd64" ]; then
+                echo "::error::DOCKER_PLATFORM=linux/amd64 requires an amd64 runner (uname -m=$HOST_ARCH)."
+                echo "::error::Expected runs-on=ubuntu-latest."
+                exit 1
+              fi
+              ;;
+            *)
+              echo "::error::Unsupported DOCKER_PLATFORM='$PLATFORM' (use linux/arm64 or linux/amd64)"
+              exit 1
+              ;;
+          esac
+
+          # Fresh login immediately before push (avoids stale/Buildx auth failures)
+          aws ecr get-login-password --region "$AWS_REGION" \
+            | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+
+          docker build \
+            --platform "$PLATFORM" \
+            --tag "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" \
+            .
           docker push "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
 
-      - name: Render ECS task definition from GitHub Environment
-        env:
-          CONTAINER_IMAGE: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
-        run: bash infra/render-ecs-task-definition.sh task-definition.json
+      - name: Note build on EC2 (escape hatch)
+        if: vars.BUILD_ON_HOST == 'true' && steps.check-image.outputs.exists != 'true'
+        run: |
+          echo "BUILD_ON_HOST=true: image will be built on EC2 via infra/ec2/build-on-host.sh"
 
-      - name: Deploy Amazon ECS task definition
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: task-definition.json
-          service: ${{ env.ECS_SERVICE }}
-          cluster: ${{ env.ECS_CLUSTER }}
-          wait-for-service-stability: true
+      - name: Render runtime env file
+        run: bash infra/render-env-file.sh .env.deploy
+
+      - name: Render Caddyfile
+        run: |
+          chmod +x infra/render-caddyfile.sh
+          infra/render-caddyfile.sh .caddy.deploy
+          echo "--- Rendered Caddyfile ---"
+          cat .caddy.deploy
+
+      # Default: EC2 only pulls + restarts (SSM ~1800s). Optional BUILD_ON_HOST=true
+      # enables native docker build on EC2 (3600s poll/execution in deploy-via-ssm.sh).
+      # Leave BUILD_ON_HOST unset for production/UAT (GHA arm64 build + EC2 pull-only).
+      # Optional: set GitHub var SSM_CLOUDWATCH_LOG_GROUP (e.g. /sopet/ssm/deploy)
+      # after creating the log group + updating EC2 IAM.
+      - name: Deploy to EC2 via SSM
+        env:
+          IMAGE_URI: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          BUILD_ON_HOST: ${{ vars.BUILD_ON_HOST == 'true' && steps.check-image.outputs.exists != 'true' }}
+          GIT_COMMIT: ${{ github.sha }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SSM_CLOUDWATCH_LOG_GROUP: ${{ vars.SSM_CLOUDWATCH_LOG_GROUP }}
+        run: |
+          # Includes deploy.sh, setup-caddy.sh, build-on-host.sh, ssm-heartbeat.sh
+          chmod +x infra/deploy-via-ssm.sh infra/ec2/*.sh
+          test -x infra/ec2/ssm-heartbeat.sh
+          infra/deploy-via-ssm.sh .env.deploy .caddy.deploy
