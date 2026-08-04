@@ -75,7 +75,17 @@ describe('NotificationsService', () => {
   });
 
   describe('notifyOrderPaid', () => {
+    function mockNoDedupeHit() {
+      const qb = {
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(null),
+      };
+      userNotificationRepo.createQueryBuilder.mockReturnValue(qb);
+    }
+
     it('sends email when customer has email', async () => {
+      mockNoDedupeHit();
       const order = {
         id: 'order-1',
         orderNumber: 'ORD-001',
@@ -105,12 +115,20 @@ describe('NotificationsService', () => {
 
       await service.notifyOrderPaid(order);
 
+      expect(userNotificationRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'cust-1',
+          type: 'payment_received',
+          message: expect.stringContaining('ORD-001'),
+        }),
+      );
       expect(emailDeliveryService.sendOrderPaid).toHaveBeenCalledWith(
         'user@example.com',
         expect.objectContaining({
           orderNumber: 'ORD-001',
           total: 1500,
           customerName: 'คุณสมชาย',
+          orderUrl: 'https://store.example.com/user/orders/order-1',
           items: expect.arrayContaining([
             expect.objectContaining({
               productName: 'Dog Food Premium',
@@ -120,6 +138,32 @@ describe('NotificationsService', () => {
         }),
       );
       expect(orderRepo.findOne).not.toHaveBeenCalled();
+    });
+
+    it('creates in-app notification even when customer has no email', async () => {
+      mockNoDedupeHit();
+      const order = {
+        id: 'order-3',
+        orderNumber: 'ORD-003',
+        customerId: 'cust-1',
+        guestEmail: null,
+        paymentMethod: 'promptpay',
+        subtotal: 100,
+        discountAmount: 0,
+        shippingFee: 0,
+        total: 100,
+        createdAt: new Date(),
+        paidAt: new Date(),
+        items: [],
+      } as unknown as Order;
+      customerRepo.findOne.mockResolvedValue({ id: 'cust-1', email: null, fullName: 'Buyer' });
+
+      await service.notifyOrderPaid(order);
+
+      expect(userNotificationRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'cust-1', type: 'payment_received' }),
+      );
+      expect(emailDeliveryService.sendOrderPaid).not.toHaveBeenCalled();
     });
 
     it('skips when no email (guest without guestEmail)', async () => {
@@ -134,12 +178,23 @@ describe('NotificationsService', () => {
       await service.notifyOrderPaid(order);
 
       expect(customerRepo.findOne).not.toHaveBeenCalled();
+      expect(userNotificationRepo.create).not.toHaveBeenCalled();
       expect(emailDeliveryService.sendOrderPaid).not.toHaveBeenCalled();
     });
   });
 
   describe('notifyOrderStatusChanged', () => {
-    it('sends email', async () => {
+    function mockNoDedupeHit() {
+      const qb = {
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(null),
+      };
+      userNotificationRepo.createQueryBuilder.mockReturnValue(qb);
+    }
+
+    it('sends email and creates in-app customer notification', async () => {
+      mockNoDedupeHit();
       const order = {
         id: 'order-1',
         orderNumber: 'ORD-001',
@@ -152,14 +207,62 @@ describe('NotificationsService', () => {
 
       await service.notifyOrderStatusChanged(order, 'shipped');
 
+      expect(userNotificationRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'cust-1',
+          type: 'order_status_changed',
+          message: expect.stringContaining('จัดส่งแล้ว'),
+          metadata: expect.objectContaining({ status: 'shipped', orderId: 'order-1' }),
+        }),
+      );
       expect(emailDeliveryService.sendOrderStatusChanged).toHaveBeenCalledWith(
         'user@example.com',
         expect.objectContaining({
           orderNumber: 'ORD-001',
           status: 'shipped',
           orderDate: expect.any(String),
+          orderUrl: 'https://store.example.com/user/orders/order-1',
         }),
       );
+    });
+
+    it('uses public track URL for guest orders', async () => {
+      const order = {
+        id: 'order-guest',
+        orderNumber: 'ORD-GUEST-1',
+        customerId: null,
+        guestEmail: 'guest@example.com',
+        createdAt: new Date('2025-07-11T12:00:00.000Z'),
+        items: [],
+      } as unknown as Order;
+
+      await service.notifyOrderStatusChanged(order, 'shipped');
+
+      expect(customerRepo.findOne).not.toHaveBeenCalled();
+      expect(userNotificationRepo.create).not.toHaveBeenCalled();
+      expect(emailDeliveryService.sendOrderStatusChanged).toHaveBeenCalledWith(
+        'guest@example.com',
+        expect.objectContaining({
+          orderUrl: 'https://store.example.com/track/ORD-GUEST-1',
+        }),
+      );
+    });
+
+    it('skips in-app for hold statuses (dedicated hold types)', async () => {
+      const order = {
+        id: 'order-1',
+        orderNumber: 'ORD-001',
+        customerId: 'cust-1',
+        guestEmail: null,
+        createdAt: new Date(),
+        items: [],
+      } as unknown as Order;
+      customerRepo.findOne.mockResolvedValue({ id: 'cust-1', email: 'user@example.com' });
+
+      await service.notifyOrderStatusChanged(order, 'on_hold');
+
+      expect(userNotificationRepo.create).not.toHaveBeenCalled();
+      expect(emailDeliveryService.sendOrderStatusChanged).toHaveBeenCalled();
     });
   });
 

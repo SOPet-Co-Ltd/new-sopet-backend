@@ -150,4 +150,5 @@ See [Deployment — Inspect a stuck SSM command](deployment.md#inspect-a-stuck--
 ## Related docs
 
 - [Deployment](deployment.md)
+- [Deploy production](deploy-production.md)
 - [Database](database.md)

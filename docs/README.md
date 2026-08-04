@@ -4,18 +4,20 @@ NestJS GraphQL API for the SOPET multi-vendor e-commerce platform.
 
 ## Index
 
-| Document                                      | Description                                            |
-| --------------------------------------------- | ------------------------------------------------------ |
-| [Architecture](architecture.md)               | Module design, layers, dependency direction            |
-| [Folder structure](folder-structure.md)       | Every important directory explained                    |
-| [File types](file-types.md)                   | `.entity`, `.service`, `.resolver`, etc. — when to use |
-| [API (GraphQL)](api.md)                       | GraphQL setup, resolvers, REST endpoints               |
-| [Database](database.md)                       | TypeORM, entities, migrations, seeds                   |
-| [Authentication](authentication.md)           | OTP, JWT, guards, decorators                           |
-| [Coding conventions](coding-conventions.md)   | Naming, validation, errors, testing                    |
-| [Feature development](feature-development.md) | End-to-end guide for new features                      |
-| [Deployment](deployment.md)                   | Docker, CI, production                                 |
-| [Troubleshooting](troubleshooting.md)         | Common issues                                          |
+| Document                                                | Description                                              |
+| ------------------------------------------------------- | -------------------------------------------------------- |
+| [Architecture](architecture.md)                         | Module design, layers, dependency direction              |
+| [Folder structure](folder-structure.md)                 | Every important directory explained                      |
+| [File types](file-types.md)                             | `.entity`, `.service`, `.resolver`, etc. — when to use   |
+| [API (GraphQL)](api.md)                                 | GraphQL setup, resolvers, REST endpoints                 |
+| [Database](database.md)                                 | TypeORM, entities, migrations, seeds                     |
+| [Authentication](authentication.md)                     | OTP, JWT, guards, decorators                             |
+| [Coding conventions](coding-conventions.md)             | Naming, validation, errors, testing                      |
+| [Feature development](feature-development.md)           | End-to-end guide for new features                        |
+| [Deployment](deployment.md)                             | Docker, CI, EC2/ECR/SSM overview                         |
+| [Deploy production](deploy-production.md)               | Production checklist (GitHub Env, AWS, verify, rollback) |
+| [Env secrets & variables](env-secrets-and-variables.md) | GitHub Env secrets vs variables + local-only keys        |
+| [Troubleshooting](troubleshooting.md)                   | Common issues                                            |
 
 ## Design notes
 

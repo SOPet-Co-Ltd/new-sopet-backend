@@ -1,5 +1,6 @@
 # SOPET Backend — Build to ECR, deploy on EC2 via SSM
-# Triggers on push to deploy/production or deploy/uat.
+# Triggers on push to deploy/production or deploy/uat, or workflow_dispatch
+# (choose Environment in the UI). Prefer push/merge for production.
 #
 # GitHub Environment vars/secrets are mapped once in "Load GitHub Environment"
 # (step-level env → GITHUB_ENV). Keys: infra/github-env.keys
@@ -8,6 +9,13 @@
 # `environment:`, but NOT when evaluating that same job's `runs-on` (chicken-and-egg
 # at schedule time). A tiny resolve-runner job reads Environment DOCKER_PLATFORM and
 # outputs the runner label; deploy uses needs.*.outputs.runner.
+#
+# Defaults (safe for Graviton): BUILD_ON_HOST unset/false → GHA builds, EC2 pull-only.
+# Set Environment var DOCKER_PLATFORM=linux/arm64 for arm64 EC2 (ubuntu-24.04-arm).
+#
+# ECR: recommend the same ECR_REPOSITORY on deploy/uat and deploy/production so a
+# UAT-built image (tag = github.sha) can be promoted — check-image skips rebuild
+# when that tag already exists. See docs/deploy-production.md.
 
 name: Deploy
 
@@ -15,9 +23,19 @@ on:
   push:
     branches: [deploy/production, deploy/uat]
   workflow_dispatch:
+    inputs:
+      environment:
+        description: 'GitHub Environment (deploy/uat or deploy/production)'
+        required: true
+        type: choice
+        default: deploy/uat
+        options:
+          - deploy/uat
+          - deploy/production
 
 concurrency:
-  group: deploy-${{ github.ref }}
+  # Isolate prod vs uat even when dispatching from the same git ref.
+  group: deploy-${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || github.ref_name }}
   cancel-in-progress: false
 
 permissions:
@@ -28,15 +46,18 @@ jobs:
   # Read Environment DOCKER_PLATFORM on a fixed runner, then hand the label to deploy.
   resolve-runner:
     runs-on: ubuntu-latest
-    environment: ${{ github.ref_name == 'deploy/production' && 'deploy/production' || 'deploy/uat' }}
+    environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || github.ref_name }}
     outputs:
       runner: ${{ steps.resolve.outputs.runner }}
       platform: ${{ steps.resolve.outputs.platform }}
+      deploy_env: ${{ steps.resolve.outputs.deploy_env }}
     steps:
       - name: Resolve runner from Environment DOCKER_PLATFORM
         id: resolve
         env:
           DOCKER_PLATFORM: ${{ vars.DOCKER_PLATFORM }}
+          BUILD_ON_HOST: ${{ vars.BUILD_ON_HOST }}
+          DEPLOY_ENV: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || github.ref_name }}
         run: |
           PLATFORM="${DOCKER_PLATFORM:-linux/amd64}"
           case "$PLATFORM" in
@@ -54,14 +75,21 @@ jobs:
           {
             echo "platform=$PLATFORM"
             echo "runner=$RUNNER"
+            echo "deploy_env=$DEPLOY_ENV"
           } >> "$GITHUB_OUTPUT"
-          echo "DOCKER_PLATFORM=$PLATFORM → runs-on=$RUNNER"
+          echo "Environment=$DEPLOY_ENV DOCKER_PLATFORM=$PLATFORM → runs-on=$RUNNER"
+          if [ -z "${DOCKER_PLATFORM:-}" ]; then
+            echo "::warning::DOCKER_PLATFORM unset — defaulting to linux/amd64. For Graviton set linux/arm64 on Environment $DEPLOY_ENV."
+          fi
+          if [ "${BUILD_ON_HOST:-}" = "true" ]; then
+            echo "::warning::BUILD_ON_HOST=true — EC2 will build the image (slow). Leave unset for normal pull-only deploys."
+          fi
 
   deploy:
     needs: resolve-runner
     # Native arm64 on ubuntu-24.04-arm (avoids QEMU); amd64 on ubuntu-latest.
     runs-on: ${{ needs.resolve-runner.outputs.runner }}
-    environment: ${{ github.ref_name == 'deploy/production' && 'deploy/production' || 'deploy/uat' }}
+    environment: ${{ needs.resolve-runner.outputs.deploy_env }}
 
     steps:
       - name: Checkout
@@ -74,6 +102,7 @@ jobs:
           ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
           EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
           DOCKER_PLATFORM: ${{ vars.DOCKER_PLATFORM }}
+          BUILD_ON_HOST: ${{ vars.BUILD_ON_HOST }}
           CADDY_HOSTNAME: ${{ vars.CADDY_HOSTNAME }}
           CADDY_ADMIN_EMAIL: ${{ vars.CADDY_ADMIN_EMAIL }}
           CADDY_TLS_CERT: ${{ vars.CADDY_TLS_CERT }}
@@ -133,7 +162,7 @@ jobs:
       - name: Validate GitHub Environment configuration
         run: |
           chmod +x infra/validate-deploy-env.sh
-          infra/validate-deploy-env.sh '${{ github.ref_name == 'deploy/production' && 'production' || 'uat' }}'
+          infra/validate-deploy-env.sh '${{ needs.resolve-runner.outputs.deploy_env }}'
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -242,6 +271,7 @@ jobs:
 
       # Default: EC2 only pulls + restarts (SSM ~1800s). Optional BUILD_ON_HOST=true
       # enables native docker build on EC2 (3600s poll/execution in deploy-via-ssm.sh).
+      # Leave BUILD_ON_HOST unset for production/UAT (GHA arm64 build + EC2 pull-only).
       # Optional: set GitHub var SSM_CLOUDWATCH_LOG_GROUP (e.g. /sopet/ssm/deploy)
       # after creating the log group + updating EC2 IAM.
       - name: Deploy to EC2 via SSM
@@ -253,5 +283,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SSM_CLOUDWATCH_LOG_GROUP: ${{ vars.SSM_CLOUDWATCH_LOG_GROUP }}
         run: |
+          # Includes deploy.sh, setup-caddy.sh, build-on-host.sh, ssm-heartbeat.sh
           chmod +x infra/deploy-via-ssm.sh infra/ec2/*.sh
+          test -x infra/ec2/ssm-heartbeat.sh
           infra/deploy-via-ssm.sh .env.deploy .caddy.deploy

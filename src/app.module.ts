@@ -20,6 +20,7 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { ValidationPipe } from './common/pipes/validation.pipe';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { StoreStatusGuard } from './modules/auth/guards/store-status.guard';
+import { VendorStatusGuard } from './modules/auth/guards/vendor-status.guard';
 import { CustomerStatusGuard } from './modules/auth/guards/customer-status.guard';
 
 // Modules
@@ -127,6 +128,11 @@ import { getPostgresSslOptions } from './database/postgres-ssl.util';
     {
       provide: APP_GUARD,
       useExisting: StoreStatusGuard,
+    },
+    // Global vendor-account suspension guard
+    {
+      provide: APP_GUARD,
+      useExisting: VendorStatusGuard,
     },
     // Global customer-suspension guard
     {

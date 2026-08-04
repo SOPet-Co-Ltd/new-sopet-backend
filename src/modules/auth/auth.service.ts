@@ -333,13 +333,41 @@ export class AuthService {
         }
       }
 
+      if (payload.role === UserRole.VENDOR || payload.role === UserRole.ADMIN) {
+        const user = await this.userRepository.findOne({
+          where: { id: payload.sub },
+          select: ['id', 'isActive'],
+        });
+        if (!user || !user.isActive) {
+          throw new UnauthorizedException({
+            code: 'ACCOUNT_SUSPENDED',
+            message: 'Your account has been suspended. Please contact support for assistance.',
+          });
+        }
+      }
+
       return this.generateTokens(newPayload);
-    } catch {
+    } catch (error) {
+      if (this.isSuspensionAuthError(error)) {
+        throw error;
+      }
       throw new UnauthorizedException({
         code: 'INVALID_REFRESH_TOKEN',
         message: 'Invalid or expired refresh token',
       });
     }
+  }
+
+  private isSuspensionAuthError(error: unknown): boolean {
+    if (!(error instanceof UnauthorizedException || error instanceof ForbiddenException)) {
+      return false;
+    }
+    const response = error.getResponse();
+    if (typeof response !== 'object' || response === null || !('code' in response)) {
+      return false;
+    }
+    const code = (response as { code?: string }).code;
+    return code === 'CUSTOMER_SUSPENDED' || code === 'ACCOUNT_SUSPENDED';
   }
 
   private async generateTokens(
@@ -388,12 +416,18 @@ export class AuthService {
     }
 
     const user = await this.userRepository.findOne({
-      where: { id: userId, isActive: true },
+      where: { id: userId },
     });
     if (!user) {
       throw new UnauthorizedException({
         code: 'USER_NOT_FOUND',
         message: 'User not found',
+      });
+    }
+    if (!user.isActive) {
+      throw new ForbiddenException({
+        code: 'ACCOUNT_SUSPENDED',
+        message: 'Your account has been suspended. Please contact support for assistance.',
       });
     }
     return { user };

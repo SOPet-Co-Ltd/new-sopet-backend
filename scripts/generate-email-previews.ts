@@ -81,7 +81,7 @@ const previews = [
       discountAmount: 100,
       shippingFee: 79,
       total: 1385,
-      orderUrl: 'https://sopet.co.th/account/orders/mock-order-id',
+      orderUrl: 'https://sopet.co.th/user/orders/mock-order-id',
     }),
   },
   {
@@ -90,7 +90,7 @@ const previews = [
       orderNumber: 'ORD-20250711-0042',
       status: 'shipped',
       orderDate: '11 กรกฎาคม 2568 เวลา 20:15',
-      orderUrl: 'https://sopet.co.th/account/orders/mock-order-id',
+      orderUrl: 'https://sopet.co.th/user/orders/mock-order-id',
     }),
   },
 ];

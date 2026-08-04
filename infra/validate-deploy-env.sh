@@ -2,7 +2,7 @@
 # Validate required GitHub Environment variables/secrets before deploy.
 set -euo pipefail
 
-ENVIRONMENT_NAME="${1:?Environment name required (uat or production)}"
+ENVIRONMENT_NAME="${1:?Environment name required (deploy/uat or deploy/production)}"
 
 REQUIRED_VARS=(
   AWS_REGION
@@ -64,8 +64,25 @@ if [ "${#missing[@]}" -gt 0 ]; then
     echo "::error::  - $item" >&2
   done
   echo "::error::Add them under Settings → Environments → $ENVIRONMENT_NAME" >&2
-  echo "::error::If values are already set, check Environment → Deployment branches allows branch: $GITHUB_REF_NAME" >&2
+  echo "::error::If values are already set, check Environment → Deployment branches allows this ref." >&2
+  echo "::error::Key list: infra/github-env.keys — production guide: docs/deploy-production.md" >&2
   exit 1
+fi
+
+# Optional but strongly recommended for Graviton (same structure as UAT).
+PLATFORM="${DOCKER_PLATFORM:-}"
+if [ -z "$PLATFORM" ]; then
+  echo "::warning::DOCKER_PLATFORM is unset on '$ENVIRONMENT_NAME' (workflow defaults to linux/amd64)." >&2
+  echo "::warning::For Graviton EC2 set Variable DOCKER_PLATFORM=linux/arm64 (runner → ubuntu-24.04-arm)." >&2
+elif [ "$PLATFORM" != "linux/arm64" ] && [ "$PLATFORM" != "linux/amd64" ]; then
+  echo "::error::DOCKER_PLATFORM='$PLATFORM' is unsupported (use linux/arm64 or linux/amd64)" >&2
+  exit 1
+else
+  echo "DOCKER_PLATFORM=$PLATFORM"
+fi
+
+if [ "${BUILD_ON_HOST:-}" = "true" ]; then
+  echo "::warning::BUILD_ON_HOST=true on '$ENVIRONMENT_NAME' — EC2 will build (slow). Prefer unset for pull-only." >&2
 fi
 
 echo "Deploy environment '$ENVIRONMENT_NAME' has all required variables and secrets."

@@ -39,11 +39,13 @@ function formatCurrency(amount: number): string {
   return Number(amount).toLocaleString('th-TH');
 }
 
-function formatOrderStatus(status: string): string {
+export function formatOrderStatus(status: string): string {
   const labels: Record<string, string> = {
     pending_payment: 'รอชำระเงิน',
     paid: 'ชำระเงินแล้ว',
     processing: 'กำลังเตรียมสินค้า',
+    on_hold: 'พักการจัดส่ง',
+    hold_resumed: 'กลับมาดำเนินการ',
     shipped: 'จัดส่งแล้ว',
     delivered: 'จัดส่งสำเร็จ',
     cancelled: 'ยกเลิกแล้ว',
