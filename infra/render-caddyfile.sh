@@ -23,6 +23,15 @@ CADDY_TLS_ENABLED="${CADDY_TLS_ENABLED:-true}"
 
 	reverse_proxy 127.0.0.1:${API_PORT}
 }
+
+# Plain HTTP on :80 — Cloudflare Full SSL still uses :443 with the origin cert.
+# Vercel SSR/BFF may call the EC2 public IP on :80 to avoid Cloudflare bot challenges
+# that return HTML challenge pages (which break GraphQL JSON parsing).
+:80 {
+	encode gzip zstd
+
+	reverse_proxy 127.0.0.1:${API_PORT}
+}
 EOF
 } >"$OUTPUT"
 
