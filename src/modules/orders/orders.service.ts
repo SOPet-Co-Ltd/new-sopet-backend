@@ -33,6 +33,8 @@ import {
   normalizeCustomerOrdersPage,
 } from './order-list-filter.util';
 import { assertNotManualHoldTransition } from './store-suspension-hold.service';
+import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.service';
+import { webhookEventForOrderStatus } from '../vendor-webhooks/vendor-webhook.events';
 export interface StoreShippingSelection {
   storeId: string;
   shippingOptionId: string;
@@ -61,6 +63,7 @@ export class OrdersService {
     private cartService: CartService,
     @InjectRepository(Store)
     private storeRepository: Repository<Store>,
+    private vendorWebhooksService: VendorWebhooksService,
   ) {}
 
   private generateOrderNumber(): string {
@@ -398,6 +401,7 @@ export class OrdersService {
       // Notify each vendor once per store (not once per line item)
       savedOrder.items = orderItems;
       this.notificationsService.notifyVendorsAboutNewOrder(savedOrder).catch(() => {});
+      this.vendorWebhooksService.dispatchOrderEvent(savedOrder.id, 'order.create').catch(() => {});
 
       return savedOrder.id;
     });
@@ -651,6 +655,12 @@ export class OrdersService {
     const saved = await this.findOne(id);
     await this.notificationsService.notifyOrderStatusChanged(saved, status);
     this.notificationsService.notifyVendorsAboutOrderStatus(saved, status).catch(() => {});
+    if (previousStatus !== status) {
+      const webhookEvent = webhookEventForOrderStatus(status);
+      if (webhookEvent) {
+        this.vendorWebhooksService.dispatchOrderEvent(saved.id, webhookEvent).catch(() => {});
+      }
+    }
 
     return saved;
   }

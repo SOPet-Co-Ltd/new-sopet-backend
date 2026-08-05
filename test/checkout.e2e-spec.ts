@@ -102,6 +102,7 @@ describe('Checkout flow (integration)', () => {
         { restoreOrderStock: jest.fn().mockResolvedValue(true) } as never,
         { removeItems: jest.fn() } as never,
         {} as never,
+        { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) } as never,
       );
     });
 

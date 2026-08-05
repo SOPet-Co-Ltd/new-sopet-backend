@@ -128,6 +128,25 @@ type AdminCustomerType {
   updatedAt: DateTime!
 }
 
+type AdminImportedReviewConnection {
+  items: [AdminImportedReviewType!]!
+  pagination: PaginationMeta!
+}
+
+type AdminImportedReviewType {
+  comment: String
+  createdAt: DateTime!
+  customerName: String!
+  id: String!
+  images: [ReviewImageType!]!
+  productId: String!
+  productName: String!
+  productSlug: String
+  rating: Int!
+  source: String!
+  status: String!
+}
+
 type AdminInvitationType {
   email: String!
   expiresAt: String!
@@ -506,7 +525,7 @@ type CustomerReviewType {
   createdAt: DateTime!
   id: String!
   images: [ReviewImageType!]!
-  orderId: String!
+  orderId: String
   productId: String!
   productImageUrl: String
   productName: String!
@@ -611,6 +630,7 @@ type Mutation {
   approveBrand(id: String!): BrandType!
   approveCategory(id: String!): CategoryType!
   approvePetType(id: String!): PetTypeType!
+  approveReview(id: String!): ReviewType!
   approveStore(input: ApproveStoreInput!): StoreType!
   approveStoreReactivationRequest(id: String!): StoreReactivationRequestType!
   approveStoreRequest(id: String!): StoreRequestType!
@@ -675,6 +695,7 @@ type Mutation {
   rejectBrand(id: String!): BrandType!
   rejectCategory(id: String!): CategoryType!
   rejectPetType(id: String!): PetTypeType!
+  rejectReview(id: String!): ReviewType!
   rejectStore(input: RejectStoreInput!): StoreType!
   rejectStoreReactivationRequest(input: RejectStoreReactivationRequestInput!): StoreReactivationRequestType!
   rejectStoreRequest(input: RejectStoreRequestInput!): StoreRequestType!
@@ -1177,6 +1198,7 @@ type Query {
   pendingAdminInvitations: [AdminInvitationType!]!
   pendingBrands: [BrandType!]!
   pendingCategories: [CategoryType!]!
+  pendingImportedReviews(limit: Int = 20, page: Int = 1): AdminImportedReviewConnection!
   pendingPetTypes: [PetTypeType!]!
   pendingStoreRequests: [StoreRequestType!]!
   pendingStores: [StoreType!]!
@@ -1320,6 +1342,7 @@ type ReviewType {
   productId: String!
   rating: Int!
   reply: ReviewReplyType
+  source: String!
   status: String!
 }
 

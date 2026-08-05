@@ -23,7 +23,7 @@ import {
 } from 'class-validator';
 import {
   ReviewsService,
-  maskCustomerName,
+  resolveReviewCustomerName,
   REVIEW_MAX_IMAGES,
   normalizeStoreReviewRatingFilter,
   normalizeStoreReviewReplyFilter,
@@ -33,6 +33,7 @@ import { CurrentUser, Public, Roles } from '../../common/decorators';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import {
+  PaginationMeta,
   ReviewImageType,
   ReviewReplyType,
   StoreProductReviewConnection,
@@ -89,8 +90,8 @@ export class CustomerReviewType {
   @Field(() => String, { nullable: true })
   productImageUrl?: string | null;
 
-  @Field()
-  orderId!: string;
+  @Field(() => String, { nullable: true })
+  orderId?: string | null;
 
   @Field(() => Int)
   rating!: number;
@@ -116,6 +117,9 @@ export class ReviewType {
   @Field()
   productId!: string;
 
+  @Field()
+  source!: string;
+
   @Field(() => Int)
   rating!: number;
 
@@ -138,6 +142,51 @@ export class ReviewType {
   reply?: ReviewReplyType | null;
 }
 
+@ObjectType()
+export class AdminImportedReviewType {
+  @Field()
+  id!: string;
+
+  @Field()
+  productId!: string;
+
+  @Field()
+  productName!: string;
+
+  @Field(() => String, { nullable: true })
+  productSlug?: string | null;
+
+  @Field(() => Int)
+  rating!: number;
+
+  @Field(() => String, { nullable: true })
+  comment?: string | null;
+
+  @Field()
+  status!: string;
+
+  @Field()
+  source!: string;
+
+  @Field()
+  customerName!: string;
+
+  @Field()
+  createdAt!: Date;
+
+  @Field(() => [ReviewImageType])
+  images!: ReviewImageType[];
+}
+
+@ObjectType()
+export class AdminImportedReviewConnection {
+  @Field(() => [AdminImportedReviewType])
+  items!: AdminImportedReviewType[];
+
+  @Field(() => PaginationMeta)
+  pagination!: PaginationMeta;
+}
+
 function mapReplyToType(reply: Review['reply']): ReviewReplyType | null {
   if (!reply) {
     return null;
@@ -155,16 +204,36 @@ function mapReviewToType(review: Review): ReviewType {
   return {
     id: review.id,
     productId: review.productId,
+    source: review.source,
     rating: review.rating,
     comment: review.comment,
     status: review.status,
     createdAt: review.createdAt,
-    customerName: maskCustomerName(review.customer),
+    customerName: resolveReviewCustomerName(review),
     images: (review.images ?? []).map((image) => ({
       id: image.id,
       url: image.url,
     })),
     reply: mapReplyToType(review.reply),
+  };
+}
+
+function mapAdminImportedReview(review: Review): AdminImportedReviewType {
+  return {
+    id: review.id,
+    productId: review.productId,
+    productName: review.product?.name ?? 'Unknown',
+    productSlug: review.product?.slug ?? null,
+    rating: review.rating,
+    comment: review.comment,
+    status: review.status,
+    source: review.source,
+    customerName: resolveReviewCustomerName(review),
+    createdAt: review.createdAt,
+    images: (review.images ?? []).map((image) => ({
+      id: image.id,
+      url: image.url,
+    })),
   };
 }
 
@@ -332,6 +401,42 @@ export class ReviewsResolver {
       createdAt: reply.createdAt,
       updatedAt: reply.updatedAt,
     };
+  }
+
+  @Query(() => AdminImportedReviewConnection)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async pendingImportedReviews(
+    @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page?: number,
+    @Args('limit', { type: () => Int, nullable: true, defaultValue: 20 }) limit?: number,
+  ): Promise<AdminImportedReviewConnection> {
+    const result = await this.reviewsService.findPendingImportedReviews(page, limit);
+    return {
+      items: result.items.map(mapAdminImportedReview),
+      pagination: result.pagination,
+    };
+  }
+
+  @Mutation(() => ReviewType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async approveReview(
+    @CurrentUser('id') adminUserId: string,
+    @Args('id') id: string,
+  ): Promise<ReviewType> {
+    const review = await this.reviewsService.approveReview(id, adminUserId);
+    return mapReviewToType(review);
+  }
+
+  @Mutation(() => ReviewType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async rejectReview(
+    @CurrentUser('id') adminUserId: string,
+    @Args('id') id: string,
+  ): Promise<ReviewType> {
+    const review = await this.reviewsService.rejectReview(id, adminUserId);
+    return mapReviewToType(review);
   }
 
   @Query(() => [CustomerReviewableItemType])

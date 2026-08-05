@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, QueryFailedError, SelectQueryBuilder } from 'typeorm';
-import { Review, ReviewStatus } from '../../database/entities/review.entity';
+import { Review, ReviewSource, ReviewStatus } from '../../database/entities/review.entity';
 import { ReviewReply, REVIEW_REPLY_MAX_LENGTH } from '../../database/entities/review-reply.entity';
 import { ReviewImage } from '../../database/entities/review-image.entity';
 import { Order } from '../../database/entities/order.entity';
@@ -38,6 +38,9 @@ export function normalizeStoreReviewRatingFilter(value?: string | null): StoreRe
   return 'all';
 }
 
+/** Display name for vendor-imported reviews (no linked customer). */
+export const UNKNOWN_CUSTOMER_DISPLAY_NAME = 'ลูกค้าไม่ระบุชื่อ';
+
 export function maskCustomerName(
   customer: Pick<Customer, 'fullName' | 'phone'> | null | undefined,
 ): string {
@@ -54,6 +57,17 @@ export function maskCustomerName(
   const firstName = parts[0];
   const lastInitial = parts[parts.length - 1].charAt(0);
   return `${firstName} ${lastInitial}.`;
+}
+
+export function resolveReviewCustomerName(
+  review: Pick<Review, 'source' | 'customerId'> & {
+    customer?: Pick<Customer, 'fullName' | 'phone'> | null;
+  },
+): string {
+  if (review.source === ReviewSource.VENDOR_IMPORT || !review.customerId) {
+    return UNKNOWN_CUSTOMER_DISPLAY_NAME;
+  }
+  return maskCustomerName(review.customer);
 }
 
 export function getReviewWindowDays(): number {
@@ -184,7 +198,7 @@ export interface CustomerReviewResult {
   productName: string;
   productSlug: string | null;
   productImageUrl: string | null;
-  orderId: string;
+  orderId: string | null;
   rating: number;
   comment: string | null;
   status: string;
@@ -221,7 +235,7 @@ function mapReviewToStoreProductReview(review: Review): StoreProductReviewResult
     productImageUrl: review.product ? resolveThumbnailUrl(review.product.images) : null,
     rating: review.rating,
     comment: review.comment,
-    customerName: maskCustomerName(review.customer),
+    customerName: resolveReviewCustomerName(review),
     createdAt: review.createdAt,
     images: mapReviewImages(review.images),
     reply: mapReply(review.reply),
@@ -311,6 +325,7 @@ export class ReviewsService {
       rating: input.rating,
       comment: input.comment,
       status,
+      source: ReviewSource.CUSTOMER,
     });
     const saved = await this.reviewRepository.save(review);
     if (imageUrls.length > 0) {
@@ -325,6 +340,146 @@ export class ReviewsService {
       relations: ['customer', 'images'],
     });
     return withRelations ?? saved;
+  }
+
+  /**
+   * Vendor API import — unknown customer, pending until platform admin approves.
+   * Does not update product rating stats until approval.
+   */
+  async createImportedForPublicApi(
+    storeId: string,
+    userId: string,
+    productId: string,
+    input: { rating: number; comment?: string; imageUrls?: string[] },
+  ): Promise<Review> {
+    await this.storesService.assertStoreAccess(userId, storeId);
+
+    const product = await this.productRepository.findOne({ where: { id: productId } });
+    if (!product || product.storeId !== storeId) {
+      throw new NotFoundException({
+        code: 'PRODUCT_NOT_FOUND',
+        message: 'Product not found',
+      });
+    }
+
+    if (!Number.isInteger(input.rating) || input.rating < 1 || input.rating > 5) {
+      throw new BadRequestException({
+        code: 'INVALID_RATING',
+        message: 'Rating must be an integer from 1 to 5',
+      });
+    }
+
+    const comment = input.comment?.trim() ? input.comment.trim().slice(0, 2000) : null;
+    const imageUrls = this.normalizeReviewImageUrls(input.imageUrls);
+
+    const review = this.reviewRepository.create({
+      productId,
+      customerId: null,
+      orderId: null,
+      rating: input.rating,
+      comment,
+      status: ReviewStatus.PENDING,
+      source: ReviewSource.VENDOR_IMPORT,
+    });
+    const saved = await this.reviewRepository.save(review);
+    if (imageUrls.length > 0) {
+      const images = imageUrls.map((url) =>
+        this.reviewImageRepository.create({ reviewId: saved.id, url }),
+      );
+      await this.reviewImageRepository.save(images);
+    }
+
+    const withRelations = await this.reviewRepository.findOne({
+      where: { id: saved.id },
+      relations: ['images', 'product'],
+    });
+    return withRelations ?? saved;
+  }
+
+  async findPendingImportedReviews(page = 1, limit = 20): Promise<PaginatedResponse<Review>> {
+    const safePage = Math.max(1, page);
+    const safeLimit = Math.min(100, Math.max(1, limit));
+    const [items, total] = await this.reviewRepository.findAndCount({
+      where: {
+        source: ReviewSource.VENDOR_IMPORT,
+        status: ReviewStatus.PENDING,
+      },
+      relations: ['images', 'product', 'product.images'],
+      order: { createdAt: 'ASC' },
+      skip: (safePage - 1) * safeLimit,
+      take: safeLimit,
+    });
+
+    return {
+      items,
+      pagination: {
+        page: safePage,
+        limit: safeLimit,
+        total,
+        totalPages: Math.ceil(total / safeLimit) || 1,
+      },
+    };
+  }
+
+  async approveReview(reviewId: string, adminUserId: string): Promise<Review> {
+    const review = await this.reviewRepository.findOne({
+      where: { id: reviewId },
+      relations: ['images', 'customer', 'product'],
+    });
+    if (!review) {
+      throw new NotFoundException({ code: 'REVIEW_NOT_FOUND', message: 'Review not found' });
+    }
+    if (review.status === ReviewStatus.APPROVED) {
+      return review;
+    }
+    if (review.status !== ReviewStatus.PENDING) {
+      throw new BadRequestException({
+        code: 'INVALID_REVIEW_STATUS',
+        message: 'Only pending reviews can be approved',
+      });
+    }
+
+    review.status = ReviewStatus.APPROVED;
+    review.moderatedBy = adminUserId;
+    review.moderatedAt = new Date();
+    await this.reviewRepository.save(review);
+    await this.syncProductReviewStats(review.productId);
+
+    const withRelations = await this.reviewRepository.findOne({
+      where: { id: review.id },
+      relations: ['images', 'customer', 'product'],
+    });
+    return withRelations ?? review;
+  }
+
+  async rejectReview(reviewId: string, adminUserId: string): Promise<Review> {
+    const review = await this.reviewRepository.findOne({
+      where: { id: reviewId },
+      relations: ['images', 'customer', 'product'],
+    });
+    if (!review) {
+      throw new NotFoundException({ code: 'REVIEW_NOT_FOUND', message: 'Review not found' });
+    }
+    if (review.status === ReviewStatus.REJECTED) {
+      return review;
+    }
+    if (review.status !== ReviewStatus.PENDING) {
+      throw new BadRequestException({
+        code: 'INVALID_REVIEW_STATUS',
+        message: 'Only pending reviews can be rejected',
+      });
+    }
+
+    review.status = ReviewStatus.REJECTED;
+    review.moderatedBy = adminUserId;
+    review.moderatedAt = new Date();
+    await this.reviewRepository.save(review);
+
+    const withRelations = await this.reviewRepository.findOne({
+      where: { id: review.id },
+      relations: ['images', 'customer', 'product'],
+    });
+    return withRelations ?? review;
   }
 
   async findReviewableItemsForCustomer(

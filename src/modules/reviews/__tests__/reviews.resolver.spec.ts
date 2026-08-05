@@ -5,7 +5,7 @@ import { IS_PUBLIC_KEY } from '../../../common/decorators/public.decorator';
 import { ROLES_KEY } from '../../../common/decorators/roles.decorator';
 import { ReviewsService } from '../reviews.service';
 import { StoresService } from '../../stores/stores.service';
-import { ReviewStatus } from '../../../database/entities/review.entity';
+import { ReviewSource, ReviewStatus } from '../../../database/entities/review.entity';
 
 describe('ReviewsResolver', () => {
   const summary = {
@@ -113,6 +113,8 @@ describe('ReviewsResolver', () => {
         {
           id: 'review-1',
           productId: 'prod-1',
+          customerId: 'cust-1',
+          source: ReviewSource.CUSTOMER,
           rating: 5,
           comment: 'Great product',
           status: ReviewStatus.APPROVED,
@@ -143,6 +145,8 @@ describe('ReviewsResolver', () => {
         {
           id: 'review-2',
           productId: 'prod-1',
+          customerId: 'cust-2',
+          source: ReviewSource.CUSTOMER,
           rating: 4,
           comment: null,
           status: ReviewStatus.APPROVED,
@@ -162,6 +166,8 @@ describe('ReviewsResolver', () => {
         {
           id: 'review-3',
           productId: 'prod-1',
+          customerId: 'cust-3',
+          source: ReviewSource.CUSTOMER,
           rating: 3,
           comment: 'OK',
           status: ReviewStatus.APPROVED,
@@ -184,6 +190,8 @@ describe('ReviewsResolver', () => {
       reviewsService.create.mockResolvedValue({
         id: 'review-new',
         productId: 'prod-1',
+        customerId: 'cust-1',
+        source: ReviewSource.CUSTOMER,
         rating: 5,
         comment: 'Nice',
         status: ReviewStatus.PENDING,

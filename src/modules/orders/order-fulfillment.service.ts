@@ -21,6 +21,8 @@ import {
   validateTrackingNumber,
   VENDOR_CANCELLABLE_ORDER_STATUSES,
 } from './order-fulfillment.util';
+import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.service';
+import { webhookEventForOrderStatus } from '../vendor-webhooks/vendor-webhook.events';
 
 @Injectable()
 export class OrderFulfillmentService {
@@ -31,6 +33,7 @@ export class OrderFulfillmentService {
     private readonly storesService: StoresService,
     private readonly notificationsService: NotificationsService,
     private readonly inventoryService: InventoryService,
+    private readonly vendorWebhooksService: VendorWebhooksService,
   ) {}
 
   private async loadOrderWithItems(orderId: string): Promise<Order> {
@@ -145,6 +148,10 @@ export class OrderFulfillmentService {
     if (previousStatus !== nextStatus) {
       await this.notificationsService.notifyOrderStatusChanged(saved, nextStatus);
       this.notificationsService.notifyVendorsAboutOrderStatus(saved, nextStatus).catch(() => {});
+      const webhookEvent = webhookEventForOrderStatus(nextStatus);
+      if (webhookEvent) {
+        this.vendorWebhooksService.dispatchOrderEvent(saved.id, webhookEvent).catch(() => {});
+      }
     }
 
     return saved;
@@ -276,6 +283,55 @@ export class OrderFulfillmentService {
     );
   }
 
+  /**
+   * Public API tracking update: auto-acknowledge pending items, then ship;
+   * if already shipped, update tracking fields only.
+   */
+  async updateTrackingForPublicApi(
+    userId: string,
+    storeId: string,
+    orderId: string,
+    trackingNumber: string,
+    fulfillmentProvider: string,
+    trackingUrl?: string | null,
+  ): Promise<Order> {
+    const order = await this.loadOrderWithItems(orderId);
+    const storeItems = await this.assertVendorStoreAccess(userId, order, storeId);
+    this.assertNoHeldItemsForVendorFulfillment(storeItems);
+
+    const statuses = new Set(storeItems.map((item) => item.fulfillmentStatus));
+    const allShipped = statuses.size === 1 && statuses.has(FulfillmentStatus.SHIPPED);
+
+    if (allShipped) {
+      const normalizedTrackingNumber = validateTrackingNumber(trackingNumber);
+      const normalizedFulfillmentProvider = validateFulfillmentProvider(fulfillmentProvider);
+      const normalizedTrackingUrl = validateOptionalTrackingUrl(trackingUrl);
+      const now = new Date();
+      for (const item of storeItems) {
+        item.trackingNumber = normalizedTrackingNumber;
+        item.fulfillmentProvider = normalizedFulfillmentProvider;
+        item.trackingUrl = normalizedTrackingUrl;
+        item.updatedAt = now;
+      }
+      await this.dataSource.manager.save(OrderItem, storeItems);
+      return this.loadOrderWithItems(orderId);
+    }
+
+    const allPending = statuses.size === 1 && statuses.has(FulfillmentStatus.PENDING);
+    if (allPending) {
+      await this.acknowledgeVendorOrder(userId, storeId, orderId);
+    }
+
+    return this.shipVendorOrder(
+      userId,
+      storeId,
+      orderId,
+      trackingNumber,
+      fulfillmentProvider,
+      trackingUrl,
+    );
+  }
+
   async confirmOrderDelivered(
     orderId: string,
     customerId?: string,
@@ -395,6 +451,7 @@ export class OrderFulfillmentService {
     this.notificationsService
       .notifyVendorsAboutOrderStatus(saved, OrderStatus.CANCELLED)
       .catch(() => {});
+    this.vendorWebhooksService.dispatchOrderEvent(saved.id, 'order.cancelled').catch(() => {});
 
     return saved;
   }

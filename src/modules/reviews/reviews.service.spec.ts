@@ -5,11 +5,13 @@ import { QueryFailedError } from 'typeorm';
 import {
   ReviewsService,
   maskCustomerName,
+  resolveReviewCustomerName,
+  UNKNOWN_CUSTOMER_DISPLAY_NAME,
   getReviewWindowDays,
   addDays,
   resolveInitialReviewStatus,
 } from './reviews.service';
-import { Review, ReviewStatus } from '../../database/entities/review.entity';
+import { Review, ReviewSource, ReviewStatus } from '../../database/entities/review.entity';
 import { ReviewImage } from '../../database/entities/review-image.entity';
 import { ReviewReply } from '../../database/entities/review-reply.entity';
 import { Order } from '../../database/entities/order.entity';
@@ -179,6 +181,7 @@ describe('ReviewsService', () => {
         customerId: input.customerId,
         productId: input.productId,
         orderId: input.orderId,
+        source: ReviewSource.CUSTOMER,
         rating: input.rating,
         comment: input.comment,
         status: ReviewStatus.APPROVED,
@@ -424,6 +427,28 @@ describe('ReviewsService', () => {
     it('never exposes raw phone number', () => {
       const masked = maskCustomerName({ fullName: null, phone: '0812345678' });
       expect(masked).not.toContain('0812');
+    });
+  });
+
+  describe('resolveReviewCustomerName', () => {
+    it('returns unknown label for vendor imports', () => {
+      expect(
+        resolveReviewCustomerName({
+          source: ReviewSource.VENDOR_IMPORT,
+          customerId: null,
+          customer: null,
+        }),
+      ).toBe(UNKNOWN_CUSTOMER_DISPLAY_NAME);
+    });
+
+    it('masks real customers', () => {
+      expect(
+        resolveReviewCustomerName({
+          source: ReviewSource.CUSTOMER,
+          customerId: 'c1',
+          customer: { fullName: 'John Doe', phone: '0899999999' },
+        }),
+      ).toBe('John D.');
     });
   });
 

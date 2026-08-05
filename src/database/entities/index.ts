@@ -15,7 +15,7 @@ export { Promotion, PromotionType, PromotionScope } from './promotion.entity';
 export { PromotionUsage } from './promotion-usage.entity';
 export { Payout, PayoutStatus } from './payout.entity';
 export { PayoutItem } from './payout-item.entity';
-export { Review, ReviewStatus } from './review.entity';
+export { Review, ReviewStatus, ReviewSource } from './review.entity';
 export { ReviewImage } from './review-image.entity';
 export { ReviewReply } from './review-reply.entity';
 export { Dispute, DisputeStatus, DisputeResolution, DisputeIssueType } from './dispute.entity';
@@ -57,3 +57,9 @@ export { VendorInvitation, VendorInvitationStatus } from './vendor-invitation.en
 export { PasswordResetToken } from './password-reset-token.entity';
 export { EmailVerificationToken } from './email-verification-token.entity';
 export { AdminInvitation, AdminInvitationStatus } from './admin-invitation.entity';
+export { StoreApiKey } from './store-api-key.entity';
+export {
+  StoreWebhook,
+  VENDOR_WEBHOOK_EVENTS,
+  type VendorWebhookEvent,
+} from './store-webhook.entity';

@@ -31,6 +31,7 @@ import { NotificationsService } from '../src/modules/notifications/notifications
 import { InventoryService } from '../src/modules/inventory/inventory.service';
 import { PayoutsService } from '../src/modules/payouts/payouts.service';
 import { StoresService } from '../src/modules/stores/stores.service';
+import { VendorWebhooksService } from '../src/modules/vendor-webhooks/vendor-webhooks.service';
 import { Payment } from '../src/database/entities/payment.entity';
 import { Order, OrderStatus, PaymentMethod } from '../src/database/entities/order.entity';
 import { OrderItem, FulfillmentStatus } from '../src/database/entities/order-item.entity';
@@ -156,6 +157,10 @@ describe('Unpaid order payment method switch (service-integration-e2e)', () => {
         {
           provide: StoresService,
           useValue: { handleOmiseRecipientWebhook: jest.fn() },
+        },
+        {
+          provide: VendorWebhooksService,
+          useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
         },
       ],
     }).compile();

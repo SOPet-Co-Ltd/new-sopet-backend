@@ -26,6 +26,7 @@ import {
   normalizeCheckoutPaymentMethod,
 } from '../../common/utils/checkout-payment.util';
 import { orderHasHeldItems } from '../orders/order-totals.util';
+import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.service';
 
 interface OmiseCharge {
   id: string;
@@ -89,6 +90,7 @@ export class PaymentsService {
     private inventoryService: InventoryService,
     private payoutsService: PayoutsService,
     private storesService: StoresService,
+    private vendorWebhooksService: VendorWebhooksService,
   ) {
     this.omiseSecretKey = this.configService.get<string>('omise.secretKey') ?? '';
     this.omisePublicKey = this.configService.get<string>('omise.publicKey') ?? '';
@@ -158,6 +160,7 @@ export class PaymentsService {
         await this.paymentEventsService.publishPaymentStatusUpdated(payment);
       }
     }
+    this.vendorWebhooksService.dispatchOrderEvent(order.id, 'order.cancelled').catch(() => {});
   }
 
   /**
@@ -198,6 +201,7 @@ export class PaymentsService {
     }
 
     await this.paymentEventsService.publishPaymentStatusUpdated(payment);
+    this.vendorWebhooksService.dispatchOrderEvent(order.id, 'order.payment_failed').catch(() => {});
     return payment;
   }
 
@@ -1002,6 +1006,9 @@ export class PaymentsService {
 
         if (payment.status === 'failed') {
           await this.paymentEventsService.publishPaymentStatusUpdated(payment);
+          this.vendorWebhooksService
+            .dispatchOrderEvent(lockedOrder.id, 'order.payment_failed')
+            .catch(() => {});
         }
 
         const response: CreateChargeResult = {
@@ -1169,6 +1176,9 @@ export class PaymentsService {
         }
       });
       await this.paymentEventsService.publishPaymentStatusUpdated(payment);
+      this.vendorWebhooksService
+        .dispatchOrderEvent(order.id, 'order.payment_failed')
+        .catch(() => {});
       this.logger.log(
         `Payment ${payment.id} failed; order ${order.id} left PENDING_PAYMENT for retry`,
       );
@@ -1188,5 +1198,6 @@ export class PaymentsService {
 
     await this.paymentEventsService.publishPaymentStatusUpdated(payment);
     await this.notificationsService.notifyOrderPaid(order);
+    this.vendorWebhooksService.dispatchOrderEvent(order.id, 'order.paid').catch(() => {});
   }
 }

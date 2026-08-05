@@ -25,6 +25,7 @@ import { GuestOrderLinkModule } from './guest-order-link.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { CartModule } from '../cart/cart.module';
+import { VendorWebhooksModule } from '../vendor-webhooks/vendor-webhooks.module';
 @Module({
   imports: [
     AuthModule,
@@ -32,6 +33,7 @@ import { CartModule } from '../cart/cart.module';
     ProductsModule,
     PromotionsModule,
     NotificationsModule,
+    VendorWebhooksModule,
     forwardRef(() => StoresModule),
     InventoryModule,
     forwardRef(() => PaymentsModule),

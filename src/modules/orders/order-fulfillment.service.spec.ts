@@ -11,7 +11,8 @@ describe('OrderFulfillmentService hold guards', () => {
     notifyOrderStatusChanged: jest.Mock;
     notifyVendorsAboutOrderStatus: jest.Mock;
   };
-  let dataSource: { transaction: jest.Mock };
+  let vendorWebhooksService: { dispatchOrderEvent: jest.Mock };
+  let dataSource: { transaction: jest.Mock; manager: { save: jest.Mock } };
 
   beforeEach(() => {
     orderRepository = { findOne: jest.fn() };
@@ -23,6 +24,9 @@ describe('OrderFulfillmentService hold guards', () => {
       notifyOrderStatusChanged: jest.fn().mockResolvedValue(undefined),
       notifyVendorsAboutOrderStatus: jest.fn().mockResolvedValue(undefined),
     };
+    vendorWebhooksService = {
+      dispatchOrderEvent: jest.fn().mockResolvedValue(undefined),
+    };
     dataSource = {
       transaction: jest.fn(async (cb: (m: unknown) => Promise<unknown>) =>
         cb({
@@ -31,6 +35,7 @@ describe('OrderFulfillmentService hold guards', () => {
           find: jest.fn().mockResolvedValue([]),
         }),
       ),
+      manager: { save: jest.fn().mockResolvedValue(undefined) },
     };
 
     service = new OrderFulfillmentService(
@@ -39,6 +44,7 @@ describe('OrderFulfillmentService hold guards', () => {
       storesService as never,
       notificationsService as never,
       inventoryService as never,
+      vendorWebhooksService as never,
     );
   });
 

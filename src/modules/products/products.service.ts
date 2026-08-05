@@ -940,6 +940,12 @@ export class ProductsService {
     await this.productRepository.softDelete(id);
   }
 
+  /** Public API soft-delete — product must belong to `:storeId` (404 otherwise). */
+  async removeForPublicApi(productId: string, storeId: string, userId: string): Promise<void> {
+    await this.findOneInStore(productId, storeId);
+    await this.remove(productId, userId);
+  }
+
   // Add variant to product
   async addVariant(
     productId: string,

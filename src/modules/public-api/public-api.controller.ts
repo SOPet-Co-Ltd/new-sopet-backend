@@ -1,19 +1,46 @@
-import { Body, Controller, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  NotFoundException,
+  Param,
+  Patch,
+  Post,
+  Put,
+  UseGuards,
+} from '@nestjs/common';
 import { Public } from '../../common/decorators';
 import { ApiKeyGuard } from '../api-keys/guards/api-key.guard';
 import { ApiKeyAuth, ApiKeyAuthContext } from '../api-keys/decorators/api-key-auth.decorator';
 import { ProductsService } from '../products/products.service';
+import { OrderFulfillmentService } from '../orders/order-fulfillment.service';
+import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.service';
+import { ReviewsService, resolveReviewCustomerName } from '../reviews/reviews.service';
 import { CreatePublicProductDto } from './dto/create-public-product.dto';
+import { CreatePublicReviewDto } from './dto/create-public-review.dto';
 import { UpdatePublicProductDto, UpdatePublicVariantDto } from './dto/update-public-product.dto';
+import {
+  UpdatePublicOrderTrackingDto,
+  UpsertPublicWebhookDto,
+} from './dto/upsert-public-webhook.dto';
 import { mapProduct, mapVariant } from '../../graphql/models/mappers';
 import { ProductType, ProductVariantType } from '../../graphql/models/types';
+import { mapPublicApiOrder } from './public-api-order.mapper';
 
 @Controller('api/v1/stores/:storeId')
 @Public()
 export class PublicApiController {
-  constructor(private readonly productsService: ProductsService) {}
+  constructor(
+    private readonly productsService: ProductsService,
+    private readonly orderFulfillmentService: OrderFulfillmentService,
+    private readonly vendorWebhooksService: VendorWebhooksService,
+    private readonly reviewsService: ReviewsService,
+  ) {}
 
   @Post('products')
+  @HttpCode(201)
   @UseGuards(ApiKeyGuard)
   async createProduct(
     @Param('storeId') storeId: string,
@@ -71,6 +98,49 @@ export class PublicApiController {
     return mapProduct(product);
   }
 
+  @Delete('products/:productId')
+  @HttpCode(204)
+  @UseGuards(ApiKeyGuard)
+  async deleteProduct(
+    @Param('storeId') storeId: string,
+    @Param('productId') productId: string,
+    @ApiKeyAuth() apiKeyAuth: ApiKeyAuthContext,
+  ): Promise<void> {
+    await this.productsService.removeForPublicApi(productId, storeId, apiKeyAuth.createdBy);
+  }
+
+  @Post('products/:productId/reviews')
+  @HttpCode(201)
+  @UseGuards(ApiKeyGuard)
+  async createImportedReview(
+    @Param('storeId') storeId: string,
+    @Param('productId') productId: string,
+    @Body() dto: CreatePublicReviewDto,
+    @ApiKeyAuth() apiKeyAuth: ApiKeyAuthContext,
+  ) {
+    const review = await this.reviewsService.createImportedForPublicApi(
+      storeId,
+      apiKeyAuth.createdBy,
+      productId,
+      {
+        rating: dto.rating,
+        comment: dto.comment,
+        imageUrls: dto.images,
+      },
+    );
+    return {
+      id: review.id,
+      productId: review.productId,
+      rating: review.rating,
+      comment: review.comment,
+      status: review.status,
+      source: review.source,
+      customerName: resolveReviewCustomerName(review),
+      images: (review.images ?? []).map((image) => ({ id: image.id, url: image.url })),
+      createdAt: review.createdAt,
+    };
+  }
+
   @Patch('products/:productId/variants/:variantId')
   @UseGuards(ApiKeyGuard)
   async updateVariantById(
@@ -111,5 +181,55 @@ export class PublicApiController {
       },
     );
     return mapVariant(variant, Number(variant.product.basePrice ?? 0));
+  }
+
+  @Get('webhook')
+  @UseGuards(ApiKeyGuard)
+  async getWebhook(@Param('storeId') storeId: string) {
+    const webhook = await this.vendorWebhooksService.getForStore(storeId);
+    if (!webhook) {
+      throw new NotFoundException({
+        code: 'WEBHOOK_NOT_FOUND',
+        message: 'Webhook not configured for this store',
+      });
+    }
+    return webhook;
+  }
+
+  @Put('webhook')
+  @UseGuards(ApiKeyGuard)
+  async upsertWebhook(@Param('storeId') storeId: string, @Body() dto: UpsertPublicWebhookDto) {
+    return this.vendorWebhooksService.upsertForStore(storeId, {
+      url: dto.url,
+      events: dto.events,
+      enabled: dto.enabled,
+      rotateSecret: dto.rotateSecret,
+    });
+  }
+
+  @Delete('webhook')
+  @HttpCode(204)
+  @UseGuards(ApiKeyGuard)
+  async deleteWebhook(@Param('storeId') storeId: string): Promise<void> {
+    await this.vendorWebhooksService.deleteForStore(storeId);
+  }
+
+  @Patch('orders/:orderId/tracking')
+  @UseGuards(ApiKeyGuard)
+  async updateOrderTracking(
+    @Param('storeId') storeId: string,
+    @Param('orderId') orderId: string,
+    @Body() dto: UpdatePublicOrderTrackingDto,
+    @ApiKeyAuth() apiKeyAuth: ApiKeyAuthContext,
+  ) {
+    const order = await this.orderFulfillmentService.updateTrackingForPublicApi(
+      apiKeyAuth.createdBy,
+      storeId,
+      orderId,
+      dto.trackingNumber,
+      dto.fulfillmentProvider,
+      dto.trackingUrl,
+    );
+    return mapPublicApiOrder(order, storeId);
   }
 }

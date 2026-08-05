@@ -36,6 +36,7 @@ import { StorageService } from '../../src/modules/storage/storage.service';
 import { AuditLogsService } from '../../src/modules/audit-logs/audit-logs.service';
 import { ShippingOptionsService } from '../../src/modules/stores/shipping-options.service';
 import { StoreSuspensionHoldService } from '../../src/modules/orders/store-suspension-hold.service';
+import { EmailDeliveryService } from '../../src/modules/email/email-delivery.service';
 import { createTypeOrmTestOptions } from './typeorm-test.config';
 
 export interface SearchTaxonomyGraphqlE2eHarness {
@@ -111,6 +112,13 @@ export const searchTaxonomyGraphqlMockProviders = [
     useValue: {
       applyHoldForStore: jest.fn().mockResolvedValue({ ordersTouched: 0, itemsHeld: 0 }),
       restoreHoldForStore: jest.fn().mockResolvedValue({ ordersTouched: 0, itemsRestored: 0 }),
+    },
+  },
+  {
+    provide: EmailDeliveryService,
+    useValue: {
+      sendVendorInvite: jest.fn().mockResolvedValue(undefined),
+      sendVendorAccountSuspended: jest.fn().mockResolvedValue(undefined),
     },
   },
 ];

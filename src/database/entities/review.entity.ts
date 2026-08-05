@@ -24,6 +24,11 @@ export enum ReviewStatus {
   REJECTED = 'rejected',
 }
 
+export enum ReviewSource {
+  CUSTOMER = 'customer',
+  VENDOR_IMPORT = 'vendor_import',
+}
+
 @Entity('reviews')
 @Index(['productId', 'status'])
 @Index(['customerId'])
@@ -36,13 +41,13 @@ export class Review {
   @IsNotEmpty()
   productId!: string;
 
-  @Column({ name: 'customer_id', type: 'uuid' })
-  @IsNotEmpty()
-  customerId!: string;
+  /** Null for vendor-imported reviews (unknown customer). */
+  @Column({ name: 'customer_id', type: 'uuid', nullable: true })
+  customerId!: string | null;
 
-  @Column({ name: 'order_id', type: 'uuid' })
-  @IsNotEmpty()
-  orderId!: string;
+  /** Null for vendor-imported reviews (no linked order). */
+  @Column({ name: 'order_id', type: 'uuid', nullable: true })
+  orderId!: string | null;
 
   @Column({ name: 'rating', type: 'integer' })
   @IsNumber()
@@ -62,6 +67,15 @@ export class Review {
   })
   @IsEnum(ReviewStatus)
   status!: ReviewStatus;
+
+  @Column({
+    name: 'source',
+    type: 'enum',
+    enum: ReviewSource,
+    default: ReviewSource.CUSTOMER,
+  })
+  @IsEnum(ReviewSource)
+  source!: ReviewSource;
 
   @Column({ name: 'moderated_by', type: 'uuid', nullable: true })
   moderatedBy!: string | null;
@@ -83,13 +97,13 @@ export class Review {
   @JoinColumn({ name: 'product_id' })
   product!: Product;
 
-  @ManyToOne(() => Customer, (customer) => customer.reviews)
+  @ManyToOne(() => Customer, (customer) => customer.reviews, { nullable: true })
   @JoinColumn({ name: 'customer_id' })
-  customer!: Customer;
+  customer!: Customer | null;
 
-  @ManyToOne(() => Order, (order) => order.reviews)
+  @ManyToOne(() => Order, (order) => order.reviews, { nullable: true })
   @JoinColumn({ name: 'order_id' })
-  order!: Order;
+  order!: Order | null;
 
   @OneToMany(() => ReviewImage, (image) => image.review, { cascade: true })
   images!: ReviewImage[];

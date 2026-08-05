@@ -17,6 +17,7 @@ import { PaymentEventsService } from '../src/modules/payments/payment-events.ser
 import { InventoryService } from '../src/modules/inventory/inventory.service';
 import { PayoutsService } from '../src/modules/payouts/payouts.service';
 import { StoresService } from '../src/modules/stores/stores.service';
+import { VendorWebhooksService } from '../src/modules/vendor-webhooks/vendor-webhooks.service';
 import { computeOmiseWebhookSignature } from '../src/modules/payments/omise-webhook.util';
 
 describe('Omise webhook (e2e)', () => {
@@ -68,6 +69,10 @@ describe('Omise webhook (e2e)', () => {
         {
           provide: StoresService,
           useValue: { handleOmiseRecipientWebhook: jest.fn() },
+        },
+        {
+          provide: VendorWebhooksService,
+          useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
         },
       ],
     }).compile();

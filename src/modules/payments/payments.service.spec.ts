@@ -14,6 +14,7 @@ import { PaymentEventsService } from './payment-events.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { PayoutsService } from '../payouts/payouts.service';
 import { StoresService } from '../stores/stores.service';
+import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.service';
 
 const paymentEventsServiceMock = {
   publishPaymentStatusUpdated: jest.fn(),
@@ -114,6 +115,10 @@ describe('PaymentsService guest access', () => {
         },
         { provide: PayoutsService, useValue: payoutsServiceMock },
         { provide: StoresService, useValue: storesServiceMock },
+        {
+          provide: VendorWebhooksService,
+          useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile();
 
@@ -212,6 +217,10 @@ describe('PaymentsService payment read queries', () => {
         },
         { provide: PayoutsService, useValue: payoutsServiceMock },
         { provide: StoresService, useValue: storesServiceMock },
+        {
+          provide: VendorWebhooksService,
+          useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile();
 
@@ -358,6 +367,10 @@ describe('PaymentsService createCharge return_uri', () => {
         },
         { provide: PayoutsService, useValue: payoutsServiceMock },
         { provide: StoresService, useValue: storesServiceMock },
+        {
+          provide: VendorWebhooksService,
+          useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile();
 
@@ -585,6 +598,10 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
         },
         { provide: PayoutsService, useValue: payoutsServiceMock },
         { provide: StoresService, useValue: storesServiceMock },
+        {
+          provide: VendorWebhooksService,
+          useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile();
 
@@ -953,6 +970,10 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
         },
         { provide: PayoutsService, useValue: payoutsServiceMock },
         { provide: StoresService, useValue: storesServiceMock },
+        {
+          provide: VendorWebhooksService,
+          useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile();
 
@@ -1524,6 +1545,10 @@ describe('PaymentsService cancelStaleUnpaidOrders (AC-019–021)', () => {
         { provide: InventoryService, useValue: inventoryService },
         { provide: PayoutsService, useValue: payoutsServiceMock },
         { provide: StoresService, useValue: storesServiceMock },
+        {
+          provide: VendorWebhooksService,
+          useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile();
 
@@ -1873,6 +1898,10 @@ describe('PaymentsService payment held gate + Decision #16 recompute (AC-026–0
         { provide: InventoryService, useValue: { restoreOrderStock: jest.fn() } },
         { provide: PayoutsService, useValue: payoutsServiceMock },
         { provide: StoresService, useValue: storesServiceMock },
+        {
+          provide: VendorWebhooksService,
+          useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile();
 

@@ -7,9 +7,13 @@ import { PublicApiController } from '../src/modules/public-api/public-api.contro
 import { ApiKeyGuard } from '../src/modules/api-keys/guards/api-key.guard';
 import { ApiKeysService } from '../src/modules/api-keys/api-keys.service';
 import { ProductsService } from '../src/modules/products/products.service';
+import { OrderFulfillmentService } from '../src/modules/orders/order-fulfillment.service';
+import { VendorWebhooksService } from '../src/modules/vendor-webhooks/vendor-webhooks.service';
+import { ReviewsService } from '../src/modules/reviews/reviews.service';
 import { ValidationPipe } from '../src/common/pipes/validation.pipe';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { ProductStatus } from '../src/database/entities/product.entity';
+import { ReviewSource, ReviewStatus } from '../src/database/entities/review.entity';
 
 describe('Public API products (e2e)', () => {
   let app: INestApplication<App>;
@@ -18,7 +22,15 @@ describe('Public API products (e2e)', () => {
     createWithVariants: jest.Mock;
     updateProductForPublicApi: jest.Mock;
     updateVariantStockPriceForPublicApi: jest.Mock;
+    removeForPublicApi: jest.Mock;
   };
+  let orderFulfillmentService: { updateTrackingForPublicApi: jest.Mock };
+  let vendorWebhooksService: {
+    getForStore: jest.Mock;
+    upsertForStore: jest.Mock;
+    deleteForStore: jest.Mock;
+  };
+  let reviewsService: { createImportedForPublicApi: jest.Mock };
 
   const storeId = 'store-1';
   const validBody = {
@@ -86,6 +98,71 @@ describe('Public API products (e2e)', () => {
         description: 'Updated desc',
       }),
       updateVariantStockPriceForPublicApi: jest.fn().mockResolvedValue(updatedVariant),
+      removeForPublicApi: jest.fn().mockResolvedValue(undefined),
+    };
+    orderFulfillmentService = {
+      updateTrackingForPublicApi: jest.fn().mockResolvedValue({
+        id: 'ord-1',
+        orderNumber: 'ORD-1',
+        status: 'shipped',
+        paymentMethod: 'promptpay',
+        paidAt: new Date('2026-08-01T00:00:00Z'),
+        updatedAt: new Date('2026-08-02T00:00:00Z'),
+        items: [
+          {
+            id: 'item-1',
+            storeId,
+            productName: 'Food',
+            variantId: 'var-1',
+            variantOptions: {},
+            quantity: 1,
+            unitPrice: 100,
+            subtotal: 100,
+            fulfillmentStatus: 'shipped',
+            trackingNumber: 'TH123',
+            fulfillmentProvider: 'Kerry',
+            trackingUrl: null,
+            shippedAt: new Date('2026-08-02T00:00:00Z'),
+          },
+        ],
+      }),
+    };
+    vendorWebhooksService = {
+      getForStore: jest.fn().mockResolvedValue(null),
+      upsertForStore: jest.fn().mockResolvedValue({
+        id: 'wh-1',
+        url: 'https://example.com/hook',
+        enabled: true,
+        events: [
+          'order.create',
+          'order.payment_failed',
+          'order.paid',
+          'order.processing',
+          'order.on_hold',
+          'order.shipped',
+          'order.delivered',
+          'order.cancelled',
+          'order.refunded',
+        ],
+        hasSecret: true,
+        secret: 'whsec_test',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+      deleteForStore: jest.fn().mockResolvedValue(undefined),
+    };
+    reviewsService = {
+      createImportedForPublicApi: jest.fn().mockResolvedValue({
+        id: 'rev-1',
+        productId: 'prod-1',
+        rating: 5,
+        comment: 'ดีมาก',
+        status: ReviewStatus.PENDING,
+        source: ReviewSource.VENDOR_IMPORT,
+        customerId: null,
+        images: [],
+        createdAt: new Date('2026-08-05T00:00:00Z'),
+      }),
     };
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -94,6 +171,9 @@ describe('Public API products (e2e)', () => {
         ApiKeyGuard,
         { provide: ApiKeysService, useValue: apiKeysService },
         { provide: ProductsService, useValue: productsService },
+        { provide: OrderFulfillmentService, useValue: orderFulfillmentService },
+        { provide: VendorWebhooksService, useValue: vendorWebhooksService },
+        { provide: ReviewsService, useValue: reviewsService },
         { provide: APP_PIPE, useClass: ValidationPipe },
         { provide: APP_FILTER, useClass: HttpExceptionFilter },
       ],
@@ -319,5 +399,79 @@ describe('Public API products (e2e)', () => {
       .expect(401);
 
     expect(productsService.updateProductForPublicApi).not.toHaveBeenCalled();
+  });
+
+  it('DELETE /products/:productId soft-deletes product', async () => {
+    await request(app.getHttpServer())
+      .delete(`/api/v1/stores/${storeId}/products/prod-1`)
+      .set('Authorization', 'Bearer sopet_sk_valid_key')
+      .expect(204);
+
+    expect(productsService.removeForPublicApi).toHaveBeenCalledWith('prod-1', storeId, 'user-1');
+  });
+
+  it('PUT /webhook configures webhook and returns secret once', async () => {
+    const res = await request(app.getHttpServer())
+      .put(`/api/v1/stores/${storeId}/webhook`)
+      .set('Authorization', 'Bearer sopet_sk_valid_key')
+      .send({
+        url: 'https://example.com/hook',
+        events: [
+          'order.create',
+          'order.payment_failed',
+          'order.paid',
+          'order.processing',
+          'order.on_hold',
+          'order.shipped',
+          'order.delivered',
+          'order.cancelled',
+          'order.refunded',
+        ],
+      })
+      .expect(200);
+
+    expect(res.body.secret).toBe('whsec_test');
+    expect(vendorWebhooksService.upsertForStore).toHaveBeenCalledWith(
+      storeId,
+      expect.objectContaining({ url: 'https://example.com/hook' }),
+    );
+  });
+
+  it('PATCH /orders/:orderId/tracking updates tracking', async () => {
+    const res = await request(app.getHttpServer())
+      .patch(`/api/v1/stores/${storeId}/orders/ord-1/tracking`)
+      .set('Authorization', 'Bearer sopet_sk_valid_key')
+      .send({ trackingNumber: 'TH123', fulfillmentProvider: 'Kerry' })
+      .expect(200);
+
+    expect(res.body.id).toBe('ord-1');
+    expect(res.body.items[0].trackingNumber).toBe('TH123');
+    expect(orderFulfillmentService.updateTrackingForPublicApi).toHaveBeenCalledWith(
+      'user-1',
+      storeId,
+      'ord-1',
+      'TH123',
+      'Kerry',
+      undefined,
+    );
+  });
+
+  it('POST /products/:productId/reviews imports pending unknown-customer review', async () => {
+    const res = await request(app.getHttpServer())
+      .post(`/api/v1/stores/${storeId}/products/prod-1/reviews`)
+      .set('Authorization', 'Bearer sopet_sk_valid_key')
+      .send({ rating: 5, comment: 'ดีมาก' })
+      .expect(201);
+
+    expect(res.body.id).toBe('rev-1');
+    expect(res.body.status).toBe(ReviewStatus.PENDING);
+    expect(res.body.source).toBe(ReviewSource.VENDOR_IMPORT);
+    expect(res.body.customerName).toBe('ลูกค้าไม่ระบุชื่อ');
+    expect(reviewsService.createImportedForPublicApi).toHaveBeenCalledWith(
+      storeId,
+      'user-1',
+      'prod-1',
+      { rating: 5, comment: 'ดีมาก', imageUrls: undefined },
+    );
   });
 });

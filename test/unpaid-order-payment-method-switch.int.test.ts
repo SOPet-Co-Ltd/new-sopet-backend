@@ -40,6 +40,7 @@ import { PaymentEventsService } from '../src/modules/payments/payment-events.ser
 import { InventoryService } from '../src/modules/inventory/inventory.service';
 import { PayoutsService } from '../src/modules/payouts/payouts.service';
 import { StoresService } from '../src/modules/stores/stores.service';
+import { VendorWebhooksService } from '../src/modules/vendor-webhooks/vendor-webhooks.service';
 
 const paymentEventsServiceMock = {
   publishPaymentStatusUpdated: jest.fn(),
@@ -172,6 +173,10 @@ describe('unpaid-order-payment-method-switch integration', () => {
         },
         { provide: PayoutsService, useValue: payoutsServiceMock },
         { provide: StoresService, useValue: storesServiceMock },
+        {
+          provide: VendorWebhooksService,
+          useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile();
 

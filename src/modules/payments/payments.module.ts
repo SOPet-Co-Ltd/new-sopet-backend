@@ -15,12 +15,14 @@ import { Customer } from '../../database/entities/customer.entity';
 import { SavedPaymentMethod } from '../../database/entities/saved-payment-method.entity';
 import { PaymentsResolver } from './payments.resolver';
 import { PaymentExpiryScheduler } from './payment-expiry.scheduler';
+import { VendorWebhooksModule } from '../vendor-webhooks/vendor-webhooks.module';
 
 @Module({
   imports: [
     AuthModule,
     NotificationsModule,
     InventoryModule,
+    VendorWebhooksModule,
     forwardRef(() => PayoutsModule),
     StoresModule,
     forwardRef(() => OrdersModule),

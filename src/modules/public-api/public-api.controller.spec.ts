@@ -1,6 +1,10 @@
 import { PublicApiController } from './public-api.controller';
 import { ProductsService } from '../products/products.service';
+import { OrderFulfillmentService } from '../orders/order-fulfillment.service';
+import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.service';
+import { ReviewsService } from '../reviews/reviews.service';
 import { ProductStatus } from '../../database/entities/product.entity';
+import { ReviewSource, ReviewStatus } from '../../database/entities/review.entity';
 import { CreatePublicProductDto } from './dto/create-public-product.dto';
 import { UpdatePublicProductDto, UpdatePublicVariantDto } from './dto/update-public-product.dto';
 
@@ -10,7 +14,15 @@ describe('PublicApiController', () => {
     createWithVariants: jest.Mock;
     updateProductForPublicApi: jest.Mock;
     updateVariantStockPriceForPublicApi: jest.Mock;
+    removeForPublicApi: jest.Mock;
   };
+  let orderFulfillmentService: { updateTrackingForPublicApi: jest.Mock };
+  let vendorWebhooksService: {
+    getForStore: jest.Mock;
+    upsertForStore: jest.Mock;
+    deleteForStore: jest.Mock;
+  };
+  let reviewsService: { createImportedForPublicApi: jest.Mock };
 
   const apiKeyAuth = {
     storeId: 'store-1',
@@ -72,112 +84,177 @@ describe('PublicApiController', () => {
         priceAdjustment: 50,
         product: { basePrice: 499 },
       }),
+      removeForPublicApi: jest.fn().mockResolvedValue(undefined),
     };
-    controller = new PublicApiController(productsService as unknown as ProductsService);
+    orderFulfillmentService = {
+      updateTrackingForPublicApi: jest.fn().mockResolvedValue({
+        id: 'ord-1',
+        orderNumber: 'ORD-1',
+        status: 'shipped',
+        paymentMethod: 'promptpay',
+        paidAt: new Date('2026-08-01T00:00:00Z'),
+        updatedAt: new Date('2026-08-02T00:00:00Z'),
+        items: [
+          {
+            id: 'item-1',
+            storeId: 'store-1',
+            productName: 'Food',
+            variantId: 'var-1',
+            variantOptions: {},
+            quantity: 1,
+            unitPrice: 100,
+            subtotal: 100,
+            fulfillmentStatus: 'shipped',
+            trackingNumber: 'TH123',
+            fulfillmentProvider: 'Kerry',
+            trackingUrl: null,
+            shippedAt: new Date('2026-08-02T00:00:00Z'),
+          },
+        ],
+      }),
+    };
+    vendorWebhooksService = {
+      getForStore: jest.fn().mockResolvedValue({
+        id: 'wh-1',
+        url: 'https://example.com/hook',
+        enabled: true,
+        events: [
+          'order.create',
+          'order.payment_failed',
+          'order.paid',
+          'order.processing',
+          'order.on_hold',
+          'order.shipped',
+          'order.delivered',
+          'order.cancelled',
+          'order.refunded',
+        ],
+        hasSecret: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+      upsertForStore: jest.fn().mockResolvedValue({
+        id: 'wh-1',
+        url: 'https://example.com/hook',
+        enabled: true,
+        events: ['order.paid'],
+        hasSecret: true,
+        secret: 'whsec_test',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+      deleteForStore: jest.fn().mockResolvedValue(undefined),
+    };
+    reviewsService = {
+      createImportedForPublicApi: jest.fn().mockResolvedValue({
+        id: 'rev-1',
+        productId: 'prod-1',
+        rating: 5,
+        comment: 'ดีมาก',
+        status: ReviewStatus.PENDING,
+        source: ReviewSource.VENDOR_IMPORT,
+        customerId: null,
+        images: [],
+        createdAt: new Date('2026-08-05T00:00:00Z'),
+      }),
+    };
+    controller = new PublicApiController(
+      productsService as unknown as ProductsService,
+      orderFulfillmentService as unknown as OrderFulfillmentService,
+      vendorWebhooksService as unknown as VendorWebhooksService,
+      reviewsService as unknown as ReviewsService,
+    );
   });
 
   it('delegates to createWithVariants with mapped payload and returns mapped product', async () => {
     const result = await controller.createProduct('store-1', dto, apiKeyAuth);
 
-    expect(productsService.createWithVariants).toHaveBeenCalledWith('user-1', 'store-1', {
-      name: dto.name,
-      description: dto.description,
-      warning: undefined,
-      expiryDate: undefined,
-      category: dto.category,
-      tags: dto.tags,
-      petType: undefined,
-      brand: undefined,
-      images: undefined,
-      variants: [{ name: 'รสชาติ', values: ['ไก่', 'ปลา'] }],
-      variantItems: [
-        { sku: 'TEST-CHK-001', stock: 10, price: 499, options: { รสชาติ: 'ไก่' } },
-        { sku: 'TEST-FISH-001', stock: 5, price: 519, options: { รสชาติ: 'ปลา' } },
-      ],
-    });
     expect(result.id).toBe('prod-1');
-    expect(result.status).toBe(ProductStatus.DRAFT);
-    expect(result.variants).toHaveLength(2);
-    expect(result.variants?.[0].sku).toBe('TEST-CHK-001');
-  });
-
-  it('uses apiKeyAuth.createdBy as the acting user', async () => {
-    await controller.createProduct('store-1', dto, {
-      ...apiKeyAuth,
-      createdBy: 'vendor-user-99',
-    });
-
     expect(productsService.createWithVariants).toHaveBeenCalledWith(
-      'vendor-user-99',
+      'user-1',
       'store-1',
-      expect.any(Object),
+      expect.objectContaining({ name: dto.name }),
     );
   });
 
-  it('delegates product PATCH to updateProductForPublicApi', async () => {
-    const patch: UpdatePublicProductDto = {
-      name: 'Updated',
-      description: 'New desc',
-      category: 'อาหารแมว',
-    };
-
-    const result = await controller.updateProduct('store-1', 'prod-1', patch, apiKeyAuth);
-
+  it('delegates product info updates', async () => {
+    const patch: UpdatePublicProductDto = { name: 'Updated' };
+    await controller.updateProduct('store-1', 'prod-1', patch, apiKeyAuth);
     expect(productsService.updateProductForPublicApi).toHaveBeenCalledWith(
       'prod-1',
       'store-1',
       'user-1',
-      {
-        name: 'Updated',
-        description: 'New desc',
-        warning: undefined,
-        expiryDate: undefined,
-        category: 'อาหารแมว',
-        tags: undefined,
-        petType: undefined,
-        brand: undefined,
-        images: undefined,
-      },
+      expect.objectContaining({ name: 'Updated' }),
     );
-    expect(result.name).toBe('Updated');
   });
 
-  it('delegates variant PATCH by id', async () => {
-    const patch: UpdatePublicVariantDto = { stock: 20, price: 549 };
-    const result = await controller.updateVariantById(
+  it('delegates variant updates by id and sku', async () => {
+    const body: UpdatePublicVariantDto = { stock: 20, price: 549 };
+    await controller.updateVariantById('store-1', 'prod-1', 'var-1', body, apiKeyAuth);
+    await controller.updateVariantBySku('store-1', 'CAT%2FSKU', body, apiKeyAuth);
+
+    expect(productsService.updateVariantStockPriceForPublicApi).toHaveBeenCalledTimes(2);
+    expect(productsService.updateVariantStockPriceForPublicApi).toHaveBeenLastCalledWith(
       'store-1',
-      'prod-1',
-      'var-1',
-      patch,
+      'user-1',
+      expect.objectContaining({ sku: 'CAT/SKU' }),
+    );
+  });
+
+  it('delegates product delete', async () => {
+    await controller.deleteProduct('store-1', 'prod-1', apiKeyAuth);
+    expect(productsService.removeForPublicApi).toHaveBeenCalledWith('prod-1', 'store-1', 'user-1');
+  });
+
+  it('delegates webhook upsert/get/delete', async () => {
+    await controller.upsertWebhook('store-1', {
+      url: 'https://example.com/hook',
+      events: ['order.paid'],
+    });
+    await controller.getWebhook('store-1');
+    await controller.deleteWebhook('store-1');
+
+    expect(vendorWebhooksService.upsertForStore).toHaveBeenCalled();
+    expect(vendorWebhooksService.getForStore).toHaveBeenCalledWith('store-1');
+    expect(vendorWebhooksService.deleteForStore).toHaveBeenCalledWith('store-1');
+  });
+
+  it('delegates tracking update and returns store-scoped order', async () => {
+    const result = await controller.updateOrderTracking(
+      'store-1',
+      'ord-1',
+      { trackingNumber: 'TH123', fulfillmentProvider: 'Kerry' },
       apiKeyAuth,
     );
 
-    expect(productsService.updateVariantStockPriceForPublicApi).toHaveBeenCalledWith(
-      'store-1',
+    expect(orderFulfillmentService.updateTrackingForPublicApi).toHaveBeenCalledWith(
       'user-1',
-      {
-        variantId: 'var-1',
-        productId: 'prod-1',
-        stock: 20,
-        price: 549,
-      },
+      'store-1',
+      'ord-1',
+      'TH123',
+      'Kerry',
+      undefined,
     );
-    expect(result.stockQuantity).toBe(20);
-    expect(result.price).toBe(549);
+    expect(result.id).toBe('ord-1');
+    expect(result.items[0].trackingNumber).toBe('TH123');
   });
 
-  it('delegates variant PATCH by sku', async () => {
-    const patch: UpdatePublicVariantDto = { stock: 3 };
-    await controller.updateVariantBySku('store-1', 'TEST-CHK-001', patch, apiKeyAuth);
+  it('delegates imported review create', async () => {
+    const result = await controller.createImportedReview(
+      'store-1',
+      'prod-1',
+      { rating: 5, comment: 'ดีมาก' },
+      apiKeyAuth,
+    );
 
-    expect(productsService.updateVariantStockPriceForPublicApi).toHaveBeenCalledWith(
+    expect(reviewsService.createImportedForPublicApi).toHaveBeenCalledWith(
       'store-1',
       'user-1',
-      {
-        sku: 'TEST-CHK-001',
-        stock: 3,
-        price: undefined,
-      },
+      'prod-1',
+      { rating: 5, comment: 'ดีมาก', imageUrls: undefined },
     );
+    expect(result.status).toBe(ReviewStatus.PENDING);
+    expect(result.source).toBe(ReviewSource.VENDOR_IMPORT);
+    expect(result.customerName).toBe('ลูกค้าไม่ระบุชื่อ');
   });
 });

@@ -26,6 +26,7 @@ describe('OrdersService', () => {
   let promotionsService: { applyStackedPromotions: jest.Mock };
   let guestOrderLinkService: { mergeGuestOrders: jest.Mock };
   let inventoryService: { restoreOrderStock: jest.Mock };
+  let vendorWebhooksService: { dispatchOrderEvent: jest.Mock };
   let mockManager: {
     create: jest.Mock;
     save: jest.Mock;
@@ -70,6 +71,9 @@ describe('OrdersService', () => {
     promotionsService = { applyStackedPromotions: jest.fn() };
     guestOrderLinkService = { mergeGuestOrders: jest.fn() };
     inventoryService = { restoreOrderStock: jest.fn().mockResolvedValue(true) };
+    vendorWebhooksService = {
+      dispatchOrderEvent: jest.fn().mockResolvedValue(undefined),
+    };
 
     mockManager = {
       create: jest.fn((_entity: unknown, data: Record<string, unknown>) => ({ ...data })),
@@ -102,6 +106,7 @@ describe('OrdersService', () => {
       inventoryService as never,
       { removeItems: jest.fn() } as never,
       {} as never,
+      vendorWebhooksService as never,
     );
   });
 
@@ -265,6 +270,7 @@ describe('OrdersService', () => {
         ]),
       }),
     );
+    expect(vendorWebhooksService.dispatchOrderEvent).toHaveBeenCalledWith('ord-1', 'order.create');
   });
 
   it('throws when order not found', async () => {
