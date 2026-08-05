@@ -24,10 +24,12 @@ export class PaymentsResolver {
     authorizeUri?: string | null;
     qrCodeUrl?: string | null;
     expiresAt?: Date | null;
+    order?: { orderNumber?: string | null } | null;
   }): PaymentType {
     return {
       id: payment.id,
       orderId: payment.orderId,
+      orderNumber: payment.order?.orderNumber ?? null,
       amount: Number(payment.amount),
       currency: payment.currency,
       status: payment.status,

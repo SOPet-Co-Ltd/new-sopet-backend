@@ -928,6 +928,7 @@ type PaymentType {
   expiresAt: DateTime
   id: String!
   orderId: String!
+  orderNumber: String
   paymentMethod: String!
   qrCodeUrl: String
   status: String!

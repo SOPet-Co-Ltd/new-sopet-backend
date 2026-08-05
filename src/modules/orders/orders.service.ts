@@ -20,6 +20,7 @@ import { CreateOrderDto, ShippingAddressDto } from './dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PromotionsService, PromotionCartLine } from '../promotions/promotions.service';
 import { GuestOrderLinkService } from './guest-order-link.service';
+import { CustomerRepository } from '../../database/repositories/customer.repository';
 import { InventoryService } from '../inventory/inventory.service';
 import { CartService } from '../cart/cart.service';
 import { Store, StoreStatus } from '../../database/entities/store.entity';
@@ -59,6 +60,7 @@ export class OrdersService {
     private notificationsService: NotificationsService,
     private promotionsService: PromotionsService,
     private guestOrderLinkService: GuestOrderLinkService,
+    private customerRepository: CustomerRepository,
     private inventoryService: InventoryService,
     private cartService: CartService,
     @InjectRepository(Store)
@@ -209,6 +211,18 @@ export class OrdersService {
       });
     }
 
+    // Link guest checkouts to an existing member when the supplied phone already
+    // belongs to an active customer, so the order shows in their history immediately
+    // (instead of only after their next OTP login) and the customer-facing order
+    // number stays consistent with Admin. The order keeps its guestPhone so the
+    // unauthenticated buyer can still reach it via the guest payment/tracking paths.
+    let linkedCustomerId: string | null = customerId ?? null;
+    if (!linkedCustomerId && normalizedGuestPhone) {
+      const existingCustomer =
+        await this.customerRepository.findActiveByPhone(normalizedGuestPhone);
+      linkedCustomerId = existingCustomer?.id ?? null;
+    }
+
     const shippingSnapshot = await this.resolveShippingSnapshot(customerId, createOrderDto);
 
     const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
@@ -283,7 +297,7 @@ export class OrdersService {
     const orderId = await this.dataSource.transaction(async (manager) => {
       const order = manager.create(Order, {
         orderNumber: this.generateOrderNumber(),
-        customerId: customerId ?? null,
+        customerId: linkedCustomerId,
         guestPhone: normalizedGuestPhone ?? null,
         guestName: guestName ?? null,
         guestEmail: guestEmail ?? null,

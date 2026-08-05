@@ -159,6 +159,29 @@ describe('PaymentsService guest access', () => {
     orderRepository.findOne.mockResolvedValue(null);
     await expect(service.assertCanPayForOrder('missing')).rejects.toThrow(BadRequestException);
   });
+
+  it('allows unauthenticated access to a guest order linked to a member', async () => {
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-1',
+      customerId: 'member-1',
+      guestPhone: '0812345678',
+    });
+
+    const order = await service.assertCanPayForOrder('ord-1');
+    expect(order.id).toBe('ord-1');
+  });
+
+  it('rejects a different authenticated customer for a linked guest order', async () => {
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-1',
+      customerId: 'member-1',
+      guestPhone: '0812345678',
+    });
+
+    await expect(service.assertCanPayForOrder('ord-1', 'cust-2')).rejects.toThrow(
+      ForbiddenException,
+    );
+  });
 });
 
 describe('PaymentsService payment read queries', () => {
@@ -235,7 +258,10 @@ describe('PaymentsService payment read queries', () => {
       const payment = await service.findById('pay-1');
 
       expect(payment).toEqual(basePayment);
-      expect(paymentRepository.findOne).toHaveBeenCalledWith({ where: { id: 'pay-1' } });
+      expect(paymentRepository.findOne).toHaveBeenCalledWith({
+        where: { id: 'pay-1' },
+        relations: ['order'],
+      });
     });
 
     it('returns payment when authenticated customer owns the order', async () => {
@@ -273,6 +299,7 @@ describe('PaymentsService payment read queries', () => {
       expect(paymentRepository.findOne).toHaveBeenCalledWith({
         where: { orderId: 'ord-1' },
         order: { createdAt: 'DESC' },
+        relations: ['order'],
       });
     });
 
@@ -1483,6 +1510,7 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
     expect(paymentRepository.findOne).toHaveBeenCalledWith({
       where: { orderId: order.id },
       order: { createdAt: 'DESC' },
+      relations: ['order'],
     });
   });
 });

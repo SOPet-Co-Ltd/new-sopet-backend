@@ -771,17 +771,29 @@ export class PaymentsService {
     }
 
     if (order.customerId && order.customerId !== customerId) {
-      throw new ForbiddenException({
-        code: 'FORBIDDEN',
-        message: 'You do not have access to pay for this order',
-      });
+      // Guest checkouts placed with an existing member's phone are linked to that
+      // member's account at creation time. Such orders still carry a guestPhone, so
+      // the unauthenticated buyer (identified by possession of the order UUID) must
+      // keep access to pay for and view them. Pure member orders (no guestPhone)
+      // remain accessible only to their owning customer.
+      const isGuestOriginatedOrder = Boolean(order.guestPhone);
+      const isUnauthenticatedGuest = !customerId;
+      if (!(isGuestOriginatedOrder && isUnauthenticatedGuest)) {
+        throw new ForbiddenException({
+          code: 'FORBIDDEN',
+          message: 'You do not have access to pay for this order',
+        });
+      }
     }
 
     return order;
   }
 
   async findById(id: string, customerId?: string): Promise<Payment> {
-    const payment = await this.paymentRepository.findOne({ where: { id } });
+    const payment = await this.paymentRepository.findOne({
+      where: { id },
+      relations: ['order'],
+    });
     if (!payment) {
       throw new NotFoundException({
         code: 'PAYMENT_NOT_FOUND',
@@ -799,6 +811,7 @@ export class PaymentsService {
     const payment = await this.paymentRepository.findOne({
       where: { orderId },
       order: { createdAt: 'DESC' },
+      relations: ['order'],
     });
     if (!payment) {
       throw new NotFoundException({

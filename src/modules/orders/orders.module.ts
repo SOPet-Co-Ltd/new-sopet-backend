@@ -20,6 +20,8 @@ import { Product } from '../../database/entities/product.entity';
 import { Store } from '../../database/entities/store.entity';
 import { StoreMember } from '../../database/entities/store-member.entity';
 import { User } from '../../database/entities/user.entity';
+import { Customer } from '../../database/entities/customer.entity';
+import { CustomerRepository } from '../../database/repositories/customer.repository';
 import { OrdersResolver } from './orders.resolver';
 import { GuestOrderLinkModule } from './guest-order-link.module';
 import { InventoryModule } from '../inventory/inventory.module';
@@ -51,9 +53,16 @@ import { VendorWebhooksModule } from '../vendor-webhooks/vendor-webhooks.module'
       Store,
       StoreMember,
       User,
+      Customer,
     ]),
   ],
-  providers: [OrdersService, OrderFulfillmentService, StoreSuspensionHoldService, OrdersResolver],
+  providers: [
+    OrdersService,
+    OrderFulfillmentService,
+    StoreSuspensionHoldService,
+    OrdersResolver,
+    CustomerRepository,
+  ],
   exports: [OrdersService, OrderFulfillmentService, StoreSuspensionHoldService],
 })
 export class OrdersModule {}

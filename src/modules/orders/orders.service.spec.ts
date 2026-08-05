@@ -25,6 +25,7 @@ describe('OrdersService', () => {
   };
   let promotionsService: { applyStackedPromotions: jest.Mock };
   let guestOrderLinkService: { mergeGuestOrders: jest.Mock };
+  let customerRepository: { findActiveByPhone: jest.Mock };
   let inventoryService: { restoreOrderStock: jest.Mock };
   let vendorWebhooksService: { dispatchOrderEvent: jest.Mock };
   let mockManager: {
@@ -70,6 +71,7 @@ describe('OrdersService', () => {
     };
     promotionsService = { applyStackedPromotions: jest.fn() };
     guestOrderLinkService = { mergeGuestOrders: jest.fn() };
+    customerRepository = { findActiveByPhone: jest.fn().mockResolvedValue(null) };
     inventoryService = { restoreOrderStock: jest.fn().mockResolvedValue(true) };
     vendorWebhooksService = {
       dispatchOrderEvent: jest.fn().mockResolvedValue(undefined),
@@ -103,6 +105,7 @@ describe('OrdersService', () => {
       notificationsService as never,
       promotionsService as never,
       guestOrderLinkService as never,
+      customerRepository as never,
       inventoryService as never,
       { removeItems: jest.fn() } as never,
       {} as never,
@@ -180,6 +183,98 @@ describe('OrdersService', () => {
     expect(dataSource.transaction).toHaveBeenCalled();
     expect(mockManager.save).toHaveBeenCalled();
     expect(result.id).toBe('ord-1');
+  });
+
+  const orderCreatePayload = (): Record<string, unknown> => {
+    const call = mockManager.create.mock.calls.find(([entity]) => entity === Order);
+    if (!call) {
+      throw new Error('Order entity was not created');
+    }
+    return call[1] as Record<string, unknown>;
+  };
+
+  it('links guest checkout to an existing member when the phone matches (AC guest-link)', async () => {
+    variantRepository.findOne.mockResolvedValue(variant);
+    customerRepository.findActiveByPhone.mockResolvedValue({ id: 'member-1' });
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-1',
+      orderNumber: 'ORD-TEST',
+      status: OrderStatus.PENDING_PAYMENT,
+      items: [],
+      shippingAddress: {},
+      storeShippings: [],
+      statusHistory: [],
+    });
+
+    await service.create(
+      {
+        items: [{ productId: 'p1', variantId: 'var-1', quantity: 1, price: 100 }],
+        paymentMethod: 'promptpay',
+        guestPhone: '+66812345678',
+        guestName: 'Guest',
+        shippingAddress,
+      },
+      undefined,
+    );
+
+    expect(customerRepository.findActiveByPhone).toHaveBeenCalledWith('0812345678');
+    const payload = orderCreatePayload();
+    expect(payload.customerId).toBe('member-1');
+    expect(payload.guestPhone).toBe('0812345678');
+  });
+
+  it('keeps guest order unlinked when no member matches the phone', async () => {
+    variantRepository.findOne.mockResolvedValue(variant);
+    customerRepository.findActiveByPhone.mockResolvedValue(null);
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-1',
+      orderNumber: 'ORD-TEST',
+      status: OrderStatus.PENDING_PAYMENT,
+      items: [],
+      shippingAddress: {},
+      storeShippings: [],
+      statusHistory: [],
+    });
+
+    await service.create(
+      {
+        items: [{ productId: 'p1', variantId: 'var-1', quantity: 1, price: 100 }],
+        paymentMethod: 'promptpay',
+        guestPhone: '+66812345678',
+        shippingAddress,
+      },
+      undefined,
+    );
+
+    const payload = orderCreatePayload();
+    expect(payload.customerId).toBeNull();
+    expect(payload.guestPhone).toBe('0812345678');
+  });
+
+  it('does not look up a member when an authenticated customer places the order', async () => {
+    variantRepository.findOne.mockResolvedValue(variant);
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-1',
+      orderNumber: 'ORD-TEST',
+      status: OrderStatus.PENDING_PAYMENT,
+      items: [],
+      shippingAddress: {},
+      storeShippings: [],
+      statusHistory: [],
+    });
+
+    await service.create(
+      {
+        items: [{ productId: 'p1', variantId: 'var-1', quantity: 1, price: 100 }],
+        paymentMethod: 'promptpay',
+        shippingAddress,
+      },
+      'cust-42',
+    );
+
+    expect(customerRepository.findActiveByPhone).not.toHaveBeenCalled();
+    const payload = orderCreatePayload();
+    expect(payload.customerId).toBe('cust-42');
   });
 
   it('fails entire create when any variant belongs to suspended store (AC-006)', async () => {

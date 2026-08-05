@@ -53,6 +53,7 @@ describe('PaymentsResolver payment queries', () => {
       expect(result).toEqual({
         id: 'pay-1',
         orderId: 'ord-1',
+        orderNumber: null,
         amount: 100,
         currency: 'THB',
         status: 'pending',
@@ -61,6 +62,17 @@ describe('PaymentsResolver payment queries', () => {
         qrCodeUrl: 'https://example.com/qr.png',
         expiresAt: paymentEntity.expiresAt,
       });
+    });
+
+    it('exposes the canonical order number from the order relation', async () => {
+      paymentsService.findById.mockResolvedValue({
+        ...paymentEntity,
+        order: { orderNumber: 'ORD-ABC-1234' },
+      } as never);
+
+      const result = await resolver.payment('pay-1', undefined, undefined);
+
+      expect(result.orderNumber).toBe('ORD-ABC-1234');
     });
 
     it('passes customer id when role is customer', async () => {

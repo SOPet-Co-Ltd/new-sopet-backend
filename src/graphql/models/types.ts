@@ -603,6 +603,9 @@ export class PaymentType {
   @Field()
   orderId!: string;
 
+  @Field(() => String, { nullable: true })
+  orderNumber?: string | null;
+
   @Field(() => Float)
   amount!: number;
 
