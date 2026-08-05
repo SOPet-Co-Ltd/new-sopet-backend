@@ -4,6 +4,7 @@ import { AnalyticsModule } from '../analytics/analytics.module';
 import { StoresModule } from '../stores/stores.module';
 import { TaxonomyModule } from '../taxonomy/taxonomy.module';
 import { SearchModule } from '../search/search.module';
+import { StorageModule } from '../storage/storage.module';
 import { ProductsService } from './products.service';
 import { Product } from '../../database/entities/product.entity';
 import { ProductVariant } from '../../database/entities/product-variant.entity';
@@ -18,6 +19,7 @@ import { ProductsResolver } from './products.resolver';
     StoresModule,
     TaxonomyModule,
     SearchModule,
+    StorageModule,
     TypeOrmModule.forFeature([Product, ProductVariant, ProductImage, OrderItem, CartItem]),
   ],
   providers: [ProductsService, ProductsResolver],

@@ -1,4 +1,5 @@
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   IsArray,
   IsInt,
@@ -6,11 +7,13 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUrl,
   Length,
   Matches,
   Min,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { PUBLIC_API_MAX_PRODUCT_IMAGES } from '../../storage/upload.rules';
 
 export class UpdatePublicProductDto {
   @ApiPropertyOptional({
@@ -101,6 +104,19 @@ export class UpdatePublicProductDto {
   @IsString()
   @Length(1, 100)
   brand?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Replace the full product image set. Same download/store rules as create (max 10, 5 MB each, jpeg/png/webp/gif). Source URLs are never saved. Send an empty array to clear all images. Omitted = leave images unchanged.',
+    example: ['https://cdn.example.com/catalog/cat-food-1.jpg'],
+    type: [String],
+    maxItems: PUBLIC_API_MAX_PRODUCT_IMAGES,
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(PUBLIC_API_MAX_PRODUCT_IMAGES)
+  @IsUrl({ protocols: ['http', 'https'], require_protocol: true }, { each: true })
+  images?: string[];
 }
 
 export class UpdatePublicVariantDto {

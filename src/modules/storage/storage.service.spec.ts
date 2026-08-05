@@ -5,10 +5,15 @@ import sharp from 'sharp';
 import { StorageService } from './storage.service';
 
 const mockSend = jest.fn();
+const mockLookup = jest.fn();
 
 jest.mock('@aws-sdk/client-s3', () => ({
   S3Client: jest.fn().mockImplementation(() => ({ send: mockSend })),
   PutObjectCommand: jest.fn().mockImplementation((input) => ({ input })),
+}));
+
+jest.mock('node:dns/promises', () => ({
+  lookup: (...args: unknown[]) => mockLookup(...args),
 }));
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -250,5 +255,87 @@ describe('StorageService', () => {
   it('builds object keys under categories folder', () => {
     const key = service.buildObjectKey('categories', 'image/webp');
     expect(key).toMatch(/^categories\/[0-9a-f-]+\.webp$/);
+  });
+
+  describe('importImageFromUrl', () => {
+    const pngBase64 =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    const pngBuffer = Buffer.from(pngBase64, 'base64');
+    let fetchMock: jest.Mock;
+
+    beforeEach(() => {
+      mockLookup.mockResolvedValue([{ address: '203.0.113.10', family: 4 }]);
+      fetchMock = jest.fn();
+      global.fetch = fetchMock;
+    });
+
+    afterEach(() => {
+      delete (global as { fetch?: typeof fetch }).fetch;
+      mockLookup.mockReset();
+    });
+
+    it('downloads, validates, converts to WebP, and uploads', async () => {
+      fetchMock.mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'image/png' }),
+        body: {
+          getReader: () => {
+            let done = false;
+            return {
+              read: async () => {
+                if (done) {
+                  return { done: true, value: undefined };
+                }
+                done = true;
+                return { done: false, value: pngBuffer };
+              },
+              cancel: async () => undefined,
+            };
+          },
+        },
+      });
+
+      const result = await service.importImageFromUrl(
+        'https://cdn.example.com/photo.png',
+        'products',
+      );
+
+      expect(result.url).toContain('/products/');
+      expect(result.key).toMatch(/^products\/[0-9a-f-]+\.webp$/);
+      expect(PutObjectCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ContentType: 'image/webp',
+        }),
+      );
+    });
+
+    it('rejects private/localhost hosts', async () => {
+      await expect(
+        service.importImageFromUrl('http://127.0.0.1/secret.png', 'products'),
+      ).rejects.toMatchObject({ response: { code: 'INVALID_IMAGE_URL' } });
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects oversized Content-Length before reading body', async () => {
+      fetchMock.mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers({
+          'content-type': 'image/png',
+          'content-length': String(6 * 1024 * 1024),
+        }),
+        body: {
+          getReader: () => ({
+            read: async () => ({ done: true, value: undefined }),
+            cancel: async () => undefined,
+          }),
+        },
+      });
+
+      await expect(
+        service.importImageFromUrl('https://cdn.example.com/huge.png', 'products'),
+      ).rejects.toMatchObject({ response: { code: 'IMAGE_TOO_LARGE' } });
+    });
   });
 });

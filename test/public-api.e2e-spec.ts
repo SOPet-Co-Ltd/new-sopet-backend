@@ -221,6 +221,30 @@ describe('Public API products (e2e)', () => {
     expect(productsService.createWithVariants).not.toHaveBeenCalled();
   });
 
+  it('returns 400 when images contains a non-URL', async () => {
+    await postProducts({
+      ...validBody,
+      images: ['not-a-url'],
+    })
+      .expect(400)
+      .expect((res) => {
+        expect(res.body.error.code).toBe('VALIDATION_ERROR');
+      });
+
+    expect(productsService.createWithVariants).not.toHaveBeenCalled();
+  });
+
+  it('passes images URLs through to createWithVariants', async () => {
+    const images = ['https://cdn.example.com/a.jpg', 'https://cdn.example.com/b.jpg'];
+    await postProducts({ ...validBody, images }).expect(201);
+
+    expect(productsService.createWithVariants).toHaveBeenCalledWith(
+      'user-1',
+      storeId,
+      expect.objectContaining({ images }),
+    );
+  });
+
   it('accepts X-Api-Key header', async () => {
     await request(app.getHttpServer())
       .post(`/api/v1/stores/${storeId}/products`)

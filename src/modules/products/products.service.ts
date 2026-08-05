@@ -34,6 +34,8 @@ import {
 } from './product-publish.validation';
 import { SearchService } from '../search/search.service';
 import { SearchEmbeddingQueueService } from '../search/embedding/search-embedding-queue.service';
+import { StorageService } from '../storage/storage.service';
+import { PUBLIC_API_MAX_PRODUCT_IMAGES } from '../storage/upload.rules';
 import {
   BlockedVariantPayload,
   ProductVariantSyncImpact,
@@ -65,6 +67,7 @@ export class ProductsService {
     private readonly storesService: StoresService,
     private readonly taxonomyService: TaxonomyService,
     private readonly shippingOptionsService: ShippingOptionsService,
+    private readonly storageService: StorageService,
     @Optional() private readonly searchService?: SearchService,
     @Optional() private readonly searchEmbeddingQueueService?: SearchEmbeddingQueueService,
   ) {}
@@ -284,7 +287,8 @@ export class ProductsService {
    * Taxonomy is resolved by NAME against approved records (throws if missing).
    * The product base price is derived from the cheapest variant item rather
    * than accepted as input, and each item stores the difference as its price
-   * adjustment. Media is not supported here.
+   * adjustment. Optional `images` are source URLs downloaded into object storage
+   * before create; only storage URLs are persisted.
    */
   async createWithVariants(
     userId: string,
@@ -298,6 +302,7 @@ export class ProductsService {
       tags?: string[];
       petType?: string;
       brand?: string;
+      images?: string[];
       variants: Array<{ name: string; values: string[] }>;
       variantItems: Array<{
         sku: string;
@@ -395,6 +400,9 @@ export class ProductsService {
       });
     }
 
+    // Download + store images before any DB writes so a bad URL fails the whole create.
+    const storageImageUrls = await this.importProductImagesFromSourceUrls(input.images);
+
     // Resolve taxonomy by name against approved records (throws if missing)
     let categoryId: string | undefined;
     if (input.category) {
@@ -453,6 +461,10 @@ export class ProductsService {
         priceModifier: item.price - basePrice,
         attributes: options,
       });
+    }
+
+    if (storageImageUrls.length) {
+      await this.replaceProductImagesWithStorageUrls(product.id, storageImageUrls);
     }
 
     return this.findOne(product.id);
@@ -1018,7 +1030,8 @@ export class ProductsService {
 
   /**
    * Public API product info update (names for taxonomy, like createWithVariants).
-   * Does not accept stock/price/status.
+   * Does not accept stock/price/status. When `images` is sent, replaces the full
+   * image set after downloading each source URL into object storage.
    */
   async updateProductForPublicApi(
     productId: string,
@@ -1033,10 +1046,17 @@ export class ProductsService {
       tags?: string[];
       petType?: string;
       brand?: string;
+      images?: string[];
     },
   ): Promise<Product> {
     this.assertPublicPatchHasFields(input);
     await this.findOneInStore(productId, storeId);
+
+    // Import before mutating so a bad image URL fails the whole PATCH.
+    const storageImageUrls =
+      input.images !== undefined
+        ? await this.importProductImagesFromSourceUrls(input.images)
+        : undefined;
 
     let categoryId: string | undefined;
     if (input.category !== undefined) {
@@ -1062,16 +1082,37 @@ export class ProductsService {
       brandId = brand.id;
     }
 
-    return this.update(productId, userId, {
-      name: input.name,
-      description: input.description,
-      warning: input.warning,
-      expiryDate: input.expiryDate,
-      categoryId,
-      tagIds,
-      petTypeId,
-      brandId,
-    });
+    const hasInfoFields = [
+      input.name,
+      input.description,
+      input.warning,
+      input.expiryDate,
+      input.category,
+      input.tags,
+      input.petType,
+      input.brand,
+    ].some((value) => value !== undefined);
+
+    if (hasInfoFields) {
+      await this.update(productId, userId, {
+        name: input.name,
+        description: input.description,
+        warning: input.warning,
+        expiryDate: input.expiryDate,
+        categoryId,
+        tagIds,
+        petTypeId,
+        brandId,
+      });
+    } else {
+      await this.assertStoreAccess(userId, storeId, 'update products');
+    }
+
+    if (storageImageUrls !== undefined) {
+      await this.replaceProductImagesWithStorageUrls(productId, storageImageUrls);
+    }
+
+    return this.findOne(productId);
   }
 
   /**
@@ -1597,6 +1638,51 @@ export class ProductsService {
     if (wasThumbnail) {
       await this.ensureThumbnail(productId);
     }
+  }
+
+  /**
+   * Download each source URL into the products folder and return storage URLs only.
+   * Source URLs are never persisted. Empty/undefined → [].
+   */
+  private async importProductImagesFromSourceUrls(sourceUrls?: string[]): Promise<string[]> {
+    if (!sourceUrls?.length) {
+      return [];
+    }
+
+    if (sourceUrls.length > PUBLIC_API_MAX_PRODUCT_IMAGES) {
+      throw new BadRequestException({
+        code: 'TOO_MANY_IMAGES',
+        message: `At most ${PUBLIC_API_MAX_PRODUCT_IMAGES} images are allowed`,
+      });
+    }
+
+    const storageUrls: string[] = [];
+    for (const sourceUrl of sourceUrls) {
+      const uploaded = await this.storageService.importImageFromUrl(sourceUrl.trim(), 'products');
+      storageUrls.push(uploaded.url);
+    }
+    return storageUrls;
+  }
+
+  /** Replace all product_images rows with the given storage URLs (first = thumbnail). */
+  private async replaceProductImagesWithStorageUrls(
+    productId: string,
+    storageUrls: string[],
+  ): Promise<void> {
+    await this.imageRepository.manager.transaction(async (manager) => {
+      await manager.delete(ProductImage, { productId });
+      for (let index = 0; index < storageUrls.length; index++) {
+        await manager.save(
+          manager.create(ProductImage, {
+            productId,
+            url: storageUrls[index],
+            sortOrder: index,
+            altText: null,
+            isThumbnail: index === 0,
+          }),
+        );
+      }
+    });
   }
 
   private async clearThumbnails(productId: string, exceptImageId?: string): Promise<void> {

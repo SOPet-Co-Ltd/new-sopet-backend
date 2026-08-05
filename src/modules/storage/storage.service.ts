@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
 import { type ObjectCannedACL, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import sharp from 'sharp';
 import { getFolderUploadRules, isAspectRatioWithinTolerance } from './upload.rules';
@@ -10,6 +12,9 @@ export interface UploadResult {
   url: string;
   key: string;
 }
+
+const REMOTE_IMAGE_FETCH_TIMEOUT_MS = 15_000;
+const REMOTE_IMAGE_MAX_REDIRECTS = 3;
 
 interface ResolvedStorageSettings {
   accessKeyId: string;
@@ -65,6 +70,20 @@ export class StorageService {
 
   async convertToWebp(buffer: Buffer): Promise<Buffer> {
     return sharp(buffer, { failOn: 'none' }).rotate().webp({ quality: 85 }).toBuffer();
+  }
+
+  /**
+   * Download a remote image URL, validate against folder rules, convert to WebP,
+   * and store in the bucket. Returns the storage public URL — never persist the source URL.
+   */
+  async importImageFromUrl(sourceUrl: string, folder: UploadFolder): Promise<UploadResult> {
+    const rules = getFolderUploadRules(folder);
+    const { buffer, contentType } = await this.downloadRemoteImage(sourceUrl, rules.maxSizeBytes);
+    await this.validateImageUpload(buffer, contentType, folder);
+    const webpBuffer = await this.convertToWebp(buffer);
+    const webpContentType = 'image/webp';
+    const key = this.buildObjectKey(folder, webpContentType);
+    return this.uploadFile(webpBuffer, key, webpContentType);
   }
 
   async validateImageUpload(
@@ -160,6 +179,227 @@ export class StorageService {
       code: 'INVALID_CATEGORY_IMAGE_URL',
       message: 'URL รูปภาพไม่ถูกต้อง',
     });
+  }
+
+  private invalidImageUrlError(message: string): BadRequestException {
+    return new BadRequestException({
+      code: 'INVALID_IMAGE_URL',
+      message,
+    });
+  }
+
+  private async downloadRemoteImage(
+    sourceUrl: string,
+    maxSizeBytes: number,
+  ): Promise<{ buffer: Buffer; contentType: string }> {
+    let currentUrl = sourceUrl.trim();
+    for (let redirectCount = 0; redirectCount <= REMOTE_IMAGE_MAX_REDIRECTS; redirectCount++) {
+      const parsed = await this.assertSafeRemoteUrl(currentUrl);
+      let response: Response;
+      try {
+        response = await fetch(parsed.toString(), {
+          method: 'GET',
+          redirect: 'manual',
+          signal: AbortSignal.timeout(REMOTE_IMAGE_FETCH_TIMEOUT_MS),
+          headers: { Accept: 'image/*,*/*;q=0.8' },
+        });
+      } catch {
+        throw this.invalidImageUrlError(`Failed to download image from URL: ${sourceUrl}`);
+      }
+
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get('location');
+        if (!location) {
+          throw this.invalidImageUrlError(`Image URL redirected without a Location header`);
+        }
+        currentUrl = new URL(location, parsed).toString();
+        continue;
+      }
+
+      if (!response.ok || !response.body) {
+        throw this.invalidImageUrlError(
+          `Failed to download image (HTTP ${response.status}): ${sourceUrl}`,
+        );
+      }
+
+      const contentLengthHeader = response.headers.get('content-length');
+      if (contentLengthHeader) {
+        const contentLength = Number(contentLengthHeader);
+        if (Number.isFinite(contentLength) && contentLength > maxSizeBytes) {
+          throw new BadRequestException({
+            code: 'IMAGE_TOO_LARGE',
+            message: `Image exceeds maximum size of ${maxSizeBytes} bytes`,
+          });
+        }
+      }
+
+      const buffer = await this.readResponseBodyWithLimit(response, maxSizeBytes);
+      const headerType = (response.headers.get('content-type') ?? '')
+        .split(';')[0]
+        .trim()
+        .toLowerCase();
+      const contentType = await this.resolveDownloadedImageContentType(buffer, headerType);
+      return { buffer, contentType };
+    }
+
+    throw this.invalidImageUrlError('Image URL exceeded maximum redirects');
+  }
+
+  private async assertSafeRemoteUrl(urlString: string): Promise<URL> {
+    let parsed: URL;
+    try {
+      parsed = new URL(urlString);
+    } catch {
+      throw this.invalidImageUrlError('Image URL is invalid');
+    }
+
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw this.invalidImageUrlError('Image URL must use http or https');
+    }
+
+    if (parsed.username || parsed.password) {
+      throw this.invalidImageUrlError('Image URL must not include credentials');
+    }
+
+    const hostname = parsed.hostname.toLowerCase();
+    if (
+      hostname === 'localhost' ||
+      hostname.endsWith('.localhost') ||
+      hostname.endsWith('.local') ||
+      hostname.endsWith('.internal') ||
+      hostname === '0.0.0.0'
+    ) {
+      throw this.invalidImageUrlError('Image URL host is not allowed');
+    }
+
+    const addresses = isIP(hostname)
+      ? [hostname]
+      : (await lookup(hostname, { all: true })).map((entry) => entry.address);
+
+    if (!addresses.length) {
+      throw this.invalidImageUrlError('Image URL host could not be resolved');
+    }
+
+    for (const address of addresses) {
+      if (this.isPrivateOrReservedIp(address)) {
+        throw this.invalidImageUrlError('Image URL host is not allowed');
+      }
+    }
+
+    return parsed;
+  }
+
+  private isPrivateOrReservedIp(address: string): boolean {
+    if (address === '::1' || address === '::' || address.startsWith('fe80:')) {
+      return true;
+    }
+
+    if (address.includes(':')) {
+      // IPv6 unique local / mapped IPv4
+      const lower = address.toLowerCase();
+      if (lower.startsWith('fc') || lower.startsWith('fd')) {
+        return true;
+      }
+      const mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+      if (mapped) {
+        return this.isPrivateOrReservedIp(mapped[1]);
+      }
+      return false;
+    }
+
+    const parts = address.split('.').map((part) => Number(part));
+    if (
+      parts.length !== 4 ||
+      parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)
+    ) {
+      return true;
+    }
+
+    const [a, b] = parts;
+    if (a === 10 || a === 127 || a === 0) {
+      return true;
+    }
+    if (a === 169 && b === 254) {
+      return true;
+    }
+    if (a === 172 && b >= 16 && b <= 31) {
+      return true;
+    }
+    if (a === 192 && b === 168) {
+      return true;
+    }
+    if (a === 100 && b >= 64 && b <= 127) {
+      return true;
+    }
+    return false;
+  }
+
+  private async readResponseBodyWithLimit(
+    response: Response,
+    maxSizeBytes: number,
+  ): Promise<Buffer> {
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw this.invalidImageUrlError('Failed to read image response body');
+    }
+
+    const chunks: Buffer[] = [];
+    let total = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      if (!value?.length) {
+        continue;
+      }
+      total += value.length;
+      if (total > maxSizeBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw new BadRequestException({
+          code: 'IMAGE_TOO_LARGE',
+          message: `Image exceeds maximum size of ${maxSizeBytes} bytes`,
+        });
+      }
+      chunks.push(Buffer.from(value));
+    }
+
+    if (!total) {
+      throw this.invalidImageUrlError('Downloaded image is empty');
+    }
+
+    return Buffer.concat(chunks, total);
+  }
+
+  private async resolveDownloadedImageContentType(
+    buffer: Buffer,
+    headerContentType: string,
+  ): Promise<string> {
+    if (headerContentType.startsWith('image/')) {
+      return headerContentType === 'image/jpg' ? 'image/jpeg' : headerContentType;
+    }
+
+    const metadata = await sharp(buffer, { failOn: 'none' }).metadata();
+    const fromFormat = this.mimeFromSharpFormat(metadata.format);
+    if (fromFormat) {
+      return fromFormat;
+    }
+
+    throw new BadRequestException({
+      code: 'INVALID_IMAGE_TYPE',
+      message: 'Downloaded file is not a supported image type',
+    });
+  }
+
+  private mimeFromSharpFormat(format?: string): string | null {
+    const map: Record<string, string> = {
+      jpeg: 'image/jpeg',
+      jpg: 'image/jpeg',
+      png: 'image/png',
+      webp: 'image/webp',
+      gif: 'image/gif',
+    };
+    return format ? (map[format] ?? null) : null;
   }
 
   private getPublicUrlPrefixes(): string[] {

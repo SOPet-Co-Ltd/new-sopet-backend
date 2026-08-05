@@ -29,6 +29,13 @@ describe('ProductsService', () => {
     create: jest.Mock;
     save: jest.Mock;
     softDelete: jest.Mock;
+    delete: jest.Mock;
+    manager: {
+      transaction: jest.Mock;
+    };
+  };
+  let storageService: {
+    importImageFromUrl: jest.Mock;
   };
   let orderItemRepository: {
     find: jest.Mock;
@@ -93,6 +100,7 @@ describe('ProductsService', () => {
       create: jest.fn((data: Record<string, unknown>) => data),
       save: jest.fn((data: Record<string, unknown>) => Promise.resolve({ ...data, id: 'img-1' })),
       softDelete: jest.fn(),
+      delete: jest.fn().mockResolvedValue(undefined),
       createQueryBuilder: jest.fn(() => ({
         update: jest.fn().mockReturnThis(),
         set: jest.fn().mockReturnThis(),
@@ -100,6 +108,25 @@ describe('ProductsService', () => {
         andWhere: jest.fn().mockReturnThis(),
         execute: jest.fn().mockResolvedValue(undefined),
       })),
+      manager: {
+        transaction: jest.fn(async (cb: (manager: Record<string, unknown>) => Promise<void>) => {
+          const manager = {
+            delete: jest.fn().mockResolvedValue(undefined),
+            create: jest.fn((_entity: unknown, data: Record<string, unknown>) => data),
+            save: jest.fn((data: Record<string, unknown>) =>
+              Promise.resolve({ ...data, id: 'img-1' }),
+            ),
+          };
+          await cb(manager);
+          return undefined;
+        }),
+      },
+    };
+    storageService = {
+      importImageFromUrl: jest.fn().mockResolvedValue({
+        url: 'https://cdn.example.com/products/stored.webp',
+        key: 'products/stored.webp',
+      }),
     };
     orderItemRepository = {
       find: jest.fn().mockResolvedValue([]),
@@ -140,6 +167,7 @@ describe('ProductsService', () => {
       storesService as never,
       taxonomyService as never,
       shippingOptionsService as never,
+      storageService as never,
     );
   });
 
@@ -632,6 +660,59 @@ describe('ProductsService', () => {
       await expect(
         service.updateProductForPublicApi('prod-1', 'store-1', 'user-1', {}),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('updateProductForPublicApi replaces images from source URLs', async () => {
+      productRepository.findOne.mockResolvedValue({
+        ...product,
+        storeId: 'store-1',
+        status: ProductStatus.DRAFT,
+        variants: [],
+      });
+      storageService.importImageFromUrl
+        .mockResolvedValueOnce({
+          url: 'https://cdn.example.com/products/a.webp',
+          key: 'products/a.webp',
+        })
+        .mockResolvedValueOnce({
+          url: 'https://cdn.example.com/products/b.webp',
+          key: 'products/b.webp',
+        });
+
+      await service.updateProductForPublicApi('prod-1', 'store-1', 'user-1', {
+        images: ['https://source.example.com/a.jpg', 'https://source.example.com/b.jpg'],
+      });
+
+      expect(storageService.importImageFromUrl).toHaveBeenCalledWith(
+        'https://source.example.com/a.jpg',
+        'products',
+      );
+      expect(storageService.importImageFromUrl).toHaveBeenCalledWith(
+        'https://source.example.com/b.jpg',
+        'products',
+      );
+      expect(imageRepository.manager.transaction).toHaveBeenCalled();
+    });
+
+    it('updateProductForPublicApi fails whole request when image import fails', async () => {
+      productRepository.findOne.mockResolvedValue({
+        ...product,
+        storeId: 'store-1',
+        status: ProductStatus.DRAFT,
+        variants: [],
+      });
+      storageService.importImageFromUrl.mockRejectedValue(
+        new BadRequestException({ code: 'INVALID_IMAGE_URL', message: 'bad' }),
+      );
+
+      await expect(
+        service.updateProductForPublicApi('prod-1', 'store-1', 'user-1', {
+          name: 'Updated',
+          images: ['https://source.example.com/bad.jpg'],
+        }),
+      ).rejects.toMatchObject({ response: { code: 'INVALID_IMAGE_URL' } });
+
+      expect(productRepository.save).not.toHaveBeenCalled();
     });
 
     it('updateVariantStockPriceForPublicApi sets stock and absolute price', async () => {
@@ -1197,6 +1278,67 @@ describe('ProductsService', () => {
       // products from the public API are always forced to draft
       expect(savedProduct.status).toBe(ProductStatus.DRAFT);
       expect(variantRepository.save).toHaveBeenCalledTimes(2);
+    });
+
+    it('imports images before create and stores only storage URLs', async () => {
+      productRepository.findOne.mockImplementation((opts: { where?: { id?: string } }) => {
+        if (opts.where?.id) {
+          return Promise.resolve({ id: 'prod-1', storeId: 'store-1', variants: [] });
+        }
+        return Promise.resolve(null);
+      });
+      variantRepository.findOne.mockResolvedValue(null);
+      storageService.importImageFromUrl.mockResolvedValue({
+        url: 'https://cdn.example.com/products/stored.webp',
+        key: 'products/stored.webp',
+      });
+
+      await service.createWithVariants('user-1', 'store-1', {
+        ...baseInput,
+        images: ['https://source.example.com/photo.jpg'],
+      });
+
+      expect(storageService.importImageFromUrl).toHaveBeenCalledWith(
+        'https://source.example.com/photo.jpg',
+        'products',
+      );
+      expect(imageRepository.manager.transaction).toHaveBeenCalled();
+      const savedArgs = (
+        imageRepository.manager.transaction.mock.calls[0] as [
+          (manager: { save: jest.Mock; create: jest.Mock; delete: jest.Mock }) => Promise<void>,
+        ]
+      )[0];
+      const manager = {
+        delete: jest.fn().mockResolvedValue(undefined),
+        create: jest.fn((_entity: unknown, data: Record<string, unknown>) => data),
+        save: jest.fn((data: Record<string, unknown>) => Promise.resolve(data)),
+      };
+      await savedArgs(manager);
+      expect(manager.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: 'https://cdn.example.com/products/stored.webp',
+          isThumbnail: true,
+        }),
+      );
+      expect(manager.save).not.toHaveBeenCalledWith(
+        expect.objectContaining({ url: 'https://source.example.com/photo.jpg' }),
+      );
+    });
+
+    it('fails create when image import fails (no product write)', async () => {
+      variantRepository.findOne.mockResolvedValue(null);
+      storageService.importImageFromUrl.mockRejectedValue(
+        new BadRequestException({ code: 'IMAGE_TOO_LARGE', message: 'too big' }),
+      );
+
+      await expect(
+        service.createWithVariants('user-1', 'store-1', {
+          ...baseInput,
+          images: ['https://source.example.com/huge.jpg'],
+        }),
+      ).rejects.toMatchObject({ response: { code: 'IMAGE_TOO_LARGE' } });
+
+      expect(productRepository.save).not.toHaveBeenCalled();
     });
 
     it('resolves category and tags by name on happy path', async () => {

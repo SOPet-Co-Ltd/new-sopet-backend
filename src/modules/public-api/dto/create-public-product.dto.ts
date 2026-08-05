@@ -1,4 +1,5 @@
 import {
+  ArrayMaxSize,
   ArrayNotEmpty,
   IsArray,
   IsInt,
@@ -7,6 +8,7 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  IsUrl,
   Length,
   Matches,
   Min,
@@ -14,6 +16,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { PUBLIC_API_MAX_PRODUCT_IMAGES } from '../../storage/upload.rules';
 
 /**
  * A parent "variant" — an option group / dimension such as "สี" (Color) or
@@ -176,6 +179,19 @@ export class CreatePublicProductDto {
   @IsString()
   @Length(1, 100)
   brand?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Product image source URLs. The server downloads each URL, validates (jpeg/png/webp/gif, max 5 MB), converts to WebP, stores in the object bucket, and persists only the storage URL — source URLs are never saved. Max 10 images; first becomes the thumbnail. Any download/validation failure fails the whole create.',
+    example: ['https://cdn.example.com/catalog/cat-food-1.jpg'],
+    type: [String],
+    maxItems: PUBLIC_API_MAX_PRODUCT_IMAGES,
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(PUBLIC_API_MAX_PRODUCT_IMAGES)
+  @IsUrl({ protocols: ['http', 'https'], require_protocol: true }, { each: true })
+  images?: string[];
 
   @ApiProperty({
     description:

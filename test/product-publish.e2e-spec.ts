@@ -59,6 +59,7 @@ describe('Product publish (e2e)', () => {
         getApprovedTagsByNames: jest.fn(() => Promise.resolve([])),
       } as never,
       shippingOptionsService as never,
+      { importImageFromUrl: jest.fn() } as never,
     );
   });
 

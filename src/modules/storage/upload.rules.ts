@@ -15,6 +15,9 @@ export interface FolderUploadRules {
 
 const MB = 1024 * 1024;
 
+/** Max product images accepted on the vendor public REST API (create/update). */
+export const PUBLIC_API_MAX_PRODUCT_IMAGES = 10;
+
 const DEFAULT_ALLOWED_MIME_TYPES = [
   'image/jpeg',
   'image/jpg',

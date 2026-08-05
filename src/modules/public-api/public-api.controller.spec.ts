@@ -88,6 +88,7 @@ describe('PublicApiController', () => {
       tags: dto.tags,
       petType: undefined,
       brand: undefined,
+      images: undefined,
       variants: [{ name: 'รสชาติ', values: ['ไก่', 'ปลา'] }],
       variantItems: [
         { sku: 'TEST-CHK-001', stock: 10, price: 499, options: { รสชาติ: 'ไก่' } },
@@ -135,6 +136,7 @@ describe('PublicApiController', () => {
         tags: undefined,
         petType: undefined,
         brand: undefined,
+        images: undefined,
       },
     );
     expect(result.name).toBe('Updated');

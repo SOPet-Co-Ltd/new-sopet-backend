@@ -29,6 +29,7 @@ export class PublicApiController {
       tags: dto.tags,
       petType: dto.petType,
       brand: dto.brand,
+      images: dto.images,
       variants: dto.variants.map((group) => ({
         name: group.name,
         values: group.values,
@@ -64,6 +65,7 @@ export class PublicApiController {
         tags: dto.tags,
         petType: dto.petType,
         brand: dto.brand,
+        images: dto.images,
       },
     );
     return mapProduct(product);
