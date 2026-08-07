@@ -99,6 +99,7 @@ describe('Checkout flow (integration)', () => {
         } as never,
         { applyStackedPromotions: jest.fn() } as never,
         { mergeGuestOrders: jest.fn() } as never,
+        { findActiveByPhone: jest.fn().mockResolvedValue(null) } as never,
         { restoreOrderStock: jest.fn().mockResolvedValue(true) } as never,
         { removeItems: jest.fn() } as never,
         {} as never,

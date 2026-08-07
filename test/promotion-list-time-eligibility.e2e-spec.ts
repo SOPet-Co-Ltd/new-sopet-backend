@@ -15,6 +15,7 @@ import { OrdersService } from '../src/modules/orders/orders.service';
 import { PromotionsService } from '../src/modules/promotions/promotions.service';
 import { NotificationsService } from '../src/modules/notifications/notifications.service';
 import { GuestOrderLinkService } from '../src/modules/orders/guest-order-link.service';
+import { CustomerRepository } from '../src/database/repositories/customer.repository';
 import { InventoryService } from '../src/modules/inventory/inventory.service';
 import { CartService } from '../src/modules/cart/cart.service';
 import { VendorWebhooksService } from '../src/modules/vendor-webhooks/vendor-webhooks.service';
@@ -134,6 +135,7 @@ describe('Promotion list-time eligibility createOrder (service-integration-e2e)'
           },
         },
         { provide: GuestOrderLinkService, useValue: { mergeGuestOrders: jest.fn() } },
+        CustomerRepository,
         { provide: InventoryService, useValue: { restoreOrderStock: jest.fn() } },
         { provide: CartService, useValue: { removeItems: jest.fn() } },
         {

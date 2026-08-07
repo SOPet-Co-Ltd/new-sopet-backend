@@ -33,6 +33,7 @@ import { Store } from '../src/database/entities/store.entity';
 import { NotificationsService } from '../src/modules/notifications/notifications.service';
 import { PromotionsService } from '../src/modules/promotions/promotions.service';
 import { GuestOrderLinkService } from '../src/modules/orders/guest-order-link.service';
+import { CustomerRepository } from '../src/database/repositories/customer.repository';
 import { InventoryService } from '../src/modules/inventory/inventory.service';
 import { CartService } from '../src/modules/cart/cart.service';
 import { resolveOrderItemImageUrl } from '../src/modules/orders/order.mapper';
@@ -279,6 +280,7 @@ describe('Order tracking (e2e)', () => {
         { provide: NotificationsService, useValue: { notifyOrderStatusChanged: jest.fn() } },
         { provide: PromotionsService, useValue: { applyStackedPromotions: jest.fn() } },
         { provide: GuestOrderLinkService, useValue: {} },
+        { provide: CustomerRepository, useValue: { findActiveByPhone: jest.fn() } },
         { provide: InventoryService, useValue: {} },
         { provide: CartService, useValue: {} },
         { provide: OrderFulfillmentService, useValue: {} },
