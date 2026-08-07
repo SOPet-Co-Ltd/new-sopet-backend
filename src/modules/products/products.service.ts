@@ -969,7 +969,8 @@ export class ProductsService {
       });
     }
 
-    const { name, attributes, priceModifier, sku, stockQuantity, compareAtPrice } = createVariantDto;
+    const { name, attributes, priceModifier, sku, stockQuantity, compareAtPrice } =
+      createVariantDto;
 
     const variant = this.variantRepository.create({
       productId,
@@ -1003,7 +1004,8 @@ export class ProductsService {
 
     await this.assertStoreAccess(userId, variant.product.storeId, 'manage product variants');
 
-    const { name, attributes, priceModifier, sku, stockQuantity, compareAtPrice } = updateVariantDto;
+    const { name, attributes, priceModifier, sku, stockQuantity, compareAtPrice } =
+      updateVariantDto;
 
     if (sku !== undefined) {
       variant.sku = sku;

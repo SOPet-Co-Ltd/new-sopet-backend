@@ -1,8 +1,4 @@
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 import { SaleCampaign } from '../../database/entities/sale-campaign.entity';
@@ -65,9 +61,9 @@ export class SaleCampaignsService {
   }
 
   /** Active campaign items that target any of the given products (catalog cards). */
-  async findActiveItemsForProducts(productIds: string[]): Promise<
-    Array<{ item: SaleCampaignItem; campaign: SaleCampaign }>
-  > {
+  async findActiveItemsForProducts(
+    productIds: string[],
+  ): Promise<Array<{ item: SaleCampaignItem; campaign: SaleCampaign }>> {
     const uniqueIds = [...new Set(productIds.filter(Boolean))];
     if (uniqueIds.length === 0) return [];
 
@@ -116,11 +112,7 @@ export class SaleCampaignsService {
     return this.findOne(saved.id);
   }
 
-  async update(
-    id: string,
-    userId: string,
-    input: UpdateSaleCampaignInput,
-  ): Promise<SaleCampaign> {
+  async update(id: string, userId: string, input: UpdateSaleCampaignInput): Promise<SaleCampaign> {
     const campaign = await this.findOne(id);
     await this.storesService.assertStoreAccess(userId, campaign.storeId);
 
@@ -189,10 +181,7 @@ export class SaleCampaignsService {
     }
   }
 
-  private async assertValidItems(
-    storeId: string,
-    items: SaleCampaignItemInput[],
-  ): Promise<void> {
+  private async assertValidItems(storeId: string, items: SaleCampaignItemInput[]): Promise<void> {
     for (const item of items) {
       const hasCompare = item.compareAtPrice != null;
       const hasPercent = item.discountPercent != null;
@@ -227,10 +216,7 @@ export class SaleCampaignsService {
     }
   }
 
-  private async replaceItems(
-    campaignId: string,
-    items: SaleCampaignItemInput[],
-  ): Promise<void> {
+  private async replaceItems(campaignId: string, items: SaleCampaignItemInput[]): Promise<void> {
     await this.itemRepository.delete({ campaignId });
     const rows = items.map((item) =>
       this.itemRepository.create({

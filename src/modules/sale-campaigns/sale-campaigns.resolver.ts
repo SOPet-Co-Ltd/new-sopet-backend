@@ -1,14 +1,8 @@
 import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { BadRequestException, UseGuards } from '@nestjs/common';
 import { SaleCampaignsService } from './sale-campaigns.service';
-import {
-  ActiveSaleCampaignItemType,
-  SaleCampaignType,
-} from '../../graphql/models/types';
-import {
-  mapActiveSaleCampaignItem,
-  mapSaleCampaign,
-} from '../../graphql/models/mappers';
+import { ActiveSaleCampaignItemType, SaleCampaignType } from '../../graphql/models/types';
+import { mapActiveSaleCampaignItem, mapSaleCampaign } from '../../graphql/models/mappers';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
