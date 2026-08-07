@@ -9,6 +9,8 @@ import { Tag } from '../../database/entities/tag.entity';
 import { PetType } from '../../database/entities/pet-type.entity';
 import { Brand } from '../../database/entities/brand.entity';
 import { Promotion } from '../../database/entities/promotion.entity';
+import { SaleCampaign } from '../../database/entities/sale-campaign.entity';
+import { SaleCampaignItem } from '../../database/entities/sale-campaign-item.entity';
 import { StoreRequest } from '../../database/entities/store-request.entity';
 import { StoreReactivationRequest } from '../../database/entities/store-reactivation-request.entity';
 import { ShippingProvider } from '../../database/entities/shipping-provider.entity';
@@ -23,6 +25,9 @@ import {
   PetTypeType,
   BrandType,
   PromotionType,
+  SaleCampaignType,
+  SaleCampaignItemType,
+  ActiveSaleCampaignItemType,
   StoreRequestType,
   StoreReactivationRequestType,
   AdminStoreType,
@@ -89,6 +94,51 @@ export function mapPromotion(promotion: Promotion): PromotionType {
     expiresAt: promotion.expiresAt,
     createdAt: promotion.createdAt,
     updatedAt: promotion.updatedAt,
+  };
+}
+
+export function mapSaleCampaignItem(item: SaleCampaignItem): SaleCampaignItemType {
+  return {
+    id: item.id,
+    campaignId: item.campaignId,
+    productId: item.productId,
+    variantId: item.variantId,
+    compareAtPrice: item.compareAtPrice != null ? Number(item.compareAtPrice) : null,
+    discountPercent: item.discountPercent != null ? Number(item.discountPercent) : null,
+    productName: item.product?.name ?? null,
+    variantSku: item.variant?.sku ?? null,
+  };
+}
+
+export function mapSaleCampaign(campaign: SaleCampaign): SaleCampaignType {
+  return {
+    id: campaign.id,
+    storeId: campaign.storeId,
+    name: campaign.name,
+    description: campaign.description,
+    startsAt: campaign.startsAt,
+    expiresAt: campaign.expiresAt,
+    isActive: campaign.isActive,
+    priority: campaign.priority,
+    items: (campaign.items ?? []).map(mapSaleCampaignItem),
+    createdAt: campaign.createdAt,
+    updatedAt: campaign.updatedAt,
+  };
+}
+
+export function mapActiveSaleCampaignItem(
+  item: SaleCampaignItem,
+  campaign: SaleCampaign,
+): ActiveSaleCampaignItemType {
+  return {
+    campaignId: campaign.id,
+    campaignName: campaign.name,
+    productId: item.productId,
+    variantId: item.variantId,
+    compareAtPrice: item.compareAtPrice != null ? Number(item.compareAtPrice) : null,
+    discountPercent: item.discountPercent != null ? Number(item.discountPercent) : null,
+    priority: campaign.priority,
+    expiresAt: campaign.expiresAt,
   };
 }
 
@@ -216,6 +266,7 @@ export function mapVariant(variant: ProductVariant, basePrice = 0): ProductVaria
     id: variant.id,
     sku: variant.sku,
     price: Number(basePrice) + Number(variant.priceAdjustment ?? 0),
+    compareAtPrice: variant.compareAtPrice != null ? Number(variant.compareAtPrice) : null,
     stockQuantity: variant.stockQuantity,
     optionsJson: variant.options ? JSON.stringify(variant.options) : null,
   };

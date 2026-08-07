@@ -431,6 +431,7 @@ export class ProductsResolver {
     @Args('brandIds', { type: () => [String], nullable: true }) brandIds?: string[],
     @Args('minPrice', { type: () => Float, nullable: true }) minPrice?: number,
     @Args('maxPrice', { type: () => Float, nullable: true }) maxPrice?: number,
+    @Args('status', { nullable: true }) status?: string,
     @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page?: number,
     @Args('limit', { type: () => Int, nullable: true, defaultValue: 20 }) limit?: number,
   ): Promise<ProductConnection> {
@@ -446,6 +447,7 @@ export class ProductsResolver {
       brandIds,
       minPrice,
       maxPrice,
+      status: status as ProductStatus | undefined,
       allStatuses: true,
       page,
       limit: cappedLimit,
@@ -540,6 +542,7 @@ export class ProductsResolver {
       name: input.name,
       sku: input.sku,
       priceModifier: input.priceModifier,
+      compareAtPrice: input.compareAtPrice,
       stockQuantity: input.stockQuantity,
       attributes: parseVariantAttributes(input.attributes),
     });
@@ -559,6 +562,7 @@ export class ProductsResolver {
       name: input.name,
       sku: input.sku,
       priceModifier: input.priceModifier,
+      compareAtPrice: input.compareAtPrice,
       stockQuantity: input.stockQuantity,
       attributes: parseVariantAttributes(input.attributes),
     });
@@ -593,6 +597,7 @@ export class ProductsResolver {
         sku: variant.sku,
         stockQuantity: variant.stockQuantity,
         priceModifier: variant.priceModifier,
+        compareAtPrice: variant.compareAtPrice,
         attributes: parseVariantAttributes(variant.attributes) ?? {},
       })),
     );
@@ -617,6 +622,7 @@ export class ProductsResolver {
         sku: variant.sku,
         stockQuantity: variant.stockQuantity,
         priceModifier: variant.priceModifier,
+        compareAtPrice: variant.compareAtPrice,
         attributes: parseVariantAttributes(variant.attributes) ?? {},
       })),
     );

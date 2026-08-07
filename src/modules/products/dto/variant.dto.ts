@@ -34,6 +34,16 @@ export class CreateVariantDto {
   @Min(0)
   priceModifier?: number;
 
+  @ApiPropertyOptional({
+    description: 'Original / compare-at price in THB for strikethrough display on this SKU',
+    example: 599.0,
+    minimum: 0,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  compareAtPrice?: number | null;
+
   @ApiProperty({
     description: 'Quantity currently in stock',
     example: 120,
@@ -86,6 +96,16 @@ export class UpdateVariantDto {
   @IsNumber()
   @Min(0)
   priceModifier?: number;
+
+  @ApiPropertyOptional({
+    description: 'Original / compare-at price in THB for strikethrough display on this SKU',
+    example: 599.0,
+    minimum: 0,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  compareAtPrice?: number | null;
 
   @ApiPropertyOptional({
     description: 'Quantity currently in stock',

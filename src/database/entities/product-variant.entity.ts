@@ -44,6 +44,19 @@ export class ProductVariant {
   @IsNumber()
   priceAdjustment!: number;
 
+  /** Original / compare-at price for this SKU (strikethrough). Falls back to product.compareAtPrice when null. */
+  @Column({
+    name: 'compare_at_price',
+    type: 'decimal',
+    precision: 10,
+    scale: 2,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  compareAtPrice!: number | null;
+
   @Column({ name: 'stock_quantity', type: 'integer', default: 0 })
   @IsNumber()
   @Min(0)

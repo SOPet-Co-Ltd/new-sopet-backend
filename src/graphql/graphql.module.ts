@@ -18,6 +18,7 @@ import { OrdersModule } from '../modules/orders/orders.module';
 import { PaymentsModule } from '../modules/payments/payments.module';
 import { UsersModule } from '../modules/users/users.module';
 import { PromotionsModule } from '../modules/promotions/promotions.module';
+import { SaleCampaignsModule } from '../modules/sale-campaigns/sale-campaigns.module';
 import { ReviewsModule } from '../modules/reviews/reviews.module';
 import { PayoutsModule } from '../modules/payouts/payouts.module';
 import { StorageModule } from '../modules/storage/storage.module';
@@ -106,6 +107,7 @@ const graphqlErrorLogger = new Logger('GraphQLFormatError');
     PaymentsModule,
     UsersModule,
     PromotionsModule,
+    SaleCampaignsModule,
     ReviewsModule,
     PayoutsModule,
     StorageModule,

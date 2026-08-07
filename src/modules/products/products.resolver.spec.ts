@@ -141,6 +141,7 @@ describe('ProductsResolver', () => {
         ['brand-1'],
         100,
         500,
+        undefined,
         2,
         50,
       );
@@ -154,10 +155,36 @@ describe('ProductsResolver', () => {
         brandIds: ['brand-1'],
         minPrice: 100,
         maxPrice: 500,
+        status: undefined,
         allStatuses: true,
         page: 2,
         limit: 50,
       });
+    });
+
+    it('forwards status filter to findAll for published-only pickers', async () => {
+      await resolver.vendorProducts(
+        'user-1',
+        'store-1',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        'published',
+        1,
+        20,
+      );
+
+      expect(productsService.findAll).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'published',
+          allStatuses: true,
+          storeId: 'store-1',
+        }),
+      );
     });
   });
 
@@ -249,6 +276,7 @@ describe('ProductsResolver', () => {
       await resolver.vendorProducts(
         'user-1',
         'store-1',
+        undefined,
         undefined,
         undefined,
         undefined,

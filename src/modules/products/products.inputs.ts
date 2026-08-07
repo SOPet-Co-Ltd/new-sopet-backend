@@ -30,6 +30,12 @@ export class CreateProductVariantInput {
   @Min(0)
   priceModifier?: number;
 
+  @Field(() => Float, { nullable: true })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  compareAtPrice?: number | null;
+
   @Field(() => Int)
   @IsNumber()
   @Min(0)
@@ -63,6 +69,12 @@ export class UpdateProductVariantInput {
   @IsNumber()
   @Min(0)
   priceModifier?: number;
+
+  @Field(() => Float, { nullable: true })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  compareAtPrice?: number | null;
 
   @Field(() => Int, { nullable: true })
   @IsOptional()
@@ -152,6 +164,12 @@ export class SyncProductVariantItemInput {
   @IsNumber()
   @Min(0)
   priceModifier?: number;
+
+  @Field(() => Float, { nullable: true })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  compareAtPrice?: number | null;
 
   @Field(() => String, {
     description: 'JSON object of variant options (e.g. {"color":"red","size":"M"})',

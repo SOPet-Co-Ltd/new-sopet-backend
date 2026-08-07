@@ -177,6 +177,9 @@ export class ProductVariantType {
   @Field(() => Float)
   price!: number;
 
+  @Field(() => Float, { nullable: true })
+  compareAtPrice?: number | null;
+
   @Field(() => Int)
   stockQuantity!: number;
 
@@ -2070,4 +2073,95 @@ export class AdminAuditLogConnection {
 
   @Field(() => PaginationMeta)
   pagination!: PaginationMeta;
+}
+
+@ObjectType()
+export class SaleCampaignItemType {
+  @Field()
+  id!: string;
+
+  @Field()
+  campaignId!: string;
+
+  @Field()
+  productId!: string;
+
+  @Field(() => String, { nullable: true })
+  variantId?: string | null;
+
+  @Field(() => Float, { nullable: true })
+  compareAtPrice?: number | null;
+
+  @Field(() => Float, { nullable: true })
+  discountPercent?: number | null;
+
+  @Field(() => String, { nullable: true })
+  productName?: string | null;
+
+  @Field(() => String, { nullable: true })
+  variantSku?: string | null;
+}
+
+@ObjectType()
+export class SaleCampaignType {
+  @Field()
+  id!: string;
+
+  @Field()
+  storeId!: string;
+
+  @Field()
+  name!: string;
+
+  @Field(() => String, { nullable: true })
+  description?: string | null;
+
+  @Field(() => Date, { nullable: true })
+  startsAt?: Date | null;
+
+  @Field(() => Date, { nullable: true })
+  expiresAt?: Date | null;
+
+  @Field()
+  isActive!: boolean;
+
+  @Field(() => Int)
+  priority!: number;
+
+  @Field(() => [SaleCampaignItemType])
+  items!: SaleCampaignItemType[];
+
+  @Field()
+  createdAt!: Date;
+
+  @Field()
+  updatedAt!: Date;
+}
+
+/** Flattened active campaign row for storefront strikethrough resolution. */
+@ObjectType()
+export class ActiveSaleCampaignItemType {
+  @Field()
+  campaignId!: string;
+
+  @Field()
+  campaignName!: string;
+
+  @Field()
+  productId!: string;
+
+  @Field(() => String, { nullable: true })
+  variantId?: string | null;
+
+  @Field(() => Float, { nullable: true })
+  compareAtPrice?: number | null;
+
+  @Field(() => Float, { nullable: true })
+  discountPercent?: number | null;
+
+  @Field(() => Int)
+  priority!: number;
+
+  @Field(() => Date, { nullable: true })
+  expiresAt?: Date | null;
 }

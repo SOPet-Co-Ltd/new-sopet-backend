@@ -20,6 +20,17 @@ input AcceptVendorInvitationInput {
   token: String!
 }
 
+type ActiveSaleCampaignItemType {
+  campaignId: String!
+  campaignName: String!
+  compareAtPrice: Float
+  discountPercent: Float
+  expiresAt: DateTime
+  priority: Int!
+  productId: String!
+  variantId: String
+}
+
 input AddPaymentMethodInput {
   brand: String!
   expiryMonth: Int!
@@ -419,6 +430,7 @@ input CreateProductInput {
 input CreateProductVariantInput {
   """JSON object of variant attributes (e.g. {"size":"M","color":"Red"})"""
   attributes: String
+  compareAtPrice: Float
   name: String!
   priceModifier: Float
   sku: String!
@@ -455,6 +467,17 @@ input CreateReviewInput {
 input CreateReviewReplyInput {
   body: String!
   reviewId: String!
+}
+
+input CreateSaleCampaignInput {
+  description: String
+  expiresAt: String
+  isActive: Boolean
+  items: [SaleCampaignItemInput!]!
+  name: String!
+  priority: Int
+  startsAt: String
+  storeId: String
 }
 
 input CreateSearchSynonymInput {
@@ -657,6 +680,7 @@ type Mutation {
   createPromotion(input: CreatePromotionInput!): PromotionType!
   createReview(input: CreateReviewInput!): ReviewType!
   createReviewReply(input: CreateReviewReplyInput!): ReviewReplyType!
+  createSaleCampaign(input: CreateSaleCampaignInput!): SaleCampaignType!
   createSearchSynonym(input: CreateSearchSynonymInput!): SearchSynonymType!
   createShippingOption(input: CreateShippingOptionInput!): StoreShippingOptionType!
   createShippingProvider(input: CreateShippingProviderInput!): ShippingProviderType!
@@ -676,6 +700,7 @@ type Mutation {
   deleteProductImage(imageId: String!): Boolean!
   deleteProductVariant(variantId: String!): Boolean!
   deletePromotion(id: String!): Boolean!
+  deleteSaleCampaign(id: String!): Boolean!
   deleteSearchSynonym(id: String!): Boolean!
   deleteShippingOption(id: String!): Boolean!
   deleteShippingProvider(id: String!): Boolean!
@@ -729,6 +754,7 @@ type Mutation {
   switchStore(input: SwitchStoreInput!): VendorAuthPayload!
   syncProductVariants(productId: String!, variants: [SyncProductVariantItemInput!]!): [ProductVariantType!]!
   togglePromotion(id: String!, isActive: Boolean!): PromotionType!
+  toggleSaleCampaign(id: String!, isActive: Boolean!): SaleCampaignType!
   triggerPayout(input: TriggerPayoutInput!): PayoutType!
   updateAddress(id: String!, input: UpdateAddressInput!): SavedAddressType!
   updateBrand(input: UpdateBrandInput!): BrandType!
@@ -747,6 +773,7 @@ type Mutation {
   updateProfile(input: UpdateProfileInput!): CustomerProfile!
   updatePromotion(id: String!, input: UpdatePromotionInput!): PromotionType!
   updateReviewReply(input: UpdateReviewReplyInput!): ReviewReplyType!
+  updateSaleCampaign(id: String!, input: UpdateSaleCampaignInput!): SaleCampaignType!
   updateSearchRankingWeights(input: UpdateSearchRankingWeightsInput!): SearchRankingWeightsType!
   updateSearchSynonym(id: String!, input: UpdateSearchSynonymInput!): SearchSynonymType!
   updateShippingOption(id: String!, input: UpdateShippingOptionInput!): StoreShippingOptionType!
@@ -1086,6 +1113,7 @@ type ProductVariantSyncImpactType {
 }
 
 type ProductVariantType {
+  compareAtPrice: Float
   id: String!
   optionsJson: String
   price: Float!
@@ -1138,6 +1166,8 @@ type PromotionValidationResult {
 
 type Query {
   activePlatformPromotions: [PromotionType!]!
+  activeSaleCampaignItems(storeId: String!): [ActiveSaleCampaignItemType!]!
+  activeSaleCampaignItemsForProducts(productIds: [String!]!): [ActiveSaleCampaignItemType!]!
   activeStorePromotions(storeId: String!): [PromotionType!]!
   addresses: [SavedAddressType!]!
   adminAuditLogs(filter: AdminAuditLogFilterInput, limit: Int! = 20, page: Int! = 1): AdminAuditLogConnection!
@@ -1228,6 +1258,7 @@ type Query {
   rejectedCategories: [CategoryType!]!
   rejectedPetTypes: [PetTypeType!]!
   rejectedTags: [TagType!]!
+  saleCampaign(id: String!): SaleCampaignType!
   searchAnalyticsSuggestionCtr(fromDate: DateTime, toDate: DateTime): [SearchSuggestionCtrRowType!]!
   searchAnalyticsSummary(fromDate: DateTime, toDate: DateTime): SearchAnalyticsSummaryType!
   searchAnalyticsTopQueries(fromDate: DateTime, limit: Int = 50, toDate: DateTime): [SearchAnalyticsQueryRowType!]!
@@ -1250,6 +1281,7 @@ type Query {
   storeReactivationRequests(storeId: String!): [StoreReactivationRequestType!]!
   storeReviewSummary(storeId: String!): StoreReviewSummaryType!
   storeReviews(storeId: String!): [StoreProductReviewType!]!
+  storeSaleCampaigns(storeId: String!): [SaleCampaignType!]!
   storeShippingOptions(storeId: String!): [StoreShippingOptionType!]!
   stores: [StoreType!]!
   tagDeleteImpact(tagId: String!): TaxonomyDeleteImpactType!
@@ -1262,7 +1294,7 @@ type Query {
   vendorCustomers(limit: Int! = 20, page: Int! = 1, search: String): VendorCustomerConnection!
   vendorOrders(storeId: String!): [OrderType!]!
   vendorProduct(id: String!): ProductType!
-  vendorProducts(brandIds: [String!], category: String, limit: Int = 20, maxPrice: Float, minPrice: Float, page: Int = 1, petTypeIds: [String!], search: String, tag: String): ProductConnection!
+  vendorProducts(brandIds: [String!], category: String, limit: Int = 20, maxPrice: Float, minPrice: Float, page: Int = 1, petTypeIds: [String!], search: String, status: String, tag: String): ProductConnection!
 }
 
 input ReactivateAccountInput {
@@ -1345,6 +1377,38 @@ type ReviewType {
   reply: ReviewReplyType
   source: String!
   status: String!
+}
+
+input SaleCampaignItemInput {
+  compareAtPrice: Float
+  discountPercent: Float
+  productId: String!
+  variantId: String
+}
+
+type SaleCampaignItemType {
+  campaignId: String!
+  compareAtPrice: Float
+  discountPercent: Float
+  id: String!
+  productId: String!
+  productName: String
+  variantId: String
+  variantSku: String
+}
+
+type SaleCampaignType {
+  createdAt: DateTime!
+  description: String
+  expiresAt: DateTime
+  id: String!
+  isActive: Boolean!
+  items: [SaleCampaignItemType!]!
+  name: String!
+  priority: Int!
+  startsAt: DateTime
+  storeId: String!
+  updatedAt: DateTime!
 }
 
 type SalesBreakdownItemType {
@@ -1651,6 +1715,7 @@ input SwitchStoreInput {
 input SyncProductVariantItemInput {
   """JSON object of variant options (e.g. {"color":"red","size":"M"})"""
   attributes: String!
+  compareAtPrice: Float
   id: String
   priceModifier: Float
   sku: String!
@@ -1812,6 +1877,7 @@ input UpdateProductInput {
 input UpdateProductVariantInput {
   """JSON object of variant attributes (e.g. {"size":"M","color":"Red"})"""
   attributes: String
+  compareAtPrice: Float
   name: String
   priceModifier: Float
   sku: String
@@ -1846,6 +1912,16 @@ input UpdatePromotionInput {
 input UpdateReviewReplyInput {
   body: String!
   replyId: String!
+}
+
+input UpdateSaleCampaignInput {
+  description: String
+  expiresAt: String
+  isActive: Boolean
+  items: [SaleCampaignItemInput!]
+  name: String
+  priority: Int
+  startsAt: String
 }
 
 input UpdateSearchRankingWeightsInput {

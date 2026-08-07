@@ -48,6 +48,7 @@ type SyncVariantItem = {
   sku: string;
   stockQuantity: number;
   priceModifier?: number;
+  compareAtPrice?: number | null;
   attributes: Record<string, string>;
 };
 
@@ -968,13 +969,14 @@ export class ProductsService {
       });
     }
 
-    const { name, attributes, priceModifier, sku, stockQuantity } = createVariantDto;
+    const { name, attributes, priceModifier, sku, stockQuantity, compareAtPrice } = createVariantDto;
 
     const variant = this.variantRepository.create({
       productId,
       sku,
       stockQuantity,
       priceAdjustment: priceModifier ?? 0,
+      compareAtPrice: compareAtPrice ?? null,
       options: this.buildVariantOptions(name, attributes),
     });
 
@@ -1001,7 +1003,7 @@ export class ProductsService {
 
     await this.assertStoreAccess(userId, variant.product.storeId, 'manage product variants');
 
-    const { name, attributes, priceModifier, sku, stockQuantity } = updateVariantDto;
+    const { name, attributes, priceModifier, sku, stockQuantity, compareAtPrice } = updateVariantDto;
 
     if (sku !== undefined) {
       variant.sku = sku;
@@ -1011,6 +1013,9 @@ export class ProductsService {
     }
     if (priceModifier !== undefined) {
       variant.priceAdjustment = priceModifier;
+    }
+    if (compareAtPrice !== undefined) {
+      variant.compareAtPrice = compareAtPrice;
     }
     if (name !== undefined || attributes !== undefined) {
       variant.options = this.buildVariantOptions(
@@ -1304,6 +1309,9 @@ export class ProductsService {
         variant.sku = item.sku;
         variant.stockQuantity = item.stockQuantity;
         variant.priceAdjustment = item.priceModifier ?? 0;
+        if (item.compareAtPrice !== undefined) {
+          variant.compareAtPrice = item.compareAtPrice;
+        }
         variant.options = options;
         savedVariants.push(await this.variantRepository.save(variant));
         keepIds.add(variant.id);
@@ -1325,6 +1333,7 @@ export class ProductsService {
         sku: item.sku,
         stockQuantity: item.stockQuantity,
         priceAdjustment: item.priceModifier ?? 0,
+        compareAtPrice: item.compareAtPrice ?? null,
         options,
       });
       const saved = await this.variantRepository.save(created);

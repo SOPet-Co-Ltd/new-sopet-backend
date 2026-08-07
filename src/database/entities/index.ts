@@ -13,6 +13,8 @@ export { OrderItem, FulfillmentStatus } from './order-item.entity';
 export { OrderStatusHistory } from './order-status-history.entity';
 export { Promotion, PromotionType, PromotionScope } from './promotion.entity';
 export { PromotionUsage } from './promotion-usage.entity';
+export { SaleCampaign } from './sale-campaign.entity';
+export { SaleCampaignItem } from './sale-campaign-item.entity';
 export { Payout, PayoutStatus } from './payout.entity';
 export { PayoutItem } from './payout-item.entity';
 export { Review, ReviewStatus, ReviewSource } from './review.entity';
