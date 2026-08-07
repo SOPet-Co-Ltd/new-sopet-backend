@@ -590,8 +590,21 @@ export class PaymentsService {
     return (response as { message?: string }).message === 'Resource was not found';
   }
 
-  private extractCardFromCustomer(omiseCustomer: OmiseCustomer): OmiseCard {
+  private extractCardFromCustomer(
+    omiseCustomer: OmiseCustomer,
+    preferredCard?: OmiseCard,
+  ): OmiseCard {
     const cards = omiseCustomer.cards?.data ?? [];
+
+    // Prefer the card matching the just-used token. Omise keeps `default_card` on the
+    // previous default when attaching an additional card via PATCH `{ card: token }`.
+    if (preferredCard) {
+      const matched = cards.find((item) => this.isSameCard(item, preferredCard));
+      if (matched) {
+        return matched;
+      }
+    }
+
     const cardId =
       typeof omiseCustomer.default_card === 'string' ? omiseCustomer.default_card : undefined;
     const card = cardId ? cards.find((item) => item.id === cardId) : cards[cards.length - 1];
@@ -753,7 +766,7 @@ export class PaymentsService {
       );
     }
 
-    const card = this.extractCardFromCustomer(omiseCustomer);
+    const card = this.extractCardFromCustomer(omiseCustomer, token.card);
 
     return this.mapOmiseCardToSavedDetails(card, token.card.fingerprint);
   }

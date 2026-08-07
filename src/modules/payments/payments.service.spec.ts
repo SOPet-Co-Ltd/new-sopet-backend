@@ -2045,3 +2045,194 @@ describe('buildOmiseReturnUri', () => {
     expect(() => buildOmiseReturnUri('', 'pay-1')).toThrow('STOREFRONT_URL_EMPTY');
   });
 });
+
+describe('PaymentsService saveCustomerCard', () => {
+  let service: PaymentsService;
+  const customerRepository = {
+    findOne: jest.fn(),
+    save: jest.fn((x: Customer) => Promise.resolve(x)),
+  };
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    global.fetch = jest.fn();
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        PaymentsService,
+        { provide: getRepositoryToken(Payment), useValue: { findOne: jest.fn() } },
+        { provide: getRepositoryToken(Order), useValue: { findOne: jest.fn() } },
+        { provide: getRepositoryToken(Customer), useValue: customerRepository },
+        {
+          provide: getRepositoryToken(SavedPaymentMethod),
+          useValue: { findOne: jest.fn() },
+        },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn((key: string) => {
+              if (key === 'omise.secretKey') return 'skey_test';
+              if (key === 'omise.publicKey') return 'pkey_test';
+              return '';
+            }),
+          },
+        },
+        {
+          provide: NotificationsService,
+          useValue: { notifyOrderPaid: jest.fn() },
+        },
+        {
+          provide: PaymentEventsService,
+          useValue: paymentEventsServiceMock,
+        },
+        {
+          provide: InventoryService,
+          useValue: { restoreOrderStock: jest.fn().mockResolvedValue(true) },
+        },
+        { provide: PayoutsService, useValue: payoutsServiceMock },
+        { provide: StoresService, useValue: storesServiceMock },
+        {
+          provide: VendorWebhooksService,
+          useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
+        },
+      ],
+    }).compile();
+
+    service = module.get(PaymentsService);
+  });
+
+  function mockJsonResponse(body: unknown, ok = true): Response {
+    return {
+      ok,
+      json: () => Promise.resolve(body),
+    } as Response;
+  }
+
+  it('returns the newly attached card when Omise keeps default_card on an existing card', async () => {
+    const existingCard = {
+      id: 'card_existing',
+      last_digits: '4242',
+      brand: 'Visa',
+      expiration_month: 1,
+      expiration_year: 2030,
+      fingerprint: 'fp_existing',
+    };
+    const newCard = {
+      id: 'card_new',
+      last_digits: '0014',
+      brand: 'Visa',
+      expiration_month: 12,
+      expiration_year: 2034,
+      fingerprint: 'fp_new',
+    };
+
+    customerRepository.findOne.mockResolvedValue({
+      id: 'cust-1',
+      email: 'user@example.com',
+      omiseCustomerId: 'cust_omise_1',
+    });
+
+    (global.fetch as jest.Mock)
+      // vault token lookup
+      .mockResolvedValueOnce(
+        mockJsonResponse({
+          id: 'tokn_new',
+          card: {
+            id: 'card_token',
+            last_digits: newCard.last_digits,
+            brand: newCard.brand,
+            expiration_month: newCard.expiration_month,
+            expiration_year: newCard.expiration_year,
+            fingerprint: newCard.fingerprint,
+          },
+        }),
+      )
+      // GET existing Omise customer (stale check)
+      .mockResolvedValueOnce(
+        mockJsonResponse({
+          id: 'cust_omise_1',
+          default_card: existingCard.id,
+          cards: { data: [existingCard] },
+        }),
+      )
+      // GET for findExistingOmiseCard — new fingerprint not present yet
+      .mockResolvedValueOnce(
+        mockJsonResponse({
+          id: 'cust_omise_1',
+          default_card: existingCard.id,
+          cards: { data: [existingCard] },
+        }),
+      )
+      // PATCH attach — Omise leaves default_card on the old card
+      .mockResolvedValueOnce(
+        mockJsonResponse({
+          id: 'cust_omise_1',
+          default_card: existingCard.id,
+          cards: { data: [existingCard, newCard] },
+        }),
+      );
+
+    const result = await service.saveCustomerCard('cust-1', 'tokn_new');
+
+    expect(result).toEqual({
+      omiseCardId: 'card_new',
+      cardFingerprint: 'fp_new',
+      lastFour: '0014',
+      brand: 'visa',
+      expiryMonth: 12,
+      expiryYear: 2034,
+    });
+  });
+
+  it('reuses an Omise card that already matches the token fingerprint', async () => {
+    const existingCard = {
+      id: 'card_existing',
+      last_digits: '0014',
+      brand: 'Visa',
+      expiration_month: 12,
+      expiration_year: 2034,
+      fingerprint: 'fp_same',
+    };
+
+    customerRepository.findOne.mockResolvedValue({
+      id: 'cust-1',
+      email: 'user@example.com',
+      omiseCustomerId: 'cust_omise_1',
+    });
+
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce(
+        mockJsonResponse({
+          id: 'tokn_retry',
+          card: {
+            id: 'card_token',
+            last_digits: existingCard.last_digits,
+            brand: existingCard.brand,
+            expiration_month: existingCard.expiration_month,
+            expiration_year: existingCard.expiration_year,
+            fingerprint: existingCard.fingerprint,
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        mockJsonResponse({
+          id: 'cust_omise_1',
+          default_card: existingCard.id,
+          cards: { data: [existingCard] },
+        }),
+      )
+      .mockResolvedValueOnce(
+        mockJsonResponse({
+          id: 'cust_omise_1',
+          default_card: existingCard.id,
+          cards: { data: [existingCard] },
+        }),
+      );
+
+    const result = await service.saveCustomerCard('cust-1', 'tokn_retry');
+
+    expect(result.omiseCardId).toBe('card_existing');
+    expect(result.cardFingerprint).toBe('fp_same');
+    expect((global.fetch as jest.Mock).mock.calls).toHaveLength(3);
+  });
+});
