@@ -72,9 +72,11 @@ describe('email templates', () => {
   it.each(templates)('%s uses shared branded layout', (_name, buildTemplate) => {
     const template = buildTemplate();
 
-    expect(template.html).toContain('SOPet');
-    expect(template.html).toContain('Marketplace สำหรับคนรักสัตว์เลี้ยง');
-    expect(template.html).toContain('อีเมลนี้ส่งจาก SOPet Marketplace');
+    expect(template.html).toContain('Sopet');
+    expect(template.html).not.toContain('SOPet');
+    expect(template.html).toContain('Sopet (โซเพ็ท) ยาสัตว์ออนไลน์');
+    expect(template.html).toContain('อีเมลนี้ส่งจาก Sopet Marketplace');
+    expect(template.subject).not.toContain('SOPet');
     expect(template.html).toContain(brand.logoUrl);
     expect(template.subject.length).toBeGreaterThan(0);
     expect(template.text.length).toBeGreaterThan(0);

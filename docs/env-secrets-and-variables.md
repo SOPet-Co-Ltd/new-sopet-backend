@@ -78,7 +78,7 @@ GitHub Environments **`deploy/uat`** and **`deploy/production`** use the **same 
 | `PAYMENT_QR_EXPIRY_MINUTES`        | PromptPay QR validity (minutes)    | Default `15`.                                           |
 | `PAYMENT_EXPIRY_CHECK_INTERVAL_MS` | Background expiry poll interval    | Default `30000`.                                        |
 | `EMAIL_FROM` ★                     | From address for Resend            | e.g. `noreply@sopet.co.th`                              |
-| `EMAIL_FROM_NAME`                  | From display name                  | e.g. `SOPet Marketplace`                                |
+| `EMAIL_FROM_NAME`                  | From display name                  | e.g. `Sopet Marketplace`                                |
 | `API_URL` ★                        | Public absolute API base URL       | e.g. `https://api.sopet.org` (emails, assets, logs).    |
 | `STOREFRONT_URL` ★                 | Customer storefront origin         | Production Vercel URL.                                  |
 | `ADMIN_PANEL_URL` ★                | Admin/vendor panel origin          | Production Vercel URL.                                  |

@@ -104,7 +104,7 @@ const indexHtml = `<!DOCTYPE html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SOPet Email Previews</title>
+  <title>Sopet Email Previews</title>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600;700&display=swap" rel="stylesheet">
   <style>
     body { margin: 0; padding: 40px 24px; font-family: 'Noto Sans Thai', Arial, sans-serif; background: #F9F6FE; color: #1A1A1A; }
@@ -122,8 +122,8 @@ const indexHtml = `<!DOCTYPE html>
 </head>
 <body>
   <div class="wrap">
-    <h1>SOPet Email Previews</h1>
-    <p class="sub">Generated from <code>src/modules/email/email-templates.ts</code> with SOPet brand primary <strong>#9C6ADE</strong> and logo header.</p>
+    <h1>Sopet Email Previews</h1>
+    <p class="sub">Generated from <code>src/modules/email/email-templates.ts</code> with Sopet brand primary <strong>#9C6ADE</strong> and logo header.</p>
     <div class="grid">
       ${previews
         .map(

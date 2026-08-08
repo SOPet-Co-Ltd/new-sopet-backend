@@ -20,7 +20,7 @@ export class EmailService {
   constructor(private readonly configService: ConfigService) {
     const apiKey = this.configService.get<string>('resend.apiKey');
     const from = this.configService.get<string>('resend.from') || 'noreply@sopet.co.th';
-    const fromName = this.configService.get<string>('resend.fromName') || 'SOPet Marketplace';
+    const fromName = this.configService.get<string>('resend.fromName') || 'Sopet Marketplace';
 
     this.isDev =
       (this.configService.get<string>('app.environment') ??

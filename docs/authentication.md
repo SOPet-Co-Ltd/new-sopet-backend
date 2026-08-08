@@ -191,7 +191,7 @@ No other features are gated by `emailVerified` today (products, orders, payouts,
 | `API_URL`                        | `http://localhost:3002`                     | Public base URL for email logo (`/images/…`) |
 | `STOREFRONT_URL`                 | `http://localhost:3000`                     | Customer-facing links in emails / redirects  |
 | `RESEND_API_KEY`                 | unset in dev                                | Production email delivery                    |
-| `EMAIL_FROM` / `EMAIL_FROM_NAME` | `noreply@sopet.co.th` / `SOPet Marketplace` | From address                                 |
+| `EMAIL_FROM` / `EMAIL_FROM_NAME` | `noreply@sopet.co.th` / `Sopet Marketplace` | From address                                 |
 
 Registration and admin resend call `AuthService.createAndSendEmailVerificationToken()` (24h expiry, single use).
 

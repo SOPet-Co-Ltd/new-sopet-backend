@@ -85,7 +85,7 @@ function layout(brand: EmailTemplateBrand, content: string, preheader?: string):
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>SOPet</title>
+  <title>Sopet</title>
 </head>
 <body style="margin:0;padding:0;background:${BRAND_PRIMARY_SOFT};font-family:'Noto Sans Thai',Arial,sans-serif;color:${TEXT_PRIMARY};">
   ${hiddenPreheader}
@@ -94,18 +94,18 @@ function layout(brand: EmailTemplateBrand, content: string, preheader?: string):
       <table width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border-radius:20px;overflow:hidden;border:1px solid ${BORDER};box-shadow:0 12px 40px rgba(156,106,222,0.12);">
         <tr>
           <td style="background:linear-gradient(135deg,${BRAND_PRIMARY} 0%,${BRAND_PRIMARY_DARK} 100%);padding:28px 32px 24px;text-align:center;">
-            <img src="${brand.logoUrl}" alt="SOPet" width="132" style="display:block;margin:0 auto 10px;border:0;max-width:132px;height:auto;" />
-            <div style="font-size:13px;color:rgba(255,255,255,0.88);letter-spacing:0.04em;">Marketplace สำหรับคนรักสัตว์เลี้ยง</div>
+            <img src="${brand.logoUrl}" alt="Sopet" width="132" style="display:block;margin:0 auto 10px;border:0;max-width:132px;height:auto;" />
+            <div style="font-size:13px;color:rgba(255,255,255,0.88);letter-spacing:0.04em;">Sopet (โซเพ็ท) ยาสัตว์ออนไลน์</div>
           </td>
         </tr>
         <tr><td style="padding:32px 32px 8px;">${content}</td></tr>
         <tr>
           <td style="padding:20px 32px 28px;border-top:1px solid ${BORDER};background:${BRAND_PRIMARY_SOFT};">
             <p style="margin:0 0 8px;font-size:12px;line-height:1.6;color:${TEXT_MUTED};text-align:center;">
-              อีเมลนี้ส่งจาก SOPet Marketplace · กรุณาอย่าตอบกลับอีเมลนี้
+              อีเมลล์นี้ส่งจาก Sopet กรุณาอย่าตอบกลับอีเมลนี้
             </p>
             <p style="margin:0;font-size:12px;line-height:1.6;color:${TEXT_MUTED};text-align:center;">
-              หากต้องการความช่วยเหลือ ติดต่อทีมงาน SOPet ผ่านเว็บไซต์ของเรา
+              หากต้องการความช่วยเหลือ ติดต่อทีมงาน Sopet ผ่านเว็บไซต์ของเรา
             </p>
           </td>
         </tr>
@@ -265,14 +265,14 @@ export function vendorInviteTemplate(
   brand: EmailTemplateBrand,
   params: { inviteUrl: string },
 ): EmailTemplateResult {
-  const subject = 'คำเชิญเข้าร่วม SOPet ในฐานะผู้ขาย';
-  const text = `คุณได้รับเชิญให้เข้าร่วม SOPet ในฐานะผู้ขาย กรุณาเปิดลิงก์นี้เพื่อสมัคร: ${params.inviteUrl}`;
+  const subject = 'คำเชิญเข้าร่วม Sopet ในฐานะผู้ขาย';
+  const text = `คุณได้รับเชิญให้เข้าร่วม Sopet ในฐานะผู้ขาย กรุณาเปิดลิงก์นี้เพื่อสมัคร: ${params.inviteUrl}`;
   const html = layout(
     brand,
     `
     ${heroBadge('คำเชิญพิเศษ')}
-    ${sectionTitle('ยินดีต้อนรับสู่ทีมผู้ขาย SOPet', 'เริ่มต้นขายสินค้าสำหรับสัตว์เลี้ยงบนแพลตฟอร์มที่ลูกค้าไว้วางใจ')}
-    ${highlightBox('คุณได้รับเชิญให้เปิดร้านค้าบน SOPet กรุณาตั้งรหัสผ่านและเริ่มจัดการสินค้า คำสั่งซื้อ และโปรโมชันของร้านคุณได้ทันที')}
+    ${sectionTitle('ยินดีต้อนรับสู่ทีมผู้ขาย Sopet', 'เริ่มต้นขายสินค้าสำหรับสัตว์เลี้ยงบนแพลตฟอร์มที่ลูกค้าไว้วางใจ')}
+    ${highlightBox('คุณได้รับเชิญให้เปิดร้านค้าบน Sopet กรุณาตั้งรหัสผ่านและเริ่มจัดการสินค้า คำสั่งซื้อ และโปรโมชันของร้านคุณได้ทันที')}
     ${infoPanel([
       { label: 'บทบาท', value: 'ผู้ขาย (Vendor)' },
       { label: 'สิทธิ์การใช้งาน', value: 'จัดการร้านค้าและสินค้า' },
@@ -291,13 +291,13 @@ export function adminInviteTemplate(
   brand: EmailTemplateBrand,
   params: { inviteUrl: string },
 ): EmailTemplateResult {
-  const subject = 'คำเชิญเข้าร่วมทีมผู้ดูแลระบบ SOPet';
-  const text = `คุณได้รับเชิญให้เป็นผู้ดูแลระบบ SOPet กรุณาเปิดลิงก์นี้: ${params.inviteUrl}`;
+  const subject = 'คำเชิญเข้าร่วมทีมผู้ดูแลระบบ Sopet';
+  const text = `คุณได้รับเชิญให้เป็นผู้ดูแลระบบ Sopet กรุณาเปิดลิงก์นี้: ${params.inviteUrl}`;
   const html = layout(
     brand,
     `
     ${heroBadge('ทีมผู้ดูแลระบบ')}
-    ${sectionTitle('คำเชิญเป็นผู้ดูแลระบบ', 'เข้าร่วมทีมงานเพื่อดูแลแพลตฟอร์ม SOPet')}
+    ${sectionTitle('คำเชิญเป็นผู้ดูแลระบบ', 'เข้าร่วมทีมงานเพื่อดูแลแพลตฟอร์ม Sopet')}
     ${highlightBox('คุณได้รับสิทธิ์เข้าถึงระบบผู้ดูแลแพลตฟอร์ม กรุณาตั้งรหัสผ่านก่อนเข้าใช้งานครั้งแรก')}
     ${infoPanel([
       { label: 'บทบาท', value: 'ผู้ดูแลระบบ (Admin)' },
@@ -317,12 +317,12 @@ export function storeMemberInviteTemplate(
   params: { inviteUrl: string; storeName: string },
 ): EmailTemplateResult {
   const subject = `คำเชิญเข้าร่วมทีมร้าน ${params.storeName}`;
-  const text = `คุณได้รับเชิญให้เข้าร่วมทีมร้าน ${params.storeName} บน SOPet: ${params.inviteUrl}`;
+  const text = `คุณได้รับเชิญให้เข้าร่วมทีมร้าน ${params.storeName} บน Sopet: ${params.inviteUrl}`;
   const html = layout(
     brand,
     `
     ${heroBadge('ทีมร้านค้า')}
-    ${sectionTitle('เข้าร่วมทีมร้านของคุณ', `คุณได้รับเชิญให้ช่วยดูแลร้าน ${params.storeName} บน SOPet`)}
+    ${sectionTitle('เข้าร่วมทีมร้านของคุณ', `คุณได้รับเชิญให้ช่วยดูแลร้าน ${params.storeName} บน Sopet`)}
     ${highlightBox('หลังจากยอมรับคำเชิญ คุณจะสามารถเข้าถึงแดชบอร์ดร้านค้า จัดการออเดอร์ และทำงานร่วมกับทีมได้ทันที')}
     ${infoPanel([
       { label: 'ร้านค้า', value: params.storeName },
@@ -341,7 +341,7 @@ export function passwordResetTemplate(
   brand: EmailTemplateBrand,
   params: { resetUrl: string },
 ): EmailTemplateResult {
-  const subject = 'รีเซ็ตรหัสผ่าน SOPet';
+  const subject = 'รีเซ็ตรหัสผ่าน Sopet';
   const text = `กรุณาเปิดลิงก์นี้เพื่อรีเซ็ตรหัสผ่านของคุณ: ${params.resetUrl}`;
   const html = layout(
     brand,
@@ -366,13 +366,13 @@ export function emailVerificationTemplate(
   brand: EmailTemplateBrand,
   params: { verifyUrl: string },
 ): EmailTemplateResult {
-  const subject = 'ยืนยันอีเมล SOPet';
+  const subject = 'ยืนยันอีเมล Sopet';
   const text = `กรุณาเปิดลิงก์นี้เพื่อยืนยันอีเมลของคุณ: ${params.verifyUrl}`;
   const html = layout(
     brand,
     `
     ${heroBadge('ยืนยันอีเมล', 'info')}
-    ${sectionTitle('ยืนยันอีเมลของคุณ', 'กรุณายืนยันอีเมลเพื่อใช้งานบัญชีผู้ขายบน SOPet')}
+    ${sectionTitle('ยืนยันอีเมลของคุณ', 'กรุณายืนยันอีเมลเพื่อใช้งานบัญชีผู้ขายบน Sopet')}
     ${highlightBox('หากคุณเป็นผู้ร้องขอ กรุณากดปุ่มด้านล่างเพื่อยืนยันอีเมล หากไม่ใช่ กรุณาเพิกเฉยอีเมลนี้')}
     ${infoPanel([
       { label: 'การดำเนินการ', value: 'ยืนยันอีเมล' },
@@ -424,7 +424,7 @@ export function orderPaidTemplate(
     ${orderItemsTable(params.items)}
     ${totalsPanel(params)}
     ${cta(params.orderUrl, 'ดูรายละเอียดคำสั่งซื้อ')}
-    ${note('เราจะแจ้งอัปเดตสถานะการจัดส่งให้คุณทราบผ่านอีเมลนี้')}
+    ${note('สามารถดูอัพเดตสินค้า ผ่านไลน์ @sopet')}
   `,
     subject,
   );
@@ -468,12 +468,12 @@ export function vendorAccountSuspendedTemplate(
   brand: EmailTemplateBrand,
   params: { vendorName?: string | null; storeName?: string | null },
 ): EmailTemplateResult {
-  const subject = 'บัญชีผู้ขาย SOPet ของคุณถูกระงับ';
+  const subject = 'บัญชีผู้ขาย Sopet ของคุณถูกระงับ';
   const displayName = params.vendorName?.trim() || 'ผู้ขาย';
   const storeLabel = params.storeName?.trim();
   const text = storeLabel
-    ? `เรียนคุณ${displayName} บัญชีผู้ขายของคุณบน SOPet (ร้าน ${storeLabel}) ถูกระงับชั่วคราว คุณจะไม่สามารถเข้าสู่ระบบได้ กรุณาติดต่อฝ่ายสนับสนุนหากต้องการความช่วยเหลือ`
-    : `เรียนคุณ${displayName} บัญชีผู้ขายของคุณบน SOPet ถูกระงับชั่วคราว คุณจะไม่สามารถเข้าสู่ระบบได้ กรุณาติดต่อฝ่ายสนับสนุนหากต้องการความช่วยเหลือ`;
+    ? `เรียนคุณ${displayName} บัญชีผู้ขายของคุณบน Sopet (ร้าน ${storeLabel}) ถูกระงับชั่วคราว คุณจะไม่สามารถเข้าสู่ระบบได้ กรุณาติดต่อฝ่ายสนับสนุนหากต้องการความช่วยเหลือ`
+    : `เรียนคุณ${displayName} บัญชีผู้ขายของคุณบน Sopet ถูกระงับชั่วคราว คุณจะไม่สามารถเข้าสู่ระบบได้ กรุณาติดต่อฝ่ายสนับสนุนหากต้องการความช่วยเหลือ`;
 
   const infoRows = [
     { label: 'บัญชี', value: displayName },
@@ -487,10 +487,10 @@ export function vendorAccountSuspendedTemplate(
     ${heroBadge('บัญชีถูกระงับ', 'info')}
     ${sectionTitle('บัญชีผู้ขายของคุณถูกระงับ', 'คุณจะไม่สามารถเข้าสู่ระบบแผงผู้ขายได้จนกว่าบัญชีจะได้รับการเปิดใช้งานอีกครั้ง')}
     ${highlightBox(
-      'ผู้ดูแลระบบได้ระงับบัญชีผู้ขายของคุณบน SOPet ชั่วคราว หากคุณเชื่อว่านี่เป็นความผิดพลาด หรือต้องการขอเปิดใช้งานอีกครั้ง กรุณาติดต่อฝ่ายสนับสนุน',
+      'ผู้ดูแลระบบได้ระงับบัญชีผู้ขายของคุณบน Sopet ชั่วคราว หากคุณเชื่อว่านี่เป็นความผิดพลาด หรือต้องการขอเปิดใช้งานอีกครั้ง กรุณาติดต่อฝ่ายสนับสนุน',
     )}
     ${infoPanel(infoRows)}
-    ${note('หากต้องการความช่วยเหลือ กรุณาติดต่อทีมงาน SOPet ผ่านช่องทางสนับสนุนบนเว็บไซต์')}
+    ${note('หากต้องการความช่วยเหลือ กรุณาติดต่อทีมงาน Sopet ผ่านช่องทางสนับสนุนบนเว็บไซต์')}
   `,
     subject,
   );
