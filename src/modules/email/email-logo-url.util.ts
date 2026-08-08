@@ -4,8 +4,7 @@ export const DEFAULT_PUBLIC_EMAIL_LOGO_URL =
 
 const EMAIL_LOGO_PATH = '/images/email/sopet-logo-white.png';
 
-const LOOPBACK_HOST =
-  /^(https?:\/\/)?(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:\d+)?(\/|$)/i;
+const LOOPBACK_HOST = /^(https?:\/\/)?(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:\d+)?(\/|$)/i;
 
 export interface ResolveEmailLogoUrlInput {
   /** Explicit absolute logo URL (`EMAIL_LOGO_URL`). Wins when set. */

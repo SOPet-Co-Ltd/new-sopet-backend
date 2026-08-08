@@ -1,7 +1,4 @@
-import {
-  DEFAULT_PUBLIC_EMAIL_LOGO_URL,
-  resolveEmailLogoUrl,
-} from './email-logo-url.util';
+import { DEFAULT_PUBLIC_EMAIL_LOGO_URL, resolveEmailLogoUrl } from './email-logo-url.util';
 
 describe('resolveEmailLogoUrl', () => {
   it('prefers EMAIL_LOGO_URL / explicitLogoUrl when set', () => {
