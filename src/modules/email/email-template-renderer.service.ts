@@ -24,6 +24,7 @@ import {
   vendorAccountSuspendedTemplate,
   vendorInviteTemplate,
 } from './email-templates';
+import { resolveEmailLogoUrl } from './email-logo-url.util';
 
 const FALLBACK_RENDERERS = {
   [EmailTemplateKey.VENDOR_INVITE]: vendorInviteTemplate,
@@ -87,11 +88,15 @@ export class EmailTemplateRendererService {
     private readonly cache: EmailTemplateCacheService,
     private readonly configService: ConfigService,
   ) {
-    const apiUrl =
-      this.configService.get<string>('app.apiUrl') ||
-      process.env.API_URL?.replace(/\/$/, '') ||
-      'http://localhost:3002';
-    this.brand = { logoUrl: `${apiUrl}/images/email/sopet-logo-white.png` };
+    this.brand = {
+      logoUrl: resolveEmailLogoUrl({
+        explicitLogoUrl: this.configService.get<string>('email.logoUrl'),
+        apiUrl:
+          this.configService.get<string>('app.apiUrl') ||
+          process.env.API_URL?.replace(/\/$/, '') ||
+          'http://localhost:3002',
+      }),
+    };
   }
 
   async renderForSend<K extends EmailTemplateKey>(

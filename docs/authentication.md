@@ -203,7 +203,7 @@ All transactional emails go through `EmailDeliveryService` → `email-templates.
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | Templates        | Vendor invite, admin invite, store member invite, password reset, email verification, order paid, order status changed |
 | Logo asset       | `public/images/email/sopet-logo-white.png` — served by Nest as a static file                                           |
-| Logo URL in HTML | `${API_URL}/images/email/sopet-logo-white.png` (PNG — SVG is unreliable in many clients)                               |
+| Logo URL in HTML | `EMAIL_LOGO_URL`, or `${API_URL}/images/email/sopet-logo-white.png`; loopback `API_URL` falls back to `https://api.sopet.org/...` so inboxes can load the image (PNG — SVG is unreliable in many clients) |
 | Local previews   | `yarn email:previews` writes HTML + assets to `temp/email-previews/`                                                   |
 | Docker           | Production image includes `public/` (see [Deployment](deployment.md))                                                  |
 

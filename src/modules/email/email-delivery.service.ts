@@ -4,7 +4,6 @@ import { EmailService } from './email.service';
 import { EmailTemplateRendererService } from './email-template-renderer.service';
 import { EmailTemplateKey } from '../../database/entities/enums/email-template.enums';
 import {
-  EmailTemplateBrand,
   formatCurrency,
   formatOrderStatus,
   formatPaymentMethod,
@@ -15,7 +14,6 @@ import {
 export class EmailDeliveryService {
   private readonly logger = new Logger(EmailDeliveryService.name);
   private readonly adminPanelUrl: string;
-  private readonly brand: EmailTemplateBrand;
 
   constructor(
     private readonly emailService: EmailService,
@@ -26,13 +24,6 @@ export class EmailDeliveryService {
       this.configService.get<string>('app.adminPanelUrl') ||
       process.env.ADMIN_PANEL_URL ||
       'http://localhost:3001';
-    const apiUrl =
-      this.configService.get<string>('app.apiUrl') ||
-      process.env.API_URL?.replace(/\/$/, '') ||
-      'http://localhost:3002';
-    this.brand = {
-      logoUrl: `${apiUrl}/images/email/sopet-logo-white.png`,
-    };
   }
 
   private async sendTemplate(

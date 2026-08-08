@@ -20,7 +20,7 @@ export const EMAIL_SYSTEM_PLACEHOLDERS: EmailPlaceholderInfo[] = [
     name: 'logoUrl',
     trustedHtml: false,
     required: true,
-    sample: 'https://sopet.co.th/images/email/sopet-logo-white.png',
+    sample: 'https://api.sopet.org/images/email/sopet-logo-white.png',
   },
 ];
 

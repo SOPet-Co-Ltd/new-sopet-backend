@@ -93,8 +93,8 @@ UAT requires GitHub Environment secrets `THAIBULKSMS_API_KEY` and `THAIBULKSMS_A
 
 ### Logo missing in received emails
 
-- Templates use `${API_URL}/images/email/sopet-logo-white.png` (PNG, not SVG).
-- Locally, open `http://localhost:3002/images/email/sopet-logo-white.png` while `yarn start:dev` is running.
+- Templates use an absolute logo URL: `EMAIL_LOGO_URL` if set, otherwise `${API_URL}/images/email/sopet-logo-white.png`. When `API_URL` is localhost, the public fallback `https://api.sopet.org/images/email/sopet-logo-white.png` is used so real inboxes can load the image.
+- Locally, open `http://localhost:3002/images/email/sopet-logo-white.png` while `yarn start:dev` is running (asset still served for direct checks).
 - In UAT/production, set `API_URL` to the **public** HTTPS API hostname (same host clients use for GraphQL). Without it, the logo URL may point at `localhost` and fail for recipients.
 - Confirm the Docker image includes `public/` (see `Dockerfile`).
 
