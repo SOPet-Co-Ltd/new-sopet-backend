@@ -8,6 +8,11 @@ export interface SendEmailOptions {
   html: string;
   text?: string;
   replyTo?: string;
+  /**
+   * When true and Resend is configured, deliver even in development
+   * (used for admin CMS explicit test sends).
+   */
+  forceSend?: boolean;
 }
 
 @Injectable()
@@ -36,8 +41,9 @@ export class EmailService {
 
   async send(options: SendEmailOptions): Promise<{ id: string | null }> {
     const recipients = Array.isArray(options.to) ? options.to : [options.to];
+    const shouldDeliver = Boolean(options.forceSend && this.client) || !this.isDev;
 
-    if (this.isDev) {
+    if (!shouldDeliver) {
       this.logDevEmail(recipients, options);
       return { id: null };
     }

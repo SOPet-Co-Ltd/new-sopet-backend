@@ -1,16 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EmailService } from './email.service';
+import { EmailTemplateRendererService } from './email-template-renderer.service';
+import { EmailTemplateKey } from '../../database/entities/enums/email-template.enums';
 import {
-  adminInviteTemplate,
   EmailTemplateBrand,
-  emailVerificationTemplate,
-  orderPaidTemplate,
-  orderStatusChangedTemplate,
-  passwordResetTemplate,
-  storeMemberInviteTemplate,
-  vendorAccountSuspendedTemplate,
-  vendorInviteTemplate,
+  formatCurrency,
+  formatOrderStatus,
+  formatPaymentMethod,
+  orderItemsTable,
 } from './email-templates';
 
 @Injectable()
@@ -22,6 +20,7 @@ export class EmailDeliveryService {
   constructor(
     private readonly emailService: EmailService,
     private readonly configService: ConfigService,
+    private readonly renderer: EmailTemplateRendererService,
   ) {
     this.adminPanelUrl =
       this.configService.get<string>('app.adminPanelUrl') ||
@@ -55,22 +54,20 @@ export class EmailDeliveryService {
 
   async sendVendorInvite(email: string, token: string): Promise<void> {
     const inviteUrl = `${this.adminPanelUrl}/register?token=${token}`;
-    await this.sendTemplate(
-      email,
-      vendorInviteTemplate(this.brand, { inviteUrl }),
-      'Vendor invite',
-      inviteUrl,
-    );
+    const result = await this.renderer.renderForSend(EmailTemplateKey.VENDOR_INVITE, {
+      vars: { inviteUrl },
+      fallbackParams: { inviteUrl },
+    });
+    await this.sendTemplate(email, result, 'Vendor invite', inviteUrl);
   }
 
   async sendAdminInvite(email: string, token: string): Promise<void> {
     const inviteUrl = `${this.adminPanelUrl}/register/invite/admin?token=${token}`;
-    await this.sendTemplate(
-      email,
-      adminInviteTemplate(this.brand, { inviteUrl }),
-      'Admin invite',
-      inviteUrl,
-    );
+    const result = await this.renderer.renderForSend(EmailTemplateKey.ADMIN_INVITE, {
+      vars: { inviteUrl },
+      fallbackParams: { inviteUrl },
+    });
+    await this.sendTemplate(email, result, 'Admin invite', inviteUrl);
   }
 
   async sendStoreMemberInvite(
@@ -80,32 +77,29 @@ export class EmailDeliveryService {
     storeName: string,
   ): Promise<void> {
     const inviteUrl = `${this.adminPanelUrl}/invite/store?token=${token}`;
-    await this.sendTemplate(
-      email,
-      storeMemberInviteTemplate(this.brand, { inviteUrl, storeName }),
-      'Store member invite',
-      inviteUrl,
-    );
+    const result = await this.renderer.renderForSend(EmailTemplateKey.STORE_MEMBER_INVITE, {
+      vars: { inviteUrl, storeName },
+      fallbackParams: { inviteUrl, storeName },
+    });
+    await this.sendTemplate(email, result, 'Store member invite', inviteUrl);
   }
 
   async sendPasswordReset(email: string, token: string): Promise<void> {
     const resetUrl = `${this.adminPanelUrl}/reset-password?token=${token}`;
-    await this.sendTemplate(
-      email,
-      passwordResetTemplate(this.brand, { resetUrl }),
-      'Password reset',
-      resetUrl,
-    );
+    const result = await this.renderer.renderForSend(EmailTemplateKey.PASSWORD_RESET, {
+      vars: { resetUrl },
+      fallbackParams: { resetUrl },
+    });
+    await this.sendTemplate(email, result, 'Password reset', resetUrl);
   }
 
   async sendEmailVerification(email: string, token: string): Promise<void> {
     const verifyUrl = `${this.adminPanelUrl}/verify-email?token=${token}`;
-    await this.sendTemplate(
-      email,
-      emailVerificationTemplate(this.brand, { verifyUrl }),
-      'Email verification',
-      verifyUrl,
-    );
+    const result = await this.renderer.renderForSend(EmailTemplateKey.EMAIL_VERIFICATION, {
+      vars: { verifyUrl },
+      fallbackParams: { verifyUrl },
+    });
+    await this.sendTemplate(email, result, 'Email verification', verifyUrl);
   }
 
   async sendOrderPaid(
@@ -129,34 +123,64 @@ export class EmailDeliveryService {
       orderUrl: string;
     },
   ): Promise<void> {
-    await this.sendTemplate(
-      email,
-      orderPaidTemplate(this.brand, params),
-      'Order paid',
-      params.orderUrl,
-    );
+    const vars: Record<string, string> = {
+      orderNumber: params.orderNumber,
+      orderDate: params.orderDate,
+      paymentMethod: formatPaymentMethod(params.paymentMethod),
+      subtotal: `฿${formatCurrency(params.subtotal)}`,
+      discountAmount: `฿${formatCurrency(params.discountAmount)}`,
+      shippingFee: `฿${formatCurrency(params.shippingFee)}`,
+      total: `฿${formatCurrency(params.total)}`,
+      orderUrl: params.orderUrl,
+      itemsHtml: orderItemsTable(params.items),
+    };
+    if (params.customerName) {
+      vars.customerName = params.customerName;
+    }
+
+    const result = await this.renderer.renderForSend(EmailTemplateKey.ORDER_PAID, {
+      vars,
+      fallbackParams: params,
+    });
+    await this.sendTemplate(email, result, 'Order paid', params.orderUrl);
   }
 
   async sendOrderStatusChanged(
     email: string,
     params: { orderNumber: string; status: string; orderDate?: string; orderUrl: string },
   ): Promise<void> {
-    await this.sendTemplate(
-      email,
-      orderStatusChangedTemplate(this.brand, params),
-      'Order status changed',
-      params.orderUrl,
-    );
+    const vars: Record<string, string> = {
+      orderNumber: params.orderNumber,
+      status: params.status,
+      statusLabel: formatOrderStatus(params.status),
+      orderUrl: params.orderUrl,
+    };
+    if (params.orderDate) {
+      vars.orderDate = params.orderDate;
+    }
+
+    const result = await this.renderer.renderForSend(EmailTemplateKey.ORDER_STATUS_CHANGED, {
+      vars,
+      fallbackParams: params,
+    });
+    await this.sendTemplate(email, result, 'Order status changed', params.orderUrl);
   }
 
   async sendVendorAccountSuspended(
     email: string,
     params: { vendorName?: string | null; storeName?: string | null } = {},
   ): Promise<void> {
-    await this.sendTemplate(
-      email,
-      vendorAccountSuspendedTemplate(this.brand, params),
-      'Vendor account suspended',
-    );
+    const vars: Record<string, string> = {
+      vendorName: params.vendorName?.trim() || 'ผู้ขาย',
+    };
+    if (params.storeName?.trim()) {
+      vars.storeName = params.storeName.trim();
+    }
+
+    const result = await this.renderer.renderForSend(EmailTemplateKey.VENDOR_ACCOUNT_SUSPENDED, {
+      vars,
+      fallbackParams: params,
+    });
+    await this.sendTemplate(email, result, 'Vendor account suspended');
   }
 }

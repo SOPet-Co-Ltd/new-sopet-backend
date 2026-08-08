@@ -346,6 +346,12 @@ input CreateCategoryInput {
   name: String!
 }
 
+input CreateEmailContainerInput {
+  htmlShell: String!
+  isDefault: Boolean = false
+  name: String!
+}
+
 input CreateOrderInput {
   cartItemIds: [String!]
   guestEmail: String
@@ -589,6 +595,59 @@ type DeleteTaxonomyResultType {
   success: Boolean!
 }
 
+type EmailContainerType {
+  createdAt: DateTime!
+  htmlShell: String!
+  id: ID!
+  isDefault: Boolean!
+  name: String!
+  updatedAt: DateTime!
+  warnings: [String!]!
+}
+
+type EmailContentTemplateType {
+  allowedPlaceholders: [EmailPlaceholderInfoType!]!
+  bodyHtml: String!
+  container: EmailContainerType!
+  containerId: ID!
+  createdAt: DateTime!
+  enabled: Boolean!
+  id: ID!
+  key: EmailTemplateKey!
+  name: String!
+  subjectTemplate: String!
+  textTemplate: String!
+  updatedAt: DateTime!
+  warnings: [String!]!
+}
+
+type EmailPlaceholderInfoType {
+  name: String!
+  required: Boolean!
+  sample: String!
+  trustedHtml: Boolean!
+}
+
+type EmailPreviewResultType {
+  html: String!
+  missingPlaceholders: [String!]!
+  subject: String!
+  text: String!
+  warnings: [String!]!
+}
+
+"""Route key for a transactional email content template"""
+enum EmailTemplateKey {
+  ADMIN_INVITE
+  EMAIL_VERIFICATION
+  ORDER_PAID
+  ORDER_STATUS_CHANGED
+  PASSWORD_RESET
+  STORE_MEMBER_INVITE
+  VENDOR_ACCOUNT_SUSPENDED
+  VENDOR_INVITE
+}
+
 input FavoriteProductInput {
   productId: String!
 }
@@ -668,6 +727,7 @@ type Mutation {
   createAddress(input: CreateAddressInput!): SavedAddressType!
   createBrand(input: CreateBrandInput!): BrandType!
   createCategory(input: CreateCategoryInput!): CategoryType!
+  createEmailContainer(input: CreateEmailContainerInput!): EmailContainerType!
   createOrder(input: CreateOrderInput!): OrderType!
   createPayment(input: CreatePaymentInput!): PaymentType!
   createPayout(input: CreatePayoutInput!): PayoutType!
@@ -712,6 +772,7 @@ type Mutation {
   markNotificationRead(id: String!): Boolean!
   markVendorOrderPaid(orderId: String!): OrderType!
   mergeCart(sessionId: String!): CartType!
+  previewEmailContentTemplate(input: PreviewEmailContentTemplateInput!): EmailPreviewResultType!
   publishProduct(id: String!): ProductType!
   reactivateAccount(input: ReactivateAccountInput!): CustomerAuthPayload!
   refreshToken(input: RefreshTokenInput!): AuthTokens!
@@ -741,10 +802,12 @@ type Mutation {
   revokeStoreApiKey(id: String!, storeId: String!): Boolean!
   revokeStoreInvitation(invitationId: String!): StoreMemberInvitationType!
   sendCustomerOtp(input: SendCustomerOtpInput!): MessagePayload!
+  sendTestEmailContentTemplate(input: SendTestEmailContentTemplateInput!): Boolean!
   setAdminActive(isActive: Boolean!, userId: String!): AdminTeamMemberType!
   setCategoryImage(input: SetCategoryImageInput!): CategoryType!
   setCustomerActive(id: String!, isActive: Boolean!): AdminCustomerType!
   setDefaultAddress(id: String!): SavedAddressType!
+  setDefaultEmailContainer(id: ID!): EmailContainerType!
   setDefaultPaymentMethod(id: String!): SavedPaymentMethodType!
   setPetTypeImage(input: SetPetTypeImageInput!): PetTypeType!
   setProductThumbnail(imageId: String!, productId: String!): ProductImageType!
@@ -761,6 +824,8 @@ type Mutation {
   updateCartItem(input: UpdateCartItemInput!): CartType!
   updateCategory(input: UpdateCategoryInput!): CategoryType!
   updateCustomerAsAdmin(input: UpdateCustomerAsAdminInput!): AdminCustomerType!
+  updateEmailContainer(id: ID!, input: UpdateEmailContainerInput!): EmailContainerType!
+  updateEmailContentTemplate(id: ID!, input: UpdateEmailContentTemplateInput!): EmailContentTemplateType!
   updateLoginPageImages(input: UpdateLoginPageImagesInput!): LoginPageImagesType!
   updateOrderStatus(input: UpdateOrderStatusInput!): OrderType!
   updatePetType(input: UpdatePetTypeInput!): PetTypeType!
@@ -1040,6 +1105,15 @@ type PlatformSponsorType {
   startsAt: DateTime
 }
 
+input PreviewEmailContentTemplateInput {
+  bodyHtml: String
+  containerId: ID
+  key: EmailTemplateKey!
+  subjectTemplate: String
+  textTemplate: String
+  variablesJson: String
+}
+
 type ProductConnection {
   items: [ProductType!]!
   pagination: PaginationMeta!
@@ -1196,6 +1270,11 @@ type Query {
   cart(sessionId: String): CartType!
   categoryDeleteImpact(categoryId: String!): TaxonomyDeleteImpactType!
   customerReviewableItems: [CustomerReviewableItemType!]!
+  emailContainer(id: ID!): EmailContainerType
+  emailContainers: [EmailContainerType!]!
+  emailContentTemplate(id: ID!): EmailContentTemplateType
+  emailContentTemplateByKey(key: EmailTemplateKey!): EmailContentTemplateType
+  emailContentTemplates: [EmailContentTemplateType!]!
   exportSearchAnalyticsCsv(fromDate: DateTime, toDate: DateTime): String!
   favorites: [FavoriteType!]!
   getAdminInvitationByToken(token: String!): AdminInvitationType!
@@ -1513,6 +1592,16 @@ input SendCustomerOtpInput {
   phone: String!
 }
 
+input SendTestEmailContentTemplateInput {
+  bodyHtml: String
+  containerId: ID
+  key: EmailTemplateKey!
+  subjectTemplate: String
+  textTemplate: String
+  toEmail: String
+  variablesJson: String
+}
+
 input SetCategoryImageInput {
   categoryId: String!
   imageUrl: String!
@@ -1800,6 +1889,21 @@ input UpdateCustomerAsAdminInput {
   fullName: String
   id: String!
   phone: String
+}
+
+input UpdateEmailContainerInput {
+  htmlShell: String
+  isDefault: Boolean
+  name: String
+}
+
+input UpdateEmailContentTemplateInput {
+  bodyHtml: String
+  containerId: ID
+  enabled: Boolean
+  name: String
+  subjectTemplate: String
+  textTemplate: String
 }
 
 input UpdateLoginPageImagesInput {

@@ -27,7 +27,7 @@ export interface OrderPaidLineItem {
   subtotal: number;
 }
 
-function escapeHtml(value: string): string {
+export function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -35,7 +35,7 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;');
 }
 
-function formatCurrency(amount: number): string {
+export function formatCurrency(amount: number): string {
   return Number(amount).toLocaleString('th-TH');
 }
 
@@ -55,7 +55,7 @@ export function formatOrderStatus(status: string): string {
   return labels[status] ?? status.replace(/_/g, ' ');
 }
 
-function formatPaymentMethod(method: string): string {
+export function formatPaymentMethod(method: string): string {
   const labels: Record<string, string> = {
     promptpay: 'พร้อมเพย์',
     credit_card: 'บัตรเครดิต/เดบิต',
@@ -194,7 +194,7 @@ function note(text: string): string {
   return `<p style="margin:18px 0 0;font-size:13px;line-height:1.6;color:${TEXT_MUTED};text-align:center;">${escapeHtml(text)}</p>`;
 }
 
-function orderItemsTable(items: OrderPaidLineItem[]): string {
+export function orderItemsTable(items: OrderPaidLineItem[]): string {
   const rows = items
     .map((item, index) => {
       const variant = formatVariantOptions(item.variantOptions);
