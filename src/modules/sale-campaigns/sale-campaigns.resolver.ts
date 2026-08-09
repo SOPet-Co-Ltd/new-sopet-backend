@@ -1,6 +1,7 @@
 import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { BadRequestException, UseGuards } from '@nestjs/common';
 import { SaleCampaignsService } from './sale-campaigns.service';
+import { SaleCampaignPricingService } from './sale-campaign-pricing.service';
 import { ActiveSaleCampaignItemType, SaleCampaignType } from '../../graphql/models/types';
 import { mapActiveSaleCampaignItem, mapSaleCampaign } from '../../graphql/models/mappers';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -15,6 +16,7 @@ import { CreateSaleCampaignInput, UpdateSaleCampaignInput } from './sale-campaig
 export class SaleCampaignsResolver {
   constructor(
     private readonly saleCampaignsService: SaleCampaignsService,
+    private readonly saleCampaignPricing: SaleCampaignPricingService,
     private readonly storesService: StoresService,
   ) {}
 
@@ -58,7 +60,7 @@ export class SaleCampaignsResolver {
   async activeSaleCampaignItemsForProducts(
     @Args('productIds', { type: () => [String] }) productIds: string[],
   ): Promise<ActiveSaleCampaignItemType[]> {
-    const rows = await this.saleCampaignsService.findActiveItemsForProducts(productIds);
+    const rows = await this.saleCampaignPricing.findActiveItemsForProducts(productIds);
     return rows.map(({ item, campaign }) => mapActiveSaleCampaignItem(item, campaign));
   }
 

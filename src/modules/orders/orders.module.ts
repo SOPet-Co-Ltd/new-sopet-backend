@@ -28,6 +28,7 @@ import { InventoryModule } from '../inventory/inventory.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { CartModule } from '../cart/cart.module';
 import { VendorWebhooksModule } from '../vendor-webhooks/vendor-webhooks.module';
+import { SaleCampaignPricingModule } from '../sale-campaigns/sale-campaign-pricing.module';
 @Module({
   imports: [
     AuthModule,
@@ -40,6 +41,7 @@ import { VendorWebhooksModule } from '../vendor-webhooks/vendor-webhooks.module'
     InventoryModule,
     forwardRef(() => PaymentsModule),
     CartModule,
+    SaleCampaignPricingModule,
     TypeOrmModule.forFeature([
       Order,
       OrderItem,

@@ -75,13 +75,6 @@ describe('SaleCampaignsService', () => {
     });
   });
 
-  describe('findActiveItemsForProducts', () => {
-    it('returns empty when productIds is empty', async () => {
-      await expect(service.findActiveItemsForProducts([])).resolves.toEqual([]);
-      expect(itemRepository.createQueryBuilder).not.toHaveBeenCalled();
-    });
-  });
-
   describe('create', () => {
     it('rejects invalid date ranges', async () => {
       const input: CreateSaleCampaignInput = {
@@ -96,19 +89,40 @@ describe('SaleCampaignsService', () => {
       );
     });
 
-    it('rejects items without discount fields', async () => {
-      const input: CreateSaleCampaignInput = {
+    it('rejects items without discountPercent', async () => {
+      const input = {
         name: 'Flash',
         items: [{ productId: 'prod-1' }],
-      };
+      } as CreateSaleCampaignInput;
 
       await expect(service.create('user-1', 'store-1', input)).rejects.toMatchObject({
         response: { code: 'SALE_CAMPAIGN_ITEM_DISCOUNT_REQUIRED' },
       });
     });
 
+    it('rejects compareAtPrice that is not greater than catalog', async () => {
+      productRepository.findOne.mockResolvedValue({
+        id: 'prod-1',
+        storeId: 'store-1',
+        basePrice: 279,
+      });
+
+      const input: CreateSaleCampaignInput = {
+        name: 'Flash',
+        items: [{ productId: 'prod-1', discountPercent: 20, compareAtPrice: 279 }],
+      };
+
+      await expect(service.create('user-1', 'store-1', input)).rejects.toMatchObject({
+        response: { code: 'SALE_CAMPAIGN_COMPARE_AT_INVALID' },
+      });
+    });
+
     it('creates campaign and replaces items', async () => {
-      productRepository.findOne.mockResolvedValue({ id: 'prod-1', storeId: 'store-1' });
+      productRepository.findOne.mockResolvedValue({
+        id: 'prod-1',
+        storeId: 'store-1',
+        basePrice: 279,
+      });
       campaignRepository.findOne.mockResolvedValue({
         id: 'camp-1',
         storeId: 'store-1',

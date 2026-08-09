@@ -6,6 +6,7 @@ configurePgUtcTimestampParsing();
 import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import type { NestExpressApplication } from '@nestjs/platform-express';
+import helmet from 'helmet';
 import { AppModule } from './app.module';
 
 // Base64 image uploads via the `uploadImage` GraphQL mutation can exceed the
@@ -22,6 +23,15 @@ async function bootstrap() {
     rawBody: true,
     bodyParser: false,
   });
+
+  app.use(
+    helmet({
+      // GraphQL Playground / Apollo Sandbox need relaxed CSP in non-production.
+      contentSecurityPolicy: process.env.NODE_ENV === 'production' ? undefined : false,
+      // API is consumed cross-origin by storefront/admin; CORP handled via CORS.
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+    }),
+  );
 
   app.useBodyParser('json', { limit: BODY_LIMIT });
   app.useBodyParser('urlencoded', { extended: true, limit: BODY_LIMIT });

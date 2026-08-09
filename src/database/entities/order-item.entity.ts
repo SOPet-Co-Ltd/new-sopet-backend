@@ -54,6 +54,16 @@ export class OrderItem {
   @Min(0)
   unitPrice!: number;
 
+  /** Catalog sell price at order create (before campaign %); defaults to unitPrice for legacy rows. */
+  @Column({ name: 'catalog_unit_price', type: 'decimal', precision: 10, scale: 2, nullable: true })
+  catalogUnitPrice!: number | null;
+
+  @Column({ name: 'sale_campaign_id', type: 'uuid', nullable: true })
+  saleCampaignId!: string | null;
+
+  @Column({ name: 'sale_discount_percent', type: 'decimal', precision: 5, scale: 2, nullable: true })
+  saleDiscountPercent!: number | null;
+
   @Column({ name: 'quantity', type: 'integer' })
   @IsNumber()
   @Min(1)

@@ -27,6 +27,7 @@ import {
 } from '../../common/utils/checkout-payment.util';
 import { orderHasHeldItems } from '../orders/order-totals.util';
 import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.service';
+import { scrubJsonForLog } from '../../common/utils/scrub-for-log.util';
 
 interface OmiseCharge {
   id: string;
@@ -570,7 +571,7 @@ export class PaymentsService {
   ): Promise<T> {
     const data = (await response.json()) as T & { message?: string };
     if (!response.ok) {
-      this.logger.error(`Omise ${method} ${path} failed: ${JSON.stringify(data)}`);
+      this.logger.error(`Omise ${method} ${path} failed: ${scrubJsonForLog(data)}`);
       throw new BadRequestException({
         code: 'OMISE_ERROR',
         message: (data as { message?: string }).message ?? 'Payment provider error',

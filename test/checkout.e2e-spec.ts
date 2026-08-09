@@ -64,8 +64,9 @@ describe('Checkout flow (integration)', () => {
       id: 'var-1',
       productId: 'prod-1',
       stockQuantity: 5,
+      priceAdjustment: 0,
       options: {},
-      product: { id: 'prod-1', storeId: 'store-1', name: 'Treats' },
+      product: { id: 'prod-1', storeId: 'store-1', name: 'Treats', basePrice: 100 },
     };
 
     beforeEach(() => {
@@ -104,6 +105,21 @@ describe('Checkout flow (integration)', () => {
         { removeItems: jest.fn() } as never,
         {} as never,
         { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) } as never,
+        {
+          resolveEffectiveUnitPrices: jest.fn(async (lines: Array<{ variantId: string; catalogUnit: number }>) => {
+            const map = new Map();
+            for (const line of lines) {
+              map.set(line.variantId, {
+                catalogUnitPrice: line.catalogUnit,
+                unitPrice: line.catalogUnit,
+                saleCampaignId: null,
+                saleDiscountPercent: null,
+                compareAtPrice: null,
+              });
+            }
+            return map;
+          }),
+        } as never,
       );
     });
 

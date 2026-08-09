@@ -15,8 +15,8 @@ import { Store } from './store.entity';
 import { SaleCampaignItem } from './sale-campaign-item.entity';
 
 /**
- * Timed catalog sale window for strikethrough / % badge display.
- * Distinct from coupon Promotions (checkout discounts).
+ * Timed catalog sale window: required % reduces payable unit price.
+ * Optional compare-at is an honest reference only. Distinct from coupon Promotions.
  */
 @Entity('sale_campaigns')
 @Index(['storeId', 'isActive'])

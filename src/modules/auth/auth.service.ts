@@ -10,7 +10,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, MoreThan } from 'typeorm';
-import { randomBytes } from 'node:crypto';
+import { createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import * as bcrypt from 'bcrypt';
 import { Customer } from '../../database/entities/customer.entity';
 import { User, UserRole } from '../../database/entities/user.entity';
@@ -75,7 +75,26 @@ export class AuthService {
   ) {}
 
   private generateOtp(): string {
-    return Math.floor(100000 + Math.random() * 900000).toString();
+    return randomInt(100000, 1000000).toString();
+  }
+
+  /** HMAC-SHA256 hex digest; plaintext OTP is never persisted. */
+  private hashOtp(code: string): string {
+    const secret = this.configService.get<string>('jwt.secret');
+    if (!secret) {
+      throw new Error('JWT_SECRET is required to hash OTP codes');
+    }
+    return createHmac('sha256', secret).update(code).digest('hex');
+  }
+
+  private otpHashesMatch(storedHash: string, providedCode: string): boolean {
+    const providedHash = this.hashOtp(providedCode);
+    const stored = Buffer.from(storedHash, 'utf8');
+    const provided = Buffer.from(providedHash, 'utf8');
+    if (stored.length !== provided.length) {
+      return false;
+    }
+    return timingSafeEqual(stored, provided);
   }
 
   async sendOtp(sendOtpDto: SendOtpDto): Promise<{ message: string }> {
@@ -101,7 +120,7 @@ export class AuthService {
 
     const otp = this.otpRepository.create({
       phone,
-      code,
+      code: this.hashOtp(code),
       expiresAt,
     });
     await this.otpRepository.save(otp);
@@ -126,13 +145,13 @@ export class AuthService {
     const otp = await this.otpRepository.findOne({
       where: {
         phone,
-        code,
+        code: this.hashOtp(code),
         isUsed: false,
         expiresAt: MoreThan(new Date()),
       },
     });
 
-    if (!otp) {
+    if (!otp || !this.otpHashesMatch(otp.code, code)) {
       throw new UnauthorizedException({
         code: 'INVALID_OTP',
         message: 'Invalid or expired OTP code',

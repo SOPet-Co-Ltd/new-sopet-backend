@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { APP_FILTER, APP_INTERCEPTOR, APP_GUARD, APP_PIPE } from '@nestjs/core';
+import { ThrottlerModule } from '@nestjs/throttler';
+import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
 import appConfig from './config/app.config';
 import jwtConfig from './config/jwt.config';
 import omiseConfig from './config/omise.config';
@@ -20,6 +22,7 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { ValidationPipe } from './common/pipes/validation.pipe';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
+import { RolesGuard } from './modules/auth/guards/roles.guard';
 import { StoreStatusGuard } from './modules/auth/guards/store-status.guard';
 import { VendorStatusGuard } from './modules/auth/guards/vendor-status.guard';
 import { CustomerStatusGuard } from './modules/auth/guards/customer-status.guard';
@@ -65,6 +68,14 @@ import { getPostgresSslOptions } from './database/postgres-ssl.util';
         emailConfig,
       ],
     }),
+
+    ThrottlerModule.forRoot([
+      {
+        name: 'default',
+        ttl: parseInt(process.env.API_THROTTLE_TTL_MS || '60000', 10),
+        limit: parseInt(process.env.API_THROTTLE_LIMIT || '120', 10),
+      },
+    ]),
 
     // Database
     TypeOrmModule.forRootAsync({
@@ -121,10 +132,20 @@ import { getPostgresSslOptions } from './database/postgres-ssl.util';
       provide: APP_PIPE,
       useClass: ValidationPipe,
     },
+    // Global API throttling (abuse resistance; auth endpoints still use Redis AuthRateLimitGuard)
+    {
+      provide: APP_GUARD,
+      useClass: AppThrottlerGuard,
+    },
     // Global JWT guard
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
+    },
+    // Enforce @Roles when present (no-op when metadata absent)
+    {
+      provide: APP_GUARD,
+      useClass: RolesGuard,
     },
     // Global store-suspension guard (runs after JwtAuthGuard populates the user)
     {

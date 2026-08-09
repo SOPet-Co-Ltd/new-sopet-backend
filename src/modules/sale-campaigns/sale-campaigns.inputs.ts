@@ -34,12 +34,11 @@ export class SaleCampaignItemInput {
   @Min(0)
   compareAtPrice?: number | null;
 
-  @Field(() => Float, { nullable: true })
-  @IsOptional()
+  @Field(() => Float)
   @IsNumber()
   @Min(1)
   @Max(99)
-  discountPercent?: number | null;
+  discountPercent!: number;
 }
 
 @InputType()

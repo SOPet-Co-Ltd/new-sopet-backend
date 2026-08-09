@@ -5,9 +5,10 @@ import { CartItem } from '../../database/entities/cart-item.entity';
 import { ProductVariant } from '../../database/entities/product-variant.entity';
 import { CartService } from './cart.service';
 import { CartResolver } from './cart.resolver';
+import { SaleCampaignPricingModule } from '../sale-campaigns/sale-campaign-pricing.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Cart, CartItem, ProductVariant])],
+  imports: [TypeOrmModule.forFeature([Cart, CartItem, ProductVariant]), SaleCampaignPricingModule],
   providers: [CartService, CartResolver],
   exports: [CartService],
 })

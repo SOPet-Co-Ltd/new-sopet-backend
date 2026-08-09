@@ -6,21 +6,53 @@ import { CartType, CartItemType, CartWarningType } from '../../graphql/models/ty
 import { mapVariant } from '../../graphql/models/mappers';
 import { Public, CurrentUser } from '../../common/decorators';
 import { AddToCartInput, RemoveCartItemInput, UpdateCartItemInput } from './cart.inputs';
+import { honestDisplayCompareAt } from '../sale-campaigns/sale-campaign-pricing';
+import { SaleCampaignPricingService } from '../sale-campaigns/sale-campaign-pricing.service';
 
-function mapCart(cart: CartWithWarnings): CartType {
+async function mapCart(
+  cart: CartWithWarnings,
+  saleCampaignPricing: SaleCampaignPricingService,
+): Promise<CartType> {
+  const priced = await saleCampaignPricing.resolveEffectiveUnitPrices(
+    (cart.items ?? [])
+      .filter((item) => item.productVariant)
+      .map((item) => ({
+        productId: item.productVariant.productId || item.productVariant.product?.id || '',
+        variantId: item.productVariant.id,
+        catalogUnit:
+          Number(item.productVariant.product?.basePrice ?? 0) +
+          Number(item.productVariant.priceAdjustment ?? 0),
+      })),
+  );
+
   return {
     id: cart.id,
     customerId: cart.customerId,
     sessionId: cart.sessionId,
     items:
-      cart.items?.map((item): CartItemType => ({
-        id: item.id,
-        variantId: item.variantId,
-        quantity: item.quantity,
-        productVariant: item.productVariant
+      cart.items?.map((item): CartItemType => {
+        const mappedVariant = item.productVariant
           ? mapVariant(item.productVariant, Number(item.productVariant.product?.basePrice ?? 0))
-          : null,
-      })) ?? [],
+          : null;
+        if (mappedVariant && item.productVariant) {
+          const resolved = priced.get(item.productVariant.id);
+          if (resolved) {
+            mappedVariant.price = resolved.unitPrice;
+            const productCompareAt =
+              item.productVariant.product?.compareAtPrice != null
+                ? Number(item.productVariant.product.compareAtPrice)
+                : null;
+            const staticCompareAt = mappedVariant.compareAtPrice ?? productCompareAt;
+            mappedVariant.compareAtPrice = honestDisplayCompareAt(resolved, staticCompareAt);
+          }
+        }
+        return {
+          id: item.id,
+          variantId: item.variantId,
+          quantity: item.quantity,
+          productVariant: mappedVariant,
+        };
+      }) ?? [],
     warnings:
       cart.warnings?.map((warning): CartWarningType => ({
         code: warning.code,
@@ -32,7 +64,10 @@ function mapCart(cart: CartWithWarnings): CartType {
 
 @Resolver()
 export class CartResolver {
-  constructor(private readonly cartService: CartService) {}
+  constructor(
+    private readonly cartService: CartService,
+    private readonly saleCampaignPricing: SaleCampaignPricingService,
+  ) {}
 
   @Query(() => CartType)
   @Public()
@@ -41,7 +76,7 @@ export class CartResolver {
     @Args('sessionId', { nullable: true }) sessionId?: string,
   ): Promise<CartType> {
     const cart = await this.cartService.getCart(customerId, sessionId);
-    return mapCart(cart);
+    return mapCart(cart, this.saleCampaignPricing);
   }
 
   @Mutation(() => CartType)
@@ -56,7 +91,7 @@ export class CartResolver {
       customerId,
       input.sessionId,
     );
-    return mapCart(cart);
+    return mapCart(cart, this.saleCampaignPricing);
   }
 
   @Mutation(() => CartType)
@@ -71,7 +106,7 @@ export class CartResolver {
       customerId,
       input.sessionId,
     );
-    return mapCart(cart);
+    return mapCart(cart, this.saleCampaignPricing);
   }
 
   @Mutation(() => CartType)
@@ -81,7 +116,7 @@ export class CartResolver {
     @CurrentUser('id') customerId?: string,
   ): Promise<CartType> {
     const cart = await this.cartService.removeItem(input.itemId, customerId, input.sessionId);
-    return mapCart(cart);
+    return mapCart(cart, this.saleCampaignPricing);
   }
 
   @Mutation(() => CartType)
@@ -91,6 +126,6 @@ export class CartResolver {
     @Args('sessionId') sessionId: string,
   ): Promise<CartType> {
     const cart = await this.cartService.mergeGuestCart(customerId, sessionId);
-    return mapCart(cart);
+    return mapCart(cart, this.saleCampaignPricing);
   }
 }

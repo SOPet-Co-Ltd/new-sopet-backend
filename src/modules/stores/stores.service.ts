@@ -23,6 +23,10 @@ import { OmiseService } from '../omise/omise.service';
 import { pickDefaultAccessibleStoreId } from './store-selection.util';
 import { NotificationsService } from '../notifications/notifications.service';
 import { StorageService } from '../storage/storage.service';
+import {
+  decryptBankAccountNumber,
+  encryptBankAccountNumber,
+} from '../../common/utils/bank-account-crypto.util';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constants';
 import { StoreSuspensionHoldService } from '../orders/store-suspension-hold.service';
@@ -488,14 +492,14 @@ export class StoresService {
     const bankDetailsChanged =
       (data.bankAccountName !== undefined && data.bankAccountName !== store.bankAccountName) ||
       (data.bankAccountNumber !== undefined &&
-        data.bankAccountNumber !== store.bankAccountNumber) ||
+        data.bankAccountNumber !== decryptBankAccountNumber(store.bankAccountNumber)) ||
       (data.bankCode !== undefined && data.bankCode !== store.bankCode);
 
     if (data.bankAccountName !== undefined) {
       store.bankAccountName = data.bankAccountName;
     }
     if (data.bankAccountNumber !== undefined) {
-      store.bankAccountNumber = data.bankAccountNumber;
+      store.bankAccountNumber = encryptBankAccountNumber(data.bankAccountNumber);
     }
     if (data.bankName !== undefined) store.bankName = data.bankName;
     if (data.bankCode !== undefined) store.bankCode = data.bankCode;
@@ -609,7 +613,7 @@ export class StoresService {
       name: store.bankAccountName as string,
       email: store.contactEmail ?? undefined,
       bankBrand: store.bankCode as string,
-      bankNumber: store.bankAccountNumber as string,
+      bankNumber: decryptBankAccountNumber(store.bankAccountNumber) as string,
       bankName: store.bankAccountName as string,
     };
 

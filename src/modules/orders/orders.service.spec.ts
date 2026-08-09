@@ -1,7 +1,7 @@
 import { NotFoundException } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
-import { FulfillmentStatus } from '../../database/entities/order-item.entity';
+import { FulfillmentStatus, OrderItem } from '../../database/entities/order-item.entity';
 import { CustomerOrderListFilter } from './order-list-filter.util';
 import * as OrderMapper from './order.mapper';
 
@@ -28,6 +28,7 @@ describe('OrdersService', () => {
   let customerRepository: { findActiveByPhone: jest.Mock };
   let inventoryService: { restoreOrderStock: jest.Mock };
   let vendorWebhooksService: { dispatchOrderEvent: jest.Mock };
+  let saleCampaignsService: { resolveEffectiveUnitPrices: jest.Mock };
   let mockManager: {
     create: jest.Mock;
     save: jest.Mock;
@@ -40,8 +41,9 @@ describe('OrdersService', () => {
     id: 'var-1',
     productId: 'prod-1',
     stockQuantity: 10,
+    priceAdjustment: 0,
     options: { size: 'M' },
-    product: { id: 'prod-1', storeId: 'store-1', name: 'Test Product' },
+    product: { id: 'prod-1', storeId: 'store-1', name: 'Test Product', basePrice: 100 },
   };
 
   const shippingAddress = {
@@ -75,6 +77,21 @@ describe('OrdersService', () => {
     inventoryService = { restoreOrderStock: jest.fn().mockResolvedValue(true) };
     vendorWebhooksService = {
       dispatchOrderEvent: jest.fn().mockResolvedValue(undefined),
+    };
+    saleCampaignsService = {
+      resolveEffectiveUnitPrices: jest.fn(async (lines: Array<{ variantId: string; catalogUnit: number }>) => {
+        const map = new Map();
+        for (const line of lines) {
+          map.set(line.variantId, {
+            catalogUnitPrice: line.catalogUnit,
+            unitPrice: line.catalogUnit,
+            saleCampaignId: null,
+            saleDiscountPercent: null,
+            compareAtPrice: null,
+          });
+        }
+        return map;
+      }),
     };
 
     mockManager = {
@@ -110,6 +127,7 @@ describe('OrdersService', () => {
       { removeItems: jest.fn() } as never,
       {} as never,
       vendorWebhooksService as never,
+      saleCampaignsService as never,
     );
   });
 
@@ -183,6 +201,85 @@ describe('OrdersService', () => {
     expect(dataSource.transaction).toHaveBeenCalled();
     expect(mockManager.save).toHaveBeenCalled();
     expect(result.id).toBe('ord-1');
+  });
+
+  it('overwrites client price with campaign sale unit and snapshots catalog (AC-004/013)', async () => {
+    variantRepository.findOne.mockResolvedValue({
+      ...variant,
+      priceAdjustment: 0,
+      product: { ...variant.product, basePrice: 279 },
+    });
+    saleCampaignsService.resolveEffectiveUnitPrices.mockResolvedValue(
+      new Map([
+        [
+          'var-1',
+          {
+            catalogUnitPrice: 279,
+            unitPrice: 223.2,
+            saleCampaignId: 'camp-1',
+            saleDiscountPercent: 20,
+            compareAtPrice: null,
+          },
+        ],
+      ]),
+    );
+    promotionsService.applyStackedPromotions.mockResolvedValue({
+      discountAmount: 22.32,
+      promotions: [{ id: 'promo-1', type: 'percentage', discountValue: 10 }],
+      discountsByPromotionId: { 'promo-1': 22.32 },
+      freeUnits: 0,
+    });
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-sale',
+      orderNumber: 'ORD-SALE',
+      status: OrderStatus.PENDING_PAYMENT,
+      items: [],
+      shippingAddress: {},
+      storeShippings: [],
+      statusHistory: [],
+    });
+
+    await service.create(
+      {
+        items: [{ productId: 'p1', variantId: 'var-1', quantity: 1, price: 279 }],
+        paymentMethod: 'promptpay',
+        guestPhone: '+66812345678',
+        guestName: 'Guest',
+        shippingAddress,
+        platformPromotionCode: 'SAVE10',
+      },
+      undefined,
+    );
+
+    expect(promotionsService.applyStackedPromotions).toHaveBeenCalledWith(
+      223.2,
+      expect.any(Map),
+      'SAVE10',
+      [],
+      { guestPhone: '0812345678' },
+      {
+        mode: 'apply',
+        lines: [
+          {
+            productId: 'prod-1',
+            variantId: 'var-1',
+            quantity: 1,
+            unitPrice: 223.2,
+            storeId: 'store-1',
+          },
+        ],
+        shippingFee: 0,
+      },
+    );
+
+    const orderItemCall = mockManager.create.mock.calls.find(([entity]) => entity === OrderItem);
+    expect(orderItemCall?.[1]).toMatchObject({
+      unitPrice: 223.2,
+      catalogUnitPrice: 279,
+      saleCampaignId: 'camp-1',
+      saleDiscountPercent: 20,
+      subtotal: 223.2,
+    });
   });
 
   const orderCreatePayload = (): Record<string, unknown> => {

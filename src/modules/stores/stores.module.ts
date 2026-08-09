@@ -29,7 +29,7 @@ import { StoresResolver } from './stores.resolver';
 
 @Module({
   imports: [
-    AuthModule,
+    forwardRef(() => AuthModule),
     NotificationsModule,
     StorageModule,
     OmiseModule,

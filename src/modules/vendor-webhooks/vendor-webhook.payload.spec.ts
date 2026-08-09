@@ -39,7 +39,7 @@ describe('vendor-webhook.payload', () => {
           trackingNumber: null,
           fulfillmentProvider: null,
           productVariant: { sku: 'CAT-1' },
-        } as OrderItem,
+        } as unknown as OrderItem,
         {
           id: 'item-2',
           storeId: 'store-2',
@@ -53,7 +53,7 @@ describe('vendor-webhook.payload', () => {
           trackingNumber: null,
           fulfillmentProvider: null,
           productVariant: { sku: 'DOG-1' },
-        } as OrderItem,
+        } as unknown as OrderItem,
       ],
     } as Order;
 

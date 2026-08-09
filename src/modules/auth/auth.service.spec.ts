@@ -3,6 +3,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { BadRequestException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
+import { createHmac } from 'node:crypto';
 import * as bcrypt from 'bcrypt';
 import { AuthService } from './auth.service';
 import { Customer } from '../../database/entities/customer.entity';
@@ -19,6 +20,12 @@ import { GuestOrderLinkService } from '../orders/guest-order-link.service';
 import { EmailDeliveryService } from '../email/email-delivery.service';
 import { StorageService } from '../storage/storage.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+
+const TEST_JWT_SECRET = 'test-jwt-secret';
+
+function hashOtpForTest(code: string): string {
+  return createHmac('sha256', TEST_JWT_SECRET).update(code).digest('hex');
+}
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -44,7 +51,11 @@ describe('AuthService', () => {
     verify: jest.fn(),
   };
   const configService = {
-    get: jest.fn((key: string) => (key.includes('refresh') ? '7d' : '15m')),
+    get: jest.fn((key: string) => {
+      if (key === 'jwt.secret') return TEST_JWT_SECRET;
+      if (key.includes('refresh')) return '7d';
+      return '15m';
+    }),
   };
   const smsService = { sendOtp: jest.fn() };
   const cartService = { mergeGuestCart: jest.fn() };
@@ -104,12 +115,22 @@ describe('AuthService', () => {
     const result = await service.sendOtp({ phone: '+66812345678' });
 
     expect(result.message).toBe('OTP sent successfully');
+    expect(otpRepo.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phone: '0812345678',
+        code: expect.stringMatching(/^[a-f0-9]{64}$/),
+      }),
+    );
     expect(otpRepo.save).toHaveBeenCalled();
-    expect(smsService.sendOtp).toHaveBeenCalled();
+    expect(smsService.sendOtp).toHaveBeenCalledWith('0812345678', expect.stringMatching(/^\d{6}$/));
+    const savedCode = otpRepo.create.mock.calls[0][0].code as string;
+    const smsCode = smsService.sendOtp.mock.calls[0][1] as string;
+    expect(savedCode).toBe(hashOtpForTest(smsCode));
+    expect(savedCode).not.toBe(smsCode);
   });
 
   it('verifies OTP and returns tokens', async () => {
-    const otp = { phone: '+66812345678', code: '123456', isUsed: false };
+    const otp = { phone: '0812345678', code: hashOtpForTest('123456'), isUsed: false };
     otpRepo.findOne.mockResolvedValue(otp);
     customerRepoWrapper.findActiveByPhone.mockResolvedValue({
       id: 'cust-1',
@@ -141,8 +162,8 @@ describe('AuthService', () => {
 
   it('rejects OTP verify for suspended customer', async () => {
     otpRepo.findOne.mockResolvedValue({
-      phone: '+66812345678',
-      code: '123456',
+      phone: '0812345678',
+      code: hashOtpForTest('123456'),
       isUsed: false,
     });
     customerRepoWrapper.findActiveByPhone.mockResolvedValue({
@@ -160,8 +181,8 @@ describe('AuthService', () => {
 
   it('returns pending deletion flow for inactive customer within retention', async () => {
     otpRepo.findOne.mockResolvedValue({
-      phone: '+66812345678',
-      code: '123456',
+      phone: '0812345678',
+      code: hashOtpForTest('123456'),
       isUsed: false,
     });
     customerRepoWrapper.findActiveByPhone.mockResolvedValue({
@@ -184,8 +205,8 @@ describe('AuthService', () => {
   it('finalizes expired deletion and creates new customer on OTP verify', async () => {
     const oldRequestedAt = new Date(Date.now() - 48 * 60 * 60 * 1000);
     otpRepo.findOne.mockResolvedValue({
-      phone: '+66812345678',
-      code: '123456',
+      phone: '0812345678',
+      code: hashOtpForTest('123456'),
       isUsed: false,
     });
     customerRepoWrapper.findActiveByPhone.mockResolvedValue({
@@ -340,7 +361,11 @@ describe('AuthService', () => {
   });
 
   it('creates customer on first OTP verify with local-format phone', async () => {
-    otpRepo.findOne.mockResolvedValue({ phone: '0811112222', code: '111111', isUsed: false });
+    otpRepo.findOne.mockResolvedValue({
+      phone: '0811112222',
+      code: hashOtpForTest('111111'),
+      isUsed: false,
+    });
     customerRepoWrapper.findActiveByPhone.mockResolvedValue(null);
 
     const result = await service.verifyOtp({ phone: '0811112222', code: '111111' });
@@ -350,13 +375,22 @@ describe('AuthService', () => {
   });
 
   it('normalizes +66 phone to local format on OTP verify', async () => {
-    otpRepo.findOne.mockResolvedValue({ phone: '0811112222', code: '111111', isUsed: false });
+    otpRepo.findOne.mockResolvedValue({
+      phone: '0811112222',
+      code: hashOtpForTest('111111'),
+      isUsed: false,
+    });
     customerRepoWrapper.findActiveByPhone.mockResolvedValue(null);
 
     const result = await service.verifyOtp({ phone: '+66811112222', code: '111111' });
 
     expect(otpRepo.findOne).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ phone: '0811112222' }) }),
+      expect.objectContaining({
+        where: expect.objectContaining({
+          phone: '0811112222',
+          code: hashOtpForTest('111111'),
+        }),
+      }),
     );
     expect(result.customer.phone).toBe('0811112222');
   });
