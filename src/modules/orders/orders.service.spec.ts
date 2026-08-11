@@ -650,6 +650,7 @@ describe('OrdersService', () => {
           },
         ],
         shippingFee: 0,
+        storeShippingFees: expect.any(Map),
       },
     );
   });
@@ -696,7 +697,10 @@ describe('OrdersService', () => {
       'FREESHIP',
       [],
       { guestPhone: '0812345678' },
-      expect.objectContaining({ shippingFee: 45 }),
+      expect.objectContaining({
+        shippingFee: 45,
+        storeShippingFees: expect.any(Map),
+      }),
     );
   });
 

@@ -419,6 +419,63 @@ describe('PromotionsService', () => {
       expect(result.discountAmount).toBe(20);
     });
 
+    it('STORE FREE_SHIPPING uses storeShippingFees for that store, not order-wide shippingFee', async () => {
+      promotionRepository.findOne.mockResolvedValue({
+        ...mockPromotion,
+        id: 'promo-store-ship',
+        code: 'STORESHIP',
+        scope: PromotionScope.STORE,
+        storeId: 'store-a',
+        type: PromotionType.FREE_SHIPPING,
+        discountValue: 0,
+      });
+
+      const result = await validateCodeExtended(service, 'STORESHIP', 1000, 'store-a', undefined, {
+        shippingFee: 100,
+        storeShippingFees: new Map([
+          ['store-a', 35],
+          ['store-b', 65],
+        ]),
+      });
+      expect(result.discountAmount).toBe(35);
+    });
+
+    it('rejects STORE promotion when validateCode is called without storeId', async () => {
+      promotionRepository.findOne.mockResolvedValue({
+        ...mockPromotion,
+        scope: PromotionScope.STORE,
+        storeId: 'store-a',
+      });
+
+      await expect(service.validateCode('STORE10', 1000)).rejects.toMatchObject({
+        response: { code: 'PROMOTION_STORE' },
+      });
+    });
+
+    it('rejects PLATFORM promotion when storeId is provided (store lane)', async () => {
+      promotionRepository.findOne.mockResolvedValue(mockPromotion);
+
+      await expect(service.validateCode('WELCOME10', 1000, 'store-a')).rejects.toMatchObject({
+        response: { code: 'PROMOTION_SCOPE' },
+      });
+    });
+
+    it('rejects STORE code on platform lane via requiredScope PLATFORM', async () => {
+      promotionRepository.findOne.mockResolvedValue({
+        ...mockPromotion,
+        scope: PromotionScope.STORE,
+        storeId: 'store-a',
+      });
+
+      await expect(
+        validateCodeExtended(service, 'STORE10', 1000, undefined, undefined, {
+          requiredScope: PromotionScope.PLATFORM,
+        }),
+      ).rejects.toMatchObject({
+        response: { code: 'PROMOTION_SCOPE' },
+      });
+    });
+
     it('applyStackedPromotions clamps shipping and item discounts against separate bases', async () => {
       promotionRepository.findOne.mockResolvedValue({
         ...mockPromotion,

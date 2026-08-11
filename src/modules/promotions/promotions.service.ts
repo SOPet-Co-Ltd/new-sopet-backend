@@ -49,6 +49,13 @@ export type ValidateCodeOptions = {
   newCustomerGateCache?: NewCustomerGateCache;
   /** Eligible base for shipping-type promotions (FREE_SHIPPING / *_SHIPPING_DISCOUNT). */
   shippingFee?: number;
+  /**
+   * Per-store shipping fees for STORE-scope shipping promotions.
+   * When present with a storeId, overrides `shippingFee` for that store's shipping types.
+   */
+  storeShippingFees?: Map<string, number>;
+  /** When set, promotion.scope must match or validate fails closed. */
+  requiredScope?: PromotionScope;
 };
 
 const SHIPPING_PROMOTION_TYPES: ReadonlySet<PromotionType> = new Set([
@@ -315,6 +322,29 @@ export class PromotionsService {
       throw new BadRequestException({ code: 'INVALID_PROMOTION', message: 'Invalid promo code' });
     }
 
+    if (options?.requiredScope && promotion.scope !== options.requiredScope) {
+      throw new BadRequestException({
+        code: 'PROMOTION_SCOPE',
+        message: 'Promotion not valid for this lane',
+      });
+    }
+
+    // Store promotions require an explicit storeId (fail closed for platform-lane misuse).
+    if (promotion.scope === PromotionScope.STORE && !storeId) {
+      throw new BadRequestException({
+        code: 'PROMOTION_STORE',
+        message: 'Promotion not valid for this store',
+      });
+    }
+
+    // Platform promotions cannot be applied in a store lane.
+    if (promotion.scope === PromotionScope.PLATFORM && storeId) {
+      throw new BadRequestException({
+        code: 'PROMOTION_SCOPE',
+        message: 'Promotion not valid for this lane',
+      });
+    }
+
     const now = new Date();
     if (promotion.startsAt && promotion.startsAt > now) {
       throw new BadRequestException({
@@ -360,7 +390,7 @@ export class PromotionsService {
       return this.resolveEligibilityFailure(promotion, gateReason, mode);
     }
 
-    const shippingFee = options?.shippingFee ?? 0;
+    const shippingFee = this.resolveShippingFeeBase(promotion, storeId, options);
     let discountAmount = 0;
     let freeUnits = 0;
 
@@ -720,6 +750,7 @@ export class PromotionsService {
       const platform = await this.validateCode(platformCode, subtotal, undefined, customer, {
         ...options,
         mode,
+        requiredScope: PromotionScope.PLATFORM,
       });
       absorb(platform);
     }
@@ -734,6 +765,7 @@ export class PromotionsService {
         const store = await this.validateCode(code, storeSubtotal, storeId, customer, {
           ...options,
           mode,
+          requiredScope: PromotionScope.STORE,
         });
         absorb(store);
       }
@@ -746,6 +778,25 @@ export class PromotionsService {
     shippingDiscountAmount = Math.min(shippingDiscountAmount, shippingFee);
     const discountAmount = itemDiscountAmount + shippingDiscountAmount;
     return { promotions, discountAmount, discountsByPromotionId, freeUnits };
+  }
+
+  /**
+   * Resolve shipping fee base for discount calculation.
+   * STORE shipping promos use that store's fee when storeShippingFees is provided.
+   */
+  private resolveShippingFeeBase(
+    promotion: Promotion,
+    storeId: string | undefined,
+    options?: ValidateCodeOptions,
+  ): number {
+    if (
+      promotion.scope === PromotionScope.STORE &&
+      storeId &&
+      options?.storeShippingFees?.has(storeId)
+    ) {
+      return options.storeShippingFees.get(storeId) ?? 0;
+    }
+    return options?.shippingFee ?? 0;
   }
 
   /**

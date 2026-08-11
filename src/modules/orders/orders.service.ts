@@ -275,6 +275,9 @@ export class OrdersService {
 
     const codes = storePromotionCodes ?? (promotionCode ? [promotionCode] : []);
     if (platformPromotionCode || codes.length) {
+      const storeShippingFees = new Map(
+        shippingRecords.map((record) => [record.storeId as string, Number(record.shippingFee)]),
+      );
       const stacked = await this.promotionsService.applyStackedPromotions(
         subtotal,
         storeSubtotals,
@@ -285,7 +288,7 @@ export class OrdersService {
           : normalizedGuestPhone
             ? { guestPhone: normalizedGuestPhone }
             : undefined,
-        { mode: 'apply', lines: promotionLines, shippingFee },
+        { mode: 'apply', lines: promotionLines, shippingFee, storeShippingFees },
       );
       discountAmount = stacked.discountAmount;
       appliedPromotions = stacked.promotions;
