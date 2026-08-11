@@ -194,8 +194,13 @@ function note(text: string): string {
   return `<p style="margin:18px 0 0;font-size:13px;line-height:1.6;color:${TEXT_MUTED};text-align:center;">${escapeHtml(text)}</p>`;
 }
 
-export function orderItemsTable(items: OrderPaidLineItem[]): string {
-  const rows = items
+/**
+ * Row fragments for CMS `{{itemsHtml}}` (injected inside the ORDER_PAID
+ * content template's items table). Must NOT wrap a full `<table>` — that
+ * double-wraps when the CMS body already has header + table chrome.
+ */
+export function orderItemsRows(items: OrderPaidLineItem[]): string {
+  return items
     .map((item, index) => {
       const variant = formatVariantOptions(item.variantOptions);
       const background = index % 2 === 0 ? '#FFFFFF' : BRAND_PRIMARY_SOFT;
@@ -211,7 +216,10 @@ export function orderItemsTable(items: OrderPaidLineItem[]): string {
       </tr>`;
     })
     .join('');
+}
 
+/** Full items table for the code-fallback `orderPaidTemplate` path. */
+export function orderItemsTable(items: OrderPaidLineItem[]): string {
   return `<table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;border:1px solid ${BORDER};border-radius:14px;overflow:hidden;">
     <tr style="background:${BRAND_PRIMARY_LIGHT};">
       <th align="left" style="padding:12px;font-size:12px;color:${BRAND_PRIMARY_DARK};text-transform:uppercase;letter-spacing:0.04em;">สินค้า</th>
@@ -219,7 +227,7 @@ export function orderItemsTable(items: OrderPaidLineItem[]): string {
       <th align="right" style="padding:12px 8px;font-size:12px;color:${BRAND_PRIMARY_DARK};text-transform:uppercase;letter-spacing:0.04em;">ราคา</th>
       <th align="right" style="padding:12px;font-size:12px;color:${BRAND_PRIMARY_DARK};text-transform:uppercase;letter-spacing:0.04em;">รวม</th>
     </tr>
-    ${rows}
+    ${orderItemsRows(items)}
   </table>`;
 }
 
