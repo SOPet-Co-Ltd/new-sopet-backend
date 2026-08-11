@@ -1,5 +1,5 @@
 import { OrderFulfillmentService } from './order-fulfillment.service';
-import { Order, OrderStatus } from '../../database/entities/order.entity';
+import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
 import { FulfillmentStatus, OrderItem } from '../../database/entities/order-item.entity';
 
 describe('OrderFulfillmentService hold guards', () => {
@@ -187,6 +187,24 @@ describe('OrderFulfillmentService hold guards', () => {
       await expect(
         service.markVendorOrderPaid('vendor-1', 'store-1', 'ord-1'),
       ).rejects.toMatchObject({ response: { code: 'INVALID_ORDER_STATUS' } });
+    });
+    it('rejects bank_transfer with BANK_TRANSFER_ADMIN_ONLY', async () => {
+      const items = [
+        {
+          id: 'item-1',
+          orderId: 'ord-1',
+          storeId: 'store-1',
+          fulfillmentStatus: FulfillmentStatus.PENDING,
+        },
+      ] as OrderItem[];
+      orderRepository.findOne.mockResolvedValue({
+        ...pendingPaymentOrder(items),
+        paymentMethod: PaymentMethod.BANK_TRANSFER,
+      });
+
+      await expect(
+        service.markVendorOrderPaid('vendor-1', 'store-1', 'ord-1'),
+      ).rejects.toMatchObject({ response: { code: 'BANK_TRANSFER_ADMIN_ONLY' } });
     });
   });
 });

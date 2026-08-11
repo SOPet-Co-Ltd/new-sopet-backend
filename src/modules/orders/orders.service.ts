@@ -613,9 +613,49 @@ export class OrdersService {
       .getMany();
   }
 
+  async findPendingBankTransferOrders(options?: {
+    page?: number;
+    limit?: number;
+  }): Promise<PaginatedResponse<Order>> {
+    const page = normalizeCustomerOrdersPage(options?.page);
+    const limit = normalizeCustomerOrdersLimit(options?.limit);
+
+    const [items, total] = await this.orderRepository.findAndCount({
+      where: {
+        paymentMethod: PaymentMethod.BANK_TRANSFER,
+        status: OrderStatus.PENDING_PAYMENT,
+      },
+      relations: ['items', 'shippingAddress', 'customer', 'storeShippings'],
+      order: { createdAt: 'ASC' },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+
+    return {
+      items,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+    };
+  }
+
   async updateStatus(id: string, status: OrderStatus, userId?: string): Promise<Order> {
     const order = await this.findOne(id);
     const previousStatus = order.status;
+
+    if (
+      order.paymentMethod === PaymentMethod.BANK_TRANSFER &&
+      previousStatus === OrderStatus.PENDING_PAYMENT &&
+      status === OrderStatus.PAID
+    ) {
+      throw new BadRequestException({
+        code: 'USE_CONFIRM_BANK_TRANSFER',
+        message: 'Use confirmBankTransferPaid to approve bank transfer payments',
+      });
+    }
 
     assertNotManualHoldTransition(previousStatus, status);
 

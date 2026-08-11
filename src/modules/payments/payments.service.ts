@@ -23,10 +23,14 @@ import { verifyOmiseWebhookSignature } from './omise-webhook.util';
 import { buildOmiseReturnUri } from './build-omise-return-uri';
 import {
   CheckoutPaymentMethod,
+  isNonOmiseCheckoutPaymentMethod,
   normalizeCheckoutPaymentMethod,
 } from '../../common/utils/checkout-payment.util';
 import { orderHasHeldItems } from '../orders/order-totals.util';
+import { deriveOrderStatusFromFulfillment } from '../orders/order-fulfillment.util';
+import { OrderStatusHistory } from '../../database/entities/order-status-history.entity';
 import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.service';
+import { BankTransferSettingsService } from '../platform/bank-transfer-settings.service';
 
 interface OmiseCharge {
   id: string;
@@ -91,6 +95,7 @@ export class PaymentsService {
     private payoutsService: PayoutsService,
     private storesService: StoresService,
     private vendorWebhooksService: VendorWebhooksService,
+    private bankTransferSettingsService: BankTransferSettingsService,
   ) {
     this.omiseSecretKey = this.configService.get<string>('omise.secretKey') ?? '';
     this.omisePublicKey = this.configService.get<string>('omise.publicKey') ?? '';
@@ -497,7 +502,30 @@ export class PaymentsService {
   private toOrderPaymentMethod(method: CheckoutPaymentMethod): PaymentMethod {
     if (method === 'promptpay') return PaymentMethod.PROMPTPAY;
     if (method === 'credit_card') return PaymentMethod.CREDIT_CARD;
+    if (method === 'bank_transfer') return PaymentMethod.BANK_TRANSFER;
     return PaymentMethod.COD;
+  }
+
+  async getBankTransferDetails(): Promise<{
+    bankName: string;
+    accountName: string;
+    accountNumber: string;
+    branchName: string | null;
+  } | null> {
+    const value = await this.bankTransferSettingsService.get();
+    if (!this.bankTransferSettingsService.isAvailable(value)) {
+      return null;
+    }
+    return {
+      bankName: value.bankName,
+      accountName: value.accountName,
+      accountNumber: value.accountNumber,
+      branchName: value.branchName,
+    };
+  }
+
+  async assertBankTransferConfigured(): Promise<void> {
+    await this.bankTransferSettingsService.getConfigured();
   }
 
   async expirePendingQrPayments(): Promise<number> {
@@ -907,7 +935,12 @@ export class PaymentsService {
 
         const orderPaymentMethod = this.toOrderPaymentMethod(paymentMethod);
 
-        if (paymentMethod === 'cod') {
+        if (isNonOmiseCheckoutPaymentMethod(paymentMethod)) {
+          if (paymentMethod === 'bank_transfer') {
+            // Ensure display config is present before accepting the method.
+            await this.assertBankTransferConfigured();
+          }
+
           const payment = manager.create(Payment, {
             orderId,
             amount,
@@ -1225,5 +1258,95 @@ export class PaymentsService {
     await this.paymentEventsService.publishPaymentStatusUpdated(payment);
     await this.notificationsService.notifyOrderPaid(order);
     this.vendorWebhooksService.dispatchOrderEvent(order.id, 'order.paid').catch(() => {});
+  }
+
+  /**
+   * Platform-admin confirmation for Direct Bank Transfer.
+   * Updates Payment + Order (unlike vendor mark-paid which only flips order status).
+   */
+  async confirmBankTransferPaid(
+    orderId: string,
+    adminUserId: string,
+    note?: string,
+  ): Promise<Order> {
+    const order = await this.orderRepository.findOne({
+      where: { id: orderId },
+      relations: ['items', 'shippingAddress', 'storeShippings', 'customer'],
+    });
+    if (!order) {
+      throw new NotFoundException({
+        code: 'ORDER_NOT_FOUND',
+        message: 'Order not found',
+      });
+    }
+
+    if (order.paymentMethod !== PaymentMethod.BANK_TRANSFER) {
+      throw new BadRequestException({
+        code: 'NOT_BANK_TRANSFER',
+        message: 'Order is not a bank transfer payment',
+      });
+    }
+
+    if (order.status !== OrderStatus.PENDING_PAYMENT) {
+      throw new BadRequestException({
+        code: 'INVALID_ORDER_STATUS',
+        message: 'Only pending payment bank transfer orders can be confirmed',
+      });
+    }
+
+    const payment = await this.paymentRepository.findOne({
+      where: { orderId },
+      order: { createdAt: 'DESC' },
+    });
+    if (!payment || payment.status === 'paid') {
+      throw new BadRequestException({
+        code: 'PAYMENT_NOT_CONFIRMABLE',
+        message: 'No pending bank transfer payment to confirm',
+      });
+    }
+    if (payment.paymentMethod !== PaymentMethod.BANK_TRANSFER) {
+      throw new BadRequestException({
+        code: 'NOT_BANK_TRANSFER',
+        message: 'Latest payment is not bank transfer',
+      });
+    }
+
+    await this.loadOrderItemsIfNeeded(order);
+
+    const nextStatus = deriveOrderStatusFromFulfillment(
+      OrderStatus.PAID,
+      (order.items ?? []).map((item) => item.fulfillmentStatus),
+    );
+
+    const reference = `bank_transfer:${adminUserId}`;
+    const historyNote = note?.trim()
+      ? `Admin confirmed bank transfer: ${note.trim()}`
+      : 'Admin confirmed bank transfer paid';
+
+    await this.paymentRepository.manager.transaction(async (trx) => {
+      payment.status = 'paid';
+      await trx.save(payment);
+
+      order.status = nextStatus;
+      order.paymentReference = reference;
+      order.paidAt = order.paidAt ?? new Date();
+      await trx.save(order);
+
+      await trx.save(
+        OrderStatusHistory,
+        trx.create(OrderStatusHistory, {
+          orderId: order.id,
+          status: nextStatus,
+          changedBy: adminUserId,
+          notes: historyNote,
+        }),
+      );
+    });
+
+    await this.paymentEventsService.publishPaymentStatusUpdated(payment);
+    await this.notificationsService.notifyOrderPaid(order);
+    this.vendorWebhooksService.dispatchOrderEvent(order.id, 'order.paid').catch(() => {});
+
+    return order;
   }
 }

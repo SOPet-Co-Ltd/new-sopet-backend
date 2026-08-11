@@ -19,6 +19,7 @@ import { OrdersResolver } from '../src/modules/orders/orders.resolver';
 import { OrdersService } from '../src/modules/orders/orders.service';
 import { OrderFulfillmentService } from '../src/modules/orders/order-fulfillment.service';
 import { ProductsService } from '../src/modules/products/products.service';
+import { PaymentsService } from '../src/modules/payments/payments.service';
 import { StoresService } from '../src/modules/stores/stores.service';
 import { VendorWebhooksService } from '../src/modules/vendor-webhooks/vendor-webhooks.service';
 import { Order, OrderStatus, PaymentMethod } from '../src/database/entities/order.entity';
@@ -286,6 +287,13 @@ describe('Order tracking (e2e)', () => {
         { provide: OrderFulfillmentService, useValue: {} },
         { provide: ProductsService, useValue: {} },
         { provide: StoresService, useValue: {} },
+        {
+          provide: PaymentsService,
+          useValue: {
+            confirmBankTransferPaid: jest.fn(),
+            getBankTransferDetails: jest.fn(),
+          },
+        },
         {
           provide: VendorWebhooksService,
           useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },

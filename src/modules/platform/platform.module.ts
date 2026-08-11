@@ -7,6 +7,7 @@ import { Setting } from '../../database/entities/setting.entity';
 import { RedisModule } from '../redis/redis.module';
 import { StorageModule } from '../storage/storage.module';
 import { LoginPageImagesSettingsService } from './login-page-images-settings.service';
+import { BankTransferSettingsService } from './bank-transfer-settings.service';
 import { PlatformService } from './platform.service';
 import { PlatformResolver } from './platform.resolver';
 
@@ -16,7 +17,12 @@ import { PlatformResolver } from './platform.resolver';
     RedisModule,
     StorageModule,
   ],
-  providers: [PlatformService, PlatformResolver, LoginPageImagesSettingsService],
-  exports: [PlatformService, LoginPageImagesSettingsService],
+  providers: [
+    PlatformService,
+    PlatformResolver,
+    LoginPageImagesSettingsService,
+    BankTransferSettingsService,
+  ],
+  exports: [PlatformService, LoginPageImagesSettingsService, BankTransferSettingsService],
 })
 export class PlatformModule {}

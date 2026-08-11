@@ -13,4 +13,5 @@ export enum PaymentMethod {
   PROMPTPAY = 'promptpay',
   CREDIT_CARD = 'credit_card',
   COD = 'cod',
+  BANK_TRANSFER = 'bank_transfer',
 }

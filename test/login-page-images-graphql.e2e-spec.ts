@@ -35,6 +35,7 @@ import { UserRole } from '../src/database/entities/user.entity';
 import { JwtAuthGuard } from '../src/modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../src/modules/auth/guards/roles.guard';
 import { LoginPageImagesSettingsService } from '../src/modules/platform/login-page-images-settings.service';
+import { BankTransferSettingsService } from '../src/modules/platform/bank-transfer-settings.service';
 import { PlatformResolver } from '../src/modules/platform/platform.resolver';
 import { PlatformService } from '../src/modules/platform/platform.service';
 import { RedisService } from '../src/modules/redis/redis.service';
@@ -173,6 +174,14 @@ describe('Login page images GraphQL HTTP (e2e)', () => {
         PlatformResolver,
         LoginPageImagesSettingsService,
         { provide: PlatformService, useValue: { getSettings: jest.fn() } },
+        {
+          provide: BankTransferSettingsService,
+          useValue: {
+            getConfigured: jest.fn().mockResolvedValue(null),
+            get: jest.fn(),
+            update: jest.fn(),
+          },
+        },
         { provide: getRepositoryToken(Setting), useValue: settingsRepository },
         { provide: RedisService, useValue: redisService },
         { provide: StorageService, useValue: storageService },

@@ -60,6 +60,7 @@ export function formatPaymentMethod(method: string): string {
     promptpay: 'พร้อมเพย์',
     credit_card: 'บัตรเครดิต/เดบิต',
     cod: 'เก็บเงินปลายทาง',
+    bank_transfer: 'โอนเงินเข้าบัญชี',
   };
 
   return labels[method] ?? method;

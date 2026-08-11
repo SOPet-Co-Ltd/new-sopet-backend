@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
-import { Order, OrderStatus } from '../../database/entities/order.entity';
+import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
 import { FulfillmentStatus, OrderItem } from '../../database/entities/order-item.entity';
 import { OrderStatusHistory } from '../../database/entities/order-status-history.entity';
 import { Payment } from '../../database/entities/payment.entity';
@@ -160,6 +160,13 @@ export class OrderFulfillmentService {
   async markVendorOrderPaid(userId: string, storeId: string, orderId: string): Promise<Order> {
     const order = await this.loadOrderWithItems(orderId);
     await this.assertVendorStoreAccess(userId, order, storeId);
+
+    if (order.paymentMethod === PaymentMethod.BANK_TRANSFER) {
+      throw new BadRequestException({
+        code: 'BANK_TRANSFER_ADMIN_ONLY',
+        message: 'Bank transfer payments can only be confirmed by platform admin',
+      });
+    }
 
     if (order.status !== OrderStatus.PENDING_PAYMENT) {
       throw new BadRequestException({

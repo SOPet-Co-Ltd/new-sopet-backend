@@ -632,6 +632,39 @@ export class PaymentType {
 }
 
 @ObjectType()
+export class BankTransferDetailsType {
+  @Field()
+  bankName!: string;
+
+  @Field()
+  accountName!: string;
+
+  @Field()
+  accountNumber!: string;
+
+  @Field(() => String, { nullable: true })
+  branchName?: string | null;
+}
+
+@ObjectType()
+export class BankTransferSettingsType {
+  @Field()
+  enabled!: boolean;
+
+  @Field()
+  bankName!: string;
+
+  @Field()
+  accountName!: string;
+
+  @Field()
+  accountNumber!: string;
+
+  @Field(() => String, { nullable: true })
+  branchName?: string | null;
+}
+
+@ObjectType()
 export class FavoriteType {
   @Field()
   id!: string;

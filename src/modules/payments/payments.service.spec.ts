@@ -15,6 +15,7 @@ import { InventoryService } from '../inventory/inventory.service';
 import { PayoutsService } from '../payouts/payouts.service';
 import { StoresService } from '../stores/stores.service';
 import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.service';
+import { BankTransferSettingsService } from '../platform/bank-transfer-settings.service';
 
 const paymentEventsServiceMock = {
   publishPaymentStatusUpdated: jest.fn(),
@@ -118,6 +119,27 @@ describe('PaymentsService guest access', () => {
         {
           provide: VendorWebhooksService,
           useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: BankTransferSettingsService,
+          useValue: {
+            getConfigured: jest.fn().mockResolvedValue({
+              enabled: true,
+              bankName: 'Test Bank',
+              accountName: 'SOPET',
+              accountNumber: '1234567890',
+              branchName: null,
+            }),
+            isAvailable: jest.fn().mockReturnValue(true),
+            get: jest.fn().mockResolvedValue({
+              enabled: true,
+              bankName: 'Test Bank',
+              accountName: 'SOPET',
+              accountNumber: '1234567890',
+              branchName: null,
+            }),
+            update: jest.fn(),
+          },
         },
       ],
     }).compile();
@@ -243,6 +265,27 @@ describe('PaymentsService payment read queries', () => {
         {
           provide: VendorWebhooksService,
           useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: BankTransferSettingsService,
+          useValue: {
+            getConfigured: jest.fn().mockResolvedValue({
+              enabled: true,
+              bankName: 'Test Bank',
+              accountName: 'SOPET',
+              accountNumber: '1234567890',
+              branchName: null,
+            }),
+            isAvailable: jest.fn().mockReturnValue(true),
+            get: jest.fn().mockResolvedValue({
+              enabled: true,
+              bankName: 'Test Bank',
+              accountName: 'SOPET',
+              accountNumber: '1234567890',
+              branchName: null,
+            }),
+            update: jest.fn(),
+          },
         },
       ],
     }).compile();
@@ -398,6 +441,27 @@ describe('PaymentsService createCharge return_uri', () => {
           provide: VendorWebhooksService,
           useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
         },
+        {
+          provide: BankTransferSettingsService,
+          useValue: {
+            getConfigured: jest.fn().mockResolvedValue({
+              enabled: true,
+              bankName: 'Test Bank',
+              accountName: 'SOPET',
+              accountNumber: '1234567890',
+              branchName: null,
+            }),
+            isAvailable: jest.fn().mockReturnValue(true),
+            get: jest.fn().mockResolvedValue({
+              enabled: true,
+              bankName: 'Test Bank',
+              accountName: 'SOPET',
+              accountNumber: '1234567890',
+              branchName: null,
+            }),
+            update: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
@@ -529,6 +593,22 @@ describe('PaymentsService createCharge return_uri', () => {
     expect(result.paymentMethod).toBe('cod');
   });
 
+  it('does not call Omise for bank_transfer', async () => {
+    service = await compileService(STOREFRONT_ORIGIN);
+
+    const result = await service.createCharge({
+      orderId: 'ord-1',
+      amount: 300,
+      currency: 'THB',
+      paymentMethod: 'bank_transfer',
+      customerId: 'cust-1',
+    });
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(result.paymentId).toBe(PAYMENT_ID);
+    expect(result.paymentMethod).toBe('bank_transfer');
+  });
+
   it('fails loudly when app.storefrontUrl is missing for credit_card', async () => {
     service = await compileService(undefined);
 
@@ -628,6 +708,27 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
         {
           provide: VendorWebhooksService,
           useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: BankTransferSettingsService,
+          useValue: {
+            getConfigured: jest.fn().mockResolvedValue({
+              enabled: true,
+              bankName: 'Test Bank',
+              accountName: 'SOPET',
+              accountNumber: '1234567890',
+              branchName: null,
+            }),
+            isAvailable: jest.fn().mockReturnValue(true),
+            get: jest.fn().mockResolvedValue({
+              enabled: true,
+              bankName: 'Test Bank',
+              accountName: 'SOPET',
+              accountNumber: '1234567890',
+              branchName: null,
+            }),
+            update: jest.fn(),
+          },
         },
       ],
     }).compile();
@@ -1000,6 +1101,27 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
         {
           provide: VendorWebhooksService,
           useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: BankTransferSettingsService,
+          useValue: {
+            getConfigured: jest.fn().mockResolvedValue({
+              enabled: true,
+              bankName: 'Test Bank',
+              accountName: 'SOPET',
+              accountNumber: '1234567890',
+              branchName: null,
+            }),
+            isAvailable: jest.fn().mockReturnValue(true),
+            get: jest.fn().mockResolvedValue({
+              enabled: true,
+              bankName: 'Test Bank',
+              accountName: 'SOPET',
+              accountNumber: '1234567890',
+              branchName: null,
+            }),
+            update: jest.fn(),
+          },
         },
       ],
     }).compile();
@@ -1577,6 +1699,27 @@ describe('PaymentsService cancelStaleUnpaidOrders (AC-019–021)', () => {
           provide: VendorWebhooksService,
           useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
         },
+        {
+          provide: BankTransferSettingsService,
+          useValue: {
+            getConfigured: jest.fn().mockResolvedValue({
+              enabled: true,
+              bankName: 'Test Bank',
+              accountName: 'SOPET',
+              accountNumber: '1234567890',
+              branchName: null,
+            }),
+            isAvailable: jest.fn().mockReturnValue(true),
+            get: jest.fn().mockResolvedValue({
+              enabled: true,
+              bankName: 'Test Bank',
+              accountName: 'SOPET',
+              accountNumber: '1234567890',
+              branchName: null,
+            }),
+            update: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
@@ -1930,6 +2073,27 @@ describe('PaymentsService payment held gate + Decision #16 recompute (AC-026–0
           provide: VendorWebhooksService,
           useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
         },
+        {
+          provide: BankTransferSettingsService,
+          useValue: {
+            getConfigured: jest.fn().mockResolvedValue({
+              enabled: true,
+              bankName: 'Test Bank',
+              accountName: 'SOPET',
+              accountNumber: '1234567890',
+              branchName: null,
+            }),
+            isAvailable: jest.fn().mockReturnValue(true),
+            get: jest.fn().mockResolvedValue({
+              enabled: true,
+              bankName: 'Test Bank',
+              accountName: 'SOPET',
+              accountNumber: '1234567890',
+              branchName: null,
+            }),
+            update: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
@@ -2094,6 +2258,27 @@ describe('PaymentsService saveCustomerCard', () => {
         {
           provide: VendorWebhooksService,
           useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: BankTransferSettingsService,
+          useValue: {
+            getConfigured: jest.fn().mockResolvedValue({
+              enabled: true,
+              bankName: 'Test Bank',
+              accountName: 'SOPET',
+              accountNumber: '1234567890',
+              branchName: null,
+            }),
+            isAvailable: jest.fn().mockReturnValue(true),
+            get: jest.fn().mockResolvedValue({
+              enabled: true,
+              bankName: 'Test Bank',
+              accountName: 'SOPET',
+              accountNumber: '1234567890',
+              branchName: null,
+            }),
+            update: jest.fn(),
+          },
         },
       ],
     }).compile();

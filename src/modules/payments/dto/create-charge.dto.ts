@@ -22,12 +22,12 @@ export class CreateChargeDto {
 
   @ApiProperty({
     description: 'Payment method used for the charge',
-    enum: ['promptpay', 'credit_card', 'cod'],
+    enum: ['promptpay', 'credit_card', 'cod', 'bank_transfer'],
     example: 'credit_card',
   })
   @IsNotEmpty()
-  @IsEnum(['promptpay', 'credit_card', 'cod'])
-  paymentMethod!: 'promptpay' | 'credit_card' | 'cod';
+  @IsEnum(['promptpay', 'credit_card', 'cod', 'bank_transfer'])
+  paymentMethod!: 'promptpay' | 'credit_card' | 'cod' | 'bank_transfer';
 
   @ApiProperty({
     description: 'ISO 4217 currency code',

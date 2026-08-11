@@ -405,6 +405,7 @@ export class AnalyticsService {
       promptpay: 'PromptPay',
       credit_card: 'บัตรเครดิต',
       cod: 'เก็บเงินปลายทาง',
+      bank_transfer: 'โอนเงินเข้าบัญชี',
     };
 
     return labels[method] ?? method;

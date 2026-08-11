@@ -41,6 +41,7 @@ import { InventoryService } from '../src/modules/inventory/inventory.service';
 import { PayoutsService } from '../src/modules/payouts/payouts.service';
 import { StoresService } from '../src/modules/stores/stores.service';
 import { VendorWebhooksService } from '../src/modules/vendor-webhooks/vendor-webhooks.service';
+import { BankTransferSettingsService } from '../src/modules/platform/bank-transfer-settings.service';
 
 const paymentEventsServiceMock = {
   publishPaymentStatusUpdated: jest.fn(),
@@ -176,6 +177,20 @@ describe('unpaid-order-payment-method-switch integration', () => {
         {
           provide: VendorWebhooksService,
           useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: BankTransferSettingsService,
+          useValue: {
+            getConfigured: jest.fn().mockResolvedValue(null),
+            isAvailable: jest.fn().mockReturnValue(false),
+            get: jest.fn().mockResolvedValue({
+              enabled: false,
+              bankName: '',
+              accountName: '',
+              accountNumber: '',
+              branchName: null,
+            }),
+          },
         },
       ],
     }).compile();
