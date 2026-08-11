@@ -724,6 +724,7 @@ export class PromotionsService {
     const discountsByPromotionId: Record<string, number> = {};
     let itemDiscountAmount = 0;
     let shippingDiscountAmount = 0;
+    let remainingShippingFee = Math.max(0, shippingFee);
     let freeUnits = 0;
 
     const absorb = (result: ValidateCodeResult): void => {
@@ -737,10 +738,16 @@ export class PromotionsService {
         return;
       }
       promotions.push(result.promotion);
-      discountsByPromotionId[result.promotion.id] = result.discountAmount;
+
+      // Shipping-family promos share one fee pool (order shippingFee). Assign sequentially
+      // so platform + store FREE_SHIPPING cannot both claim the full fee in discountsByPromotionId.
       if (SHIPPING_PROMOTION_TYPES.has(result.promotion.type)) {
-        shippingDiscountAmount += result.discountAmount;
+        const applied = Math.min(Math.max(0, result.discountAmount), remainingShippingFee);
+        discountsByPromotionId[result.promotion.id] = applied;
+        shippingDiscountAmount += applied;
+        remainingShippingFee -= applied;
       } else {
+        discountsByPromotionId[result.promotion.id] = result.discountAmount;
         itemDiscountAmount += result.discountAmount;
       }
       freeUnits += result.freeUnits;

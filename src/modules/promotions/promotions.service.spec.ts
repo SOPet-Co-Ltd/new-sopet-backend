@@ -496,6 +496,55 @@ describe('PromotionsService', () => {
       // A free-shipping promo must not be clamped against the (much larger) subtotal.
       expect(result.discountAmount).toBe(40);
     });
+
+    it('platform + store FREE_SHIPPING share one shipping fee (no double discount)', async () => {
+      const platformFree = {
+        ...mockPromotion,
+        id: 'promo-plat-ship',
+        code: 'PLATFREE',
+        type: PromotionType.FREE_SHIPPING,
+        scope: PromotionScope.PLATFORM,
+        storeId: null,
+        discountValue: 0,
+      };
+      const storeFree = {
+        ...mockPromotion,
+        id: 'promo-store-ship',
+        code: 'STOREFREE',
+        type: PromotionType.FREE_SHIPPING,
+        scope: PromotionScope.STORE,
+        storeId: 'store-1',
+        discountValue: 0,
+      };
+
+      promotionRepository.findOne
+        .mockResolvedValueOnce(platformFree)
+        .mockResolvedValueOnce(storeFree)
+        .mockResolvedValueOnce(storeFree);
+
+      const result = await applyStackedExtended(
+        service,
+        856,
+        new Map([['store-1', 856]]),
+        'PLATFREE',
+        ['STOREFREE'],
+        undefined,
+        {
+          mode: 'apply',
+          shippingFee: 50,
+          storeShippingFees: new Map([['store-1', 50]]),
+        },
+      );
+
+      expect(result.discountAmount).toBe(50);
+      expect(result.discountsByPromotionId).toEqual({
+        'promo-plat-ship': 50,
+        'promo-store-ship': 0,
+      });
+      expect(
+        Object.values(result.discountsByPromotionId).reduce((sum, amount) => sum + amount, 0),
+      ).toBe(50);
+    });
   });
 
   it('finds active platform promotions', async () => {
