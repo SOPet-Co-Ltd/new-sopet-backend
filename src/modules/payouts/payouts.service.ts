@@ -52,10 +52,7 @@ export class PayoutsService {
     });
   }
 
-  async findPendingManualPayouts(params: {
-    page?: number;
-    limit?: number;
-  }): Promise<{
+  async findPendingManualPayouts(params: { page?: number; limit?: number }): Promise<{
     items: Payout[];
     pagination: { page: number; limit: number; total: number; totalPages: number };
   }> {
