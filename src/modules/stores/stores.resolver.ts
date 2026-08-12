@@ -938,6 +938,18 @@ export class StoresResolver {
     return mapMyStore(store, true);
   }
 
+  @Mutation(() => MyStoreType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('vendor')
+  async linkStoreOmiseRecipient(
+    @CurrentUser('storeId') storeId: string,
+    @CurrentUser('id') userId: string,
+  ): Promise<MyStoreType> {
+    await this.storesService.assertStoreOwner(userId, storeId);
+    const store = await this.storesService.linkStoreOmiseRecipient(storeId);
+    return mapMyStore(store, true);
+  }
+
   @Mutation(() => StoreShippingOptionType)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('vendor')

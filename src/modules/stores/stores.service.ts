@@ -500,14 +500,23 @@ export class StoresService {
     if (data.bankName !== undefined) store.bankName = data.bankName;
     if (data.bankCode !== undefined) store.bankCode = data.bankCode;
 
-    // Persist the bank details first so vendor input is never lost, even if the
-    // downstream Omise recipient binding fails.
-    await this.storeRepository.save(store);
-
+    // Persist bank details only. Omise recipient linking is a separate explicit step
+    // (linkStoreOmiseRecipient) so vendors can save account info without waiting on Omise.
     if (bankDetailsChanged) {
-      await this.syncOmiseRecipient(store);
+      // Saved bank no longer matches Omise recipient until vendor re-links.
+      store.omiseRecipientStatus = OmiseRecipientStatus.NOT_CONNECTED;
+      store.omiseRecipientFailureMessage = null;
     }
 
+    return this.storeRepository.save(store);
+  }
+
+  /**
+   * Explicitly create/update the Omise recipient from the store's saved bank details.
+   */
+  async linkStoreOmiseRecipient(storeId: string): Promise<Store> {
+    const store = await this.findOne(storeId);
+    await this.syncOmiseRecipient(store);
     return this.storeRepository.save(store);
   }
 

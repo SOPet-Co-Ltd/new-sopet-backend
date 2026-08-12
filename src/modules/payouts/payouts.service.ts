@@ -2,17 +2,31 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from '@nes
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In, IsNull, Repository } from 'typeorm';
-import { Payout, PayoutStatus } from '../../database/entities/payout.entity';
+import { Payout, PayoutSettlementRail, PayoutStatus } from '../../database/entities/payout.entity';
 import { FulfillmentStatus, OrderItem } from '../../database/entities/order-item.entity';
-import { Order, OrderStatus } from '../../database/entities/order.entity';
+import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
 import { Store, OmiseRecipientStatus } from '../../database/entities/store.entity';
 import { Promotion, PromotionScope } from '../../database/entities/promotion.entity';
 import { PromotionUsage } from '../../database/entities/promotion-usage.entity';
 import { OmiseService, OmiseTransfer } from '../omise/omise.service';
-import { CreatePayoutOptions, PayoutSummary, TriggerPayoutOptions } from './payouts.types';
+import { NotificationsService } from '../notifications/notifications.service';
+import {
+  CreatePayoutOptions,
+  PayoutRailSummary,
+  PayoutSummary,
+  RejectManualPayoutOptions,
+  SettleManualPayoutOptions,
+  TriggerPayoutOptions,
+} from './payouts.types';
 
 const PAID_OUT_STATUSES = [PayoutStatus.PENDING, PayoutStatus.PROCESSING, PayoutStatus.COMPLETED];
 const PENDING_STATUSES = [PayoutStatus.PENDING, PayoutStatus.PROCESSING];
+
+/** Omise-collected customer payments — settle via Omise transfer. */
+const OMISE_PAYMENT_METHODS = [PaymentMethod.PROMPTPAY, PaymentMethod.CREDIT_CARD];
+
+/** Platform bank-collected — settle via admin manual bank transfer to vendor. */
+const MANUAL_PAYMENT_METHODS = [PaymentMethod.BANK_TRANSFER];
 
 @Injectable()
 export class PayoutsService {
@@ -28,6 +42,7 @@ export class PayoutsService {
     private readonly dataSource: DataSource,
     private readonly omiseService: OmiseService,
     private readonly configService: ConfigService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async findByStore(storeId: string): Promise<Payout[]> {
@@ -37,31 +52,96 @@ export class PayoutsService {
     });
   }
 
+  async findPendingManualPayouts(params: {
+    page?: number;
+    limit?: number;
+  }): Promise<{
+    items: Payout[];
+    pagination: { page: number; limit: number; total: number; totalPages: number };
+  }> {
+    const page = Math.max(1, params.page ?? 1);
+    const limit = Math.min(100, Math.max(1, params.limit ?? 20));
+
+    const [items, total] = await this.payoutRepository.findAndCount({
+      where: {
+        settlementRail: PayoutSettlementRail.MANUAL,
+        status: PayoutStatus.PENDING,
+      },
+      relations: ['store'],
+      order: { createdAt: 'ASC' },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+
+    return {
+      items,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+    };
+  }
+
   async getPayoutSummary(storeId: string): Promise<PayoutSummary> {
     await this.assertStoreExists(storeId);
 
+    const [omise, manual, minimumPayoutAmount] = await Promise.all([
+      this.buildRailSummary(storeId, PayoutSettlementRail.OMISE, OMISE_PAYMENT_METHODS),
+      this.buildRailSummary(storeId, PayoutSettlementRail.MANUAL, MANUAL_PAYMENT_METHODS),
+      Promise.resolve(this.getMinimumPayoutAmount()),
+    ]);
+
+    // Top-level fields remain Omise-rail for backward-compatible clients / scheduler.
+    return {
+      storeId,
+      grossRevenue: omise.grossRevenue,
+      totalPaidOut: omise.totalPaidOut,
+      availableBalance: omise.availableBalance,
+      pendingPayoutAmount: omise.pendingPayoutAmount,
+      minimumPayoutAmount,
+      canRequestPayout: omise.canRequestPayout,
+      omise,
+      manual,
+    };
+  }
+
+  private async buildRailSummary(
+    storeId: string,
+    rail: PayoutSettlementRail,
+    paymentMethods: PaymentMethod[],
+  ): Promise<PayoutRailSummary> {
     const [grossRevenue, totalPaidOut, pendingPayoutAmount, orphanPending] = await Promise.all([
-      this.calculateGrossRevenue(storeId),
-      this.calculateTotalPaidOut(storeId),
-      this.calculatePendingPayoutAmount(storeId),
-      this.findOrphanPendingPayout(storeId),
+      this.calculateGrossRevenue(storeId, paymentMethods),
+      this.calculateTotalPaidOut(storeId, rail),
+      this.calculatePendingPayoutAmount(storeId, rail),
+      rail === PayoutSettlementRail.OMISE
+        ? this.findOrphanPendingPayout(storeId)
+        : Promise.resolve(null),
     ]);
 
     const availableBalance = Math.max(0, grossRevenue - totalPaidOut);
-    const minimumPayoutAmount = this.getMinimumPayoutAmount();
     const hasPending = pendingPayoutAmount > 0;
+    const minimumPayoutAmount = this.getMinimumPayoutAmount();
+
+    let canRequestPayout = false;
+    if (rail === PayoutSettlementRail.OMISE) {
+      canRequestPayout = orphanPending
+        ? true
+        : !hasPending && availableBalance >= minimumPayoutAmount && availableBalance > 0;
+    } else {
+      // Manual rail: vendor requests; admin transfers offline then approves.
+      canRequestPayout =
+        !hasPending && availableBalance >= minimumPayoutAmount && availableBalance > 0;
+    }
 
     return {
-      storeId,
       grossRevenue,
       totalPaidOut,
       availableBalance,
       pendingPayoutAmount,
-      minimumPayoutAmount,
-      // Orphan pending rows (DB-only, never sent to Omise) are retryable.
-      canRequestPayout: orphanPending
-        ? true
-        : !hasPending && availableBalance >= minimumPayoutAmount && availableBalance > 0,
+      canRequestPayout,
     };
   }
 
@@ -77,29 +157,30 @@ export class PayoutsService {
     }
 
     const summary = await this.getPayoutSummary(storeId);
+    const omise = summary.omise;
 
-    if (summary.pendingPayoutAmount > 0) {
+    if (omise.pendingPayoutAmount > 0) {
       throw new BadRequestException({
         code: 'PAYOUT_ALREADY_PENDING',
-        message: 'A payout is already pending for this store',
+        message: 'An Omise payout is already pending for this store',
       });
     }
 
-    if (summary.availableBalance <= 0) {
+    if (omise.availableBalance <= 0) {
       throw new BadRequestException({
         code: 'INSUFFICIENT_BALANCE',
-        message: 'No funds available for payout',
+        message: 'No Omise funds available for payout',
       });
     }
 
-    if (summary.availableBalance < summary.minimumPayoutAmount) {
+    if (omise.availableBalance < summary.minimumPayoutAmount) {
       throw new BadRequestException({
         code: 'PAYOUT_BELOW_MINIMUM',
         message: `Minimum payout amount is ${summary.minimumPayoutAmount}`,
       });
     }
 
-    return this.createManualPayout(storeId, summary.availableBalance, {
+    return this.createOmisePayout(storeId, omise.availableBalance, {
       processedBy,
       notes: 'Vendor requested payout',
     });
@@ -113,7 +194,7 @@ export class PayoutsService {
     }
 
     const summary = await this.getPayoutSummary(storeId);
-    const amount = options.amount ?? summary.availableBalance;
+    const amount = options.amount ?? summary.omise.availableBalance;
 
     if (amount <= 0) {
       throw new BadRequestException({
@@ -122,10 +203,10 @@ export class PayoutsService {
       });
     }
 
-    if (amount > summary.availableBalance) {
+    if (amount > summary.omise.availableBalance) {
       throw new BadRequestException({
         code: 'INSUFFICIENT_BALANCE',
-        message: 'Payout amount exceeds available balance',
+        message: 'Payout amount exceeds Omise available balance',
       });
     }
 
@@ -136,13 +217,232 @@ export class PayoutsService {
       });
     }
 
-    return this.createManualPayout(storeId, amount, {
+    return this.createOmisePayout(storeId, amount, {
       processedBy: options.processedBy,
-      notes: options.notes ?? 'Admin triggered payout',
+      notes: options.notes ?? 'Admin triggered Omise payout',
     });
   }
 
+  /**
+   * Vendor requests settlement of bank_transfer revenue (manual rail).
+   * Creates a PENDING payout; admin transfers offline then calls settleManualPayout.
+   */
+  async requestManualPayout(storeId: string, processedBy?: string): Promise<Payout> {
+    const store = await this.storeRepository.findOne({ where: { id: storeId } });
+    if (!store) {
+      throw new NotFoundException({ code: 'STORE_NOT_FOUND', message: 'Store not found' });
+    }
+
+    const summary = await this.getPayoutSummary(storeId);
+    const manual = summary.manual;
+
+    if (manual.pendingPayoutAmount > 0) {
+      throw new BadRequestException({
+        code: 'PAYOUT_ALREADY_PENDING',
+        message: 'A manual payout is already pending for this store',
+      });
+    }
+
+    if (manual.availableBalance <= 0) {
+      throw new BadRequestException({
+        code: 'INSUFFICIENT_BALANCE',
+        message: 'No bank-transfer funds available for payout',
+      });
+    }
+
+    if (manual.availableBalance < summary.minimumPayoutAmount) {
+      throw new BadRequestException({
+        code: 'PAYOUT_BELOW_MINIMUM',
+        message: `Minimum payout amount is ${summary.minimumPayoutAmount}`,
+      });
+    }
+
+    const amount = manual.availableBalance;
+    const fee = 0;
+    const netAmount = amount - fee;
+
+    const payout = await this.dataSource.transaction(async (manager) => {
+      await this.lockStoreRowForPayout(manager, storeId);
+      await this.assertNoConcurrentPendingPayout(manager, storeId, PayoutSettlementRail.MANUAL);
+
+      const created = manager.getRepository(Payout).create({
+        storeId,
+        amount,
+        fee,
+        netAmount,
+        status: PayoutStatus.PENDING,
+        settlementRail: PayoutSettlementRail.MANUAL,
+        transferReference: null,
+        processedBy: processedBy ?? null,
+        processedAt: null,
+        notes: 'Vendor requested manual payout',
+      });
+      return manager.getRepository(Payout).save(created);
+    });
+
+    try {
+      await this.notificationsService.notifyAdminsAboutManualPayoutRequest({
+        payoutId: payout.id,
+        storeId,
+        storeName: store.name,
+        amount: Number(payout.amount),
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Failed to notify admins about manual payout ${payout.id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+
+    return payout;
+  }
+
+  /**
+   * Admin approves a pending manual payout after transferring funds outside Omise.
+   */
+  async settleManualPayout(
+    storeId: string,
+    options: SettleManualPayoutOptions = {},
+  ): Promise<Payout> {
+    const store = await this.storeRepository.findOne({ where: { id: storeId } });
+    if (!store) {
+      throw new NotFoundException({ code: 'STORE_NOT_FOUND', message: 'Store not found' });
+    }
+
+    const pending = await this.resolvePendingManualPayout(storeId, options.payoutId);
+    const now = new Date();
+
+    return this.dataSource.transaction(async (manager) => {
+      await this.lockStoreRowForPayout(manager, storeId);
+
+      const locked = await manager
+        .getRepository(Payout)
+        .createQueryBuilder('payout')
+        .where('payout.id = :id', { id: pending.id })
+        .setLock('pessimistic_write')
+        .getOne();
+      if (!locked || locked.status !== PayoutStatus.PENDING) {
+        throw new BadRequestException({
+          code: 'PAYOUT_NOT_PENDING',
+          message: 'Manual payout is no longer pending',
+        });
+      }
+      if (locked.storeId !== storeId || locked.settlementRail !== PayoutSettlementRail.MANUAL) {
+        throw new BadRequestException({
+          code: 'PAYOUT_MISMATCH',
+          message: 'Payout does not belong to this store manual rail',
+        });
+      }
+
+      locked.status = PayoutStatus.COMPLETED;
+      locked.processedBy = options.processedBy ?? locked.processedBy;
+      locked.processedAt = now;
+      locked.notes = options.notes ?? locked.notes ?? 'Admin approved manual payout after transfer';
+      return manager.getRepository(Payout).save(locked);
+    });
+  }
+
+  /**
+   * Admin rejects a pending manual payout (vendor may request again).
+   */
+  async rejectManualPayout(
+    storeId: string,
+    options: RejectManualPayoutOptions = {},
+  ): Promise<Payout> {
+    const store = await this.storeRepository.findOne({ where: { id: storeId } });
+    if (!store) {
+      throw new NotFoundException({ code: 'STORE_NOT_FOUND', message: 'Store not found' });
+    }
+
+    const pending = await this.resolvePendingManualPayout(storeId, options.payoutId);
+    const now = new Date();
+
+    return this.dataSource.transaction(async (manager) => {
+      await this.lockStoreRowForPayout(manager, storeId);
+
+      const locked = await manager
+        .getRepository(Payout)
+        .createQueryBuilder('payout')
+        .where('payout.id = :id', { id: pending.id })
+        .setLock('pessimistic_write')
+        .getOne();
+      if (!locked || locked.status !== PayoutStatus.PENDING) {
+        throw new BadRequestException({
+          code: 'PAYOUT_NOT_PENDING',
+          message: 'Manual payout is no longer pending',
+        });
+      }
+      if (locked.storeId !== storeId || locked.settlementRail !== PayoutSettlementRail.MANUAL) {
+        throw new BadRequestException({
+          code: 'PAYOUT_MISMATCH',
+          message: 'Payout does not belong to this store manual rail',
+        });
+      }
+
+      locked.status = PayoutStatus.FAILED;
+      locked.processedBy = options.processedBy ?? locked.processedBy;
+      locked.processedAt = now;
+      locked.failureReason = options.notes ?? 'Admin rejected manual payout request';
+      locked.notes = options.notes ?? locked.notes;
+      return manager.getRepository(Payout).save(locked);
+    });
+  }
+
+  private async resolvePendingManualPayout(storeId: string, payoutId?: string): Promise<Payout> {
+    if (payoutId) {
+      const payout = await this.payoutRepository.findOne({ where: { id: payoutId } });
+      if (!payout) {
+        throw new NotFoundException({ code: 'PAYOUT_NOT_FOUND', message: 'Payout not found' });
+      }
+      if (payout.storeId !== storeId) {
+        throw new BadRequestException({
+          code: 'PAYOUT_MISMATCH',
+          message: 'Payout does not belong to this store',
+        });
+      }
+      if (payout.settlementRail !== PayoutSettlementRail.MANUAL) {
+        throw new BadRequestException({
+          code: 'PAYOUT_WRONG_RAIL',
+          message: 'Payout is not on the manual settlement rail',
+        });
+      }
+      if (payout.status !== PayoutStatus.PENDING) {
+        throw new BadRequestException({
+          code: 'PAYOUT_NOT_PENDING',
+          message: 'Manual payout is not pending',
+        });
+      }
+      return payout;
+    }
+
+    const pending = await this.payoutRepository.findOne({
+      where: {
+        storeId,
+        settlementRail: PayoutSettlementRail.MANUAL,
+        status: PayoutStatus.PENDING,
+      },
+      order: { createdAt: 'ASC' },
+    });
+    if (!pending) {
+      throw new BadRequestException({
+        code: 'NO_PENDING_MANUAL_PAYOUT',
+        message: 'No pending manual payout request for this store — vendor must request first',
+      });
+    }
+    return pending;
+  }
+
+  /** @deprecated Use createOmisePayout — kept for scheduler call sites. */
   async createManualPayout(
+    storeId: string,
+    amount: number,
+    options: CreatePayoutOptions = {},
+  ): Promise<Payout> {
+    return this.createOmisePayout(storeId, amount, options);
+  }
+
+  async createOmisePayout(
     storeId: string,
     amount: number,
     options: CreatePayoutOptions = {},
@@ -171,7 +471,7 @@ export class PayoutsService {
     // fast-fail for the common case).
     const payout = await this.dataSource.transaction(async (manager) => {
       await this.lockStoreRowForPayout(manager, storeId);
-      await this.assertNoConcurrentPendingPayout(manager, storeId);
+      await this.assertNoConcurrentPendingPayout(manager, storeId, PayoutSettlementRail.OMISE);
 
       const created = manager.getRepository(Payout).create({
         storeId,
@@ -179,6 +479,7 @@ export class PayoutsService {
         fee,
         netAmount,
         status: PayoutStatus.PENDING,
+        settlementRail: PayoutSettlementRail.OMISE,
         processedBy: options.processedBy ?? null,
         notes: options.notes ?? null,
       });
@@ -212,15 +513,16 @@ export class PayoutsService {
   private async assertNoConcurrentPendingPayout(
     manager: EntityManager,
     storeId: string,
+    rail: PayoutSettlementRail,
   ): Promise<void> {
-    const pending = await manager
-      .getRepository(Payout)
-      .findOne({ where: { storeId, status: In(PENDING_STATUSES) } });
+    const pending = await manager.getRepository(Payout).findOne({
+      where: { storeId, settlementRail: rail, status: In(PENDING_STATUSES) },
+    });
 
     if (pending) {
       throw new BadRequestException({
         code: 'PAYOUT_ALREADY_PENDING',
-        message: 'A payout is already pending for this store',
+        message: `A ${rail} payout is already pending for this store`,
       });
     }
   }
@@ -453,6 +755,7 @@ export class PayoutsService {
     return this.payoutRepository.findOne({
       where: {
         storeId,
+        settlementRail: PayoutSettlementRail.OMISE,
         status: PayoutStatus.PENDING,
         transferReference: IsNull(),
       },
@@ -460,10 +763,13 @@ export class PayoutsService {
     });
   }
 
-  private async calculateGrossRevenue(storeId: string): Promise<number> {
+  private async calculateGrossRevenue(
+    storeId: string,
+    paymentMethods: PaymentMethod[],
+  ): Promise<number> {
     const [itemSubtotal, storePromotionDiscounts] = await Promise.all([
-      this.calculateItemSubtotal(storeId),
-      this.calculateStorePromotionDiscounts(storeId),
+      this.calculateItemSubtotal(storeId, paymentMethods),
+      this.calculateStorePromotionDiscounts(storeId, paymentMethods),
     ]);
 
     // A vendor's OWN store-scoped promotion is a discount the vendor chose to give -
@@ -476,7 +782,10 @@ export class PayoutsService {
     return Math.max(0, itemSubtotal - storePromotionDiscounts);
   }
 
-  private async calculateItemSubtotal(storeId: string): Promise<number> {
+  private async calculateItemSubtotal(
+    storeId: string,
+    paymentMethods: PaymentMethod[],
+  ): Promise<number> {
     const result = await this.orderItemRepository
       .createQueryBuilder('item')
       .innerJoin(Order, 'order', 'order.id = item.order_id')
@@ -484,6 +793,7 @@ export class PayoutsService {
       .andWhere('order.status IN (:...statuses)', {
         statuses: [OrderStatus.PAID, OrderStatus.DELIVERED],
       })
+      .andWhere('order.payment_method IN (:...paymentMethods)', { paymentMethods })
       // Held item portions are not payout-eligible (AC-030); restore re-includes under PAID|DELIVERED.
       .andWhere('item.fulfillment_status <> :heldFulfillment', {
         heldFulfillment: FulfillmentStatus.ON_HOLD,
@@ -498,7 +808,10 @@ export class PayoutsService {
     return Number(result?.total ?? 0);
   }
 
-  private async calculateStorePromotionDiscounts(storeId: string): Promise<number> {
+  private async calculateStorePromotionDiscounts(
+    storeId: string,
+    paymentMethods: PaymentMethod[],
+  ): Promise<number> {
     const result = await this.dataSource
       .createQueryBuilder(PromotionUsage, 'usage')
       .innerJoin(Order, 'order', 'order.id = usage.order_id')
@@ -508,6 +821,7 @@ export class PayoutsService {
       .andWhere('order.status IN (:...statuses)', {
         statuses: [OrderStatus.PAID, OrderStatus.DELIVERED],
       })
+      .andWhere('order.payment_method IN (:...paymentMethods)', { paymentMethods })
       .andWhere('order.status <> :heldOrderStatus', { heldOrderStatus: OrderStatus.ON_HOLD })
       .select('COALESCE(SUM(usage.discount_amount), 0)', 'total')
       .getRawOne<{ total: string }>();
@@ -515,10 +829,14 @@ export class PayoutsService {
     return Number(result?.total ?? 0);
   }
 
-  private async calculateTotalPaidOut(storeId: string): Promise<number> {
+  private async calculateTotalPaidOut(
+    storeId: string,
+    rail: PayoutSettlementRail,
+  ): Promise<number> {
     const result = await this.payoutRepository
       .createQueryBuilder('payout')
       .where('payout.store_id = :storeId', { storeId })
+      .andWhere('payout.settlement_rail = :rail', { rail })
       .andWhere('payout.status IN (:...statuses)', { statuses: PAID_OUT_STATUSES })
       .select('COALESCE(SUM(payout.amount), 0)', 'total')
       .getRawOne<{ total: string }>();
@@ -526,10 +844,14 @@ export class PayoutsService {
     return Number(result?.total ?? 0);
   }
 
-  private async calculatePendingPayoutAmount(storeId: string): Promise<number> {
+  private async calculatePendingPayoutAmount(
+    storeId: string,
+    rail: PayoutSettlementRail,
+  ): Promise<number> {
     const result = await this.payoutRepository
       .createQueryBuilder('payout')
       .where('payout.store_id = :storeId', { storeId })
+      .andWhere('payout.settlement_rail = :rail', { rail })
       .andWhere('payout.status IN (:...statuses)', { statuses: PENDING_STATUSES })
       .select('COALESCE(SUM(payout.amount), 0)', 'total')
       .getRawOne<{ total: string }>();
@@ -538,7 +860,7 @@ export class PayoutsService {
   }
 
   private getMinimumPayoutAmount(): number {
-    return this.configService.get<number>('payout.minPayoutAmount') ?? 500;
+    return this.configService.get<number>('payout.minPayoutAmount') ?? 100;
   }
 
   private async assertStoreExists(storeId: string): Promise<void> {

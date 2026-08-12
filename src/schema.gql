@@ -165,6 +165,26 @@ type AdminInvitationType {
   status: String!
 }
 
+type AdminManualPayoutConnection {
+  items: [AdminManualPayoutType!]!
+  pagination: PaginationMeta!
+}
+
+type AdminManualPayoutType {
+  amount: Float!
+  bankAccountName: String
+  bankAccountNumber: String
+  bankCode: String
+  bankName: String
+  createdAt: DateTime!
+  id: String!
+  netAmount: Float!
+  settlementRail: String!
+  status: String!
+  storeId: String!
+  storeName: String!
+}
+
 type AdminStoreType {
   address: String
   bankAccountName: String
@@ -784,6 +804,7 @@ type Mutation {
   inviteAdmin(input: InviteAdminInput!): AdminInvitationType!
   inviteStoreMember(input: InviteStoreMemberInput!): StoreMemberInvitationType!
   inviteVendor(input: InviteVendorInput!): VendorInvitationType!
+  linkStoreOmiseRecipient: MyStoreType!
   markAllNotificationsRead: Boolean!
   markNotificationRead(id: String!): Boolean!
   markVendorOrderPaid(orderId: String!): OrderType!
@@ -796,6 +817,7 @@ type Mutation {
   registerVendor(input: RegisterVendorInput!): VendorAuthPayload!
   rejectBrand(id: String!): BrandType!
   rejectCategory(id: String!): CategoryType!
+  rejectManualPayout(input: RejectManualPayoutInput!): PayoutType!
   rejectPetType(id: String!): PetTypeType!
   rejectReview(id: String!): ReviewType!
   rejectStore(input: RejectStoreInput!): StoreType!
@@ -809,6 +831,7 @@ type Mutation {
   reorderPlatformSponsors(ids: [ID!]!): [PlatformSponsorType!]!
   reorderProductImages(imageIds: [ID!]!, productId: String!): [ProductImageType!]!
   requestAccountDeletion: Boolean!
+  requestManualPayout: PayoutType!
   requestPasswordReset(input: RequestPasswordResetInput!): MessagePayload!
   requestPayout: PayoutType!
   resendEmailVerification: MessagePayload!
@@ -827,6 +850,7 @@ type Mutation {
   setDefaultPaymentMethod(id: String!): SavedPaymentMethodType!
   setPetTypeImage(input: SetPetTypeImageInput!): PetTypeType!
   setProductThumbnail(imageId: String!, productId: String!): ProductImageType!
+  settleManualPayout(input: SettleManualPayoutInput!): PayoutType!
   shipVendorOrder(input: ShipVendorOrderInput!): OrderType!
   submitStoreReactivationRequest(input: SubmitStoreReactivationRequestInput!): StoreReactivationRequestType!
   submitStoreRequest(input: SubmitStoreRequestInput!): StoreRequestType!
@@ -1043,11 +1067,21 @@ type PaymentType {
   status: String!
 }
 
+type PayoutRailSummaryType {
+  availableBalance: Float!
+  canRequestPayout: Boolean!
+  grossRevenue: Float!
+  pendingPayoutAmount: Float!
+  totalPaidOut: Float!
+}
+
 type PayoutSummaryType {
   availableBalance: Float!
   canRequestPayout: Boolean!
   grossRevenue: Float!
+  manual: PayoutRailSummaryType!
   minimumPayoutAmount: Float!
+  omise: PayoutRailSummaryType!
   pendingPayoutAmount: Float!
   storeId: String!
   totalPaidOut: Float!
@@ -1058,6 +1092,7 @@ type PayoutType {
   createdAt: DateTime!
   id: String!
   netAmount: Float!
+  settlementRail: String!
   status: String!
   storeId: String!
 }
@@ -1329,6 +1364,7 @@ type Query {
   pendingBrands: [BrandType!]!
   pendingCategories: [CategoryType!]!
   pendingImportedReviews(limit: Int = 20, page: Int = 1): AdminImportedReviewConnection!
+  pendingManualPayouts(limit: Int = 20, page: Int = 1): AdminManualPayoutConnection!
   pendingPetTypes: [PetTypeType!]!
   pendingStoreRequests: [StoreRequestType!]!
   pendingStores: [StoreType!]!
@@ -1422,6 +1458,12 @@ input RegisterVendorInput {
   email: String!
   fullName: String!
   password: String!
+}
+
+input RejectManualPayoutInput {
+  notes: String
+  payoutId: String
+  storeId: String!
 }
 
 input RejectStoreInput {
@@ -1630,6 +1672,12 @@ input SetCategoryImageInput {
 input SetPetTypeImageInput {
   imageUrl: String!
   petTypeId: String!
+}
+
+input SettleManualPayoutInput {
+  notes: String
+  payoutId: String
+  storeId: String!
 }
 
 input ShipVendorOrderInput {

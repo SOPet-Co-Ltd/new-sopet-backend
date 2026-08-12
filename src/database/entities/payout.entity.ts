@@ -20,9 +20,16 @@ export enum PayoutStatus {
   FAILED = 'failed',
 }
 
+/** How vendor funds are settled: Omise transfer vs platform bank transfer. */
+export enum PayoutSettlementRail {
+  OMISE = 'omise',
+  MANUAL = 'manual',
+}
+
 @Entity('payouts')
 @Index(['storeId', 'status', 'createdAt'])
 @Index(['status'])
+@Index(['storeId', 'settlementRail', 'status'])
 export class Payout {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -54,6 +61,15 @@ export class Payout {
   })
   @IsEnum(PayoutStatus)
   status!: PayoutStatus;
+
+  @Column({
+    name: 'settlement_rail',
+    type: 'enum',
+    enum: PayoutSettlementRail,
+    default: PayoutSettlementRail.OMISE,
+  })
+  @IsEnum(PayoutSettlementRail)
+  settlementRail!: PayoutSettlementRail;
 
   @Column({ name: 'transfer_reference', type: 'varchar', length: 255, nullable: true })
   transferReference!: string | null;

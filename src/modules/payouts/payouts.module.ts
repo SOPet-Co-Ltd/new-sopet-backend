@@ -5,6 +5,7 @@ import { ConfigModule } from '@nestjs/config';
 import { isRedisConfigured } from '../../common/utils/is-redis-configured';
 import { OmiseModule } from '../omise/omise.module';
 import { StoresModule } from '../stores/stores.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import payoutConfig from '../../config/payout.config';
 import { Payout } from '../../database/entities/payout.entity';
 import { Store } from '../../database/entities/store.entity';
@@ -37,6 +38,7 @@ const payoutQueueProviders = isRedisConfigured() ? [PayoutSchedulerProcessor] : 
   imports: [
     OmiseModule,
     StoresModule,
+    NotificationsModule,
     ConfigModule.forFeature(payoutConfig),
     ...payoutQueueImports,
     TypeOrmModule.forFeature([Payout, Store, OrderItem]),
