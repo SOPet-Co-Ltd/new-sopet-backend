@@ -36,6 +36,11 @@ import {
 import { assertNotManualHoldTransition } from './store-suspension-hold.service';
 import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.service';
 import { webhookEventForOrderStatus } from '../vendor-webhooks/vendor-webhook.events';
+import { OrderAuditLogsService } from '../order-audit-logs/order-audit-logs.service';
+import {
+  OrderAuditActorType,
+  OrderAuditEventType,
+} from '../order-audit-logs/order-audit-log.constants';
 export interface StoreShippingSelection {
   storeId: string;
   shippingOptionId: string;
@@ -66,6 +71,7 @@ export class OrdersService {
     @InjectRepository(Store)
     private storeRepository: Repository<Store>,
     private vendorWebhooksService: VendorWebhooksService,
+    private orderAuditLogsService: OrderAuditLogsService,
   ) {}
 
   private generateOrderNumber(): string {
@@ -400,6 +406,18 @@ export class OrdersService {
           status: OrderStatus.PENDING_PAYMENT,
         }),
       );
+
+      await this.orderAuditLogsService.append(manager, {
+        orderId: savedOrder.id,
+        eventType: OrderAuditEventType.ORDER_PLACED,
+        actorType: OrderAuditActorType.customer,
+        actorId: linkedCustomerId,
+        actorLabel: await this.orderAuditLogsService.resolveCustomerActorLabel(manager, {
+          customerId: linkedCustomerId,
+          guestName: guestName ?? null,
+        }),
+        details: { paymentMethod: savedOrder.paymentMethod },
+      });
 
       for (const promotion of appliedPromotions) {
         const promoDiscount = discountsByPromotionId[promotion.id] ?? 0;

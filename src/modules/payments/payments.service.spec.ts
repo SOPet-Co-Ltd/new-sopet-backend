@@ -16,6 +16,8 @@ import { PayoutsService } from '../payouts/payouts.service';
 import { StoresService } from '../stores/stores.service';
 import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.service';
 import { BankTransferSettingsService } from '../platform/bank-transfer-settings.service';
+import { OrderAuditLogsService } from '../order-audit-logs/order-audit-logs.service';
+import { OrderAuditLog } from '../../database/entities/order-audit-log.entity';
 
 const paymentEventsServiceMock = {
   publishPaymentStatusUpdated: jest.fn(),
@@ -27,6 +29,11 @@ const payoutsServiceMock = {
 
 const storesServiceMock = {
   handleOmiseRecipientWebhook: jest.fn(),
+};
+
+const orderAuditLogsServiceMock = {
+  append: jest.fn().mockResolvedValue(undefined),
+  resolveCustomerActorLabel: jest.fn().mockResolvedValue('ลูกค้า'),
 };
 
 /** EntityManager mock for Phase B FOR UPDATE createCharge path. */
@@ -58,11 +65,17 @@ function createPhaseBManagerMock(deps: {
       }
       return Promise.resolve([]);
     }),
-    create: jest.fn(
-      (_entity: unknown, data: unknown): Payment =>
-        deps.paymentRepository.create(data as Payment) as Payment,
-    ),
-    save: jest.fn((entity: { orderId?: string }): Promise<unknown> => {
+    create: jest.fn((_entity: unknown, data: unknown) => {
+      if (_entity === OrderAuditLog) {
+        return data;
+      }
+      return deps.paymentRepository.create(data);
+    }),
+    save: jest.fn((entityOrType: unknown, maybeData?: unknown): Promise<unknown> => {
+      if (entityOrType === OrderAuditLog) {
+        return Promise.resolve(maybeData);
+      }
+      const entity = (maybeData ?? entityOrType) as { orderId?: string };
       if (entity && typeof entity === 'object' && 'orderId' in entity) {
         return Promise.resolve(deps.paymentRepository.save(entity) as unknown);
       }
@@ -120,6 +133,7 @@ describe('PaymentsService guest access', () => {
           provide: VendorWebhooksService,
           useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
         },
+        { provide: OrderAuditLogsService, useValue: orderAuditLogsServiceMock },
         {
           provide: BankTransferSettingsService,
           useValue: {
@@ -266,6 +280,7 @@ describe('PaymentsService payment read queries', () => {
           provide: VendorWebhooksService,
           useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
         },
+        { provide: OrderAuditLogsService, useValue: orderAuditLogsServiceMock },
         {
           provide: BankTransferSettingsService,
           useValue: {
@@ -441,6 +456,7 @@ describe('PaymentsService createCharge return_uri', () => {
           provide: VendorWebhooksService,
           useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
         },
+        { provide: OrderAuditLogsService, useValue: orderAuditLogsServiceMock },
         {
           provide: BankTransferSettingsService,
           useValue: {
@@ -709,6 +725,7 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
           provide: VendorWebhooksService,
           useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
         },
+        { provide: OrderAuditLogsService, useValue: orderAuditLogsServiceMock },
         {
           provide: BankTransferSettingsService,
           useValue: {
@@ -1102,6 +1119,7 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
           provide: VendorWebhooksService,
           useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
         },
+        { provide: OrderAuditLogsService, useValue: orderAuditLogsServiceMock },
         {
           provide: BankTransferSettingsService,
           useValue: {
@@ -1699,6 +1717,7 @@ describe('PaymentsService cancelStaleUnpaidOrders (AC-019–021)', () => {
           provide: VendorWebhooksService,
           useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
         },
+        { provide: OrderAuditLogsService, useValue: orderAuditLogsServiceMock },
         {
           provide: BankTransferSettingsService,
           useValue: {
@@ -2073,6 +2092,7 @@ describe('PaymentsService payment held gate + Decision #16 recompute (AC-026–0
           provide: VendorWebhooksService,
           useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
         },
+        { provide: OrderAuditLogsService, useValue: orderAuditLogsServiceMock },
         {
           provide: BankTransferSettingsService,
           useValue: {
@@ -2259,6 +2279,7 @@ describe('PaymentsService saveCustomerCard', () => {
           provide: VendorWebhooksService,
           useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
         },
+        { provide: OrderAuditLogsService, useValue: orderAuditLogsServiceMock },
         {
           provide: BankTransferSettingsService,
           useValue: {

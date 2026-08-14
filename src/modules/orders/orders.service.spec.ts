@@ -28,6 +28,10 @@ describe('OrdersService', () => {
   let customerRepository: { findActiveByPhone: jest.Mock };
   let inventoryService: { restoreOrderStock: jest.Mock };
   let vendorWebhooksService: { dispatchOrderEvent: jest.Mock };
+  let orderAuditLogsService: {
+    append: jest.Mock;
+    resolveCustomerActorLabel: jest.Mock;
+  };
   let mockManager: {
     create: jest.Mock;
     save: jest.Mock;
@@ -76,6 +80,10 @@ describe('OrdersService', () => {
     vendorWebhooksService = {
       dispatchOrderEvent: jest.fn().mockResolvedValue(undefined),
     };
+    orderAuditLogsService = {
+      append: jest.fn().mockResolvedValue(undefined),
+      resolveCustomerActorLabel: jest.fn().mockResolvedValue('Guest'),
+    };
 
     mockManager = {
       create: jest.fn((_entity: unknown, data: Record<string, unknown>) => ({ ...data })),
@@ -110,6 +118,7 @@ describe('OrdersService', () => {
       { removeItems: jest.fn() } as never,
       {} as never,
       vendorWebhooksService as never,
+      orderAuditLogsService as never,
     );
   });
 
@@ -182,6 +191,14 @@ describe('OrdersService', () => {
 
     expect(dataSource.transaction).toHaveBeenCalled();
     expect(mockManager.save).toHaveBeenCalled();
+    expect(orderAuditLogsService.append).toHaveBeenCalledWith(
+      mockManager,
+      expect.objectContaining({
+        eventType: 'ORDER_PLACED',
+        actorType: 'customer',
+        actorLabel: 'Guest',
+      }),
+    );
     expect(result.id).toBe('ord-1');
   });
 

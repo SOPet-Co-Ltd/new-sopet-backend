@@ -33,6 +33,7 @@ import { PayoutsService } from '../src/modules/payouts/payouts.service';
 import { StoresService } from '../src/modules/stores/stores.service';
 import { VendorWebhooksService } from '../src/modules/vendor-webhooks/vendor-webhooks.service';
 import { BankTransferSettingsService } from '../src/modules/platform/bank-transfer-settings.service';
+import { OrderAuditLogsService } from '../src/modules/order-audit-logs/order-audit-logs.service';
 import { Payment } from '../src/database/entities/payment.entity';
 import { Order, OrderStatus, PaymentMethod } from '../src/database/entities/order.entity';
 import { OrderItem, FulfillmentStatus } from '../src/database/entities/order-item.entity';
@@ -162,6 +163,13 @@ describe('Unpaid order payment method switch (service-integration-e2e)', () => {
         {
           provide: VendorWebhooksService,
           useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: OrderAuditLogsService,
+          useValue: {
+            append: jest.fn().mockResolvedValue(undefined),
+            resolveCustomerActorLabel: jest.fn().mockResolvedValue('ลูกค้า'),
+          },
         },
         {
           provide: BankTransferSettingsService,

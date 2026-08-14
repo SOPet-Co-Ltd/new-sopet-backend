@@ -22,6 +22,7 @@ import { ProductsService } from '../src/modules/products/products.service';
 import { PaymentsService } from '../src/modules/payments/payments.service';
 import { StoresService } from '../src/modules/stores/stores.service';
 import { VendorWebhooksService } from '../src/modules/vendor-webhooks/vendor-webhooks.service';
+import { OrderAuditLogsService } from '../src/modules/order-audit-logs/order-audit-logs.service';
 import { Order, OrderStatus, PaymentMethod } from '../src/database/entities/order.entity';
 import { FulfillmentStatus } from '../src/database/entities/order-item.entity';
 import { OrderItem } from '../src/database/entities/order-item.entity';
@@ -297,6 +298,13 @@ describe('Order tracking (e2e)', () => {
         {
           provide: VendorWebhooksService,
           useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: OrderAuditLogsService,
+          useValue: {
+            append: jest.fn().mockResolvedValue(undefined),
+            resolveCustomerActorLabel: jest.fn().mockResolvedValue('ลูกค้า'),
+          },
         },
       ],
     }).compile();

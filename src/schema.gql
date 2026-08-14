@@ -937,6 +937,46 @@ type NotificationType {
   type: String!
 }
 
+enum OrderAuditActorType {
+  admin
+  customer
+  system
+  vendor
+}
+
+enum OrderAuditEventType {
+  ORDER_ACCEPTED
+  ORDER_PLACED
+  PAYMENT_APPROVED
+  PAYMENT_METHOD_CHANGED
+}
+
+type OrderAuditLogDetailsType {
+  approvalMethod: String
+  newPaymentMethod: String
+  note: String
+  paymentMethod: String
+  previousPaymentMethod: String
+  storeId: String
+}
+
+type OrderAuditLogEntryType {
+  actorId: String
+  actorLabel: String
+  actorType: OrderAuditActorType!
+  details: OrderAuditLogDetailsType!
+  eventType: OrderAuditEventType!
+  id: ID!
+  occurredAt: DateTime!
+  orderId: ID!
+  storeId: String
+}
+
+type OrderAuditLogType {
+  entries: [OrderAuditLogEntryType!]!
+  orderId: ID!
+}
+
 type OrderConnection {
   items: [OrderType!]!
   pagination: PaginationMeta!
@@ -1354,6 +1394,7 @@ type Query {
   myTagProposals: [TagType!]!
   notifications(unreadOnly: Boolean): [NotificationType!]!
   order(id: String!): OrderType!
+  orderAuditLog(orderId: String!, storeId: String!): OrderAuditLogType!
   orderTracking(orderNumber: String!): OrderTrackingType!
   orders(filter: CustomerOrderListFilter = ALL, limit: Int = 10, page: Int = 1): OrderConnection!
   payment(id: String!): PaymentType!

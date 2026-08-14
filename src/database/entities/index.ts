@@ -30,6 +30,7 @@ export { CartItem } from './cart-item.entity';
 export { Notification, NotificationType, NotificationChannel } from './notification.entity';
 export { AdminLog, AdminAction } from './admin-log.entity';
 export { AuditLog, AuditActorType } from './audit-log.entity';
+export { OrderAuditLog } from './order-audit-log.entity';
 export { Setting } from './setting.entity';
 export { Favorite } from './favorite.entity';
 export { StoreShippingOption } from './store-shipping-option.entity';

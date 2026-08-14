@@ -5,11 +5,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
 import { FulfillmentStatus, OrderItem } from '../../database/entities/order-item.entity';
 import { OrderStatusHistory } from '../../database/entities/order-status-history.entity';
 import { Payment } from '../../database/entities/payment.entity';
+import { Store } from '../../database/entities/store.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 import { StoresService } from '../stores/stores.service';
 import { InventoryService } from '../inventory/inventory.service';
@@ -23,6 +24,12 @@ import {
 } from './order-fulfillment.util';
 import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.service';
 import { webhookEventForOrderStatus } from '../vendor-webhooks/vendor-webhook.events';
+import { OrderAuditLogsService } from '../order-audit-logs/order-audit-logs.service';
+import {
+  FALLBACK_VENDOR_ACTOR_LABEL,
+  OrderAuditActorType,
+  OrderAuditEventType,
+} from '../order-audit-logs/order-audit-log.constants';
 
 @Injectable()
 export class OrderFulfillmentService {
@@ -34,6 +41,7 @@ export class OrderFulfillmentService {
     private readonly notificationsService: NotificationsService,
     private readonly inventoryService: InventoryService,
     private readonly vendorWebhooksService: VendorWebhooksService,
+    private readonly orderAuditLogsService: OrderAuditLogsService,
   ) {}
 
   private async loadOrderWithItems(orderId: string): Promise<Order> {
@@ -118,7 +126,7 @@ export class OrderFulfillmentService {
     nextStatus: OrderStatus,
     userId: string,
     notes: string,
-    options?: { saveItems?: boolean },
+    options?: { saveItems?: boolean; afterSave?: (manager: EntityManager) => Promise<void> },
   ): Promise<Order> {
     const previousStatus = order.status;
 
@@ -142,6 +150,10 @@ export class OrderFulfillmentService {
           notes,
         }),
       );
+
+      if (options?.afterSave) {
+        await options.afterSave(manager);
+      }
     });
 
     const saved = await this.loadOrderWithItems(order.id);
@@ -226,12 +238,26 @@ export class OrderFulfillmentService {
       order.items.map((item) => item.fulfillmentStatus),
     );
 
+    const store = await this.dataSource.manager.findOne(Store, { where: { id: storeId } });
+
     return this.persistOrderTransition(
       order,
       nextStatus,
       userId,
       `Vendor acknowledged order for customer (store ${storeId})`,
-      { saveItems: true },
+      {
+        saveItems: true,
+        afterSave: (manager) =>
+          this.orderAuditLogsService.append(manager, {
+            orderId: order.id,
+            eventType: OrderAuditEventType.ORDER_ACCEPTED,
+            actorType: OrderAuditActorType.vendor,
+            actorId: userId,
+            actorLabel: store?.name?.trim() || FALLBACK_VENDOR_ACTOR_LABEL,
+            storeId,
+            details: { storeId },
+          }),
+      },
     );
   }
 

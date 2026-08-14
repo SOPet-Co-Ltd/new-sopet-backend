@@ -31,6 +31,13 @@ import { deriveOrderStatusFromFulfillment } from '../orders/order-fulfillment.ut
 import { OrderStatusHistory } from '../../database/entities/order-status-history.entity';
 import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.service';
 import { BankTransferSettingsService } from '../platform/bank-transfer-settings.service';
+import { OrderAuditLogsService } from '../order-audit-logs/order-audit-logs.service';
+import {
+  MANUAL_BANK_TRANSFER_APPROVAL,
+  OrderAuditActorType,
+  OrderAuditEventType,
+  VENDOR_ADMIN_ACTOR_LABEL,
+} from '../order-audit-logs/order-audit-log.constants';
 
 interface OmiseCharge {
   id: string;
@@ -96,6 +103,7 @@ export class PaymentsService {
     private storesService: StoresService,
     private vendorWebhooksService: VendorWebhooksService,
     private bankTransferSettingsService: BankTransferSettingsService,
+    private orderAuditLogsService: OrderAuditLogsService,
   ) {
     this.omiseSecretKey = this.configService.get<string>('omise.secretKey') ?? '';
     this.omisePublicKey = this.configService.get<string>('omise.publicKey') ?? '';
@@ -933,6 +941,7 @@ export class PaymentsService {
 
         await this.supersedePendingPaymentsForOrder(orderId, manager);
 
+        const previousPaymentMethod = lockedOrder.paymentMethod;
         const orderPaymentMethod = this.toOrderPaymentMethod(paymentMethod);
 
         if (isNonOmiseCheckoutPaymentMethod(paymentMethod)) {
@@ -954,6 +963,12 @@ export class PaymentsService {
           lockedOrder.paymentMethod = orderPaymentMethod;
           lockedOrder.paymentReference = null;
           await manager.save(lockedOrder);
+          await this.appendPaymentMethodChangedIfNeeded(
+            manager,
+            lockedOrder,
+            previousPaymentMethod,
+            orderPaymentMethod,
+          );
 
           return {
             paymentId: payment.id,
@@ -1062,6 +1077,12 @@ export class PaymentsService {
         lockedOrder.paymentMethod = orderPaymentMethod;
         lockedOrder.paymentReference = charge.id;
         await manager.save(lockedOrder);
+        await this.appendPaymentMethodChangedIfNeeded(
+          manager,
+          lockedOrder,
+          previousPaymentMethod,
+          orderPaymentMethod,
+        );
 
         if (payment.status === 'failed') {
           await this.paymentEventsService.publishPaymentStatusUpdated(payment);
@@ -1260,6 +1281,29 @@ export class PaymentsService {
     this.vendorWebhooksService.dispatchOrderEvent(order.id, 'order.paid').catch(() => {});
   }
 
+  private async appendPaymentMethodChangedIfNeeded(
+    manager: EntityManager,
+    order: Order,
+    previousPaymentMethod: PaymentMethod,
+    nextPaymentMethod: PaymentMethod,
+  ): Promise<void> {
+    if (previousPaymentMethod === nextPaymentMethod) {
+      return;
+    }
+
+    await this.orderAuditLogsService.append(manager, {
+      orderId: order.id,
+      eventType: OrderAuditEventType.PAYMENT_METHOD_CHANGED,
+      actorType: OrderAuditActorType.customer,
+      actorId: order.customerId,
+      actorLabel: await this.orderAuditLogsService.resolveCustomerActorLabel(manager, order),
+      details: {
+        previousPaymentMethod,
+        newPaymentMethod: nextPaymentMethod,
+      },
+    });
+  }
+
   /**
    * Platform-admin confirmation for Direct Bank Transfer.
    * Updates Payment + Order (unlike vendor mark-paid which only flips order status).
@@ -1341,6 +1385,18 @@ export class PaymentsService {
           notes: historyNote,
         }),
       );
+
+      await this.orderAuditLogsService.append(trx, {
+        orderId: order.id,
+        eventType: OrderAuditEventType.PAYMENT_APPROVED,
+        actorType: OrderAuditActorType.admin,
+        actorId: adminUserId,
+        actorLabel: VENDOR_ADMIN_ACTOR_LABEL,
+        details: {
+          approvalMethod: MANUAL_BANK_TRANSFER_APPROVAL,
+          note: note?.trim() || null,
+        },
+      });
     });
 
     await this.paymentEventsService.publishPaymentStatusUpdated(payment);

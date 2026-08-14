@@ -35,7 +35,10 @@ describe('OrderFulfillmentService hold guards', () => {
           find: jest.fn().mockResolvedValue([]),
         }),
       ),
-      manager: { save: jest.fn().mockResolvedValue(undefined) },
+      manager: {
+        save: jest.fn().mockResolvedValue(undefined),
+        findOne: jest.fn().mockResolvedValue({ id: 'store-1', name: 'Test Store' }),
+      },
     };
 
     service = new OrderFulfillmentService(
@@ -45,6 +48,7 @@ describe('OrderFulfillmentService hold guards', () => {
       notificationsService as never,
       inventoryService as never,
       vendorWebhooksService as never,
+      { append: jest.fn().mockResolvedValue(undefined) } as never,
     );
   });
 

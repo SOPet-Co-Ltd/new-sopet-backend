@@ -104,6 +104,10 @@ describe('Checkout flow (integration)', () => {
         { removeItems: jest.fn() } as never,
         {} as never,
         { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) } as never,
+        {
+          append: jest.fn().mockResolvedValue(undefined),
+          resolveCustomerActorLabel: jest.fn(),
+        } as never,
       );
     });
 
