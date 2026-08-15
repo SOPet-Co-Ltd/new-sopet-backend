@@ -53,6 +53,27 @@ export class Payout {
   @Min(0)
   netAmount!: number;
 
+  @Column({ name: 'commission_rate', type: 'integer', nullable: true })
+  commissionRate!: number | null;
+
+  @Column({ name: 'product_sold', type: 'decimal', precision: 10, scale: 2, nullable: true })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  productSold!: number | null;
+
+  @Column({ name: 'shipping_fees', type: 'decimal', precision: 10, scale: 2, nullable: true })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  shippingFees!: number | null;
+
+  @Column({ name: 'commission_amount', type: 'decimal', precision: 10, scale: 2, nullable: true })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  commissionAmount!: number | null;
+
   @Column({
     name: 'status',
     type: 'enum',

@@ -7,6 +7,7 @@ import { OmiseModule } from '../omise/omise.module';
 import { StoresModule } from '../stores/stores.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import payoutConfig from '../../config/payout.config';
+import commissionConfig from '../../config/commission.config';
 import { Payout } from '../../database/entities/payout.entity';
 import { Store } from '../../database/entities/store.entity';
 import { OrderItem } from '../../database/entities/order-item.entity';
@@ -40,6 +41,7 @@ const payoutQueueProviders = isRedisConfigured() ? [PayoutSchedulerProcessor] : 
     StoresModule,
     NotificationsModule,
     ConfigModule.forFeature(payoutConfig),
+    ConfigModule.forFeature(commissionConfig),
     ...payoutQueueImports,
     TypeOrmModule.forFeature([Payout, Store, OrderItem]),
   ],

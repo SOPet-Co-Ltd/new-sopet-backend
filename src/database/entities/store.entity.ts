@@ -167,6 +167,9 @@ export class Store {
   @Column({ name: 'payout_schedule_paused', type: 'boolean', default: false })
   payoutSchedulePaused!: boolean;
 
+  @Column({ name: 'commission_rate', type: 'integer', nullable: true })
+  commissionRate!: number | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
   createdAt!: Date;
 
