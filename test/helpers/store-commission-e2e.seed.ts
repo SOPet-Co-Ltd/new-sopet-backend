@@ -53,7 +53,9 @@ export const STORE_COMMISSION_E2E_POST_PRODUCT_GROSS = 1100;
 export const STORE_COMMISSION_E2E_POST_PROMO_DISCOUNT = 100;
 export const STORE_COMMISSION_E2E_POST_PRODUCT_NET = 1000;
 export const STORE_COMMISSION_E2E_POST_SHIPPING = 80;
+export const STORE_COMMISSION_E2E_HOLD_PRODUCT = 300;
 export const STORE_COMMISSION_E2E_HOLD_SHIPPING = 50;
+export const STORE_COMMISSION_E2E_NULL_PAID_AT_PRODUCT = 50;
 export const STORE_COMMISSION_E2E_HISTORICAL_PAYOUT_AMOUNT = 200;
 
 export const STORE_COMMISSION_E2E_MIXED_FOURS = {
@@ -502,6 +504,9 @@ async function seedMixedCutoffUnpaidSet(
     shippingPrice: STORE_COMMISSION_E2E_POST_SHIPPING,
   });
   const promotion = await seedStorePromo(dataSource, tracked, catalog.store.id, input.label);
+  const paymentMethod = input.connectOmiseRecipient
+    ? PaymentMethod.PROMPTPAY
+    : PaymentMethod.BANK_TRANSFER;
   const preOrder = await seedPaidOrderWithItem(dataSource, tracked, {
     label: `${input.label}-pre`,
     store: catalog.store,
@@ -513,6 +518,7 @@ async function seedMixedCutoffUnpaidSet(
     shippingFee: 0,
     paidAt: input.preCutoffPaidAt,
     fulfillmentStatus: FulfillmentStatus.PENDING,
+    paymentMethod,
   });
   const postOrder = await seedPaidOrderWithItem(dataSource, tracked, {
     label: `${input.label}-post`,
@@ -525,18 +531,20 @@ async function seedMixedCutoffUnpaidSet(
     shippingFee: STORE_COMMISSION_E2E_POST_SHIPPING,
     paidAt: input.postCutoffPaidAt,
     fulfillmentStatus: FulfillmentStatus.PENDING,
+    paymentMethod,
   });
   const nullPaidAtOrder = await seedPaidOrderWithItem(dataSource, tracked, {
     label: `${input.label}-null-paid`,
     store: catalog.store,
     product: catalog.product,
     variant: catalog.variant,
-    unitPrice: 50,
+    unitPrice: STORE_COMMISSION_E2E_NULL_PAID_AT_PRODUCT,
     quantity: 1,
     discountAmount: 0,
     shippingFee: 0,
     paidAt: null,
     fulfillmentStatus: FulfillmentStatus.PENDING,
+    paymentMethod,
   });
   const postShipping = await seedStoreShipping(
     dataSource,
@@ -578,7 +586,7 @@ async function seedHoldOnlyPostCutoffOrder(
     store: catalog.store,
     product: catalog.product,
     variant: catalog.variant,
-    unitPrice: 300,
+    unitPrice: STORE_COMMISSION_E2E_HOLD_PRODUCT,
     quantity: 1,
     discountAmount: 0,
     shippingFee: STORE_COMMISSION_E2E_HOLD_SHIPPING,
@@ -716,6 +724,7 @@ async function seedPaidOrderWithItem(
     shippingFee: number;
     paidAt: Date | null;
     fulfillmentStatus: FulfillmentStatus;
+    paymentMethod?: PaymentMethod;
   },
 ): Promise<{ order: Order; item: OrderItem }> {
   const orderRepo = dataSource.getRepository(Order);
@@ -733,7 +742,7 @@ async function seedPaidOrderWithItem(
       discountAmount: input.discountAmount,
       shippingFee: input.shippingFee,
       total,
-      paymentMethod: PaymentMethod.PROMPTPAY,
+      paymentMethod: input.paymentMethod ?? PaymentMethod.PROMPTPAY,
       paidAt: input.paidAt,
     }),
   );
