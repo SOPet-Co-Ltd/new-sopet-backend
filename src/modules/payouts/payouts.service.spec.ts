@@ -896,6 +896,37 @@ describe('PayoutsService', () => {
       expect(shippingQb.from).toHaveBeenCalled();
       expect(shippingQb.getQuery).toHaveBeenCalled();
     });
+
+    it('requires a non-held eligible line before summing post-cutoff store shipping', async () => {
+      configService.get.mockImplementation((key: string) => {
+        if (key === 'payout.minPayoutAmount') return 500;
+        if (key === 'commission.defaultRatePercent') return 7;
+        if (key === 'commission.goLiveAt') return GO_LIVE_AT;
+        return undefined;
+      });
+      const { shippingQb } = mockCutoffQueries({
+        preTotal: '0',
+        postTotal: '1000',
+        shipping: '80',
+      });
+
+      await service.getPayoutSummary('store-1');
+
+      type AndWhereCall = [string | ((qb: typeof shippingQb) => string), Record<string, unknown>?];
+      const existsCallbacks = (shippingQb.andWhere.mock.calls as AndWhereCall[])
+        .map((call) => call[0])
+        .filter(
+          (clause): clause is (qb: typeof shippingQb) => string => typeof clause === 'function',
+        );
+      expect(existsCallbacks.length).toBeGreaterThan(0);
+      for (const callback of existsCallbacks) {
+        expect(callback(shippingQb)).toMatch(/EXISTS/i);
+      }
+      expect(shippingQb.andWhere).toHaveBeenCalledWith(
+        expect.stringMatching(/fulfillment_status\s*<>\s*:heldFulfillment/i),
+      );
+      expect(shippingQb.setParameter).toHaveBeenCalledWith('heldFulfillment', 'on_hold');
+    });
   });
 
   describe('computeUnpaidBreakdown fail-fast', () => {

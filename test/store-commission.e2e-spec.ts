@@ -10,7 +10,7 @@
 // @real-dependency: payout-commission.calculator
 // @real-dependency: PostgreSQL
 //
-// INT-3 hold shipping is out of scope (backend-task-08).
+// INT-3 hold exclusion: held-only shipping 0; mixed shipping once; restore re-entry.
 
 import { CanActivate, ExecutionContext, INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -874,5 +874,370 @@ describe('store commission — admin rate edit and snapshot immutability [integr
     expect(summary.commissionRate).toBe(0);
     expect(summary.commissionAmount).toBe(0);
     expect(summary.availableBalance).toBe(1000);
+  });
+});
+
+describe('store commission — hold exclusion [integration]', () => {
+  let postgresAvailable = false;
+  let app: INestApplication | undefined;
+  let moduleFixture: TestingModule | undefined;
+  let dataSource: DataSource;
+  let payoutsService: PayoutsService;
+  let payoutRepo: Repository<Payout>;
+  let storeRepo: Repository<Store>;
+  let orderRepo: Repository<Order>;
+  let orderItemRepo: Repository<OrderItem>;
+  let variantRepo: Repository<ProductVariant>;
+  let shippingOptionRepo: Repository<StoreShippingOption>;
+  let storeShippingRepo: Repository<OrderStoreShipping>;
+
+  const seedContext = createSeedRunContext(`store-commission-int3-${Date.now()}`);
+  const tracked = {
+    payoutIds: [] as string[],
+    orderIds: [] as string[],
+    itemIds: [] as string[],
+    variantIds: [] as string[],
+    shippingOptionIds: [] as string[],
+    storeShippingIds: [] as string[],
+  };
+
+  beforeAll(async () => {
+    postgresAvailable = await isPostgresAvailable();
+    if (!postgresAvailable) {
+      return;
+    }
+
+    moduleFixture = await Test.createTestingModule({
+      imports: [
+        ConfigModule.forRoot({ isGlobal: true }),
+        TypeOrmModule.forRoot(createTypeOrmTestOptions()),
+        TypeOrmModule.forFeature([
+          Payout,
+          Store,
+          User,
+          StoreMember,
+          Order,
+          OrderItem,
+          OrderStoreShipping,
+          StoreShippingOption,
+          Product,
+          ProductVariant,
+          Promotion,
+          PromotionUsage,
+          AuditLog,
+        ]),
+      ],
+      providers: [
+        PayoutsService,
+        { provide: AuditLogsService, useValue: { log: jest.fn() } },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: (key: string) => {
+              if (key === 'payout.minPayoutAmount') return 500;
+              if (key === 'commission.defaultRatePercent') return 7;
+              if (key === 'commission.goLiveAt') return GO_LIVE_AT;
+              return undefined;
+            },
+          },
+        },
+        {
+          provide: OmiseService,
+          useValue: {
+            hasCredentials: jest.fn().mockReturnValue(false),
+            createTransfer: jest.fn(),
+            getRecipient: jest.fn(),
+          },
+        },
+        {
+          provide: NotificationsService,
+          useValue: { notifyAdminsAboutManualPayoutRequest: jest.fn() },
+        },
+      ],
+    }).compile();
+
+    app = moduleFixture.createNestApplication();
+    await app.init();
+
+    dataSource = moduleFixture.get(DataSource);
+    payoutsService = moduleFixture.get(PayoutsService);
+    payoutRepo = moduleFixture.get(getRepositoryToken(Payout));
+    storeRepo = moduleFixture.get(getRepositoryToken(Store));
+    orderRepo = moduleFixture.get(getRepositoryToken(Order));
+    orderItemRepo = moduleFixture.get(getRepositoryToken(OrderItem));
+    variantRepo = moduleFixture.get(getRepositoryToken(ProductVariant));
+    shippingOptionRepo = moduleFixture.get(getRepositoryToken(StoreShippingOption));
+    storeShippingRepo = moduleFixture.get(getRepositoryToken(OrderStoreShipping));
+  });
+
+  afterAll(async () => {
+    if (dataSource?.isInitialized) {
+      await cleanupTracked();
+      await cleanupSeedRun(dataSource, seedContext);
+    }
+    if (app) {
+      await app.close();
+    }
+  });
+
+  afterEach(async () => {
+    if (dataSource?.isInitialized) {
+      await cleanupTracked();
+    }
+  });
+
+  async function cleanupTracked(): Promise<void> {
+    if (tracked.payoutIds.length) {
+      await payoutRepo.delete(tracked.payoutIds);
+      tracked.payoutIds = [];
+    }
+    if (tracked.storeShippingIds.length) {
+      await storeShippingRepo.delete(tracked.storeShippingIds);
+      tracked.storeShippingIds = [];
+    }
+    if (tracked.itemIds.length) {
+      await orderItemRepo.delete(tracked.itemIds);
+      tracked.itemIds = [];
+    }
+    if (tracked.orderIds.length) {
+      await orderRepo.delete(tracked.orderIds);
+      tracked.orderIds = [];
+    }
+    if (tracked.shippingOptionIds.length) {
+      await shippingOptionRepo.delete(tracked.shippingOptionIds);
+      tracked.shippingOptionIds = [];
+    }
+    if (tracked.variantIds.length) {
+      await variantRepo.delete(tracked.variantIds);
+      tracked.variantIds = [];
+    }
+  }
+
+  async function seedStore(suffix: string): Promise<Store> {
+    const owner = await createTestUser(dataSource, seedContext, {
+      suffix: `${suffix}-owner`,
+      role: UserRole.VENDOR,
+    });
+    return createTestStore(dataSource, seedContext, {
+      suffix,
+      ownerId: owner.id,
+      status: StoreStatus.APPROVED,
+      approvedBy: owner.id,
+    });
+  }
+
+  async function seedCatalog(store: Store, label: string) {
+    const product = await createTestProduct(dataSource, seedContext, {
+      suffix: `${label}-prod`,
+      storeId: store.id,
+      status: ProductStatus.PUBLISHED,
+      name: `Hold ${label}`,
+    });
+    const variant = await variantRepo.save(
+      variantRepo.create({
+        productId: product.id,
+        sku: `SKU-SC3-${label}-${seedContext.runId}`.slice(0, 100),
+        options: { size: 'default' },
+        priceAdjustment: 0,
+        stockQuantity: 50,
+      }),
+    );
+    tracked.variantIds.push(variant.id);
+    const shippingOption = await shippingOptionRepo.save(
+      shippingOptionRepo.create({
+        storeId: store.id,
+        name: 'Standard',
+        price: 999,
+        isActive: true,
+      }),
+    );
+    tracked.shippingOptionIds.push(shippingOption.id);
+    return { product, variant, shippingOption };
+  }
+
+  async function seedPaidOrderWithItems(input: {
+    store: Store;
+    productName: string;
+    variant: ProductVariant;
+    shippingOptionId: string;
+    orderNumber: string;
+    paidAt: Date;
+    shippingFee: number;
+    items: Array<{ subtotal: number; fulfillmentStatus: FulfillmentStatus }>;
+  }): Promise<{ order: Order; items: OrderItem[] }> {
+    const itemSubtotal = input.items.reduce((sum, item) => sum + item.subtotal, 0);
+    const order = await orderRepo.save(
+      orderRepo.create({
+        orderNumber: input.orderNumber.slice(0, 50),
+        customerId: null,
+        guestPhone: '+66812345678',
+        guestName: 'INT3 Guest',
+        status: OrderStatus.PAID,
+        subtotal: itemSubtotal,
+        discountAmount: 0,
+        shippingFee: 0,
+        total: itemSubtotal + input.shippingFee,
+        paymentMethod: PaymentMethod.PROMPTPAY,
+        paidAt: input.paidAt,
+      }),
+    );
+    tracked.orderIds.push(order.id);
+
+    const items: OrderItem[] = [];
+    for (const line of input.items) {
+      const item = await orderItemRepo.save(
+        orderItemRepo.create({
+          orderId: order.id,
+          storeId: input.store.id,
+          variantId: input.variant.id,
+          productName: input.productName,
+          variantOptions: { size: 'default' },
+          unitPrice: line.subtotal,
+          quantity: 1,
+          subtotal: line.subtotal,
+          fulfillmentStatus: line.fulfillmentStatus,
+          previousFulfillmentStatus:
+            line.fulfillmentStatus === FulfillmentStatus.ON_HOLD ? FulfillmentStatus.PENDING : null,
+        }),
+      );
+      tracked.itemIds.push(item.id);
+      items.push(item);
+    }
+
+    const shipping = await storeShippingRepo.save(
+      storeShippingRepo.create({
+        orderId: order.id,
+        storeId: input.store.id,
+        shippingOptionId: input.shippingOptionId,
+        optionName: 'Standard',
+        shippingFee: input.shippingFee,
+      }),
+    );
+    tracked.storeShippingIds.push(shipping.id);
+
+    return { order, items };
+  }
+
+  // AC-025: "While an item is on_hold (or the order is on_hold), then that portion is excluded from
+  // item product (calculateItemSubtotal) and that store’s shipping is excluded unless another
+  // non-held eligible line remains on that store/order."
+  // Behavior: Held-only post-cutoff order + mixed held+eligible sibling → getPayoutSummary →
+  // held subtotal omitted; held-only shippingFees === 0; mixed shipping included once;
+  // commissionAmount only on non-held post-cutoff product.
+  // @category: edge-case
+  // @lane: integration
+  // @dependency: PayoutsService.calculateItemSubtotal + computeUnpaidBreakdown, PostgreSQL hold columns
+  // @complexity: medium
+  // ROI: 70
+  it('excludes on_hold item portions and held-only shipping from commission and payout totals', async () => {
+    if (!postgresAvailable) {
+      return;
+    }
+
+    const store = await seedStore('int3-exclude');
+    const catalog = await seedCatalog(store, 'exclude');
+
+    await seedPaidOrderWithItems({
+      store,
+      productName: catalog.product.name,
+      variant: catalog.variant,
+      shippingOptionId: catalog.shippingOption.id,
+      orderNumber: `SC3-HELD-${seedContext.runId}`,
+      paidAt: POST_PAID_AT,
+      shippingFee: 50,
+      items: [{ subtotal: 400, fulfillmentStatus: FulfillmentStatus.ON_HOLD }],
+    });
+
+    await seedPaidOrderWithItems({
+      store,
+      productName: catalog.product.name,
+      variant: catalog.variant,
+      shippingOptionId: catalog.shippingOption.id,
+      orderNumber: `SC3-MIX-${seedContext.runId}`,
+      paidAt: POST_PAID_AT,
+      shippingFee: 80,
+      items: [
+        { subtotal: 300, fulfillmentStatus: FulfillmentStatus.ON_HOLD },
+        { subtotal: 1000, fulfillmentStatus: FulfillmentStatus.PENDING },
+      ],
+    });
+
+    const summary = await payoutsService.getPayoutSummary(store.id);
+
+    expect(summary.productSold).toBe(1000);
+    expect(summary.shippingFees).toBe(80);
+    expect(summary.commissionAmount).toBe(70);
+    expect(summary.commissionRate).toBe(7);
+    expect(summary.availableBalance).toBe(1010);
+    expect(summary.omise.productSold).toBe(1000);
+    expect(summary.omise.shippingFees).toBe(80);
+    expect(summary.omise.commissionAmount).toBe(70);
+    expect(summary.availableBalance).toBe(
+      summary.productSold - summary.commissionAmount + summary.shippingFees,
+    );
+  });
+
+  // AC-026: "When held items leave hold, then they re-enter eligibility under this PRD’s cutoff and
+  // commission rules."
+  // Behavior: Restore previously held post-cutoff line → recompute unpaid breakdown → matches
+  // non-held sibling under cutoff + current effective rate (custom 5).
+  // @category: edge-case
+  // @lane: integration
+  // @dependency: PayoutsService.calculateItemSubtotal + computeUnpaidBreakdown, PostgreSQL hold columns
+  // @complexity: medium
+  // ROI: 70
+  it('re-enters eligibility under cutoff and commission rules after leave-hold', async () => {
+    if (!postgresAvailable) {
+      return;
+    }
+
+    const store = await seedStore('int3-restore');
+    store.commissionRate = 5;
+    await storeRepo.save(store);
+    const catalog = await seedCatalog(store, 'restore');
+
+    const held = await seedPaidOrderWithItems({
+      store,
+      productName: catalog.product.name,
+      variant: catalog.variant,
+      shippingOptionId: catalog.shippingOption.id,
+      orderNumber: `SC3-RST-H-${seedContext.runId}`,
+      paidAt: POST_PAID_AT,
+      shippingFee: 80,
+      items: [{ subtotal: 1000, fulfillmentStatus: FulfillmentStatus.ON_HOLD }],
+    });
+
+    await seedPaidOrderWithItems({
+      store,
+      productName: catalog.product.name,
+      variant: catalog.variant,
+      shippingOptionId: catalog.shippingOption.id,
+      orderNumber: `SC3-RST-S-${seedContext.runId}`,
+      paidAt: POST_PAID_AT,
+      shippingFee: 80,
+      items: [{ subtotal: 1000, fulfillmentStatus: FulfillmentStatus.PENDING }],
+    });
+
+    const before = await payoutsService.getPayoutSummary(store.id);
+    expect(before.productSold).toBe(1000);
+    expect(before.shippingFees).toBe(80);
+    expect(before.commissionAmount).toBe(50);
+    expect(before.commissionRate).toBe(5);
+    expect(before.availableBalance).toBe(1030);
+
+    const heldItem = held.items[0];
+    heldItem.fulfillmentStatus = heldItem.previousFulfillmentStatus ?? FulfillmentStatus.PENDING;
+    heldItem.previousFulfillmentStatus = null;
+    await orderItemRepo.save(heldItem);
+
+    const after = await payoutsService.getPayoutSummary(store.id);
+    expect(after.productSold).toBe(2000);
+    expect(after.shippingFees).toBe(160);
+    expect(after.commissionAmount).toBe(100);
+    expect(after.commissionRate).toBe(5);
+    expect(after.availableBalance).toBe(2060);
+    expect(after.productSold - before.productSold).toBe(1000);
+    expect(after.shippingFees - before.shippingFees).toBe(80);
+    expect(after.commissionAmount - before.commissionAmount).toBe(50);
   });
 });
