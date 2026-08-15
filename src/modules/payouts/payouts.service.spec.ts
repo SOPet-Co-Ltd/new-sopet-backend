@@ -10,6 +10,7 @@ import { Store, OmiseRecipientStatus } from '../../database/entities/store.entit
 import { OrderItem } from '../../database/entities/order-item.entity';
 import { OmiseService } from '../omise/omise.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import * as payoutCommissionCalculator from './payout-commission.calculator';
 
 function createQueryBuilderMock(result: Record<string, string>) {
   return {
@@ -254,6 +255,10 @@ describe('PayoutsService', () => {
         amount: 1500,
         fee: 0,
         netAmount: 1500,
+        productSold: 1500,
+        shippingFees: 0,
+        commissionAmount: 0,
+        commissionRate: 7,
         status: PayoutStatus.PENDING,
         settlementRail: 'omise',
       }),
@@ -671,7 +676,10 @@ describe('PayoutsService', () => {
 
     await expect(
       service.triggerPayout('store-1', { amount: 700, bypassMinimum: true }),
-    ).rejects.toThrow(BadRequestException);
+    ).rejects.toMatchObject({
+      response: { code: 'INSUFFICIENT_BALANCE' },
+    });
+    expect(managerPayoutRepo.create).not.toHaveBeenCalled();
   });
 
   it('requests then settles manual bank-transfer payout without Omise', async () => {
@@ -683,6 +691,12 @@ describe('PayoutsService', () => {
       expect.objectContaining({
         storeId: 'store-1',
         amount: 2000,
+        fee: 0,
+        netAmount: 2000,
+        productSold: 2000,
+        shippingFees: 0,
+        commissionAmount: 0,
+        commissionRate: 7,
         settlementRail: 'manual',
         status: PayoutStatus.PENDING,
         processedBy: 'vendor-1',
@@ -696,6 +710,11 @@ describe('PayoutsService', () => {
       storeId: 'store-1',
       amount: 2000,
       netAmount: 2000,
+      fee: 0,
+      productSold: 2000,
+      shippingFees: 0,
+      commissionAmount: 0,
+      commissionRate: 7,
       status: PayoutStatus.PENDING,
       settlementRail: 'manual',
       processedBy: 'vendor-1',
@@ -715,6 +734,13 @@ describe('PayoutsService', () => {
         status: PayoutStatus.COMPLETED,
         processedBy: 'admin-1',
         notes: 'Transferred via SCB',
+        amount: 2000,
+        netAmount: 2000,
+        fee: 0,
+        productSold: 2000,
+        shippingFees: 0,
+        commissionAmount: 0,
+        commissionRate: 7,
       }),
     );
     expect(omiseService.createTransfer).not.toHaveBeenCalled();
@@ -949,6 +975,150 @@ describe('PayoutsService', () => {
       );
       expect(summary.availableBalance).toBe(500);
       expect(summary.productSold).toBe(500);
+    });
+  });
+
+  describe('create-path snapshot (AC-007/008/018, AC-D-011, AC-D-029)', () => {
+    it('writes fee===0 and already-net snapshot on both rails for the same unpaid set', async () => {
+      configService.get.mockImplementation((key: string) => {
+        if (key === 'payout.minPayoutAmount') return 500;
+        if (key === 'commission.defaultRatePercent') return 7;
+        if (key === 'commission.goLiveAt') return GO_LIVE_AT;
+        return undefined;
+      });
+      mockCutoffQueries({ preTotal: '400', postTotal: '1000', shipping: '80' });
+
+      const omise = await service.createOmisePayout('store-1', 1410);
+      expect(omise.amount).toBe(1410);
+      expect(omise.netAmount).toBe(1410);
+      expect(omise.fee).toBe(0);
+      expect(omise.productSold).toBe(1400);
+      expect(omise.shippingFees).toBe(80);
+      expect(omise.commissionAmount).toBe(70);
+      expect(omise.commissionRate).toBe(7);
+
+      mockCutoffQueries({ preTotal: '400', postTotal: '1000', shipping: '80' });
+      const manual = await service.requestManualPayout('store-1', 'vendor-1');
+      expect(manual.amount).toBe(1410);
+      expect(manual.netAmount).toBe(1410);
+      expect(manual.fee).toBe(0);
+      expect(manual.productSold).toBe(1400);
+      expect(manual.shippingFees).toBe(80);
+      expect(manual.commissionAmount).toBe(70);
+      expect(manual.commissionRate).toBe(7);
+    });
+
+    it('omits amount to pay full unpaid fours and snapshots a partial consume for an explicit amount', async () => {
+      configService.get.mockImplementation((key: string) => {
+        if (key === 'payout.minPayoutAmount') return 500;
+        if (key === 'commission.defaultRatePercent') return 7;
+        if (key === 'commission.goLiveAt') return GO_LIVE_AT;
+        return undefined;
+      });
+      mockCutoffQueries({ preTotal: '400', postTotal: '1000', shipping: '80' });
+      const logSpy = jest.spyOn(service['logger'], 'log').mockImplementation();
+
+      const full = await service.triggerPayout('store-1', { bypassMinimum: true });
+      expect(full.amount).toBe(1410);
+      expect(full.productSold).toBe(1400);
+      expect(full.shippingFees).toBe(80);
+      expect(full.commissionAmount).toBe(70);
+      expect(full.fee).toBe(0);
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Payout snapshot created'));
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('net=1410'));
+      expect(logSpy.mock.calls.some((call) => String(call[0]).includes('partialConsume'))).toBe(
+        false,
+      );
+
+      mockCutoffQueries({ preTotal: '0', postTotal: '1000', shipping: '0' });
+      const partial = await service.triggerPayout('store-1', {
+        amount: 200,
+        bypassMinimum: true,
+      });
+      expect(partial.amount).toBe(200);
+      expect(partial.netAmount).toBe(200);
+      expect(partial.fee).toBe(0);
+      expect(partial.productSold - partial.commissionAmount + partial.shippingFees).toBe(200);
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('partialConsume=true'));
+      logSpy.mockRestore();
+    });
+
+    it('rejects createOmisePayout amount <= 0 or above unpaid net without inserting', async () => {
+      configService.get.mockImplementation((key: string) => {
+        if (key === 'payout.minPayoutAmount') return 500;
+        if (key === 'commission.defaultRatePercent') return 7;
+        if (key === 'commission.goLiveAt') return GO_LIVE_AT;
+        return undefined;
+      });
+      mockCutoffQueries({ preTotal: '400', postTotal: '1000', shipping: '80' });
+
+      await expect(service.createOmisePayout('store-1', 0)).rejects.toMatchObject({
+        response: { code: 'INVALID_PAYOUT_AMOUNT' },
+      });
+      expect(managerPayoutRepo.create).not.toHaveBeenCalled();
+
+      await expect(service.createManualPayout('store-1', 1410.01)).rejects.toMatchObject({
+        response: { code: 'INSUFFICIENT_BALANCE' },
+      });
+      expect(managerPayoutRepo.create).not.toHaveBeenCalled();
+    });
+
+    it('logs ERROR and does not insert when commissionAmount fails AC-D-011', async () => {
+      const consumeSpy = jest.spyOn(payoutCommissionCalculator, 'consumeToAmount').mockReturnValue({
+        productSold: 1500,
+        shippingFees: 0,
+        commissionAmount: 99,
+        commissionRate: 7,
+        net: 1401,
+      });
+      const errorSpy = jest.spyOn(service['logger'], 'error').mockImplementation();
+
+      await expect(service.createOmisePayout('store-1', 1500)).rejects.toMatchObject({
+        response: { code: 'COMMISSION_FORMULA_MISMATCH' },
+      });
+      expect(managerPayoutRepo.create).not.toHaveBeenCalled();
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Commission formula mismatch'));
+      consumeSpy.mockRestore();
+      errorSpy.mockRestore();
+    });
+
+    it('does not rewrite snapshot when retrying an orphan pending payout', async () => {
+      const orphan = {
+        id: 'payout-orphan',
+        storeId: 'store-1',
+        amount: 1410,
+        netAmount: 1410,
+        fee: 0,
+        productSold: 1400,
+        shippingFees: 80,
+        commissionAmount: 70,
+        commissionRate: 7,
+        status: PayoutStatus.PENDING,
+        transferReference: null,
+        failureReason: null,
+      };
+      payoutRepo.findOne.mockResolvedValue(orphan);
+      managerPayoutQueryBuilder.getOne.mockResolvedValue({ ...orphan });
+      storeRepo.findOne.mockResolvedValue({
+        id: 'store-1',
+        omiseRecipientId: 'recp_test_1',
+        omiseRecipientStatus: OmiseRecipientStatus.ACTIVE,
+      });
+      omiseService.hasCredentials.mockReturnValue(true);
+      omiseService.getRecipient.mockResolvedValue({
+        id: 'recp_test_1',
+        verified: true,
+        active: true,
+      });
+      omiseService.createTransfer.mockResolvedValue({ id: 'trsf_retry_snap', paid: false });
+
+      const payout = await service.requestPayout('store-1', 'vendor-1');
+
+      expect(managerPayoutRepo.create).not.toHaveBeenCalled();
+      expect(payout.productSold).toBe(1400);
+      expect(payout.commissionAmount).toBe(70);
+      expect(payout.amount).toBe(1410);
+      expect(omiseService.createTransfer).toHaveBeenCalledWith('recp_test_1', 141000);
     });
   });
 });

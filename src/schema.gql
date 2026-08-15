@@ -176,10 +176,14 @@ type AdminManualPayoutType {
   bankAccountNumber: String
   bankCode: String
   bankName: String
+  commissionAmount: Float
+  commissionRate: Int
   createdAt: DateTime!
   id: String!
   netAmount: Float!
+  productSold: Float
   settlementRail: String!
+  shippingFees: Float
   status: String!
   storeId: String!
   storeName: String!
@@ -1138,10 +1142,14 @@ type PayoutSummaryType {
 
 type PayoutType {
   amount: Float!
+  commissionAmount: Float
+  commissionRate: Int
   createdAt: DateTime!
   id: String!
   netAmount: Float!
+  productSold: Float
   settlementRail: String!
+  shippingFees: Float
   status: String!
   storeId: String!
 }

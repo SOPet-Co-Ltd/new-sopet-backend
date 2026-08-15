@@ -36,6 +36,18 @@ export class PayoutType {
   @Field(() => Float)
   netAmount!: number;
 
+  @Field(() => Float, { nullable: true })
+  productSold!: number | null;
+
+  @Field(() => Float, { nullable: true })
+  shippingFees!: number | null;
+
+  @Field(() => Float, { nullable: true })
+  commissionAmount!: number | null;
+
+  @Field(() => Int, { nullable: true })
+  commissionRate!: number | null;
+
   @Field()
   status!: string;
 
@@ -74,6 +86,18 @@ export class AdminManualPayoutType {
 
   @Field(() => Float)
   netAmount!: number;
+
+  @Field(() => Float, { nullable: true })
+  productSold!: number | null;
+
+  @Field(() => Float, { nullable: true })
+  shippingFees!: number | null;
+
+  @Field(() => Float, { nullable: true })
+  commissionAmount!: number | null;
+
+  @Field(() => Int, { nullable: true })
+  commissionRate!: number | null;
 
   @Field()
   status!: string;
@@ -490,6 +514,10 @@ function mapPayout(payout: {
   storeId: string;
   amount: number;
   netAmount: number;
+  productSold?: number | null;
+  shippingFees?: number | null;
+  commissionAmount?: number | null;
+  commissionRate?: number | null;
   status: string;
   settlementRail: string;
   createdAt: Date;
@@ -499,6 +527,10 @@ function mapPayout(payout: {
     storeId: payout.storeId,
     amount: Number(payout.amount),
     netAmount: Number(payout.netAmount),
+    productSold: payout.productSold == null ? null : Number(payout.productSold),
+    shippingFees: payout.shippingFees == null ? null : Number(payout.shippingFees),
+    commissionAmount: payout.commissionAmount == null ? null : Number(payout.commissionAmount),
+    commissionRate: payout.commissionRate == null ? null : Number(payout.commissionRate),
     status: payout.status,
     settlementRail: payout.settlementRail,
     createdAt: payout.createdAt,

@@ -13,11 +13,14 @@ import { OmiseService, OmiseTransfer } from '../omise/omise.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { DEFAULT_COMMISSION_RATE_PERCENT } from '../../config/commission.config';
 import {
+  commissionSatang,
   consumePriorPayouts,
+  consumeToAmount,
   effectiveRate,
   finalizeBreakdown,
   type Breakdown,
   type PriorPayout,
+  type UnpaidBuckets,
 } from './payout-commission.calculator';
 import {
   CreatePayoutOptions,
@@ -271,27 +274,16 @@ export class PayoutsService {
       });
     }
 
-    const amount = manual.availableBalance;
-    const fee = 0;
-    const netAmount = amount - fee;
-
     const payout = await this.dataSource.transaction(async (manager) => {
       await this.lockStoreRowForPayout(manager, storeId);
       await this.assertNoConcurrentPendingPayout(manager, storeId, PayoutSettlementRail.MANUAL);
-
-      const created = manager.getRepository(Payout).create({
+      return this.insertSnapshotPayout(manager, {
         storeId,
-        amount,
-        fee,
-        netAmount,
-        status: PayoutStatus.PENDING,
-        settlementRail: PayoutSettlementRail.MANUAL,
-        transferReference: null,
+        rail: PayoutSettlementRail.MANUAL,
+        paymentMethods: MANUAL_PAYMENT_METHODS,
         processedBy: processedBy ?? null,
-        processedAt: null,
         notes: 'Vendor requested manual payout',
       });
-      return manager.getRepository(Payout).save(created);
     });
 
     try {
@@ -472,9 +464,6 @@ export class PayoutsService {
       this.assertRecipientReadyForTransfer(store);
     }
 
-    const fee = 0;
-    const netAmount = amount - fee;
-
     // Both requestPayout (vendor) and triggerPayout (admin) read the pending-payout summary
     // and only create a payout if it's zero, with no lock in between - two concurrent calls
     // (double-click, or vendor + admin racing) can otherwise both pass that check and each
@@ -482,22 +471,18 @@ export class PayoutsService {
     // store once Omise transfers are applied below. Locking the store row inside a
     // transaction serializes concurrent creates for the same store; the recheck after
     // acquiring the lock is what actually catches the race (the pre-check above is just a
-    // fast-fail for the common case).
+    // fast-fail for the common case). Snapshot fours are written in this same insert.
     const payout = await this.dataSource.transaction(async (manager) => {
       await this.lockStoreRowForPayout(manager, storeId);
       await this.assertNoConcurrentPendingPayout(manager, storeId, PayoutSettlementRail.OMISE);
-
-      const created = manager.getRepository(Payout).create({
+      return this.insertSnapshotPayout(manager, {
         storeId,
+        rail: PayoutSettlementRail.OMISE,
+        paymentMethods: OMISE_PAYMENT_METHODS,
         amount,
-        fee,
-        netAmount,
-        status: PayoutStatus.PENDING,
-        settlementRail: PayoutSettlementRail.OMISE,
         processedBy: options.processedBy ?? null,
         notes: options.notes ?? null,
       });
-      return manager.getRepository(Payout).save(created);
     });
 
     if (
@@ -505,7 +490,7 @@ export class PayoutsService {
       store.omiseRecipientId &&
       store.omiseRecipientStatus === OmiseRecipientStatus.ACTIVE
     ) {
-      await this.applyOmiseTransfer(payout, store.omiseRecipientId, netAmount);
+      await this.applyOmiseTransfer(payout, store.omiseRecipientId, Number(payout.netAmount));
     }
 
     return this.payoutRepository.save(payout);
@@ -786,7 +771,7 @@ export class PayoutsService {
     storeId: string,
     rail: PayoutSettlementRail,
     paymentMethods: PaymentMethod[],
-  ): Promise<Breakdown & { lifetimeProduct: number }> {
+  ): Promise<Breakdown & { lifetimeProduct: number; unpaid: UnpaidBuckets }> {
     const store = await this.storeRepository.findOne({ where: { id: storeId } });
     if (!store) {
       throw new NotFoundException({ code: 'STORE_NOT_FOUND', message: 'Store not found' });
@@ -814,7 +799,113 @@ export class PayoutsService {
     return {
       ...breakdown,
       lifetimeProduct: preProduct + postProduct,
+      unpaid,
     };
+  }
+
+  /**
+   * Persist snapshot columns in the same insert as amount/net. Both rails.
+   * Omit `amount` to consume the full unpaid net.
+   */
+  private async insertSnapshotPayout(
+    manager: EntityManager,
+    params: {
+      storeId: string;
+      rail: PayoutSettlementRail;
+      paymentMethods: PaymentMethod[];
+      amount?: number;
+      processedBy?: string | null;
+      notes?: string | null;
+    },
+  ): Promise<Payout> {
+    const unpaidFull = await this.computeUnpaidBreakdown(
+      params.storeId,
+      params.rail,
+      params.paymentMethods,
+    );
+    const requested = params.amount ?? unpaidFull.net;
+
+    if (requested <= 0) {
+      throw new BadRequestException({
+        code: 'INVALID_PAYOUT_AMOUNT',
+        message: 'Payout amount must be greater than zero',
+      });
+    }
+    if (requested > unpaidFull.net) {
+      throw new BadRequestException({
+        code: 'INSUFFICIENT_BALANCE',
+        message:
+          params.rail === PayoutSettlementRail.MANUAL
+            ? 'No bank-transfer funds available for payout'
+            : 'Payout amount exceeds Omise available balance',
+      });
+    }
+
+    const breakdown = consumeToAmount(unpaidFull.unpaid, requested, unpaidFull.commissionRate);
+    this.assertCommissionFormula(breakdown, unpaidFull.unpaid, unpaidFull.commissionRate);
+
+    const created = manager.getRepository(Payout).create({
+      storeId: params.storeId,
+      amount: breakdown.net,
+      fee: 0,
+      netAmount: breakdown.net,
+      commissionRate: breakdown.commissionRate,
+      productSold: breakdown.productSold,
+      shippingFees: breakdown.shippingFees,
+      commissionAmount: breakdown.commissionAmount,
+      status: PayoutStatus.PENDING,
+      settlementRail: params.rail,
+      transferReference: null,
+      processedBy: params.processedBy ?? null,
+      processedAt: null,
+      notes: params.notes ?? null,
+    });
+    const payout = await manager.getRepository(Payout).save(created);
+
+    const requestedSatang = Math.floor(requested * 100 + 0.5);
+    this.logCreateSnapshot(payout, {
+      partialConsume: requestedSatang < Math.floor(unpaidFull.net * 100 + 0.5),
+      requestedAmount: requested,
+    });
+
+    return payout;
+  }
+
+  private assertCommissionFormula(breakdown: Breakdown, unpaid: UnpaidBuckets, rate: number): void {
+    const productSatang = Math.floor(breakdown.productSold * 100 + 0.5);
+    const unpaidPreSatang = Math.floor(unpaid.unpaidPre * 100 + 0.5);
+    const consumedPostSatang = Math.max(0, productSatang - unpaidPreSatang);
+    const expectedSatang = commissionSatang(consumedPostSatang, rate);
+    const actualSatang = Math.floor(breakdown.commissionAmount * 100 + 0.5);
+    if (actualSatang !== expectedSatang) {
+      this.logger.error(
+        `Commission formula mismatch store snapshot productSold=${breakdown.productSold} ` +
+          `commissionAmount=${breakdown.commissionAmount} expectedSatang=${expectedSatang} ` +
+          `rate=${rate} consumedPostSatang=${consumedPostSatang}`,
+      );
+      throw new BadRequestException({
+        code: 'COMMISSION_FORMULA_MISMATCH',
+        message: 'Commission amount does not match round_half_up(post × rate / 100)',
+      });
+    }
+  }
+
+  private logCreateSnapshot(
+    payout: Payout,
+    extras: {
+      partialConsume: boolean;
+      requestedAmount?: number;
+    },
+  ): void {
+    const partialNote = extras.partialConsume
+      ? ` partialConsume=true requestedAmount=${extras.requestedAmount}`
+      : '';
+    this.logger.log(
+      `Payout snapshot created storeId=${payout.storeId} payoutId=${payout.id} ` +
+        `productSold=${payout.productSold} shippingFees=${payout.shippingFees} ` +
+        `commissionAmount=${payout.commissionAmount} commissionRate=${payout.commissionRate} ` +
+        `net=${payout.netAmount}${partialNote}`,
+    );
   }
 
   private async calculateEligibleProductBuckets(
