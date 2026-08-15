@@ -1,4 +1,11 @@
-export interface PayoutRailSummary {
+export interface PayoutBreakdownFours {
+  productSold: number;
+  shippingFees: number;
+  commissionAmount: number;
+  commissionRate: number;
+}
+
+export interface PayoutRailSummary extends PayoutBreakdownFours {
   grossRevenue: number;
   totalPaidOut: number;
   availableBalance: number;
@@ -6,7 +13,7 @@ export interface PayoutRailSummary {
   canRequestPayout: boolean;
 }
 
-export interface PayoutSummary {
+export interface PayoutSummary extends PayoutBreakdownFours {
   storeId: string;
   /** @deprecated Prefer omise.* — kept for GraphQL backward compatibility (Omise rail). */
   grossRevenue: number;

@@ -8,8 +8,17 @@ import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order
 import { Store, OmiseRecipientStatus } from '../../database/entities/store.entity';
 import { Promotion, PromotionScope } from '../../database/entities/promotion.entity';
 import { PromotionUsage } from '../../database/entities/promotion-usage.entity';
+import { OrderStoreShipping } from '../../database/entities/order-store-shipping.entity';
 import { OmiseService, OmiseTransfer } from '../omise/omise.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { DEFAULT_COMMISSION_RATE_PERCENT } from '../../config/commission.config';
+import {
+  consumePriorPayouts,
+  effectiveRate,
+  finalizeBreakdown,
+  type Breakdown,
+  type PriorPayout,
+} from './payout-commission.calculator';
 import {
   CreatePayoutOptions,
   PayoutRailSummary,
@@ -96,6 +105,10 @@ export class PayoutsService {
       grossRevenue: omise.grossRevenue,
       totalPaidOut: omise.totalPaidOut,
       availableBalance: omise.availableBalance,
+      productSold: omise.productSold,
+      shippingFees: omise.shippingFees,
+      commissionAmount: omise.commissionAmount,
+      commissionRate: omise.commissionRate,
       pendingPayoutAmount: omise.pendingPayoutAmount,
       minimumPayoutAmount,
       canRequestPayout: omise.canRequestPayout,
@@ -109,8 +122,8 @@ export class PayoutsService {
     rail: PayoutSettlementRail,
     paymentMethods: PaymentMethod[],
   ): Promise<PayoutRailSummary> {
-    const [grossRevenue, totalPaidOut, pendingPayoutAmount, orphanPending] = await Promise.all([
-      this.calculateGrossRevenue(storeId, paymentMethods),
+    const [unpaid, totalPaidOut, pendingPayoutAmount, orphanPending] = await Promise.all([
+      this.computeUnpaidBreakdown(storeId, rail, paymentMethods),
       this.calculateTotalPaidOut(storeId, rail),
       this.calculatePendingPayoutAmount(storeId, rail),
       rail === PayoutSettlementRail.OMISE
@@ -118,7 +131,7 @@ export class PayoutsService {
         : Promise.resolve(null),
     ]);
 
-    const availableBalance = Math.max(0, grossRevenue - totalPaidOut);
+    const availableBalance = Math.max(0, unpaid.net);
     const hasPending = pendingPayoutAmount > 0;
     const minimumPayoutAmount = this.getMinimumPayoutAmount();
 
@@ -134,9 +147,13 @@ export class PayoutsService {
     }
 
     return {
-      grossRevenue,
+      grossRevenue: unpaid.lifetimeProduct,
       totalPaidOut,
       availableBalance,
+      productSold: unpaid.productSold,
+      shippingFees: unpaid.shippingFees,
+      commissionAmount: unpaid.commissionAmount,
+      commissionRate: unpaid.commissionRate,
       pendingPayoutAmount,
       canRequestPayout,
     };
@@ -760,56 +777,141 @@ export class PayoutsService {
     });
   }
 
-  private async calculateGrossRevenue(
+  /**
+   * Unpaid-bucket fours + derived net using the shared calculator.
+   * Eligibility (hold / rail / status) first; cutoff split second.
+   * Does not persist snapshot columns.
+   */
+  async computeUnpaidBreakdown(
+    storeId: string,
+    rail: PayoutSettlementRail,
+    paymentMethods: PaymentMethod[],
+  ): Promise<Breakdown & { lifetimeProduct: number }> {
+    const store = await this.storeRepository.findOne({ where: { id: storeId } });
+    if (!store) {
+      throw new NotFoundException({ code: 'STORE_NOT_FOUND', message: 'Store not found' });
+    }
+
+    const goLiveAt = this.configService.get<Date>('commission.goLiveAt');
+    const rate = effectiveRate(
+      store.commissionRate ?? null,
+      this.configService.get<number>('commission.defaultRatePercent') ??
+        DEFAULT_COMMISSION_RATE_PERCENT,
+    );
+
+    const { preProduct, postProduct } = await this.calculateEligibleProductBuckets(
+      storeId,
+      paymentMethods,
+      goLiveAt,
+    );
+    const postShipping = goLiveAt
+      ? await this.calculatePostCutoffShipping(storeId, paymentMethods, goLiveAt)
+      : 0;
+    const priorPayouts = await this.loadPriorPayoutsForConsume(storeId, rail);
+    const unpaid = consumePriorPayouts({ preProduct, postProduct, postShipping }, priorPayouts);
+    const breakdown = finalizeBreakdown(unpaid, rate);
+
+    return {
+      ...breakdown,
+      lifetimeProduct: preProduct + postProduct,
+    };
+  }
+
+  private async calculateEligibleProductBuckets(
     storeId: string,
     paymentMethods: PaymentMethod[],
-  ): Promise<number> {
-    const [itemSubtotal, storePromotionDiscounts] = await Promise.all([
-      this.calculateItemSubtotal(storeId, paymentMethods),
-      this.calculateStorePromotionDiscounts(storeId, paymentMethods),
+    goLiveAt: Date | undefined,
+  ): Promise<{ preProduct: number; postProduct: number }> {
+    if (!goLiveAt) {
+      const [itemSubtotal, storePromotionDiscounts] = await Promise.all([
+        this.calculateItemSubtotal(storeId, paymentMethods),
+        this.calculateStorePromotionDiscounts(storeId, paymentMethods),
+      ]);
+      return {
+        preProduct: Math.max(0, itemSubtotal - storePromotionDiscounts),
+        postProduct: 0,
+      };
+    }
+
+    const [preItems, postItems, prePromos, postPromos] = await Promise.all([
+      this.sumEligibleItemSubtotal(storeId, paymentMethods, 'pre', goLiveAt),
+      this.sumEligibleItemSubtotal(storeId, paymentMethods, 'post', goLiveAt),
+      this.sumStorePromotionDiscounts(storeId, paymentMethods, 'pre', goLiveAt),
+      this.sumStorePromotionDiscounts(storeId, paymentMethods, 'post', goLiveAt),
     ]);
 
-    // A vendor's OWN store-scoped promotion is a discount the vendor chose to give -
-    // OrderItem.subtotal is always the raw pre-discount line amount (discountAmount only
-    // ever lived at the Order header level), so without this the vendor was credited the
-    // full undiscounted amount while the customer paid less, with nobody actually bearing
-    // the cost of the vendor's own promo. Platform-wide promotions are intentionally left
-    // untouched here - the platform funds those out of its own margin, which is a business
-    // policy choice, not this bug.
-    return Math.max(0, itemSubtotal - storePromotionDiscounts);
+    return {
+      preProduct: Math.max(0, preItems - prePromos),
+      postProduct: Math.max(0, postItems - postPromos),
+    };
+  }
+
+  private eligibleItemsQuery(storeId: string, paymentMethods: PaymentMethod[]) {
+    return (
+      this.orderItemRepository
+        .createQueryBuilder('item')
+        .innerJoin(Order, 'order', 'order.id = item.order_id')
+        .where('item.store_id = :storeId', { storeId })
+        .andWhere('order.status IN (:...statuses)', {
+          statuses: [OrderStatus.PAID, OrderStatus.DELIVERED],
+        })
+        .andWhere('order.payment_method IN (:...paymentMethods)', { paymentMethods })
+        // Held item portions are not payout-eligible (AC-030); restore re-includes under PAID|DELIVERED.
+        .andWhere('item.fulfillment_status <> :heldFulfillment', {
+          heldFulfillment: FulfillmentStatus.ON_HOLD,
+        })
+        // Defense in depth: order-level on_hold must never contribute via item join.
+        .andWhere('order.status <> :heldOrderStatus', {
+          heldOrderStatus: OrderStatus.ON_HOLD,
+        })
+    );
+  }
+
+  private applyPaidAtCutoff<T extends { andWhere: (clause: string, params?: object) => T }>(
+    query: T,
+    bucket: 'pre' | 'post',
+    goLiveAt: Date,
+  ): T {
+    if (bucket === 'post') {
+      return query.andWhere('order.paid_at >= :goLiveAt', { goLiveAt });
+    }
+    return query.andWhere('(order.paid_at IS NULL OR order.paid_at < :goLiveAt)', { goLiveAt });
   }
 
   private async calculateItemSubtotal(
     storeId: string,
     paymentMethods: PaymentMethod[],
   ): Promise<number> {
-    const result = await this.orderItemRepository
-      .createQueryBuilder('item')
-      .innerJoin(Order, 'order', 'order.id = item.order_id')
-      .where('item.store_id = :storeId', { storeId })
-      .andWhere('order.status IN (:...statuses)', {
-        statuses: [OrderStatus.PAID, OrderStatus.DELIVERED],
-      })
-      .andWhere('order.payment_method IN (:...paymentMethods)', { paymentMethods })
-      // Held item portions are not payout-eligible (AC-030); restore re-includes under PAID|DELIVERED.
-      .andWhere('item.fulfillment_status <> :heldFulfillment', {
-        heldFulfillment: FulfillmentStatus.ON_HOLD,
-      })
-      // Defense in depth: order-level on_hold must never contribute via item join.
-      .andWhere('order.status <> :heldOrderStatus', {
-        heldOrderStatus: OrderStatus.ON_HOLD,
-      })
+    const result = await this.eligibleItemsQuery(storeId, paymentMethods)
       .select('COALESCE(SUM(item.subtotal), 0)', 'total')
       .getRawOne<{ total: string }>();
 
     return Number(result?.total ?? 0);
   }
 
-  private async calculateStorePromotionDiscounts(
+  private async sumEligibleItemSubtotal(
     storeId: string,
     paymentMethods: PaymentMethod[],
+    bucket: 'pre' | 'post',
+    goLiveAt: Date,
   ): Promise<number> {
-    const result = await this.dataSource
+    const result = await this.applyPaidAtCutoff(
+      this.eligibleItemsQuery(storeId, paymentMethods),
+      bucket,
+      goLiveAt,
+    )
+      .select('COALESCE(SUM(item.subtotal), 0)', 'total')
+      .getRawOne<{ total: string }>();
+
+    return Number(result?.total ?? 0);
+  }
+
+  /**
+   * Store-scoped promo SUM. Order paid/delivered + rail + order-level on_hold only.
+   * Intentionally no order_items / item.fulfillment_status join (AC-D-010 preserved gap).
+   */
+  private storePromotionDiscountQuery(storeId: string, paymentMethods: PaymentMethod[]) {
+    return this.dataSource
       .createQueryBuilder(PromotionUsage, 'usage')
       .innerJoin(Order, 'order', 'order.id = usage.order_id')
       .innerJoin(Promotion, 'promotion', 'promotion.id = usage.promotion_id')
@@ -819,11 +921,90 @@ export class PayoutsService {
         statuses: [OrderStatus.PAID, OrderStatus.DELIVERED],
       })
       .andWhere('order.payment_method IN (:...paymentMethods)', { paymentMethods })
-      .andWhere('order.status <> :heldOrderStatus', { heldOrderStatus: OrderStatus.ON_HOLD })
+      .andWhere('order.status <> :heldOrderStatus', { heldOrderStatus: OrderStatus.ON_HOLD });
+  }
+
+  private async calculateStorePromotionDiscounts(
+    storeId: string,
+    paymentMethods: PaymentMethod[],
+  ): Promise<number> {
+    const result = await this.storePromotionDiscountQuery(storeId, paymentMethods)
       .select('COALESCE(SUM(usage.discount_amount), 0)', 'total')
       .getRawOne<{ total: string }>();
 
     return Number(result?.total ?? 0);
+  }
+
+  private async sumStorePromotionDiscounts(
+    storeId: string,
+    paymentMethods: PaymentMethod[],
+    bucket: 'pre' | 'post',
+    goLiveAt: Date,
+  ): Promise<number> {
+    const result = await this.applyPaidAtCutoff(
+      this.storePromotionDiscountQuery(storeId, paymentMethods),
+      bucket,
+      goLiveAt,
+    )
+      .select('COALESCE(SUM(usage.discount_amount), 0)', 'total')
+      .getRawOne<{ total: string }>();
+
+    return Number(result?.total ?? 0);
+  }
+
+  private async calculatePostCutoffShipping(
+    storeId: string,
+    paymentMethods: PaymentMethod[],
+    goLiveAt: Date,
+  ): Promise<number> {
+    const result = await this.dataSource
+      .createQueryBuilder(OrderStoreShipping, 'oss')
+      .innerJoin(Order, 'order', 'order.id = oss.order_id')
+      .where('oss.store_id = :storeId', { storeId })
+      .andWhere('order.status IN (:...statuses)', {
+        statuses: [OrderStatus.PAID, OrderStatus.DELIVERED],
+      })
+      .andWhere('order.payment_method IN (:...paymentMethods)', { paymentMethods })
+      .andWhere('order.status <> :heldOrderStatus', { heldOrderStatus: OrderStatus.ON_HOLD })
+      .andWhere('order.paid_at >= :goLiveAt', { goLiveAt })
+      .andWhere((qb) => {
+        const sub = qb
+          .subQuery()
+          .select('1')
+          .from(OrderItem, 'eligibleItem')
+          .where('eligibleItem.order_id = order.id')
+          .andWhere('eligibleItem.store_id = :storeId')
+          .andWhere('eligibleItem.fulfillment_status <> :heldFulfillment')
+          .getQuery();
+        return `EXISTS ${sub}`;
+      })
+      .setParameter('heldFulfillment', FulfillmentStatus.ON_HOLD)
+      .select('COALESCE(SUM(oss.shipping_fee), 0)', 'total')
+      .getRawOne<{ total: string }>();
+
+    return Number(result?.total ?? 0);
+  }
+
+  private async loadPriorPayoutsForConsume(
+    storeId: string,
+    rail: PayoutSettlementRail,
+  ): Promise<PriorPayout[]> {
+    const rows = await this.payoutRepository.find({
+      where: {
+        storeId,
+        settlementRail: rail,
+        status: In(PAID_OUT_STATUSES),
+      },
+      order: { createdAt: 'ASC', id: 'ASC' },
+    });
+
+    return rows.map((row) => ({
+      amount: Number(row.amount),
+      productSold: row.productSold == null ? null : Number(row.productSold),
+      shippingFees: row.shippingFees == null ? null : Number(row.shippingFees),
+      commissionAmount: row.commissionAmount == null ? null : Number(row.commissionAmount),
+      commissionRate: row.commissionRate == null ? null : Number(row.commissionRate),
+    }));
   }
 
   private async calculateTotalPaidOut(

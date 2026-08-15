@@ -1111,19 +1111,27 @@ type PaymentType {
 type PayoutRailSummaryType {
   availableBalance: Float!
   canRequestPayout: Boolean!
+  commissionAmount: Float!
+  commissionRate: Int!
   grossRevenue: Float!
   pendingPayoutAmount: Float!
+  productSold: Float!
+  shippingFees: Float!
   totalPaidOut: Float!
 }
 
 type PayoutSummaryType {
   availableBalance: Float!
   canRequestPayout: Boolean!
+  commissionAmount: Float!
+  commissionRate: Int!
   grossRevenue: Float!
   manual: PayoutRailSummaryType!
   minimumPayoutAmount: Float!
   omise: PayoutRailSummaryType!
   pendingPayoutAmount: Float!
+  productSold: Float!
+  shippingFees: Float!
   storeId: String!
   totalPaidOut: Float!
 }

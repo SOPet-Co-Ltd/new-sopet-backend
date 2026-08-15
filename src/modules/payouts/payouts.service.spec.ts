@@ -4,18 +4,24 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 import { PayoutsService } from './payouts.service';
-import { Payout, PayoutStatus } from '../../database/entities/payout.entity';
+import { Payout, PayoutSettlementRail, PayoutStatus } from '../../database/entities/payout.entity';
+import { PaymentMethod } from '../../database/entities/order.entity';
 import { Store, OmiseRecipientStatus } from '../../database/entities/store.entity';
 import { OrderItem } from '../../database/entities/order-item.entity';
 import { OmiseService } from '../omise/omise.service';
 import { NotificationsService } from '../notifications/notifications.service';
 
-function createQueryBuilderMock(result: { total: string }) {
+function createQueryBuilderMock(result: Record<string, string>) {
   return {
     innerJoin: jest.fn().mockReturnThis(),
     where: jest.fn().mockReturnThis(),
     andWhere: jest.fn().mockReturnThis(),
     select: jest.fn().mockReturnThis(),
+    addSelect: jest.fn().mockReturnThis(),
+    setParameter: jest.fn().mockReturnThis(),
+    from: jest.fn().mockReturnThis(),
+    subQuery: jest.fn().mockReturnThis(),
+    getQuery: jest.fn().mockReturnValue('(SELECT 1)'),
     getRawOne: jest.fn().mockResolvedValue(result),
   };
 }
@@ -78,14 +84,135 @@ describe('PayoutsService', () => {
     notifyAdminsAboutManualPayoutRequest: jest.fn().mockResolvedValue(null),
   };
   const configService = {
-    get: jest.fn((key: string) => (key === 'payout.minPayoutAmount' ? 500 : undefined)),
+    get: jest.fn((key: string) => {
+      if (key === 'payout.minPayoutAmount') return 500;
+      if (key === 'commission.defaultRatePercent') return 7;
+      return undefined;
+    }),
   };
+
+  const GO_LIVE_AT = new Date('2026-06-01T00:00:00.000Z');
+
+  function historicalPayout(amount: number, id: string) {
+    return {
+      id,
+      amount,
+      productSold: null,
+      shippingFees: null,
+      commissionAmount: null,
+      commissionRate: null,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    };
+  }
+
+  function expectFoursIdentity(
+    summary: {
+      productSold?: number;
+      shippingFees?: number;
+      commissionAmount?: number;
+      commissionRate?: number;
+      availableBalance: number;
+      omise: {
+        productSold?: number;
+        shippingFees?: number;
+        commissionAmount?: number;
+        commissionRate?: number;
+        availableBalance: number;
+      };
+    },
+    expected: {
+      productSold: number;
+      shippingFees: number;
+      commissionAmount: number;
+      commissionRate: number;
+      availableBalance: number;
+    },
+  ) {
+    expect(summary.productSold).toBe(expected.productSold);
+    expect(summary.shippingFees).toBe(expected.shippingFees);
+    expect(summary.commissionAmount).toBe(expected.commissionAmount);
+    expect(summary.commissionRate).toBe(expected.commissionRate);
+    expect(summary.availableBalance).toBe(expected.availableBalance);
+    expect(summary.omise.productSold).toBe(expected.productSold);
+    expect(summary.omise.shippingFees).toBe(expected.shippingFees);
+    expect(summary.omise.commissionAmount).toBe(expected.commissionAmount);
+    expect(summary.omise.commissionRate).toBe(expected.commissionRate);
+    expect(summary.omise.availableBalance).toBe(expected.availableBalance);
+    expect(summary.availableBalance).toBe(
+      expected.productSold - expected.commissionAmount + expected.shippingFees,
+    );
+    expect(summary).not.toHaveProperty('pre_productSold');
+    expect(summary).not.toHaveProperty('post_productSold');
+    expect(summary.omise).not.toHaveProperty('pre_productSold');
+    expect(summary.omise).not.toHaveProperty('post_productSold');
+  }
+
+  function createCutoffAwareQb(pre: string, post: string) {
+    const state: { cutoff?: 'pre' | 'post' } = {};
+    const qb = createQueryBuilderMock({
+      total: String(Number(pre) + Number(post)),
+    });
+    qb.andWhere.mockImplementation((clause: string, params?: { goLiveAt?: Date }) => {
+      if (params?.goLiveAt) {
+        if (/>=/.test(clause)) state.cutoff = 'post';
+        else if (/IS NULL|</.test(clause)) state.cutoff = 'pre';
+      }
+      return qb;
+    });
+    qb.getRawOne.mockImplementation(async () => {
+      if (state.cutoff === 'pre') return { total: pre };
+      if (state.cutoff === 'post') return { total: post };
+      return { total: String(Number(pre) + Number(post)) };
+    });
+    return qb;
+  }
+
+  function isShippingEntity(entity: { name?: string } | undefined) {
+    return typeof entity?.name === 'string' && entity.name.includes('OrderStoreShipping');
+  }
+
+  function mockCutoffQueries(opts: {
+    preTotal: string;
+    postTotal: string;
+    promoPre?: string;
+    promoPost?: string;
+    shipping?: string;
+  }) {
+    const itemQbs: ReturnType<typeof createQueryBuilderMock>[] = [];
+    const promoQbs: ReturnType<typeof createQueryBuilderMock>[] = [];
+    orderItemRepo.createQueryBuilder.mockImplementation(() => {
+      const qb = createCutoffAwareQb(opts.preTotal, opts.postTotal);
+      itemQbs.push(qb);
+      return qb;
+    });
+    payoutRepo.createQueryBuilder.mockImplementation(() => createQueryBuilderMock({ total: '0' }));
+    const shippingQb = createQueryBuilderMock({ total: opts.shipping ?? '0' });
+    dataSource.createQueryBuilder.mockImplementation((entity: { name?: string } | undefined) => {
+      if (isShippingEntity(entity)) {
+        return shippingQb;
+      }
+      const promoQb = createCutoffAwareQb(opts.promoPre ?? '0', opts.promoPost ?? '0');
+      promoQbs.push(promoQb);
+      return promoQb;
+    });
+    return { itemQbs, promoQbs, shippingQb };
+  }
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    configService.get.mockImplementation((key: string) => {
+      if (key === 'payout.minPayoutAmount') return 500;
+      if (key === 'commission.defaultRatePercent') return 7;
+      return undefined;
+    });
     omiseService.hasCredentials.mockReturnValue(false);
-    storeRepo.findOne.mockResolvedValue({ id: 'store-1', name: 'Test Store' });
+    storeRepo.findOne.mockResolvedValue({
+      id: 'store-1',
+      name: 'Test Store',
+      commissionRate: null,
+    });
     payoutRepo.findOne.mockResolvedValue(null);
+    payoutRepo.find.mockResolvedValue([]);
     orderItemRepo.createQueryBuilder.mockReturnValue(createQueryBuilderMock({ total: '5000' }));
     payoutRepo.createQueryBuilder.mockImplementation(() =>
       createQueryBuilderMock({ total: '1000' }),
@@ -288,6 +415,8 @@ describe('PayoutsService', () => {
       return qb;
     });
 
+    payoutRepo.find.mockResolvedValue([historicalPayout(1500, 'payout-paid')]);
+
     const summary = await service.getPayoutSummary('store-1');
 
     expect(summary.grossRevenue).toBe(5000);
@@ -383,6 +512,47 @@ describe('PayoutsService', () => {
         expect.objectContaining({ scope: 'store' }),
       );
     });
+
+    it('does not deduct platform-scoped promotion discounts from the product base', async () => {
+      orderItemRepo.createQueryBuilder.mockReturnValue(createQueryBuilderMock({ total: '5000' }));
+      payoutRepo.createQueryBuilder.mockImplementation(() =>
+        createQueryBuilderMock({ total: '0' }),
+      );
+      const promoQb = createQueryBuilderMock({ total: '0' });
+      dataSource.createQueryBuilder.mockImplementation(() => promoQb);
+
+      const summary = await service.getPayoutSummary('store-1');
+
+      expect(summary.grossRevenue).toBe(5000);
+      expect(promoQb.andWhere).toHaveBeenCalledWith(
+        expect.stringMatching(/promotion\.scope/i),
+        expect.objectContaining({ scope: 'store' }),
+      );
+      expect(promoQb.andWhere).not.toHaveBeenCalledWith(
+        expect.stringMatching(/promotion\.scope/i),
+        expect.objectContaining({ scope: 'platform' }),
+      );
+    });
+
+    it('does not join order_items or filter item.fulfillment_status on the promo query', async () => {
+      orderItemRepo.createQueryBuilder.mockReturnValue(createQueryBuilderMock({ total: '5000' }));
+      payoutRepo.createQueryBuilder.mockImplementation(() =>
+        createQueryBuilderMock({ total: '0' }),
+      );
+      const promoQb = createQueryBuilderMock({ total: '0' });
+      dataSource.createQueryBuilder.mockImplementation(() => promoQb);
+
+      await service.getPayoutSummary('store-1');
+
+      const joinHaystack = promoQb.innerJoin.mock.calls
+        .map((call) => JSON.stringify(call))
+        .join(' ');
+      expect(joinHaystack).not.toMatch(/order_items|OrderItem|fulfillment_status/i);
+      expect(promoQb.andWhere).not.toHaveBeenCalledWith(
+        expect.stringMatching(/fulfillment_status/i),
+        expect.anything(),
+      );
+    });
   });
 
   it('allows retry when orphan pending payout exists', async () => {
@@ -411,6 +581,7 @@ describe('PayoutsService', () => {
 
   it('requests payout for full available balance when eligible', async () => {
     orderItemRepo.createQueryBuilder.mockReturnValue(createQueryBuilderMock({ total: '5000' }));
+    payoutRepo.find.mockResolvedValue([historicalPayout(1000, 'payout-paid')]);
     payoutRepo.createQueryBuilder
       .mockImplementationOnce(() => createQueryBuilderMock({ total: '1000' }))
       .mockImplementationOnce(() => createQueryBuilderMock({ total: '0' }));
@@ -493,6 +664,7 @@ describe('PayoutsService', () => {
 
   it('rejects trigger amount above available balance', async () => {
     orderItemRepo.createQueryBuilder.mockReturnValue(createQueryBuilderMock({ total: '1000' }));
+    payoutRepo.find.mockResolvedValue([historicalPayout(400, 'payout-paid')]);
     payoutRepo.createQueryBuilder.mockImplementation(() =>
       createQueryBuilderMock({ total: '400' }),
     );
@@ -580,5 +752,203 @@ describe('PayoutsService', () => {
 
     expect(payout.status).toBe(PayoutStatus.FAILED);
     expect(payout.failureReason).toBe('Bank details incomplete');
+  });
+
+  describe('available-balance fours identity (AC-016 / AC-D-016)', () => {
+    it('returns identity fours on each rail and top-level Omise mirror, including post-cutoff shipping', async () => {
+      configService.get.mockImplementation((key: string) => {
+        if (key === 'payout.minPayoutAmount') return 500;
+        if (key === 'commission.defaultRatePercent') return 7;
+        if (key === 'commission.goLiveAt') return GO_LIVE_AT;
+        return undefined;
+      });
+      mockCutoffQueries({ preTotal: '0', postTotal: '1000', shipping: '80' });
+
+      const summary = await service.getPayoutSummary('store-1');
+
+      expectFoursIdentity(summary, {
+        productSold: 1000,
+        shippingFees: 80,
+        commissionAmount: 70,
+        commissionRate: 7,
+        availableBalance: 1010,
+      });
+      expect(summary.manual.productSold).toBe(1000);
+      expect(summary.manual.shippingFees).toBe(80);
+      expect(summary.manual.commissionAmount).toBe(70);
+      expect(summary.manual.commissionRate).toBe(7);
+      expect(summary.manual.availableBalance).toBe(1010);
+    });
+
+    it('combines mixed-cutoff into one fours set (pre at 0%, shipping post-only)', async () => {
+      configService.get.mockImplementation((key: string) => {
+        if (key === 'payout.minPayoutAmount') return 500;
+        if (key === 'commission.defaultRatePercent') return 7;
+        if (key === 'commission.goLiveAt') return GO_LIVE_AT;
+        return undefined;
+      });
+      mockCutoffQueries({ preTotal: '1500', postTotal: '1000', shipping: '80' });
+
+      const summary = await service.getPayoutSummary('store-1');
+
+      expectFoursIdentity(summary, {
+        productSold: 2500,
+        shippingFees: 80,
+        commissionAmount: 70,
+        commissionRate: 7,
+        availableBalance: 2510,
+      });
+    });
+
+    it('binds paid_at cutoff as Date (>= post, < or NULL pre) without AT TIME ZONE', async () => {
+      configService.get.mockImplementation((key: string) => {
+        if (key === 'payout.minPayoutAmount') return 500;
+        if (key === 'commission.defaultRatePercent') return 7;
+        if (key === 'commission.goLiveAt') return GO_LIVE_AT;
+        return undefined;
+      });
+      const { itemQbs, promoQbs, shippingQb } = mockCutoffQueries({
+        preTotal: '0',
+        postTotal: '1000',
+        shipping: '80',
+      });
+
+      await service.getPayoutSummary('store-1');
+
+      type AndWhereCall = [string, Record<string, unknown>?];
+      const allAndWheres: AndWhereCall[] = [
+        ...itemQbs.flatMap((qb) => qb.andWhere.mock.calls as AndWhereCall[]),
+        ...promoQbs.flatMap((qb) => qb.andWhere.mock.calls as AndWhereCall[]),
+        ...(shippingQb.andWhere.mock.calls as AndWhereCall[]),
+      ];
+      const haystack = allAndWheres.map((call) => JSON.stringify(call)).join('\n');
+      expect(haystack).toMatch(/paid_at\s*>=\s*:goLiveAt/i);
+      expect(haystack).toMatch(/paid_at\s+IS NULL|paid_at\s*<\s*:goLiveAt/i);
+      expect(haystack).not.toMatch(/AT TIME ZONE/i);
+      const goLiveBinds = allAndWheres.filter(
+        (call) => call[1] && typeof call[1] === 'object' && 'goLiveAt' in call[1],
+      );
+      expect(goLiveBinds.length).toBeGreaterThan(0);
+      for (const call of goLiveBinds) {
+        expect(call[1]?.goLiveAt).toBeInstanceOf(Date);
+        expect((call[1]?.goLiveAt as Date).getTime()).toBe(GO_LIVE_AT.getTime());
+      }
+    });
+
+    it('sums order_store_shippings.shipping_fee and never orders.shipping_fee or live option price', async () => {
+      configService.get.mockImplementation((key: string) => {
+        if (key === 'payout.minPayoutAmount') return 500;
+        if (key === 'commission.defaultRatePercent') return 7;
+        if (key === 'commission.goLiveAt') return GO_LIVE_AT;
+        return undefined;
+      });
+      const { shippingQb } = mockCutoffQueries({
+        preTotal: '0',
+        postTotal: '1000',
+        shipping: '80',
+      });
+
+      await service.getPayoutSummary('store-1');
+
+      const selectHaystack = shippingQb.select.mock.calls
+        .map((call) => JSON.stringify(call))
+        .join(' ');
+      expect(selectHaystack).toMatch(/shipping_fee/i);
+      expect(selectHaystack).not.toMatch(/orders\.shipping_fee|order\.shipping_fee/i);
+      expect(selectHaystack).not.toMatch(/store_shipping_options|option\.price/i);
+
+      type AndWhereCall = [string | ((qb: typeof shippingQb) => string), Record<string, unknown>?];
+      const existsCallbacks = (shippingQb.andWhere.mock.calls as AndWhereCall[])
+        .map((call) => call[0])
+        .filter(
+          (clause): clause is (qb: typeof shippingQb) => string => typeof clause === 'function',
+        );
+      expect(existsCallbacks.length).toBeGreaterThan(0);
+      for (const callback of existsCallbacks) {
+        expect(callback(shippingQb)).toMatch(/EXISTS/i);
+      }
+      expect(shippingQb.from).toHaveBeenCalled();
+      expect(shippingQb.getQuery).toHaveBeenCalled();
+    });
+  });
+
+  describe('computeUnpaidBreakdown fail-fast', () => {
+    it('throws STORE_NOT_FOUND when the store is missing', async () => {
+      storeRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.computeUnpaidBreakdown('missing', PayoutSettlementRail.OMISE, [
+          PaymentMethod.PROMPTPAY,
+        ]),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('rate-change leftover uses current rate (AC-028)', () => {
+    it('commissions leftover unpaid post at 5% after a 7→5 change (not lifetime_net − SUM(amount))', async () => {
+      configService.get.mockImplementation((key: string) => {
+        if (key === 'payout.minPayoutAmount') return 500;
+        if (key === 'commission.defaultRatePercent') return 7;
+        if (key === 'commission.goLiveAt') return GO_LIVE_AT;
+        return undefined;
+      });
+      storeRepo.findOne.mockResolvedValue({
+        id: 'store-1',
+        name: 'Test Store',
+        commissionRate: 5,
+      });
+      mockCutoffQueries({ preTotal: '0', postTotal: '1000', shipping: '0' });
+      payoutRepo.createQueryBuilder.mockImplementation(() =>
+        createQueryBuilderMock({ total: '465' }),
+      );
+      payoutRepo.find.mockResolvedValue([
+        {
+          id: 'payout-old',
+          amount: 465,
+          productSold: 500,
+          shippingFees: 0,
+          commissionAmount: 35,
+          commissionRate: 7,
+          createdAt: new Date('2026-07-01T00:00:00.000Z'),
+        },
+      ]);
+
+      const summary = await service.getPayoutSummary('store-1');
+
+      // leftover post 500 at current 5% → commission 25, net 475
+      expectFoursIdentity(summary, {
+        productSold: 500,
+        shippingFees: 0,
+        commissionAmount: 25,
+        commissionRate: 5,
+        availableBalance: 475,
+      });
+      const lifetimeNetMinusPaidOut = 1000 - 70 - 465;
+      expect(summary.availableBalance).not.toBe(465);
+      expect(summary.availableBalance).not.toBe(lifetimeNetMinusPaidOut);
+    });
+  });
+
+  describe('prior payout consume order (created_at ASC, id ASC)', () => {
+    it('loads prior payouts ordered by createdAt ASC, id ASC', async () => {
+      payoutRepo.find.mockResolvedValue([
+        historicalPayout(800, 'payout-a'),
+        historicalPayout(200, 'payout-b'),
+      ]);
+      orderItemRepo.createQueryBuilder.mockReturnValue(createQueryBuilderMock({ total: '1500' }));
+      payoutRepo.createQueryBuilder.mockImplementation(() =>
+        createQueryBuilderMock({ total: '1000' }),
+      );
+
+      const summary = await service.getPayoutSummary('store-1');
+
+      expect(payoutRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          order: { createdAt: 'ASC', id: 'ASC' },
+        }),
+      );
+      expect(summary.availableBalance).toBe(500);
+      expect(summary.productSold).toBe(500);
+    });
   });
 });

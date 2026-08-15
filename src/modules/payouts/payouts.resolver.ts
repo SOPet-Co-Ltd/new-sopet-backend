@@ -106,6 +106,18 @@ export class PayoutRailSummaryType {
   availableBalance!: number;
 
   @Field(() => Float)
+  productSold!: number;
+
+  @Field(() => Float)
+  shippingFees!: number;
+
+  @Field(() => Float)
+  commissionAmount!: number;
+
+  @Field(() => Int)
+  commissionRate!: number;
+
+  @Field(() => Float)
   pendingPayoutAmount!: number;
 
   @Field()
@@ -126,6 +138,18 @@ export class PayoutSummaryType {
 
   @Field(() => Float)
   availableBalance!: number;
+
+  @Field(() => Float)
+  productSold!: number;
+
+  @Field(() => Float)
+  shippingFees!: number;
+
+  @Field(() => Float)
+  commissionAmount!: number;
+
+  @Field(() => Int)
+  commissionRate!: number;
 
   @Field(() => Float)
   pendingPayoutAmount!: number;
@@ -449,6 +473,10 @@ function mapSummary(summary: PayoutSummary): PayoutSummaryType {
     grossRevenue: summary.grossRevenue,
     totalPaidOut: summary.totalPaidOut,
     availableBalance: summary.availableBalance,
+    productSold: summary.productSold,
+    shippingFees: summary.shippingFees,
+    commissionAmount: summary.commissionAmount,
+    commissionRate: summary.commissionRate,
     pendingPayoutAmount: summary.pendingPayoutAmount,
     minimumPayoutAmount: summary.minimumPayoutAmount,
     canRequestPayout: summary.canRequestPayout,
