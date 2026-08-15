@@ -191,6 +191,7 @@ type AdminStoreType {
   bankAccountNumber: String
   bankName: String
   bannerUrl: String
+  commissionRate: Int
   contactEmail: String
   contactPhone: String
   createdAt: DateTime!
@@ -2180,6 +2181,7 @@ input UpdateShippingProviderInput {
 input UpdateStoreAsAdminInput {
   address: String
   bannerUrl: String
+  commissionRate: Int
   contactEmail: String
   contactPhone: String
   description: String

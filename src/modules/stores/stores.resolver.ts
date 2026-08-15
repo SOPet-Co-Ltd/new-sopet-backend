@@ -478,6 +478,7 @@ export class StoresResolver {
       contactEmail: input.contactEmail,
       address: input.address,
       status: input.status as StoreStatus | undefined,
+      commissionRate: input.commissionRate,
       adminId,
     });
 

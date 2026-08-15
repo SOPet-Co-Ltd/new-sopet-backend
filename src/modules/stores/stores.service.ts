@@ -5,6 +5,7 @@ import {
   ConflictException,
   ForbiddenException,
   Inject,
+  Logger,
   forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -86,6 +87,8 @@ export type AdminVendorInsightsResult = {
 
 @Injectable()
 export class StoresService {
+  private readonly logger = new Logger(StoresService.name);
+
   constructor(
     @InjectRepository(Store)
     private readonly storeRepository: Repository<Store>,
@@ -720,9 +723,25 @@ export class StoresService {
     status?: StoreStatus;
     /** Admin actor for suspend/reactivate audit + hold side effects (GraphQL updateStoreAsAdmin). */
     adminId?: string;
+    commissionRate?: number;
   }): Promise<Store> {
     const store = await this.findOne(input.id);
     const previousStatus = store.status;
+    const previousCommissionRate = store.commissionRate;
+
+    if (input.commissionRate !== undefined) {
+      if (
+        typeof input.commissionRate !== 'number' ||
+        !Number.isInteger(input.commissionRate) ||
+        input.commissionRate < 0 ||
+        input.commissionRate > 100
+      ) {
+        throw new BadRequestException({
+          code: 'INVALID_COMMISSION_RATE',
+          message: 'Commission rate must be an integer between 0 and 100',
+        });
+      }
+    }
 
     if (input.ownerUserId !== undefined) {
       if (input.ownerUserId === null) {
@@ -758,6 +777,7 @@ export class StoresService {
     if (input.address !== undefined) store.address = input.address;
     if (input.logoUrl !== undefined) store.logoUrl = input.logoUrl;
     if (input.bannerUrl !== undefined) store.bannerUrl = input.bannerUrl;
+    if (input.commissionRate !== undefined) store.commissionRate = input.commissionRate;
     if (input.status !== undefined) {
       // Match reactivate() metadata when admin UI reopens a suspended store via updateStoreAsAdmin.
       if (
@@ -773,6 +793,12 @@ export class StoresService {
 
     await this.storeRepository.save(store);
     const saved = await this.findOne(input.id);
+
+    if (input.commissionRate !== undefined) {
+      this.logger.log(
+        `Commission rate changed storeId=${saved.id} old=${previousCommissionRate} new=${input.commissionRate}`,
+      );
+    }
 
     // Production admin suspend/reactivate uses updateStoreAsAdmin (status only) — not
     // StoresService.suspend/reactivate. Wire the same hold hooks so AC-007+/AC-017+ fire.

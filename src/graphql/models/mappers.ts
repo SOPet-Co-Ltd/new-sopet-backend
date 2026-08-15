@@ -208,6 +208,7 @@ export function mapAdminStore(store: Store): AdminStoreType {
     bankName: store.bankName,
     payoutSchedule: store.payoutSchedule,
     payoutSchedulePaused: store.payoutSchedulePaused,
+    commissionRate: store.commissionRate ?? null,
     ownerEmail: store.owner?.email ?? null,
     ownerFullName: store.owner?.fullName ?? null,
     createdAt: store.createdAt,

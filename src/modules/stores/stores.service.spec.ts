@@ -1,8 +1,9 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Logger, NotFoundException } from '@nestjs/common';
 import { StoresService } from './stores.service';
 import { StoreStatus } from '../../database/entities/store.entity';
 import { StoreMemberRole } from '../../database/entities/store-member.entity';
 import { UserRole } from '../../database/entities/user.entity';
+import { mapAdminStore } from '../../graphql/models/mappers';
 
 describe('StoresService', () => {
   let service: StoresService;
@@ -484,6 +485,160 @@ describe('StoresService', () => {
 
     expect(storeSuspensionHoldService.applyHoldForStore).not.toHaveBeenCalled();
     expect(storeSuspensionHoldService.restoreHoldForStore).not.toHaveBeenCalled();
+  });
+
+  describe('updateAsAdmin commissionRate', () => {
+    const loadStore = (commissionRate: number | null) => {
+      const store = {
+        id: 'store-1',
+        ownerId: 'owner-1',
+        name: 'Pet Shop',
+        status: StoreStatus.APPROVED,
+        commissionRate,
+      };
+      storeRepository.findOne.mockImplementation(() => Promise.resolve(store));
+      storeRepository.save.mockImplementation((saved) => Promise.resolve(saved));
+      return store;
+    };
+
+    it('persists 0 as custom 0 when the column was NULL', async () => {
+      const store = loadStore(null);
+
+      const result = await service.updateAsAdmin({ id: 'store-1', commissionRate: 0 });
+
+      expect(store.commissionRate).toBe(0);
+      expect(result.commissionRate).toBe(0);
+      expect(storeRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'store-1', commissionRate: 0 }),
+      );
+    });
+
+    it('persists 5 and leaves an omitted rate unchanged', async () => {
+      const store = loadStore(null);
+
+      await service.updateAsAdmin({ id: 'store-1', commissionRate: 5 });
+      expect(store.commissionRate).toBe(5);
+
+      await service.updateAsAdmin({ id: 'store-1', name: 'Renamed' });
+      expect(store.commissionRate).toBe(5);
+      expect(store.name).toBe('Renamed');
+    });
+
+    it('persists explicit 7 as custom 7', async () => {
+      const store = loadStore(null);
+
+      await service.updateAsAdmin({ id: 'store-1', commissionRate: 7 });
+
+      expect(store.commissionRate).toBe(7);
+    });
+
+    it('leaves NULL when commissionRate is omitted', async () => {
+      const store = loadStore(null);
+
+      await service.updateAsAdmin({ id: 'store-1', name: 'Still Null Rate' });
+
+      expect(store.commissionRate).toBeNull();
+    });
+
+    it('rejects 101 with INVALID_COMMISSION_RATE and does not write', async () => {
+      const store = loadStore(5);
+
+      await expect(
+        service.updateAsAdmin({ id: 'store-1', commissionRate: 101 }),
+      ).rejects.toMatchObject({
+        response: { code: 'INVALID_COMMISSION_RATE' },
+      });
+      expect(store.commissionRate).toBe(5);
+      expect(storeRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('rejects 7.5 with INVALID_COMMISSION_RATE and does not write', async () => {
+      const store = loadStore(5);
+
+      await expect(
+        service.updateAsAdmin({ id: 'store-1', commissionRate: 7.5 }),
+      ).rejects.toMatchObject({
+        response: { code: 'INVALID_COMMISSION_RATE' },
+      });
+      expect(store.commissionRate).toBe(5);
+      expect(storeRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('rejects a non-integer with INVALID_COMMISSION_RATE and does not write', async () => {
+      const store = loadStore(5);
+
+      await expect(
+        service.updateAsAdmin({ id: 'store-1', commissionRate: '10' as unknown as number }),
+      ).rejects.toMatchObject({
+        response: { code: 'INVALID_COMMISSION_RATE' },
+      });
+      expect(store.commissionRate).toBe(5);
+      expect(storeRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('emits INFO with storeId, old, and new on successful persist and no PII', async () => {
+      loadStore(null);
+      const logSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation();
+
+      await service.updateAsAdmin({ id: 'store-1', commissionRate: 0 });
+
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('store-1'));
+      expect(logSpy).toHaveBeenCalledWith(expect.stringMatching(/old=null/));
+      expect(logSpy).toHaveBeenCalledWith(expect.stringMatching(/new=0/));
+      const message = logSpy.mock.calls.map((call) => String(call[0])).join(' ');
+      expect(message).not.toMatch(/Pet Shop|jwt|Bearer|@/i);
+      logSpy.mockRestore();
+    });
+
+    it('does not emit a rate-change INFO when the rate is rejected', async () => {
+      loadStore(5);
+      const logSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation();
+
+      await expect(
+        service.updateAsAdmin({ id: 'store-1', commissionRate: 101 }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(logSpy).not.toHaveBeenCalled();
+      logSpy.mockRestore();
+    });
+  });
+
+  describe('mapAdminStore commissionRate', () => {
+    const baseStore = {
+      id: 'store-1',
+      ownerId: 'owner-1',
+      name: 'Pet Shop',
+      slug: 'pet-shop',
+      description: null,
+      logoUrl: null,
+      bannerUrl: null,
+      status: StoreStatus.APPROVED,
+      contactPhone: null,
+      contactEmail: null,
+      address: null,
+      bankAccountName: null,
+      bankAccountNumber: null,
+      bankName: null,
+      payoutSchedule: 'manual',
+      payoutSchedulePaused: false,
+      owner: undefined,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-02T00:00:00.000Z'),
+    };
+
+    it('preserves SQL NULL as null and does not substitute 7', () => {
+      const mapped = mapAdminStore({ ...baseStore, commissionRate: null } as never);
+      expect(mapped.commissionRate).toBeNull();
+    });
+
+    it('maps 0 as 0', () => {
+      const mapped = mapAdminStore({ ...baseStore, commissionRate: 0 } as never);
+      expect(mapped.commissionRate).toBe(0);
+    });
+
+    it('maps custom 7 as 7', () => {
+      const mapped = mapAdminStore({ ...baseStore, commissionRate: 7 } as never);
+      expect(mapped.commissionRate).toBe(7);
+    });
   });
 
   describe('updateVendorAsAdmin', () => {

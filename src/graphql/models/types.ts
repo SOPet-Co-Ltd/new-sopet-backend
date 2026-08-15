@@ -1546,6 +1546,9 @@ export class AdminStoreType {
   @Field()
   payoutSchedulePaused!: boolean;
 
+  @Field(() => Int, { nullable: true })
+  commissionRate?: number | null;
+
   @Field(() => String, { nullable: true })
   ownerEmail?: string | null;
 
