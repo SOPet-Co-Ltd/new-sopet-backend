@@ -64,6 +64,32 @@ export function consumePriorPayouts(
   };
 }
 
+/**
+ * Shipping for orders that still have unpaid product (oldest orders treated as paid first).
+ * Prevents leftover list shipping from already-paid-out orders (e.g. 11 × ฿50 = ฿550 with ฿0 product).
+ */
+export function unpaidShippingForRemainingProduct(
+  orders: { product: number; shipping: number }[],
+  unpaidProduct: number,
+): number {
+  const lifetime = orders.reduce((sum, order) => sum + toSatang(order.product), 0);
+  let cover = Math.max(0, lifetime - toSatang(unpaidProduct));
+  let ship = 0;
+
+  for (const order of orders) {
+    const product = toSatang(order.product);
+    const shipping = toSatang(order.shipping);
+    if (cover >= product) {
+      cover -= product;
+      continue;
+    }
+    ship += shipping;
+    cover = 0;
+  }
+
+  return fromSatang(ship);
+}
+
 export function finalizeBreakdown(unpaid: UnpaidBuckets, rate: number): Breakdown {
   const unpaidPre = toSatang(unpaid.unpaidPre);
   const unpaidPost = toSatang(unpaid.unpaidPost);

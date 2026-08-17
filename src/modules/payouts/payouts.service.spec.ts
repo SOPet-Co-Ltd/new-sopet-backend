@@ -19,11 +19,16 @@ function createQueryBuilderMock(result: Record<string, string>) {
     andWhere: jest.fn().mockReturnThis(),
     select: jest.fn().mockReturnThis(),
     addSelect: jest.fn().mockReturnThis(),
+    groupBy: jest.fn().mockReturnThis(),
+    addGroupBy: jest.fn().mockReturnThis(),
+    orderBy: jest.fn().mockReturnThis(),
+    addOrderBy: jest.fn().mockReturnThis(),
     setParameter: jest.fn().mockReturnThis(),
     from: jest.fn().mockReturnThis(),
     subQuery: jest.fn().mockReturnThis(),
     getQuery: jest.fn().mockReturnValue('(SELECT 1)'),
     getRawOne: jest.fn().mockResolvedValue(result),
+    getRawMany: jest.fn().mockResolvedValue([]),
   };
 }
 
@@ -188,6 +193,10 @@ describe('PayoutsService', () => {
     });
     payoutRepo.createQueryBuilder.mockImplementation(() => createQueryBuilderMock({ total: '0' }));
     const shippingQb = createQueryBuilderMock({ total: opts.shipping ?? '0' });
+    const lifetimeProduct = String(Number(opts.preTotal) + Number(opts.postTotal));
+    shippingQb.getRawMany.mockResolvedValue([
+      { product: lifetimeProduct, shipping: opts.shipping ?? '0' },
+    ]);
     dataSource.createQueryBuilder.mockImplementation((entity: { name?: string } | undefined) => {
       if (isShippingEntity(entity)) {
         return shippingQb;
@@ -197,6 +206,15 @@ describe('PayoutsService', () => {
       return promoQb;
     });
     return { itemQbs, promoQbs, shippingQb };
+  }
+
+  function mockPromoQuery(promoQb: ReturnType<typeof createQueryBuilderMock>, shippingTotal = '0') {
+    dataSource.createQueryBuilder.mockImplementation((entity?: { name?: string }) => {
+      if (isShippingEntity(entity)) {
+        return createQueryBuilderMock({ total: shippingTotal });
+      }
+      return promoQb;
+    });
   }
 
   beforeEach(async () => {
@@ -255,9 +273,9 @@ describe('PayoutsService', () => {
         amount: 1500,
         fee: 0,
         netAmount: 1500,
-        productSold: 1500,
+        productSold: 1612.9,
         shippingFees: 0,
-        commissionAmount: 0,
+        commissionAmount: 112.9,
         commissionRate: 7,
         status: PayoutStatus.PENDING,
         settlementRail: 'omise',
@@ -426,9 +444,9 @@ describe('PayoutsService', () => {
 
     expect(summary.grossRevenue).toBe(5000);
     expect(summary.totalPaidOut).toBe(1500);
-    expect(summary.availableBalance).toBe(3500);
+    expect(summary.availableBalance).toBe(3255);
     expect(summary.canRequestPayout).toBe(true);
-    expect(summary.omise.availableBalance).toBe(3500);
+    expect(summary.omise.availableBalance).toBe(3255);
     expect(summary.manual.grossRevenue).toBe(5000);
   });
 
@@ -474,14 +492,17 @@ describe('PayoutsService', () => {
       payoutRepo.createQueryBuilder
         .mockImplementationOnce(() => createQueryBuilderMock({ total: '0' }))
         .mockImplementationOnce(() => createQueryBuilderMock({ total: '0' }));
-      dataSource.createQueryBuilder.mockImplementation(() =>
-        createQueryBuilderMock({ total: '750' }),
-      );
+      dataSource.createQueryBuilder.mockImplementation((entity?: { name?: string }) => {
+        if (isShippingEntity(entity)) {
+          return createQueryBuilderMock({ total: '0' });
+        }
+        return createQueryBuilderMock({ total: '750' });
+      });
 
       const summary = await service.getPayoutSummary('store-1');
 
       expect(summary.grossRevenue).toBe(4250);
-      expect(summary.availableBalance).toBe(4250);
+      expect(summary.availableBalance).toBe(3952.5);
     });
 
     it('never lets gross revenue go negative even if discounts somehow exceed subtotal', async () => {
@@ -489,9 +510,12 @@ describe('PayoutsService', () => {
       payoutRepo.createQueryBuilder
         .mockImplementationOnce(() => createQueryBuilderMock({ total: '0' }))
         .mockImplementationOnce(() => createQueryBuilderMock({ total: '0' }));
-      dataSource.createQueryBuilder.mockImplementation(() =>
-        createQueryBuilderMock({ total: '500' }),
-      );
+      dataSource.createQueryBuilder.mockImplementation((entity?: { name?: string }) => {
+        if (isShippingEntity(entity)) {
+          return createQueryBuilderMock({ total: '0' });
+        }
+        return createQueryBuilderMock({ total: '500' });
+      });
 
       const summary = await service.getPayoutSummary('store-1');
 
@@ -504,7 +528,7 @@ describe('PayoutsService', () => {
         .mockImplementationOnce(() => createQueryBuilderMock({ total: '0' }))
         .mockImplementationOnce(() => createQueryBuilderMock({ total: '0' }));
       const promoQb = createQueryBuilderMock({ total: '0' });
-      dataSource.createQueryBuilder.mockImplementation(() => promoQb);
+      mockPromoQuery(promoQb);
 
       await service.getPayoutSummary('store-1');
 
@@ -524,7 +548,7 @@ describe('PayoutsService', () => {
         createQueryBuilderMock({ total: '0' }),
       );
       const promoQb = createQueryBuilderMock({ total: '0' });
-      dataSource.createQueryBuilder.mockImplementation(() => promoQb);
+      mockPromoQuery(promoQb);
 
       const summary = await service.getPayoutSummary('store-1');
 
@@ -545,7 +569,7 @@ describe('PayoutsService', () => {
         createQueryBuilderMock({ total: '0' }),
       );
       const promoQb = createQueryBuilderMock({ total: '0' });
-      dataSource.createQueryBuilder.mockImplementation(() => promoQb);
+      mockPromoQuery(promoQb);
 
       await service.getPayoutSummary('store-1');
 
@@ -595,11 +619,11 @@ describe('PayoutsService', () => {
 
     expect(managerPayoutRepo.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        amount: 4000,
+        amount: 3720,
         processedBy: 'vendor-user-1',
       }),
     );
-    expect(payout.amount).toBe(4000);
+    expect(payout.amount).toBe(3720);
   });
 
   it('allows admin trigger below minimum when bypassing threshold', async () => {
@@ -690,12 +714,12 @@ describe('PayoutsService', () => {
     expect(managerPayoutRepo.create).toHaveBeenCalledWith(
       expect.objectContaining({
         storeId: 'store-1',
-        amount: 2000,
+        amount: 1860,
         fee: 0,
-        netAmount: 2000,
+        netAmount: 1860,
         productSold: 2000,
         shippingFees: 0,
-        commissionAmount: 0,
+        commissionAmount: 140,
         commissionRate: 7,
         settlementRail: 'manual',
         status: PayoutStatus.PENDING,
@@ -708,12 +732,12 @@ describe('PayoutsService', () => {
     const pendingRow = {
       id: 'payout-manual-1',
       storeId: 'store-1',
-      amount: 2000,
-      netAmount: 2000,
+      amount: 1860,
+      netAmount: 1860,
       fee: 0,
       productSold: 2000,
       shippingFees: 0,
-      commissionAmount: 0,
+      commissionAmount: 140,
       commissionRate: 7,
       status: PayoutStatus.PENDING,
       settlementRail: 'manual',
@@ -734,12 +758,12 @@ describe('PayoutsService', () => {
         status: PayoutStatus.COMPLETED,
         processedBy: 'admin-1',
         notes: 'Transferred via SCB',
-        amount: 2000,
-        netAmount: 2000,
+        amount: 1860,
+        netAmount: 1860,
         fee: 0,
         productSold: 2000,
         shippingFees: 0,
-        commissionAmount: 0,
+        commissionAmount: 140,
         commissionRate: 7,
       }),
     );
@@ -806,7 +830,21 @@ describe('PayoutsService', () => {
       expect(summary.manual.availableBalance).toBe(1010);
     });
 
-    it('combines mixed-cutoff into one fours set (pre at 0%, shipping post-only)', async () => {
+    it('applies default commission to product only and pays all shipping when goLiveAt is unset', async () => {
+      mockCutoffQueries({ preTotal: '0', postTotal: '1000', shipping: '80' });
+
+      const summary = await service.getPayoutSummary('store-1');
+
+      expectFoursIdentity(summary, {
+        productSold: 1000,
+        shippingFees: 80,
+        commissionAmount: 70,
+        commissionRate: 7,
+        availableBalance: 1010,
+      });
+    });
+
+    it('combines mixed-cutoff into one fours set (pre at 0%, shipping paid in full)', async () => {
       configService.get.mockImplementation((key: string) => {
         if (key === 'payout.minPayoutAmount') return 500;
         if (key === 'commission.defaultRatePercent') return 7;
@@ -861,7 +899,7 @@ describe('PayoutsService', () => {
       }
     });
 
-    it('sums order_store_shippings.shipping_fee and never orders.shipping_fee or live option price', async () => {
+    it('caps store shipping at customer-paid remainder (order.total minus store items), not live option price', async () => {
       configService.get.mockImplementation((key: string) => {
         if (key === 'payout.minPayoutAmount') return 500;
         if (key === 'commission.defaultRatePercent') return 7;
@@ -876,28 +914,22 @@ describe('PayoutsService', () => {
 
       await service.getPayoutSummary('store-1');
 
-      const selectHaystack = shippingQb.select.mock.calls
+      const selectHaystack = [...shippingQb.select.mock.calls, ...shippingQb.addSelect.mock.calls]
         .map((call) => JSON.stringify(call))
         .join(' ');
       expect(selectHaystack).toMatch(/shipping_fee/i);
-      expect(selectHaystack).not.toMatch(/orders\.shipping_fee|order\.shipping_fee/i);
+      expect(selectHaystack).toMatch(/order\.total/i);
+      expect(selectHaystack).toMatch(/LEAST/i);
       expect(selectHaystack).not.toMatch(/store_shipping_options|option\.price/i);
 
-      type AndWhereCall = [string | ((qb: typeof shippingQb) => string), Record<string, unknown>?];
-      const existsCallbacks = (shippingQb.andWhere.mock.calls as AndWhereCall[])
-        .map((call) => call[0])
-        .filter(
-          (clause): clause is (qb: typeof shippingQb) => string => typeof clause === 'function',
-        );
-      expect(existsCallbacks.length).toBeGreaterThan(0);
-      for (const callback of existsCallbacks) {
-        expect(callback(shippingQb)).toMatch(/EXISTS/i);
-      }
-      expect(shippingQb.from).toHaveBeenCalled();
-      expect(shippingQb.getQuery).toHaveBeenCalled();
+      const joinHaystack = shippingQb.innerJoin.mock.calls
+        .map((call) => JSON.stringify(call))
+        .join(' ');
+      expect(joinHaystack).toMatch(/fulfillment_status/i);
+      expect(shippingQb.setParameter).toHaveBeenCalledWith('heldFulfillment', 'on_hold');
     });
 
-    it('requires a non-held eligible line before summing post-cutoff store shipping', async () => {
+    it('requires a non-held eligible line before summing store shipping', async () => {
       configService.get.mockImplementation((key: string) => {
         if (key === 'payout.minPayoutAmount') return 500;
         if (key === 'commission.defaultRatePercent') return 7;
@@ -912,19 +944,10 @@ describe('PayoutsService', () => {
 
       await service.getPayoutSummary('store-1');
 
-      type AndWhereCall = [string | ((qb: typeof shippingQb) => string), Record<string, unknown>?];
-      const existsCallbacks = (shippingQb.andWhere.mock.calls as AndWhereCall[])
-        .map((call) => call[0])
-        .filter(
-          (clause): clause is (qb: typeof shippingQb) => string => typeof clause === 'function',
-        );
-      expect(existsCallbacks.length).toBeGreaterThan(0);
-      for (const callback of existsCallbacks) {
-        expect(callback(shippingQb)).toMatch(/EXISTS/i);
-      }
-      expect(shippingQb.andWhere).toHaveBeenCalledWith(
-        expect.stringMatching(/fulfillment_status\s*<>\s*:heldFulfillment/i),
-      );
+      const joinHaystack = shippingQb.innerJoin.mock.calls
+        .map((call) => JSON.stringify(call))
+        .join(' ');
+      expect(joinHaystack).toMatch(/fulfillment_status\s*<>\s*:heldFulfillment/i);
       expect(shippingQb.setParameter).toHaveBeenCalledWith('heldFulfillment', 'on_hold');
     });
   });
@@ -1004,8 +1027,9 @@ describe('PayoutsService', () => {
           order: { createdAt: 'ASC', id: 'ASC' },
         }),
       );
-      expect(summary.availableBalance).toBe(500);
+      expect(summary.availableBalance).toBe(465);
       expect(summary.productSold).toBe(500);
+      expect(summary.commissionAmount).toBe(35);
     });
   });
 

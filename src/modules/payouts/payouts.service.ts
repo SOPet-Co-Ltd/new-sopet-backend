@@ -18,6 +18,7 @@ import {
   consumeToAmount,
   effectiveRate,
   finalizeBreakdown,
+  unpaidShippingForRemainingProduct,
   type Breakdown,
   type PriorPayout,
   type UnpaidBuckets,
@@ -789,11 +790,16 @@ export class PayoutsService {
       paymentMethods,
       goLiveAt,
     );
-    const postShipping = goLiveAt
-      ? await this.calculatePostCutoffShipping(storeId, paymentMethods, goLiveAt)
-      : 0;
+    const orderSlices = await this.listEligibleOrderSlices(storeId, paymentMethods);
     const priorPayouts = await this.loadPriorPayoutsForConsume(storeId, rail);
-    const unpaid = consumePriorPayouts({ preProduct, postProduct, postShipping }, priorPayouts);
+    const unpaid = consumePriorPayouts(
+      { preProduct, postProduct, postShipping: 0 },
+      priorPayouts,
+    );
+    unpaid.unpaidShip = unpaidShippingForRemainingProduct(
+      orderSlices,
+      unpaid.unpaidPre + unpaid.unpaidPost,
+    );
     const breakdown = finalizeBreakdown(unpaid, rate);
 
     return {
@@ -919,8 +925,8 @@ export class PayoutsService {
         this.calculateStorePromotionDiscounts(storeId, paymentMethods),
       ]);
       return {
-        preProduct: Math.max(0, itemSubtotal - storePromotionDiscounts),
-        postProduct: 0,
+        preProduct: 0,
+        postProduct: Math.max(0, itemSubtotal - storePromotionDiscounts),
       };
     }
 
@@ -1043,37 +1049,47 @@ export class PayoutsService {
     return Number(result?.total ?? 0);
   }
 
-  private async calculatePostCutoffShipping(
+  private async listEligibleOrderSlices(
     storeId: string,
     paymentMethods: PaymentMethod[],
-    goLiveAt: Date,
-  ): Promise<number> {
-    const result = await this.dataSource
+  ): Promise<{ product: number; shipping: number }[]> {
+    const rows = await this.dataSource
       .createQueryBuilder(OrderStoreShipping, 'oss')
       .innerJoin(Order, 'order', 'order.id = oss.order_id')
+      .innerJoin(
+        OrderItem,
+        'item',
+        'item.order_id = order.id AND item.store_id = oss.store_id AND item.fulfillment_status <> :heldFulfillment',
+      )
       .where('oss.store_id = :storeId', { storeId })
       .andWhere('order.status IN (:...statuses)', {
         statuses: [OrderStatus.PAID, OrderStatus.DELIVERED],
       })
       .andWhere('order.payment_method IN (:...paymentMethods)', { paymentMethods })
       .andWhere('order.status <> :heldOrderStatus', { heldOrderStatus: OrderStatus.ON_HOLD })
-      .andWhere('order.paid_at >= :goLiveAt', { goLiveAt })
-      .andWhere((qb) => {
-        const sub = qb
-          .subQuery()
-          .select('1')
-          .from(OrderItem, 'eligibleItem')
-          .where('eligibleItem.order_id = order.id')
-          .andWhere('eligibleItem.store_id = :storeId')
-          .andWhere('eligibleItem.fulfillment_status <> :heldFulfillment')
-          .getQuery();
-        return `EXISTS ${sub}`;
-      })
       .setParameter('heldFulfillment', FulfillmentStatus.ON_HOLD)
-      .select('COALESCE(SUM(oss.shipping_fee), 0)', 'total')
-      .getRawOne<{ total: string }>();
+      .select('COALESCE(SUM(item.subtotal), 0)', 'product')
+      .addSelect(
+        `GREATEST(0, LEAST(
+          oss.shipping_fee,
+          GREATEST(0, order.total - COALESCE(SUM(item.subtotal), 0))
+        ))`,
+        'shipping',
+      )
+      .groupBy('order.id')
+      .addGroupBy('oss.shipping_fee')
+      .addGroupBy('order.total')
+      .addGroupBy('order.paid_at')
+      .addGroupBy('order.created_at')
+      .orderBy('order.paid_at', 'ASC', 'NULLS FIRST')
+      .addOrderBy('order.created_at', 'ASC')
+      .addOrderBy('order.id', 'ASC')
+      .getRawMany<{ product: string; shipping: string }>();
 
-    return Number(result?.total ?? 0);
+    return rows.map((row) => ({
+      product: Number(row.product ?? 0),
+      shipping: Number(row.shipping ?? 0),
+    }));
   }
 
   private async loadPriorPayoutsForConsume(

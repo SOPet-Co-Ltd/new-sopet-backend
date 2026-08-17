@@ -41,6 +41,10 @@ type CalculatorModule = {
   ) => UnpaidBuckets;
   finalizeBreakdown: (unpaid: UnpaidBuckets, rate: number) => Breakdown;
   consumeToAmount: (unpaid: UnpaidBuckets, amount: number, rate: number) => Breakdown;
+  unpaidShippingForRemainingProduct: (
+    orders: { product: number; shipping: number }[],
+    unpaidProduct: number,
+  ) => number;
 };
 
 function loadCalculator(): CalculatorModule {
@@ -215,6 +219,32 @@ describe('payout-commission.calculator', () => {
         commissionRate: 7,
         net: 1510,
       });
+    });
+  });
+
+  describe('unpaidShippingForRemainingProduct', () => {
+    it('keeps shipping only on the remaining unpaid order (3 × ฿50 with ฿220 left → ฿50)', () => {
+      const { unpaidShippingForRemainingProduct } = loadCalculator();
+      expect(
+        unpaidShippingForRemainingProduct(
+          [
+            { product: 250, shipping: 50 },
+            { product: 220, shipping: 50 },
+            { product: 220, shipping: 50 },
+          ],
+          220,
+        ),
+      ).toBe(50);
+    });
+
+    it('returns 0 shipping when unpaid product is 0 (11 × ฿50 omise leftover)', () => {
+      const { unpaidShippingForRemainingProduct } = loadCalculator();
+      expect(
+        unpaidShippingForRemainingProduct(
+          Array.from({ length: 11 }, () => ({ product: 200, shipping: 50 })),
+          0,
+        ),
+      ).toBe(0);
     });
   });
 
