@@ -193,6 +193,7 @@ type AdminStoreType {
   address: String
   bankAccountName: String
   bankAccountNumber: String
+  bankCode: String
   bankName: String
   bannerUrl: String
   commissionRate: Int
@@ -203,6 +204,9 @@ type AdminStoreType {
   id: String!
   logoUrl: String
   name: String!
+  omiseRecipientFailureMessage: String
+  omiseRecipientId: String
+  omiseRecipientStatus: String!
   ownerEmail: String
   ownerFullName: String
   ownerId: String!
@@ -810,6 +814,7 @@ type Mutation {
   inviteStoreMember(input: InviteStoreMemberInput!): StoreMemberInvitationType!
   inviteVendor(input: InviteVendorInput!): VendorInvitationType!
   linkStoreOmiseRecipient: MyStoreType!
+  linkStoreOmiseRecipientAsAdmin(storeId: String!): AdminStoreType!
   markAllNotificationsRead: Boolean!
   markNotificationRead(id: String!): Boolean!
   markVendorOrderPaid(orderId: String!): OrderType!

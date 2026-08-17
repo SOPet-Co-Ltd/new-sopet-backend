@@ -808,4 +808,77 @@ describe('StoresService', () => {
       await expect(service.getVendorInsightsForAdmin('missing')).rejects.toThrow(NotFoundException);
     });
   });
+
+  describe('Omise payout bank change', () => {
+    it('resets Omise status when bank details change', async () => {
+      const { OmiseRecipientStatus } = await import('../../database/entities/store.entity');
+      storeRepository.findOne.mockResolvedValue({
+        id: 'store-1',
+        bankAccountName: 'Old Name',
+        bankAccountNumber: '1111111111',
+        bankName: 'ธนาคารกสิกรไทย',
+        bankCode: 'kbank',
+        omiseRecipientId: 'recp_old',
+        omiseRecipientStatus: OmiseRecipientStatus.ACTIVE,
+        omiseRecipientFailureMessage: null,
+      });
+
+      const saved = await service.updateStorePayout('store-1', {
+        bankAccountName: 'New Name',
+        bankAccountNumber: '2222222222',
+        bankName: 'ธนาคารกรุงศรีอยุธยา',
+        bankCode: 'bay',
+      });
+
+      expect(saved.omiseRecipientStatus).toBe(OmiseRecipientStatus.NOT_CONNECTED);
+      expect(storeRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          omiseRecipientStatus: OmiseRecipientStatus.NOT_CONNECTED,
+          bankAccountNumber: '2222222222',
+        }),
+      );
+    });
+
+    it('does not refresh Omise status while NOT_CONNECTED after bank change', async () => {
+      const { OmiseRecipientStatus } = await import('../../database/entities/store.entity');
+      const getRecipient = jest.fn().mockResolvedValue({ verified: true, active: true });
+      const omiseService = {
+        hasCredentials: jest.fn().mockReturnValue(true),
+        createRecipient: jest.fn(),
+        updateRecipient: jest.fn(),
+        getRecipient,
+      };
+
+      service = new StoresService(
+        storeRepository as never,
+        userRepository as never,
+        storeMemberRepository as never,
+        orderRepository as never,
+        orderItemRepository as never,
+        auditLogRepository as never,
+        omiseService as never,
+        {
+          notifyVendorAboutStoreStatus: jest.fn().mockResolvedValue(undefined),
+        } as never,
+        {
+          deleteObject: jest.fn(),
+        } as never,
+        auditLogsService as never,
+        storeSuspensionHoldService as never,
+        emailDeliveryService as never,
+      );
+
+      storeRepository.findOne.mockResolvedValue({
+        id: 'store-1',
+        omiseRecipientId: 'recp_old',
+        omiseRecipientStatus: OmiseRecipientStatus.NOT_CONNECTED,
+      });
+
+      const result = await service.refreshOmiseRecipientStatus('store-1');
+
+      expect(getRecipient).not.toHaveBeenCalled();
+      expect(result.omiseRecipientStatus).toBe(OmiseRecipientStatus.NOT_CONNECTED);
+      expect(storeRepository.save).not.toHaveBeenCalled();
+    });
+  });
 });

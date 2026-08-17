@@ -492,7 +492,8 @@ export class StoresService {
       (data.bankAccountName !== undefined && data.bankAccountName !== store.bankAccountName) ||
       (data.bankAccountNumber !== undefined &&
         data.bankAccountNumber !== store.bankAccountNumber) ||
-      (data.bankCode !== undefined && data.bankCode !== store.bankCode);
+      (data.bankCode !== undefined && data.bankCode !== store.bankCode) ||
+      (data.bankName !== undefined && data.bankName !== store.bankName);
 
     if (data.bankAccountName !== undefined) {
       store.bankAccountName = data.bankAccountName;
@@ -527,9 +528,16 @@ export class StoresService {
    * Re-fetches the Omise recipient and updates local verification status.
    * Called when vendors open payout settings so Omise dashboard activations
    * are reflected without requiring a bank-detail re-save.
+   *
+   * Skips refresh when status is NOT_CONNECTED: that means local bank details
+   * changed (or were never linked) and must not be overwritten by a stale
+   * Omise recipient that still reports verified/active for the previous account.
    */
   async refreshOmiseRecipientStatus(storeId: string): Promise<Store> {
     const store = await this.findOne(storeId);
+    if (store.omiseRecipientStatus === OmiseRecipientStatus.NOT_CONNECTED) {
+      return store;
+    }
     await this.applyOmiseRecipientSnapshot(store);
     return this.storeRepository.save(store);
   }
@@ -567,6 +575,12 @@ export class StoresService {
     store: Store,
     fallback?: { verified?: boolean; active?: boolean },
   ): Promise<void> {
+    // Bank was changed (or never linked). Keep NOT_CONNECTED until an explicit
+    // linkStoreOmiseRecipient / admin re-verify updates the recipient.
+    if (store.omiseRecipientStatus === OmiseRecipientStatus.NOT_CONNECTED) {
+      return;
+    }
+
     if (!store.omiseRecipientId) {
       return;
     }

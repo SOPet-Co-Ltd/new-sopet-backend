@@ -1540,6 +1540,18 @@ export class AdminStoreType {
   @Field(() => String, { nullable: true })
   bankName?: string | null;
 
+  @Field(() => String, { nullable: true })
+  bankCode?: string | null;
+
+  @Field(() => String, { nullable: true })
+  omiseRecipientId?: string | null;
+
+  @Field()
+  omiseRecipientStatus!: string;
+
+  @Field(() => String, { nullable: true })
+  omiseRecipientFailureMessage?: string | null;
+
   @Field()
   payoutSchedule!: string;
 

@@ -951,6 +951,29 @@ export class StoresResolver {
     return mapMyStore(store, true);
   }
 
+  @Mutation(() => AdminStoreType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async linkStoreOmiseRecipientAsAdmin(
+    @Args('storeId') storeId: string,
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail?: string,
+  ): Promise<AdminStoreType> {
+    const store = await this.storesService.linkStoreOmiseRecipient(storeId);
+    await this.auditLogsService.log({
+      ...this.adminActor(adminId, adminEmail),
+      action: AuditAction.STORE_UPDATED,
+      resourceType: AuditResourceType.STORE,
+      resourceId: store.id,
+      metadata: {
+        storeName: store.name,
+        omiseRecipientStatus: store.omiseRecipientStatus,
+        action: 'link_omise_recipient',
+      },
+    });
+    return mapAdminStore(store);
+  }
+
   @Mutation(() => StoreShippingOptionType)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('vendor')
