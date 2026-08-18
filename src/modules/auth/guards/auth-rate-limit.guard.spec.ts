@@ -39,14 +39,12 @@ describe('AuthRateLimitGuard', () => {
     });
   });
 
-  it('fails closed when Redis is unavailable', async () => {
+  it('skips rate limiting when Redis is unavailable', async () => {
     redisService.isAvailable.mockReturnValue(false);
 
-    await expect(guard.canActivate(context)).rejects.toMatchObject({
-      status: HttpStatus.SERVICE_UNAVAILABLE,
-      response: { code: 'RATE_LIMIT_UNAVAILABLE' },
-    });
+    await expect(guard.canActivate(context)).resolves.toBe(true);
     expect(redisService.get).not.toHaveBeenCalled();
+    expect(redisService.set).not.toHaveBeenCalled();
   });
 
   it('allows requests under the limit', async () => {

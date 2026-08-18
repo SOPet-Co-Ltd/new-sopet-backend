@@ -30,15 +30,9 @@ export class AuthRateLimitGuard implements CanActivate {
     const ttlMs = this.configService.get<number>('app.rateLimit.ttl') ?? 60000;
     const ttlSeconds = Math.ceil(ttlMs / 1000);
 
-    // Fail closed for auth endpoints: without Redis we cannot enforce limits.
+    // Redis is optional. Enforce limits when it is up; skip when it is not.
     if (!this.redisService.isAvailable()) {
-      throw new HttpException(
-        {
-          code: 'RATE_LIMIT_UNAVAILABLE',
-          message: 'Authentication temporarily unavailable. Please try again later.',
-        },
-        HttpStatus.SERVICE_UNAVAILABLE,
-      );
+      return true;
     }
 
     const current = await this.redisService.get(key);

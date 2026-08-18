@@ -118,7 +118,7 @@ All registered globally in `app.module.ts`.
 
 ### Rate limiting
 
-`AuthRateLimitGuard` — Redis-backed limits on OTP send, login, password reset.
+`AuthRateLimitGuard` — Redis-backed limits on OTP send, login, password reset. Skipped when Redis is not configured or unavailable.
 
 ## Token refresh
 
