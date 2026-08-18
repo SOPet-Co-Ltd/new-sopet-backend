@@ -83,11 +83,28 @@ if ! docker ps --filter "name=$CONTAINER_NAME" --filter "status=running" -q | gr
   exit 1
 fi
 
+echo "Waiting for /health (Postgres ping)..."
+health_ok=0
+for _ in $(seq 1 24); do
+  if curl -fsS --max-time 5 "http://127.0.0.1:${PORT}/health" -o /dev/null; then
+    health_ok=1
+    break
+  fi
+  sleep 5
+done
+
+if [ "$health_ok" != 1 ]; then
+  echo "ERROR: /health failed after ~120s. Container logs:" >&2
+  docker logs "$CONTAINER_NAME" --tail 150 2>&1 || true
+  exit 1
+fi
+
 if ! curl -fsS --max-time 15 "http://127.0.0.1:${PORT}/graphql" -o /dev/null \
   -H 'content-type: application/json' \
   --data '{"query":"{ __typename }"}'; then
-  echo "Warning: GraphQL health check failed (container is up — check app logs)." >&2
-  docker logs "$CONTAINER_NAME" --tail 50 2>&1 || true
+  echo "ERROR: GraphQL health check failed. Container logs:" >&2
+  docker logs "$CONTAINER_NAME" --tail 150 2>&1 || true
+  exit 1
 fi
 
 # After the new container is confirmed running, drop unused tags + build cache.

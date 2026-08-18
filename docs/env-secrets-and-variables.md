@@ -90,8 +90,9 @@ GitHub Environments **`deploy/uat`** and **`deploy/production`** use the **same 
 | `REVIEW_WINDOW_DAYS`               | Days after delivery to review      | Default `30`.                                                                                       |
 | `PAYOUT_CRON_SCHEDULE`             | Payout BullMQ cron                 | Default `0 2 * * *`.                                                                                |
 | `PAYOUT_CRON_TIMEZONE`             | Payout cron timezone               | Default `Asia/Bangkok`.                                                                             |
+| `COMMISSION_GO_LIVE_AT` ★          | Platform commission cutoff instant | ISO-8601 UTC, e.g. `2026-01-01T00:00:00.000Z`. Required when `NODE_ENV=production` or the API will not boot. |
 
-**Count: 44 variables** (6 deploy/infra including optional `BUILD_ON_HOST` + `SSM_CLOUDWATCH_LOG_GROUP`, 5 Caddy, 33 application from `env.manifest.json`).
+**Count: 45 variables** (6 deploy/infra including optional `BUILD_ON_HOST` + `SSM_CLOUDWATCH_LOG_GROUP`, 5 Caddy, 34 application from `env.manifest.json`).
 
 ---
 

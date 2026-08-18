@@ -141,6 +141,7 @@ jobs:
           REVIEW_WINDOW_DAYS: ${{ vars.REVIEW_WINDOW_DAYS }}
           PAYOUT_CRON_SCHEDULE: ${{ vars.PAYOUT_CRON_SCHEDULE }}
           PAYOUT_CRON_TIMEZONE: ${{ vars.PAYOUT_CRON_TIMEZONE }}
+          COMMISSION_GO_LIVE_AT: ${{ vars.COMMISSION_GO_LIVE_AT }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

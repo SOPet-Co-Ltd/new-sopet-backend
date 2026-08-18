@@ -40,6 +40,18 @@ UAT/prod reset (destructive): set `DB_RESET_ALLOW_PRODUCTION=1` and run `yarn db
 
 ## GraphQL
 
+### Storefront/admin: `UPSTREAM_NON_JSON` / HTTP 502
+
+The Next.js BFF wraps a non-JSON upstream body. On UAT this is usually Cloudflare `error code: 502` because the origin API is down — not a WAF bypass-secret mismatch.
+
+Most common after a UAT deploy: Nest never finishes boot. `NODE_ENV=production` requires `COMMISSION_GO_LIVE_AT` (ISO-8601). If it is missing, the process throws `COMMISSION_GO_LIVE_UNCONFIGURED` and Docker restart-loops. Set the GitHub Environment variable and redeploy.
+
+Confirm origin health:
+
+```bash
+curl -fsS "https://api-new-uat.sopet.org/health"
+```
+
 ### Schema out of date
 
 ```bash
