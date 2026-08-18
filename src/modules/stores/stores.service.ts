@@ -5,6 +5,7 @@ import {
   ConflictException,
   ForbiddenException,
   Inject,
+  Logger,
   forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -90,6 +91,8 @@ export type AdminVendorInsightsResult = {
 
 @Injectable()
 export class StoresService {
+  private readonly logger = new Logger(StoresService.name);
+
   constructor(
     @InjectRepository(Store)
     private readonly storeRepository: Repository<Store>,
@@ -493,7 +496,8 @@ export class StoresService {
       (data.bankAccountName !== undefined && data.bankAccountName !== store.bankAccountName) ||
       (data.bankAccountNumber !== undefined &&
         data.bankAccountNumber !== decryptBankAccountNumber(store.bankAccountNumber)) ||
-      (data.bankCode !== undefined && data.bankCode !== store.bankCode);
+      (data.bankCode !== undefined && data.bankCode !== store.bankCode) ||
+      (data.bankName !== undefined && data.bankName !== store.bankName);
 
     if (data.bankAccountName !== undefined) {
       store.bankAccountName = data.bankAccountName;
@@ -504,14 +508,23 @@ export class StoresService {
     if (data.bankName !== undefined) store.bankName = data.bankName;
     if (data.bankCode !== undefined) store.bankCode = data.bankCode;
 
-    // Persist the bank details first so vendor input is never lost, even if the
-    // downstream Omise recipient binding fails.
-    await this.storeRepository.save(store);
-
+    // Persist bank details only. Omise recipient linking is a separate explicit step
+    // (linkStoreOmiseRecipient) so vendors can save account info without waiting on Omise.
     if (bankDetailsChanged) {
-      await this.syncOmiseRecipient(store);
+      // Saved bank no longer matches Omise recipient until vendor re-links.
+      store.omiseRecipientStatus = OmiseRecipientStatus.NOT_CONNECTED;
+      store.omiseRecipientFailureMessage = null;
     }
 
+    return this.storeRepository.save(store);
+  }
+
+  /**
+   * Explicitly create/update the Omise recipient from the store's saved bank details.
+   */
+  async linkStoreOmiseRecipient(storeId: string): Promise<Store> {
+    const store = await this.findOne(storeId);
+    await this.syncOmiseRecipient(store);
     return this.storeRepository.save(store);
   }
 
@@ -519,9 +532,16 @@ export class StoresService {
    * Re-fetches the Omise recipient and updates local verification status.
    * Called when vendors open payout settings so Omise dashboard activations
    * are reflected without requiring a bank-detail re-save.
+   *
+   * Skips refresh when status is NOT_CONNECTED: that means local bank details
+   * changed (or were never linked) and must not be overwritten by a stale
+   * Omise recipient that still reports verified/active for the previous account.
    */
   async refreshOmiseRecipientStatus(storeId: string): Promise<Store> {
     const store = await this.findOne(storeId);
+    if (store.omiseRecipientStatus === OmiseRecipientStatus.NOT_CONNECTED) {
+      return store;
+    }
     await this.applyOmiseRecipientSnapshot(store);
     return this.storeRepository.save(store);
   }
@@ -559,6 +579,12 @@ export class StoresService {
     store: Store,
     fallback?: { verified?: boolean; active?: boolean },
   ): Promise<void> {
+    // Bank was changed (or never linked). Keep NOT_CONNECTED until an explicit
+    // linkStoreOmiseRecipient / admin re-verify updates the recipient.
+    if (store.omiseRecipientStatus === OmiseRecipientStatus.NOT_CONNECTED) {
+      return;
+    }
+
     if (!store.omiseRecipientId) {
       return;
     }
@@ -715,9 +741,25 @@ export class StoresService {
     status?: StoreStatus;
     /** Admin actor for suspend/reactivate audit + hold side effects (GraphQL updateStoreAsAdmin). */
     adminId?: string;
+    commissionRate?: number;
   }): Promise<Store> {
     const store = await this.findOne(input.id);
     const previousStatus = store.status;
+    const previousCommissionRate = store.commissionRate;
+
+    if (input.commissionRate !== undefined) {
+      if (
+        typeof input.commissionRate !== 'number' ||
+        !Number.isInteger(input.commissionRate) ||
+        input.commissionRate < 0 ||
+        input.commissionRate > 100
+      ) {
+        throw new BadRequestException({
+          code: 'INVALID_COMMISSION_RATE',
+          message: 'Commission rate must be an integer between 0 and 100',
+        });
+      }
+    }
 
     if (input.ownerUserId !== undefined) {
       if (input.ownerUserId === null) {
@@ -753,6 +795,7 @@ export class StoresService {
     if (input.address !== undefined) store.address = input.address;
     if (input.logoUrl !== undefined) store.logoUrl = input.logoUrl;
     if (input.bannerUrl !== undefined) store.bannerUrl = input.bannerUrl;
+    if (input.commissionRate !== undefined) store.commissionRate = input.commissionRate;
     if (input.status !== undefined) {
       // Match reactivate() metadata when admin UI reopens a suspended store via updateStoreAsAdmin.
       if (
@@ -768,6 +811,12 @@ export class StoresService {
 
     await this.storeRepository.save(store);
     const saved = await this.findOne(input.id);
+
+    if (input.commissionRate !== undefined) {
+      this.logger.log(
+        `Commission rate changed storeId=${saved.id} old=${previousCommissionRate} new=${input.commissionRate}`,
+      );
+    }
 
     // Production admin suspend/reactivate uses updateStoreAsAdmin (status only) — not
     // StoresService.suspend/reactivate. Wire the same hold hooks so AC-007+/AC-017+ fire.

@@ -299,6 +299,48 @@ export class NotificationsService {
   }
 
   /**
+   * Notify platform admins that a vendor requested a manual (bank) payout.
+   */
+  async notifyAdminsAboutManualPayoutRequest(input: {
+    payoutId: string;
+    storeId: string;
+    storeName: string;
+    amount: number;
+  }): Promise<UserNotification | null> {
+    const admins = await this.userRepository.find({
+      where: { role: UserRole.ADMIN, isActive: true },
+    });
+    if (admins.length === 0) {
+      return null;
+    }
+
+    const amountLabel = Number(input.amount).toLocaleString('th-TH', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    const message = `ร้าน "${input.storeName}" ขอรับเงิน Manual ฿${amountLabel} — รอแอดมินโอนและอนุมัติ`;
+
+    const notifications: UserNotification[] = [];
+    for (const admin of admins) {
+      notifications.push(
+        await this.createUserNotification(
+          admin.id,
+          'manual_payout_request',
+          message,
+          {
+            payoutId: input.payoutId,
+            storeId: input.storeId,
+            storeName: input.storeName,
+            amount: Number(input.amount),
+          },
+          ['payoutId'],
+        ),
+      );
+    }
+    return notifications[0] ?? null;
+  }
+
+  /**
    * Notify a vendor that their store has been approved or rejected.
    */
   async notifyVendorAboutStoreStatus(

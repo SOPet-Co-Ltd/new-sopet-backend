@@ -9,5 +9,6 @@ describe('normalizeCheckoutPaymentMethod', () => {
     expect(normalizeCheckoutPaymentMethod('promptpay')).toBe('promptpay');
     expect(normalizeCheckoutPaymentMethod('credit_card')).toBe('credit_card');
     expect(normalizeCheckoutPaymentMethod('cod')).toBe('cod');
+    expect(normalizeCheckoutPaymentMethod('bank_transfer')).toBe('bank_transfer');
   });
 });

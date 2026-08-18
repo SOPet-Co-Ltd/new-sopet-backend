@@ -628,6 +628,33 @@ describe('ProductsService', () => {
       await expect(service.findOneInStore('prod-1', 'store-1')).rejects.toThrow(NotFoundException);
     });
 
+    it('findAllForPublicApi lists store products with allStatuses and skips smart search', async () => {
+      const findAllSpy = jest.spyOn(service, 'findAll').mockResolvedValue({
+        items: [product as never],
+        pagination: { page: 1, limit: 20, total: 1, totalPages: 1 },
+      });
+
+      await service.findAllForPublicApi('store-1', {
+        page: 2,
+        limit: 50,
+        status: ProductStatus.DRAFT,
+        search: 'แมว',
+      });
+
+      expect(findAllSpy).toHaveBeenCalledWith(
+        {
+          storeId: 'store-1',
+          page: 2,
+          limit: 50,
+          status: ProductStatus.DRAFT,
+          search: 'แมว',
+          allStatuses: true,
+        },
+        { skipSmartSearch: true },
+      );
+      findAllSpy.mockRestore();
+    });
+
     it('updateProductForPublicApi resolves taxonomy names and updates', async () => {
       productRepository.findOne.mockResolvedValue({
         ...product,

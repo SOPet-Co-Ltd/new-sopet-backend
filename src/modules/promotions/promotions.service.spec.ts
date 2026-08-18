@@ -419,6 +419,63 @@ describe('PromotionsService', () => {
       expect(result.discountAmount).toBe(20);
     });
 
+    it('STORE FREE_SHIPPING uses storeShippingFees for that store, not order-wide shippingFee', async () => {
+      promotionRepository.findOne.mockResolvedValue({
+        ...mockPromotion,
+        id: 'promo-store-ship',
+        code: 'STORESHIP',
+        scope: PromotionScope.STORE,
+        storeId: 'store-a',
+        type: PromotionType.FREE_SHIPPING,
+        discountValue: 0,
+      });
+
+      const result = await validateCodeExtended(service, 'STORESHIP', 1000, 'store-a', undefined, {
+        shippingFee: 100,
+        storeShippingFees: new Map([
+          ['store-a', 35],
+          ['store-b', 65],
+        ]),
+      });
+      expect(result.discountAmount).toBe(35);
+    });
+
+    it('rejects STORE promotion when validateCode is called without storeId', async () => {
+      promotionRepository.findOne.mockResolvedValue({
+        ...mockPromotion,
+        scope: PromotionScope.STORE,
+        storeId: 'store-a',
+      });
+
+      await expect(service.validateCode('STORE10', 1000)).rejects.toMatchObject({
+        response: { code: 'PROMOTION_STORE' },
+      });
+    });
+
+    it('rejects PLATFORM promotion when storeId is provided (store lane)', async () => {
+      promotionRepository.findOne.mockResolvedValue(mockPromotion);
+
+      await expect(service.validateCode('WELCOME10', 1000, 'store-a')).rejects.toMatchObject({
+        response: { code: 'PROMOTION_SCOPE' },
+      });
+    });
+
+    it('rejects STORE code on platform lane via requiredScope PLATFORM', async () => {
+      promotionRepository.findOne.mockResolvedValue({
+        ...mockPromotion,
+        scope: PromotionScope.STORE,
+        storeId: 'store-a',
+      });
+
+      await expect(
+        validateCodeExtended(service, 'STORE10', 1000, undefined, undefined, {
+          requiredScope: PromotionScope.PLATFORM,
+        }),
+      ).rejects.toMatchObject({
+        response: { code: 'PROMOTION_SCOPE' },
+      });
+    });
+
     it('applyStackedPromotions clamps shipping and item discounts against separate bases', async () => {
       promotionRepository.findOne.mockResolvedValue({
         ...mockPromotion,
@@ -438,6 +495,55 @@ describe('PromotionsService', () => {
       );
       // A free-shipping promo must not be clamped against the (much larger) subtotal.
       expect(result.discountAmount).toBe(40);
+    });
+
+    it('platform + store FREE_SHIPPING share one shipping fee (no double discount)', async () => {
+      const platformFree = {
+        ...mockPromotion,
+        id: 'promo-plat-ship',
+        code: 'PLATFREE',
+        type: PromotionType.FREE_SHIPPING,
+        scope: PromotionScope.PLATFORM,
+        storeId: null,
+        discountValue: 0,
+      };
+      const storeFree = {
+        ...mockPromotion,
+        id: 'promo-store-ship',
+        code: 'STOREFREE',
+        type: PromotionType.FREE_SHIPPING,
+        scope: PromotionScope.STORE,
+        storeId: 'store-1',
+        discountValue: 0,
+      };
+
+      promotionRepository.findOne
+        .mockResolvedValueOnce(platformFree)
+        .mockResolvedValueOnce(storeFree)
+        .mockResolvedValueOnce(storeFree);
+
+      const result = await applyStackedExtended(
+        service,
+        856,
+        new Map([['store-1', 856]]),
+        'PLATFREE',
+        ['STOREFREE'],
+        undefined,
+        {
+          mode: 'apply',
+          shippingFee: 50,
+          storeShippingFees: new Map([['store-1', 50]]),
+        },
+      );
+
+      expect(result.discountAmount).toBe(50);
+      expect(result.discountsByPromotionId).toEqual({
+        'promo-plat-ship': 50,
+        'promo-store-ship': 0,
+      });
+      expect(
+        Object.values(result.discountsByPromotionId).reduce((sum, amount) => sum + amount, 0),
+      ).toBe(50);
     });
   });
 

@@ -124,7 +124,7 @@ Present in `.env.example` and/or app config, but **not** listed in `infra/github
 | `SMS_OTP_LOG_ONLY`                     | Log OTP instead of sending SMS | UAT/testing only; **never** enable in production.                                        |
 | `PAYMENT_OMISE_CANCEL_TIMEOUT_MS`      | Omise cancel/expire timeout    | Default `4000`; fail-open behavior.                                                      |
 | `PAYMENT_UNPAID_ORDER_CANCEL_AFTER_MS` | Auto-cancel unpaid orders      | Default `86400000` (24h).                                                                |
-| `PAYOUT_MIN_AMOUNT`                    | Minimum payout amount          | Default `500` (THB).                                                                     |
+| `PAYOUT_MIN_AMOUNT`                    | Minimum payout amount          | Default `100` (THB).                                                                     |
 | `PROD_ADMIN_EMAIL`                     | Prod seed admin email          | Bootstrap/`yarn db:seed:prod` only (commented in `.env.example`).                        |
 | `DB_RESET_ALLOW_PRODUCTION`            | Gate destructive DB reset      | Must be `1` to allow `yarn db:reset:*` against non-dev; ops only.                        |
 

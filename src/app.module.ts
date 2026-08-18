@@ -46,6 +46,7 @@ import { PublicApiModule } from './modules/public-api/public-api.module';
 import { SearchModule } from './modules/search/search.module';
 import { HealthModule } from './modules/health/health.module';
 import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
+import { OrderAuditLogsModule } from './modules/order-audit-logs/order-audit-logs.module';
 import { getPostgresSslOptions } from './database/postgres-ssl.util';
 
 @Module({
@@ -115,6 +116,7 @@ import { getPostgresSslOptions } from './database/postgres-ssl.util';
     AppGraphqlModule,
     HealthModule,
     AuditLogsModule,
+    OrderAuditLogsModule,
   ],
   providers: [
     // Global exception filter

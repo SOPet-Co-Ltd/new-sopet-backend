@@ -2,7 +2,7 @@ import { Args, Mutation, Query, Resolver, Subscription } from '@nestjs/graphql';
 import { BadRequestException } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import { PaymentEventsService, type PaymentStatusUpdatedPayload } from './payment-events.service';
-import { PaymentType } from '../../graphql/models/types';
+import { BankTransferDetailsType, PaymentType } from '../../graphql/models/types';
 import { CurrentUser, Public } from '../../common/decorators';
 import { CreatePaymentInput } from './payments.inputs';
 import { normalizeCheckoutPaymentMethod } from '../../common/utils/checkout-payment.util';
@@ -38,6 +38,12 @@ export class PaymentsResolver {
       qrCodeUrl: payment.qrCodeUrl ?? null,
       expiresAt: payment.expiresAt ?? null,
     };
+  }
+
+  @Query(() => BankTransferDetailsType, { nullable: true })
+  @Public()
+  async bankTransferDetails(): Promise<BankTransferDetailsType | null> {
+    return this.paymentsService.getBankTransferDetails();
   }
 
   @Query(() => PaymentType)

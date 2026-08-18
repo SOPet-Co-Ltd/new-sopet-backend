@@ -29,6 +29,10 @@ describe('OrdersService', () => {
   let inventoryService: { restoreOrderStock: jest.Mock };
   let vendorWebhooksService: { dispatchOrderEvent: jest.Mock };
   let saleCampaignsService: { resolveEffectiveUnitPrices: jest.Mock };
+  let orderAuditLogsService: {
+    append: jest.Mock;
+    resolveCustomerActorLabel: jest.Mock;
+  };
   let mockManager: {
     create: jest.Mock;
     save: jest.Mock;
@@ -79,19 +83,25 @@ describe('OrdersService', () => {
       dispatchOrderEvent: jest.fn().mockResolvedValue(undefined),
     };
     saleCampaignsService = {
-      resolveEffectiveUnitPrices: jest.fn(async (lines: Array<{ variantId: string; catalogUnit: number }>) => {
-        const map = new Map();
-        for (const line of lines) {
-          map.set(line.variantId, {
-            catalogUnitPrice: line.catalogUnit,
-            unitPrice: line.catalogUnit,
-            saleCampaignId: null,
-            saleDiscountPercent: null,
-            compareAtPrice: null,
-          });
-        }
-        return map;
-      }),
+      resolveEffectiveUnitPrices: jest.fn(
+        async (lines: Array<{ variantId: string; catalogUnit: number }>) => {
+          const map = new Map();
+          for (const line of lines) {
+            map.set(line.variantId, {
+              catalogUnitPrice: line.catalogUnit,
+              unitPrice: line.catalogUnit,
+              saleCampaignId: null,
+              saleDiscountPercent: null,
+              compareAtPrice: null,
+            });
+          }
+          return map;
+        },
+      ),
+    };
+    orderAuditLogsService = {
+      append: jest.fn().mockResolvedValue(undefined),
+      resolveCustomerActorLabel: jest.fn().mockResolvedValue('Guest'),
     };
 
     mockManager = {
@@ -128,6 +138,7 @@ describe('OrdersService', () => {
       {} as never,
       vendorWebhooksService as never,
       saleCampaignsService as never,
+      orderAuditLogsService as never,
     );
   });
 
@@ -200,6 +211,14 @@ describe('OrdersService', () => {
 
     expect(dataSource.transaction).toHaveBeenCalled();
     expect(mockManager.save).toHaveBeenCalled();
+    expect(orderAuditLogsService.append).toHaveBeenCalledWith(
+      mockManager,
+      expect.objectContaining({
+        eventType: 'ORDER_PLACED',
+        actorType: 'customer',
+        actorLabel: 'Guest',
+      }),
+    );
     expect(result.id).toBe('ord-1');
   });
 
@@ -269,6 +288,7 @@ describe('OrdersService', () => {
           },
         ],
         shippingFee: 0,
+        storeShippingFees: expect.any(Map),
       },
     );
 
@@ -747,6 +767,7 @@ describe('OrdersService', () => {
           },
         ],
         shippingFee: 0,
+        storeShippingFees: expect.any(Map),
       },
     );
   });
@@ -793,7 +814,10 @@ describe('OrdersService', () => {
       'FREESHIP',
       [],
       { guestPhone: '0812345678' },
-      expect.objectContaining({ shippingFee: 45 }),
+      expect.objectContaining({
+        shippingFee: 45,
+        storeShippingFees: expect.any(Map),
+      }),
     );
   });
 

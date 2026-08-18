@@ -480,6 +480,7 @@ export class StoresResolver {
       contactEmail: input.contactEmail,
       address: input.address,
       status: input.status as StoreStatus | undefined,
+      commissionRate: input.commissionRate,
       adminId,
     });
 
@@ -938,6 +939,41 @@ export class StoresResolver {
     await this.storesService.assertStoreOwner(userId, storeId);
     const store = await this.storesService.updateStorePayout(storeId, input);
     return mapMyStore(store, true);
+  }
+
+  @Mutation(() => MyStoreType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('vendor')
+  async linkStoreOmiseRecipient(
+    @CurrentUser('storeId') storeId: string,
+    @CurrentUser('id') userId: string,
+  ): Promise<MyStoreType> {
+    await this.storesService.assertStoreOwner(userId, storeId);
+    const store = await this.storesService.linkStoreOmiseRecipient(storeId);
+    return mapMyStore(store, true);
+  }
+
+  @Mutation(() => AdminStoreType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async linkStoreOmiseRecipientAsAdmin(
+    @Args('storeId') storeId: string,
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail?: string,
+  ): Promise<AdminStoreType> {
+    const store = await this.storesService.linkStoreOmiseRecipient(storeId);
+    await this.auditLogsService.log({
+      ...this.adminActor(adminId, adminEmail),
+      action: AuditAction.STORE_UPDATED,
+      resourceType: AuditResourceType.STORE,
+      resourceId: store.id,
+      metadata: {
+        storeName: store.name,
+        omiseRecipientStatus: store.omiseRecipientStatus,
+        action: 'link_omise_recipient',
+      },
+    });
+    return mapAdminStore(store);
   }
 
   @Mutation(() => StoreShippingOptionType)

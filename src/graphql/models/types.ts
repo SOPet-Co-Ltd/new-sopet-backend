@@ -641,6 +641,39 @@ export class PaymentType {
 }
 
 @ObjectType()
+export class BankTransferDetailsType {
+  @Field()
+  bankName!: string;
+
+  @Field()
+  accountName!: string;
+
+  @Field()
+  accountNumber!: string;
+
+  @Field(() => String, { nullable: true })
+  branchName?: string | null;
+}
+
+@ObjectType()
+export class BankTransferSettingsType {
+  @Field()
+  enabled!: boolean;
+
+  @Field()
+  bankName!: string;
+
+  @Field()
+  accountName!: string;
+
+  @Field()
+  accountNumber!: string;
+
+  @Field(() => String, { nullable: true })
+  branchName?: string | null;
+}
+
+@ObjectType()
 export class FavoriteType {
   @Field()
   id!: string;
@@ -1516,11 +1549,26 @@ export class AdminStoreType {
   @Field(() => String, { nullable: true })
   bankName?: string | null;
 
+  @Field(() => String, { nullable: true })
+  bankCode?: string | null;
+
+  @Field(() => String, { nullable: true })
+  omiseRecipientId?: string | null;
+
+  @Field()
+  omiseRecipientStatus!: string;
+
+  @Field(() => String, { nullable: true })
+  omiseRecipientFailureMessage?: string | null;
+
   @Field()
   payoutSchedule!: string;
 
   @Field()
   payoutSchedulePaused!: boolean;
+
+  @Field(() => Int, { nullable: true })
+  commissionRate?: number | null;
 
   @Field(() => String, { nullable: true })
   ownerEmail?: string | null;

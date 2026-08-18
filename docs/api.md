@@ -111,6 +111,8 @@ Unknown, malformed, or whitespace-only `orderNumber` all throw the identical `No
 | -------- | ----------------------------------------------------------------- | ----------------------------- | --------------------------------------------------------------------------- |
 | `POST`   | `/webhooks/omise`                                                 | HMAC (`OMISE_WEBHOOK_SECRET`) | `payments-webhook.controller.ts`                                            |
 | `POST`   | `/api/v1/stores/:storeId/products`                                | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (create draft; optional `images` URLs → storage) |
+| `GET`    | `/api/v1/stores/:storeId/products`                                | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (paginated list; all statuses)                   |
+| `GET`    | `/api/v1/stores/:storeId/products/:productId`                     | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (detail; store-scoped)                           |
 | `PATCH`  | `/api/v1/stores/:storeId/products/:productId`                     | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (info + optional `images` replace)               |
 | `DELETE` | `/api/v1/stores/:storeId/products/:productId`                     | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (soft delete)                                    |
 | `PATCH`  | `/api/v1/stores/:storeId/products/:productId/variants/:variantId` | API key                       | `public-api.controller.ts` (stock / absolute price)                         |

@@ -7,7 +7,7 @@ import {
   formatCurrency,
   formatOrderStatus,
   formatPaymentMethod,
-  orderItemsTable,
+  orderItemsRows,
 } from './email-templates';
 
 @Injectable()
@@ -123,7 +123,8 @@ export class EmailDeliveryService {
       shippingFee: `฿${formatCurrency(params.shippingFee)}`,
       total: `฿${formatCurrency(params.total)}`,
       orderUrl: params.orderUrl,
-      itemsHtml: orderItemsTable(params.items),
+      // Rows only — CMS ORDER_PAID body already wraps headers + <table>.
+      itemsHtml: orderItemsRows(params.items),
     };
     if (params.customerName) {
       vars.customerName = params.customerName;

@@ -9,6 +9,7 @@ import {
   Patch,
   Post,
   Put,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { Public } from '../../common/decorators';
@@ -20,6 +21,7 @@ import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.servic
 import { ReviewsService, resolveReviewCustomerName } from '../reviews/reviews.service';
 import { CreatePublicProductDto } from './dto/create-public-product.dto';
 import { CreatePublicReviewDto } from './dto/create-public-review.dto';
+import { ListPublicProductsQueryDto } from './dto/list-public-products-query.dto';
 import { UpdatePublicProductDto, UpdatePublicVariantDto } from './dto/update-public-product.dto';
 import {
   UpdatePublicOrderTrackingDto,
@@ -28,6 +30,7 @@ import {
 import { mapProduct, mapVariant } from '../../graphql/models/mappers';
 import { ProductType, ProductVariantType } from '../../graphql/models/types';
 import { mapPublicApiOrder } from './public-api-order.mapper';
+import { PaginatedResponse } from '../../common/interfaces';
 
 @Controller('api/v1/stores/:storeId')
 @Public()
@@ -38,6 +41,34 @@ export class PublicApiController {
     private readonly vendorWebhooksService: VendorWebhooksService,
     private readonly reviewsService: ReviewsService,
   ) {}
+
+  @Get('products')
+  @UseGuards(ApiKeyGuard)
+  async listProducts(
+    @Param('storeId') storeId: string,
+    @Query() query: ListPublicProductsQueryDto,
+  ): Promise<PaginatedResponse<ProductType>> {
+    const result = await this.productsService.findAllForPublicApi(storeId, {
+      page: query.page,
+      limit: query.limit,
+      status: query.status,
+      search: query.search,
+    });
+    return {
+      items: result.items.map(mapProduct),
+      pagination: result.pagination,
+    };
+  }
+
+  @Get('products/:productId')
+  @UseGuards(ApiKeyGuard)
+  async getProduct(
+    @Param('storeId') storeId: string,
+    @Param('productId') productId: string,
+  ): Promise<ProductType> {
+    const product = await this.productsService.findOneInStore(productId, storeId);
+    return mapProduct(product);
+  }
 
   @Post('products')
   @HttpCode(201)

@@ -1,5 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenException, INestApplication, UnauthorizedException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  INestApplication,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { APP_FILTER, APP_PIPE } from '@nestjs/core';
 import request from 'supertest';
 import { App } from 'supertest/types';
@@ -20,6 +25,8 @@ describe('Public API products (e2e)', () => {
   let apiKeysService: { verifyAndAuthenticate: jest.Mock };
   let productsService: {
     createWithVariants: jest.Mock;
+    findAllForPublicApi: jest.Mock;
+    findOneInStore: jest.Mock;
     updateProductForPublicApi: jest.Mock;
     updateVariantStockPriceForPublicApi: jest.Mock;
     removeForPublicApi: jest.Mock;
@@ -92,6 +99,11 @@ describe('Public API products (e2e)', () => {
     };
     productsService = {
       createWithVariants: jest.fn().mockResolvedValue(createdProduct),
+      findAllForPublicApi: jest.fn().mockResolvedValue({
+        items: [createdProduct],
+        pagination: { page: 1, limit: 20, total: 1, totalPages: 1 },
+      }),
+      findOneInStore: jest.fn().mockResolvedValue(createdProduct),
       updateProductForPublicApi: jest.fn().mockResolvedValue({
         ...createdProduct,
         name: 'Updated name',
@@ -225,6 +237,141 @@ describe('Public API products (e2e)', () => {
       'sopet_sk_valid_key',
       storeId,
     );
+  });
+
+  it('GET /api/v1/stores/:storeId/products returns paginated list', async () => {
+    const res = await request(app.getHttpServer())
+      .get(`/api/v1/stores/${storeId}/products`)
+      .query({ page: 1, limit: 10 })
+      .set('Authorization', 'Bearer sopet_sk_valid_key')
+      .expect(200);
+
+    expect(res.body.items).toHaveLength(1);
+    expect(res.body.items[0].id).toBe('prod-1');
+    expect(res.body.pagination).toEqual({
+      page: 1,
+      limit: 20,
+      total: 1,
+      totalPages: 1,
+    });
+    expect(productsService.findAllForPublicApi).toHaveBeenCalledWith(storeId, {
+      page: 1,
+      limit: 10,
+      status: undefined,
+      search: undefined,
+    });
+  });
+
+  it('GET /products forwards status and search query filters', async () => {
+    await request(app.getHttpServer())
+      .get(`/api/v1/stores/${storeId}/products`)
+      .query({ status: ProductStatus.DRAFT, search: 'แมว', page: 2, limit: 5 })
+      .set('Authorization', 'Bearer sopet_sk_valid_key')
+      .expect(200);
+
+    expect(productsService.findAllForPublicApi).toHaveBeenCalledWith(storeId, {
+      page: 2,
+      limit: 5,
+      status: ProductStatus.DRAFT,
+      search: 'แมว',
+    });
+  });
+
+  it('GET /products accepts X-Api-Key header', async () => {
+    await request(app.getHttpServer())
+      .get(`/api/v1/stores/${storeId}/products`)
+      .set('X-Api-Key', 'sopet_sk_header_key')
+      .expect(200);
+
+    expect(apiKeysService.verifyAndAuthenticate).toHaveBeenCalledWith(
+      'sopet_sk_header_key',
+      storeId,
+    );
+  });
+
+  it('GET /products returns 400 for invalid query (limit > 100)', async () => {
+    await request(app.getHttpServer())
+      .get(`/api/v1/stores/${storeId}/products`)
+      .query({ limit: 101 })
+      .set('Authorization', 'Bearer sopet_sk_valid_key')
+      .expect(400)
+      .expect((res) => {
+        expect(res.body.error.code).toBe('VALIDATION_ERROR');
+      });
+
+    expect(productsService.findAllForPublicApi).not.toHaveBeenCalled();
+  });
+
+  it('GET /products returns 400 for invalid status', async () => {
+    await request(app.getHttpServer())
+      .get(`/api/v1/stores/${storeId}/products`)
+      .query({ status: 'deleted' })
+      .set('Authorization', 'Bearer sopet_sk_valid_key')
+      .expect(400)
+      .expect((res) => {
+        expect(res.body.error.code).toBe('VALIDATION_ERROR');
+      });
+
+    expect(productsService.findAllForPublicApi).not.toHaveBeenCalled();
+  });
+
+  it('GET /products returns 403 when store is not approved', async () => {
+    apiKeysService.verifyAndAuthenticate.mockRejectedValue(
+      new ForbiddenException({
+        code: 'STORE_SUSPENDED',
+        message: 'Store is not approved or is suspended',
+      }),
+    );
+
+    await request(app.getHttpServer())
+      .get(`/api/v1/stores/${storeId}/products`)
+      .set('Authorization', 'Bearer sopet_sk_valid_key')
+      .expect(403)
+      .expect((res) => {
+        expect(res.body.error.code).toBe('STORE_SUSPENDED');
+      });
+
+    expect(productsService.findAllForPublicApi).not.toHaveBeenCalled();
+  });
+
+  it('GET /api/v1/stores/:storeId/products/:productId returns product detail', async () => {
+    const res = await request(app.getHttpServer())
+      .get(`/api/v1/stores/${storeId}/products/prod-1`)
+      .set('Authorization', 'Bearer sopet_sk_valid_key')
+      .expect(200);
+
+    expect(res.body.id).toBe('prod-1');
+    expect(res.body.status).toBe(ProductStatus.DRAFT);
+    expect(productsService.findOneInStore).toHaveBeenCalledWith('prod-1', storeId);
+  });
+
+  it('GET /products/:productId returns 404 PRODUCT_NOT_FOUND', async () => {
+    productsService.findOneInStore.mockRejectedValue(
+      new NotFoundException({
+        code: 'PRODUCT_NOT_FOUND',
+        message: 'Product not found',
+      }),
+    );
+
+    await request(app.getHttpServer())
+      .get(`/api/v1/stores/${storeId}/products/missing`)
+      .set('Authorization', 'Bearer sopet_sk_valid_key')
+      .expect(404)
+      .expect((res) => {
+        expect(res.body.error.code).toBe('PRODUCT_NOT_FOUND');
+      });
+  });
+
+  it('GET /products/:productId returns 401 when API key is missing', async () => {
+    await request(app.getHttpServer()).get(`/api/v1/stores/${storeId}/products/prod-1`).expect(401);
+
+    expect(productsService.findOneInStore).not.toHaveBeenCalled();
+  });
+
+  it('GET products returns 401 when API key is missing', async () => {
+    await request(app.getHttpServer()).get(`/api/v1/stores/${storeId}/products`).expect(401);
+
+    expect(productsService.findAllForPublicApi).not.toHaveBeenCalled();
   });
 
   it('returns 401 when API key is missing', async () => {

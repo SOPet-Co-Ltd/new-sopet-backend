@@ -14,6 +14,8 @@ export const AuditAction = {
   STORE_APPROVED: 'store.approved',
   STORE_REJECTED: 'store.rejected',
   PAYOUT_TRIGGERED: 'payout.triggered',
+  PAYOUT_MANUAL_SETTLED: 'payout.manual_settled',
+  PAYOUT_MANUAL_REJECTED: 'payout.manual_rejected',
   ADMIN_INVITED: 'admin.invited',
   ADMIN_INVITATION_REVOKED: 'admin.invitation_revoked',
   ADMIN_INVITATION_ACCEPTED: 'admin.invitation_accepted',

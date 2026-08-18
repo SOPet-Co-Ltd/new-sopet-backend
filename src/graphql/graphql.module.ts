@@ -31,6 +31,7 @@ import { CustomersModule } from '../modules/customers/customers.module';
 import { ApiKeysModule } from '../modules/api-keys/api-keys.module';
 import { SearchModule } from '../modules/search/search.module';
 import { AuditLogsModule } from '../modules/audit-logs/audit-logs.module';
+import { OrderAuditLogsModule } from '../modules/order-audit-logs/order-audit-logs.module';
 import { GraphqlLoadersModule } from './loaders/graphql-loaders.module';
 import { GraphqlContextFactory } from './loaders/graphql-context.factory';
 
@@ -120,6 +121,7 @@ const graphqlErrorLogger = new Logger('GraphQLFormatError');
     ApiKeysModule,
     SearchModule,
     AuditLogsModule,
+    OrderAuditLogsModule,
   ],
   providers: [AppGraphqlResolver],
 })

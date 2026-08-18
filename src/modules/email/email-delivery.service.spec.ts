@@ -89,6 +89,9 @@ describe('EmailDeliveryService', () => {
       customerName: 'คุณลูกค้า',
     });
     expect(options.vars.itemsHtml).toContain('Dog Food');
+    // CMS body already owns the outer <table> + headers; itemsHtml must be rows only.
+    expect(options.vars.itemsHtml).toContain('<tr');
+    expect(options.vars.itemsHtml).not.toContain('<table');
     expect(options.fallbackParams).toBe(params);
   });
 

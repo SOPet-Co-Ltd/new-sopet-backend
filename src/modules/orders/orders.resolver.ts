@@ -2,6 +2,7 @@ import { Args, Int, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { ForbiddenException, NotFoundException, UseGuards } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { OrderFulfillmentService } from './order-fulfillment.service';
+import { PaymentsService } from '../payments/payments.service';
 import { ProductsService } from '../products/products.service';
 import { StoresService } from '../stores/stores.service';
 import {
@@ -30,6 +31,7 @@ export class OrdersResolver {
   constructor(
     private readonly ordersService: OrdersService,
     private readonly orderFulfillmentService: OrderFulfillmentService,
+    private readonly paymentsService: PaymentsService,
     private readonly productsService: ProductsService,
     private readonly storesService: StoresService,
   ) {}
@@ -134,6 +136,32 @@ export class OrdersResolver {
 
     const orders = await this.ordersService.findByStore(storeId);
     return orders.map((order) => mapOrder(order, storeId));
+  }
+
+  @Query(() => OrderConnection)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async pendingBankTransferOrders(
+    @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page?: number,
+    @Args('limit', { type: () => Int, nullable: true, defaultValue: 20 }) limit?: number,
+  ): Promise<OrderConnection> {
+    const result = await this.ordersService.findPendingBankTransferOrders({ page, limit });
+    return {
+      items: result.items.map((order) => mapOrder(order)),
+      pagination: result.pagination,
+    };
+  }
+
+  @Mutation(() => OrderType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async confirmBankTransferPaid(
+    @Args('orderId') orderId: string,
+    @CurrentUser('id') userId: string,
+    @Args('note', { type: () => String, nullable: true }) note?: string,
+  ): Promise<OrderType> {
+    const updated = await this.paymentsService.confirmBankTransferPaid(orderId, userId, note);
+    return mapOrder(updated);
   }
 
   @Mutation(() => OrderType)

@@ -11,6 +11,7 @@ import {
 } from 'class-validator';
 import { PlatformService } from './platform.service';
 import {
+  BankTransferSettingsType,
   LoginPageImagesType,
   PlatformBannerType,
   PlatformSettingsType,
@@ -25,6 +26,8 @@ import { PlatformSponsor } from '../../database/entities/platform-sponsor.entity
 import { PlatformAd } from '../../database/entities/platform-ad.entity';
 import { LoginPageImagesSettingsService } from './login-page-images-settings.service';
 import { UpdateLoginPageImagesInput } from './login-page-images.inputs';
+import { BankTransferSettingsService } from './bank-transfer-settings.service';
+import { UpdateBankTransferDetailsInput } from './bank-transfer.inputs';
 
 @InputType()
 export class CreatePlatformBannerInput {
@@ -265,6 +268,7 @@ export class PlatformResolver {
   constructor(
     private readonly platformService: PlatformService,
     private readonly loginPageImagesSettingsService: LoginPageImagesSettingsService,
+    private readonly bankTransferSettingsService: BankTransferSettingsService,
   ) {}
 
   @Query(() => [PlatformBannerType])
@@ -345,6 +349,22 @@ export class PlatformResolver {
   @Roles('admin')
   async clearLoginPageMobileImage(): Promise<LoginPageImagesType> {
     return mapLoginPageImages(await this.loginPageImagesSettingsService.clearMobile());
+  }
+
+  @Query(() => BankTransferSettingsType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async bankTransferSettings(): Promise<BankTransferSettingsType> {
+    return this.bankTransferSettingsService.get();
+  }
+
+  @Mutation(() => BankTransferSettingsType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async updateBankTransferDetails(
+    @Args('input') input: UpdateBankTransferDetailsInput,
+  ): Promise<BankTransferSettingsType> {
+    return this.bankTransferSettingsService.update(input);
   }
 
   @Mutation(() => PlatformBannerType)

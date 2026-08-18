@@ -18,6 +18,8 @@ import { InventoryService } from '../src/modules/inventory/inventory.service';
 import { PayoutsService } from '../src/modules/payouts/payouts.service';
 import { StoresService } from '../src/modules/stores/stores.service';
 import { VendorWebhooksService } from '../src/modules/vendor-webhooks/vendor-webhooks.service';
+import { OrderAuditLogsService } from '../src/modules/order-audit-logs/order-audit-logs.service';
+import { BankTransferSettingsService } from '../src/modules/platform/bank-transfer-settings.service';
 import { computeOmiseWebhookSignature } from '../src/modules/payments/omise-webhook.util';
 
 describe('Omise webhook (e2e)', () => {
@@ -73,6 +75,27 @@ describe('Omise webhook (e2e)', () => {
         {
           provide: VendorWebhooksService,
           useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: OrderAuditLogsService,
+          useValue: {
+            append: jest.fn().mockResolvedValue(undefined),
+            resolveCustomerActorLabel: jest.fn().mockResolvedValue('ลูกค้า'),
+          },
+        },
+        {
+          provide: BankTransferSettingsService,
+          useValue: {
+            getConfigured: jest.fn().mockResolvedValue(null),
+            isAvailable: jest.fn().mockReturnValue(false),
+            get: jest.fn().mockResolvedValue({
+              enabled: false,
+              bankName: '',
+              accountName: '',
+              accountNumber: '',
+              branchName: null,
+            }),
+          },
         },
       ],
     }).compile();

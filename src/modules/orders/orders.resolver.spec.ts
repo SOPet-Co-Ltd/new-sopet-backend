@@ -3,6 +3,7 @@ import { NotFoundException } from '@nestjs/common';
 import { OrdersResolver } from './orders.resolver';
 import { OrdersService } from './orders.service';
 import { OrderFulfillmentService } from './order-fulfillment.service';
+import { PaymentsService } from '../payments/payments.service';
 import { ProductsService } from '../products/products.service';
 import { StoresService } from '../stores/stores.service';
 import { IS_PUBLIC_KEY } from '../../common/decorators/public.decorator';
@@ -97,6 +98,7 @@ describe('OrdersResolver mapOrder extensions', () => {
       | 'findByCustomerPaginated'
       | 'findByGuestPhone'
       | 'findByStore'
+      | 'findPendingBankTransferOrders'
       | 'findLatestPurchaseProductId'
       | 'findLatestPurchaseProductIds'
       | 'findOneWithItems'
@@ -117,6 +119,9 @@ describe('OrdersResolver mapOrder extensions', () => {
       'markVendorOrderPaid' | 'acknowledgeVendorOrder' | 'shipVendorOrder' | 'cancelVendorOrder'
     >
   >;
+  let paymentsService: jest.Mocked<
+    Pick<PaymentsService, 'confirmBankTransferPaid' | 'getBankTransferDetails'>
+  >;
   let resolver: OrdersResolver;
 
   beforeEach(() => {
@@ -126,6 +131,7 @@ describe('OrdersResolver mapOrder extensions', () => {
       findByCustomerPaginated: jest.fn(),
       findByGuestPhone: jest.fn(),
       findByStore: jest.fn(),
+      findPendingBankTransferOrders: jest.fn(),
       findLatestPurchaseProductId: jest.fn(),
       findLatestPurchaseProductIds: jest.fn(),
       findOneWithItems: jest.fn(),
@@ -148,9 +154,14 @@ describe('OrdersResolver mapOrder extensions', () => {
       shipVendorOrder: jest.fn(),
       cancelVendorOrder: jest.fn(),
     };
+    paymentsService = {
+      confirmBankTransferPaid: jest.fn(),
+      getBankTransferDetails: jest.fn(),
+    };
     resolver = new OrdersResolver(
       ordersService as unknown as OrdersService,
       orderFulfillmentService as unknown as OrderFulfillmentService,
+      paymentsService as unknown as PaymentsService,
       productsService as unknown as ProductsService,
       storesService as unknown as StoresService,
     );

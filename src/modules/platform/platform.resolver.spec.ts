@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { PlatformResolver } from './platform.resolver';
 import { PlatformService } from './platform.service';
 import { LoginPageImagesSettingsService } from './login-page-images-settings.service';
+import { BankTransferSettingsService } from './bank-transfer-settings.service';
 import { IS_PUBLIC_KEY } from '../../common/decorators/public.decorator';
 import { ROLES_KEY } from '../../common/decorators/roles.decorator';
 import { UpdateLoginPageImagesInput } from './login-page-images.inputs';
@@ -13,6 +14,9 @@ describe('PlatformResolver login page images', () => {
       LoginPageImagesSettingsService,
       'get' | 'updateConfigured' | 'clearDesktop' | 'clearMobile'
     >
+  >;
+  let bankTransferSettingsService: jest.Mocked<
+    Pick<BankTransferSettingsService, 'get' | 'getConfigured' | 'update'>
   >;
   let resolver: PlatformResolver;
 
@@ -26,9 +30,15 @@ describe('PlatformResolver login page images', () => {
       clearDesktop: jest.fn(),
       clearMobile: jest.fn(),
     };
+    bankTransferSettingsService = {
+      get: jest.fn(),
+      getConfigured: jest.fn(),
+      update: jest.fn(),
+    };
     resolver = new PlatformResolver(
       platformService as unknown as PlatformService,
       loginPageImagesSettingsService as unknown as LoginPageImagesSettingsService,
+      bankTransferSettingsService as unknown as BankTransferSettingsService,
     );
   });
 

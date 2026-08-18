@@ -106,19 +106,25 @@ describe('Checkout flow (integration)', () => {
         {} as never,
         { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) } as never,
         {
-          resolveEffectiveUnitPrices: jest.fn(async (lines: Array<{ variantId: string; catalogUnit: number }>) => {
-            const map = new Map();
-            for (const line of lines) {
-              map.set(line.variantId, {
-                catalogUnitPrice: line.catalogUnit,
-                unitPrice: line.catalogUnit,
-                saleCampaignId: null,
-                saleDiscountPercent: null,
-                compareAtPrice: null,
-              });
-            }
-            return map;
-          }),
+          resolveEffectiveUnitPrices: jest.fn(
+            async (lines: Array<{ variantId: string; catalogUnit: number }>) => {
+              const map = new Map();
+              for (const line of lines) {
+                map.set(line.variantId, {
+                  catalogUnitPrice: line.catalogUnit,
+                  unitPrice: line.catalogUnit,
+                  saleCampaignId: null,
+                  saleDiscountPercent: null,
+                  compareAtPrice: null,
+                });
+              }
+              return map;
+            },
+          ),
+        } as never,
+        {
+          append: jest.fn().mockResolvedValue(undefined),
+          resolveCustomerActorLabel: jest.fn(),
         } as never,
       );
     });

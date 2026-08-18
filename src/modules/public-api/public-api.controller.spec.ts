@@ -1,3 +1,4 @@
+import { NotFoundException } from '@nestjs/common';
 import { PublicApiController } from './public-api.controller';
 import { ProductsService } from '../products/products.service';
 import { OrderFulfillmentService } from '../orders/order-fulfillment.service';
@@ -12,6 +13,8 @@ describe('PublicApiController', () => {
   let controller: PublicApiController;
   let productsService: {
     createWithVariants: jest.Mock;
+    findAllForPublicApi: jest.Mock;
+    findOneInStore: jest.Mock;
     updateProductForPublicApi: jest.Mock;
     updateVariantStockPriceForPublicApi: jest.Mock;
     removeForPublicApi: jest.Mock;
@@ -73,6 +76,11 @@ describe('PublicApiController', () => {
   beforeEach(() => {
     productsService = {
       createWithVariants: jest.fn().mockResolvedValue(createdProduct),
+      findAllForPublicApi: jest.fn().mockResolvedValue({
+        items: [createdProduct],
+        pagination: { page: 1, limit: 20, total: 1, totalPages: 1 },
+      }),
+      findOneInStore: jest.fn().mockResolvedValue(createdProduct),
       updateProductForPublicApi: jest.fn().mockResolvedValue({
         ...createdProduct,
         name: 'Updated',
@@ -164,6 +172,51 @@ describe('PublicApiController', () => {
       vendorWebhooksService as unknown as VendorWebhooksService,
       reviewsService as unknown as ReviewsService,
     );
+  });
+
+  it('delegates product list and maps items', async () => {
+    const result = await controller.listProducts('store-1', { page: 1, limit: 20 });
+
+    expect(productsService.findAllForPublicApi).toHaveBeenCalledWith('store-1', {
+      page: 1,
+      limit: 20,
+      status: undefined,
+      search: undefined,
+    });
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].id).toBe('prod-1');
+    expect(result.pagination.total).toBe(1);
+  });
+
+  it('delegates product list with status and search', async () => {
+    await controller.listProducts('store-1', {
+      page: 3,
+      limit: 50,
+      status: ProductStatus.PUBLISHED,
+      search: 'organic',
+    });
+
+    expect(productsService.findAllForPublicApi).toHaveBeenCalledWith('store-1', {
+      page: 3,
+      limit: 50,
+      status: ProductStatus.PUBLISHED,
+      search: 'organic',
+    });
+  });
+
+  it('delegates product detail by id', async () => {
+    const result = await controller.getProduct('store-1', 'prod-1');
+
+    expect(productsService.findOneInStore).toHaveBeenCalledWith('prod-1', 'store-1');
+    expect(result.id).toBe('prod-1');
+  });
+
+  it('propagates PRODUCT_NOT_FOUND from findOneInStore', async () => {
+    productsService.findOneInStore.mockRejectedValueOnce(
+      new NotFoundException({ code: 'PRODUCT_NOT_FOUND', message: 'Product not found' }),
+    );
+
+    await expect(controller.getProduct('store-1', 'missing')).rejects.toThrow(NotFoundException);
   });
 
   it('delegates to createWithVariants with mapped payload and returns mapped product', async () => {

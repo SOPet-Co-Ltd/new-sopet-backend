@@ -38,6 +38,12 @@ import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.servic
 import { webhookEventForOrderStatus } from '../vendor-webhooks/vendor-webhook.events';
 import { SaleCampaignPricingService } from '../sale-campaigns/sale-campaign-pricing.service';
 import { roundMoney } from '../sale-campaigns/sale-campaign-pricing';
+import { OrderAuditLogsService } from '../order-audit-logs/order-audit-logs.service';
+import {
+  OrderAuditActorType,
+  OrderAuditEventType,
+} from '../order-audit-logs/order-audit-log.constants';
+
 export interface StoreShippingSelection {
   storeId: string;
   shippingOptionId: string;
@@ -69,6 +75,7 @@ export class OrdersService {
     private storeRepository: Repository<Store>,
     private vendorWebhooksService: VendorWebhooksService,
     private saleCampaignPricing: SaleCampaignPricingService,
+    private orderAuditLogsService: OrderAuditLogsService,
   ) {}
 
   private generateOrderNumber(): string {
@@ -326,6 +333,9 @@ export class OrdersService {
 
     const codes = storePromotionCodes ?? (promotionCode ? [promotionCode] : []);
     if (platformPromotionCode || codes.length) {
+      const storeShippingFees = new Map(
+        shippingRecords.map((record) => [record.storeId as string, Number(record.shippingFee)]),
+      );
       const stacked = await this.promotionsService.applyStackedPromotions(
         subtotal,
         storeSubtotals,
@@ -336,7 +346,7 @@ export class OrdersService {
           : normalizedGuestPhone
             ? { guestPhone: normalizedGuestPhone }
             : undefined,
-        { mode: 'apply', lines: promotionLines, shippingFee },
+        { mode: 'apply', lines: promotionLines, shippingFee, storeShippingFees },
       );
       discountAmount = stacked.discountAmount;
       appliedPromotions = stacked.promotions;
@@ -451,6 +461,18 @@ export class OrdersService {
           status: OrderStatus.PENDING_PAYMENT,
         }),
       );
+
+      await this.orderAuditLogsService.append(manager, {
+        orderId: savedOrder.id,
+        eventType: OrderAuditEventType.ORDER_PLACED,
+        actorType: OrderAuditActorType.customer,
+        actorId: linkedCustomerId,
+        actorLabel: await this.orderAuditLogsService.resolveCustomerActorLabel(manager, {
+          customerId: linkedCustomerId,
+          guestName: guestName ?? null,
+        }),
+        details: { paymentMethod: savedOrder.paymentMethod },
+      });
 
       for (const promotion of appliedPromotions) {
         const promoDiscount = discountsByPromotionId[promotion.id] ?? 0;
@@ -664,9 +686,49 @@ export class OrdersService {
       .getMany();
   }
 
+  async findPendingBankTransferOrders(options?: {
+    page?: number;
+    limit?: number;
+  }): Promise<PaginatedResponse<Order>> {
+    const page = normalizeCustomerOrdersPage(options?.page);
+    const limit = normalizeCustomerOrdersLimit(options?.limit);
+
+    const [items, total] = await this.orderRepository.findAndCount({
+      where: {
+        paymentMethod: PaymentMethod.BANK_TRANSFER,
+        status: OrderStatus.PENDING_PAYMENT,
+      },
+      relations: ['items', 'shippingAddress', 'customer', 'storeShippings'],
+      order: { createdAt: 'ASC' },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+
+    return {
+      items,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+    };
+  }
+
   async updateStatus(id: string, status: OrderStatus, userId?: string): Promise<Order> {
     const order = await this.findOne(id);
     const previousStatus = order.status;
+
+    if (
+      order.paymentMethod === PaymentMethod.BANK_TRANSFER &&
+      previousStatus === OrderStatus.PENDING_PAYMENT &&
+      status === OrderStatus.PAID
+    ) {
+      throw new BadRequestException({
+        code: 'USE_CONFIRM_BANK_TRANSFER',
+        message: 'Use confirmBankTransferPaid to approve bank transfer payments',
+      });
+    }
 
     assertNotManualHoldTransition(previousStatus, status);
 

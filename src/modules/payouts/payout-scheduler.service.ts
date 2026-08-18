@@ -65,7 +65,7 @@ export class PayoutSchedulerService implements OnModuleInit, OnModuleDestroy {
       },
     });
 
-    const minimumPayoutAmount = this.configService.get<number>('payout.minPayoutAmount') ?? 500;
+    const minimumPayoutAmount = this.configService.get<number>('payout.minPayoutAmount') ?? 100;
     const now = new Date();
 
     for (const store of stores) {

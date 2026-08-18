@@ -20,9 +20,16 @@ export enum PayoutStatus {
   FAILED = 'failed',
 }
 
+/** How vendor funds are settled: Omise transfer vs platform bank transfer. */
+export enum PayoutSettlementRail {
+  OMISE = 'omise',
+  MANUAL = 'manual',
+}
+
 @Entity('payouts')
 @Index(['storeId', 'status', 'createdAt'])
 @Index(['status'])
+@Index(['storeId', 'settlementRail', 'status'])
 export class Payout {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -46,6 +53,27 @@ export class Payout {
   @Min(0)
   netAmount!: number;
 
+  @Column({ name: 'commission_rate', type: 'integer', nullable: true })
+  commissionRate!: number | null;
+
+  @Column({ name: 'product_sold', type: 'decimal', precision: 10, scale: 2, nullable: true })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  productSold!: number | null;
+
+  @Column({ name: 'shipping_fees', type: 'decimal', precision: 10, scale: 2, nullable: true })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  shippingFees!: number | null;
+
+  @Column({ name: 'commission_amount', type: 'decimal', precision: 10, scale: 2, nullable: true })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  commissionAmount!: number | null;
+
   @Column({
     name: 'status',
     type: 'enum',
@@ -54,6 +82,15 @@ export class Payout {
   })
   @IsEnum(PayoutStatus)
   status!: PayoutStatus;
+
+  @Column({
+    name: 'settlement_rail',
+    type: 'enum',
+    enum: PayoutSettlementRail,
+    default: PayoutSettlementRail.OMISE,
+  })
+  @IsEnum(PayoutSettlementRail)
+  settlementRail!: PayoutSettlementRail;
 
   @Column({ name: 'transfer_reference', type: 'varchar', length: 255, nullable: true })
   transferReference!: string | null;

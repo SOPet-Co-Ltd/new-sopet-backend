@@ -484,7 +484,10 @@ export class ProductsService {
   }
 
   // Find products with filters and pagination
-  async findAll(queryDto: ProductQueryDto): Promise<PaginatedResponse<Product>> {
+  async findAll(
+    queryDto: ProductQueryDto,
+    options?: { skipSmartSearch?: boolean },
+  ): Promise<PaginatedResponse<Product>> {
     const { page = 1, limit = 20, sortBy = 'createdAt', sortOrder = 'DESC' } = queryDto;
 
     const resolvedDto: ProductQueryDto = { ...queryDto };
@@ -509,7 +512,11 @@ export class ProductsService {
       resolvedDto.tagName = resolvedTag.name;
     }
 
-    if (resolvedDto.search?.trim() && this.searchService?.isSmartSearchEnabled()) {
+    if (
+      !options?.skipSmartSearch &&
+      resolvedDto.search?.trim() &&
+      this.searchService?.isSmartSearchEnabled()
+    ) {
       return this.searchService.searchProducts(resolvedDto);
     }
 
@@ -945,6 +952,32 @@ export class ProductsService {
   async removeForPublicApi(productId: string, storeId: string, userId: string): Promise<void> {
     await this.findOneInStore(productId, storeId);
     await this.remove(productId, userId);
+  }
+
+  /**
+   * Public API product list — store-scoped; includes draft/published/archived
+   * unless `status` is set. Soft-deleted products are excluded by TypeORM.
+   */
+  async findAllForPublicApi(
+    storeId: string,
+    query: {
+      page?: number;
+      limit?: number;
+      status?: ProductStatus;
+      search?: string;
+    } = {},
+  ): Promise<PaginatedResponse<Product>> {
+    return this.findAll(
+      {
+        storeId,
+        page: query.page ?? 1,
+        limit: query.limit ?? 20,
+        status: query.status,
+        search: query.search,
+        allStatuses: true,
+      },
+      { skipSmartSearch: true },
+    );
   }
 
   // Add variant to product

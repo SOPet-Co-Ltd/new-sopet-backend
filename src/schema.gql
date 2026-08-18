@@ -165,12 +165,38 @@ type AdminInvitationType {
   status: String!
 }
 
+type AdminManualPayoutConnection {
+  items: [AdminManualPayoutType!]!
+  pagination: PaginationMeta!
+}
+
+type AdminManualPayoutType {
+  amount: Float!
+  bankAccountName: String
+  bankAccountNumber: String
+  bankCode: String
+  bankName: String
+  commissionAmount: Float
+  commissionRate: Int
+  createdAt: DateTime!
+  id: String!
+  netAmount: Float!
+  productSold: Float
+  settlementRail: String!
+  shippingFees: Float
+  status: String!
+  storeId: String!
+  storeName: String!
+}
+
 type AdminStoreType {
   address: String
   bankAccountName: String
   bankAccountNumber: String
+  bankCode: String
   bankName: String
   bannerUrl: String
+  commissionRate: Int
   contactEmail: String
   contactPhone: String
   createdAt: DateTime!
@@ -178,6 +204,9 @@ type AdminStoreType {
   id: String!
   logoUrl: String
   name: String!
+  omiseRecipientFailureMessage: String
+  omiseRecipientId: String
+  omiseRecipientStatus: String!
   ownerEmail: String
   ownerFullName: String
   ownerId: String!
@@ -264,6 +293,21 @@ input ApproveStoreInput {
 type AuthTokens {
   accessToken: String!
   refreshToken: String!
+}
+
+type BankTransferDetailsType {
+  accountName: String!
+  accountNumber: String!
+  bankName: String!
+  branchName: String
+}
+
+type BankTransferSettingsType {
+  accountName: String!
+  accountNumber: String!
+  bankName: String!
+  branchName: String
+  enabled: Boolean!
 }
 
 type BrandType {
@@ -722,6 +766,7 @@ type Mutation {
   changePassword(input: ChangePasswordInput!): MessagePayload!
   clearLoginPageDesktopImage: LoginPageImagesType!
   clearLoginPageMobileImage: LoginPageImagesType!
+  confirmBankTransferPaid(note: String, orderId: String!): OrderType!
   confirmGuestOrderDelivered(input: ConfirmOrderDeliveredInput!): OrderType!
   confirmOrderDelivered(input: ConfirmOrderDeliveredInput!): OrderType!
   createAddress(input: CreateAddressInput!): SavedAddressType!
@@ -768,6 +813,8 @@ type Mutation {
   inviteAdmin(input: InviteAdminInput!): AdminInvitationType!
   inviteStoreMember(input: InviteStoreMemberInput!): StoreMemberInvitationType!
   inviteVendor(input: InviteVendorInput!): VendorInvitationType!
+  linkStoreOmiseRecipient: MyStoreType!
+  linkStoreOmiseRecipientAsAdmin(storeId: String!): AdminStoreType!
   markAllNotificationsRead: Boolean!
   markNotificationRead(id: String!): Boolean!
   markVendorOrderPaid(orderId: String!): OrderType!
@@ -780,6 +827,7 @@ type Mutation {
   registerVendor(input: RegisterVendorInput!): VendorAuthPayload!
   rejectBrand(id: String!): BrandType!
   rejectCategory(id: String!): CategoryType!
+  rejectManualPayout(input: RejectManualPayoutInput!): PayoutType!
   rejectPetType(id: String!): PetTypeType!
   rejectReview(id: String!): ReviewType!
   rejectStore(input: RejectStoreInput!): StoreType!
@@ -793,6 +841,7 @@ type Mutation {
   reorderPlatformSponsors(ids: [ID!]!): [PlatformSponsorType!]!
   reorderProductImages(imageIds: [ID!]!, productId: String!): [ProductImageType!]!
   requestAccountDeletion: Boolean!
+  requestManualPayout: PayoutType!
   requestPasswordReset(input: RequestPasswordResetInput!): MessagePayload!
   requestPayout: PayoutType!
   resendEmailVerification: MessagePayload!
@@ -811,6 +860,7 @@ type Mutation {
   setDefaultPaymentMethod(id: String!): SavedPaymentMethodType!
   setPetTypeImage(input: SetPetTypeImageInput!): PetTypeType!
   setProductThumbnail(imageId: String!, productId: String!): ProductImageType!
+  settleManualPayout(input: SettleManualPayoutInput!): PayoutType!
   shipVendorOrder(input: ShipVendorOrderInput!): OrderType!
   submitStoreReactivationRequest(input: SubmitStoreReactivationRequestInput!): StoreReactivationRequestType!
   submitStoreRequest(input: SubmitStoreRequestInput!): StoreRequestType!
@@ -820,6 +870,7 @@ type Mutation {
   toggleSaleCampaign(id: String!, isActive: Boolean!): SaleCampaignType!
   triggerPayout(input: TriggerPayoutInput!): PayoutType!
   updateAddress(id: String!, input: UpdateAddressInput!): SavedAddressType!
+  updateBankTransferDetails(input: UpdateBankTransferDetailsInput!): BankTransferSettingsType!
   updateBrand(input: UpdateBrandInput!): BrandType!
   updateCartItem(input: UpdateCartItemInput!): CartType!
   updateCategory(input: UpdateCategoryInput!): CategoryType!
@@ -894,6 +945,46 @@ type NotificationType {
   metadata: String
   title: String
   type: String!
+}
+
+enum OrderAuditActorType {
+  admin
+  customer
+  system
+  vendor
+}
+
+enum OrderAuditEventType {
+  ORDER_ACCEPTED
+  ORDER_PLACED
+  PAYMENT_APPROVED
+  PAYMENT_METHOD_CHANGED
+}
+
+type OrderAuditLogDetailsType {
+  approvalMethod: String
+  newPaymentMethod: String
+  note: String
+  paymentMethod: String
+  previousPaymentMethod: String
+  storeId: String
+}
+
+type OrderAuditLogEntryType {
+  actorId: String
+  actorLabel: String
+  actorType: OrderAuditActorType!
+  details: OrderAuditLogDetailsType!
+  eventType: OrderAuditEventType!
+  id: ID!
+  occurredAt: DateTime!
+  orderId: ID!
+  storeId: String
+}
+
+type OrderAuditLogType {
+  entries: [OrderAuditLogEntryType!]!
+  orderId: ID!
 }
 
 type OrderConnection {
@@ -1029,21 +1120,44 @@ type PaymentType {
   status: String!
 }
 
+type PayoutRailSummaryType {
+  availableBalance: Float!
+  canRequestPayout: Boolean!
+  commissionAmount: Float!
+  commissionRate: Int!
+  grossRevenue: Float!
+  pendingPayoutAmount: Float!
+  productSold: Float!
+  shippingFees: Float!
+  totalPaidOut: Float!
+}
+
 type PayoutSummaryType {
   availableBalance: Float!
   canRequestPayout: Boolean!
+  commissionAmount: Float!
+  commissionRate: Int!
   grossRevenue: Float!
+  manual: PayoutRailSummaryType!
   minimumPayoutAmount: Float!
+  omise: PayoutRailSummaryType!
   pendingPayoutAmount: Float!
+  productSold: Float!
+  shippingFees: Float!
   storeId: String!
   totalPaidOut: Float!
 }
 
 type PayoutType {
   amount: Float!
+  commissionAmount: Float
+  commissionRate: Int
   createdAt: DateTime!
   id: String!
   netAmount: Float!
+  productSold: Float
+  settlementRail: String!
+  shippingFees: Float
   status: String!
   storeId: String!
 }
@@ -1269,6 +1383,8 @@ type Query {
   approvedCategories: [CategoryType!]!
   approvedPetTypes: [PetTypeType!]!
   approvedTags: [TagType!]!
+  bankTransferDetails: BankTransferDetailsType
+  bankTransferSettings: BankTransferSettingsType!
   brandDeleteImpact(brandId: String!): TaxonomyDeleteImpactType!
   cart(sessionId: String): CartType!
   categoryDeleteImpact(categoryId: String!): TaxonomyDeleteImpactType!
@@ -1303,15 +1419,18 @@ type Query {
   myTagProposals: [TagType!]!
   notifications(unreadOnly: Boolean): [NotificationType!]!
   order(id: String!): OrderType!
+  orderAuditLog(orderId: String!, storeId: String!): OrderAuditLogType!
   orderTracking(orderNumber: String!): OrderTrackingType!
   orders(filter: CustomerOrderListFilter = ALL, limit: Int = 10, page: Int = 1): OrderConnection!
   payment(id: String!): PaymentType!
   paymentByOrderId(orderId: String!): PaymentType!
   paymentMethods: [SavedPaymentMethodType!]!
   pendingAdminInvitations: [AdminInvitationType!]!
+  pendingBankTransferOrders(limit: Int = 20, page: Int = 1): OrderConnection!
   pendingBrands: [BrandType!]!
   pendingCategories: [CategoryType!]!
   pendingImportedReviews(limit: Int = 20, page: Int = 1): AdminImportedReviewConnection!
+  pendingManualPayouts(limit: Int = 20, page: Int = 1): AdminManualPayoutConnection!
   pendingPetTypes: [PetTypeType!]!
   pendingStoreRequests: [StoreRequestType!]!
   pendingStores: [StoreType!]!
@@ -1405,6 +1524,12 @@ input RegisterVendorInput {
   email: String!
   fullName: String!
   password: String!
+}
+
+input RejectManualPayoutInput {
+  notes: String
+  payoutId: String
+  storeId: String!
 }
 
 input RejectStoreInput {
@@ -1613,6 +1738,12 @@ input SetCategoryImageInput {
 input SetPetTypeImageInput {
   imageUrl: String!
   petTypeId: String!
+}
+
+input SettleManualPayoutInput {
+  notes: String
+  payoutId: String
+  storeId: String!
 }
 
 input ShipVendorOrderInput {
@@ -1868,6 +1999,14 @@ input UpdateAddressInput {
   tumbon: String
 }
 
+input UpdateBankTransferDetailsInput {
+  accountName: String!
+  accountNumber: String!
+  bankName: String!
+  branchName: String
+  enabled: Boolean!
+}
+
 input UpdateBrandInput {
   brandId: String!
   name: String!
@@ -2066,6 +2205,7 @@ input UpdateShippingProviderInput {
 input UpdateStoreAsAdminInput {
   address: String
   bannerUrl: String
+  commissionRate: Int
   contactEmail: String
   contactPhone: String
   description: String
