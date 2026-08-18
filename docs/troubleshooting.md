@@ -17,6 +17,21 @@ yarn migration:revert    # Revert last migration
 yarn migration:run
 ```
 
+### Deploy: `self-signed certificate in certificate chain` during `migration:show`
+
+GitHub Actions talks to RDS with `DB_SSL=true` and `NODE_ENV=production`. Node then verifies the RDS cert against its built-in CAs, which do not include Amazon RDS, and fails with `SELF_SIGNED_CERT_IN_CHAIN`.
+
+The deploy workflow sets `DB_SSL_CA` to `infra/certs/rds-global-bundle.pem` before migrations. The Docker image copies the same file to `/app/certs/rds-global-bundle.pem`.
+
+If this error returns after a CA rotation, refresh the bundle:
+
+```bash
+curl -fsSL -o infra/certs/rds-global-bundle.pem \
+  https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+```
+
+Do not set `NODE_TLS_REJECT_UNAUTHORIZED=0`. `DB_SSL_REJECT_UNAUTHORIZED=false` is break-glass only.
+
 ### `db:reset:migrate` / `db:reset:dev` refused
 
 Local reset: point `DB_HOST` at localhost, or set `DB_RESET_ALLOW=1` for unrecognized local hosts.

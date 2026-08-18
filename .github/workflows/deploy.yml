@@ -173,6 +173,10 @@ jobs:
       - name: Run database migrations
         run: |
           yarn install --frozen-lockfile --production=false
+          # Node does not trust Amazon RDS CAs by default. Without this bundle,
+          # production (rejectUnauthorized=true) fails with SELF_SIGNED_CERT_IN_CHAIN.
+          export DB_SSL_CA="${GITHUB_WORKSPACE}/infra/certs/rds-global-bundle.pem"
+          test -s "$DB_SSL_CA"
           yarn typeorm migration:show -d ormconfig.ts
           yarn migration:run
 

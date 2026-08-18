@@ -1,3 +1,6 @@
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { getPostgresSslOptions } from './postgres-ssl.util';
 
 describe('getPostgresSslOptions', () => {
@@ -16,6 +19,7 @@ describe('getPostgresSslOptions', () => {
     process.env.DB_SSL = 'true';
     process.env.NODE_ENV = 'production';
     delete process.env.DB_SSL_REJECT_UNAUTHORIZED;
+    delete process.env.DB_SSL_CA;
     expect(getPostgresSslOptions()).toEqual({
       require: true,
       rejectUnauthorized: true,
@@ -25,9 +29,43 @@ describe('getPostgresSslOptions', () => {
   it('allows break-glass disable of verification', () => {
     process.env.DB_SSL = 'true';
     process.env.DB_SSL_REJECT_UNAUTHORIZED = 'false';
+    delete process.env.DB_SSL_CA;
     expect(getPostgresSslOptions()).toEqual({
       require: true,
       rejectUnauthorized: false,
     });
+  });
+
+  it('loads an inline PEM from DB_SSL_CA', () => {
+    const ca = '-----BEGIN CERTIFICATE-----\nINLINE\n-----END CERTIFICATE-----';
+    process.env.DB_SSL = 'true';
+    process.env.NODE_ENV = 'production';
+    process.env.DB_SSL_CA = ca;
+    expect(getPostgresSslOptions()).toEqual({
+      require: true,
+      rejectUnauthorized: true,
+      ca,
+    });
+  });
+
+  it('loads a CA bundle from a file path', () => {
+    const ca = '-----BEGIN CERTIFICATE-----\nFILE\n-----END CERTIFICATE-----';
+    const dir = mkdtempSync(join(tmpdir(), 'sopet-rds-ca-'));
+    const caPath = join(dir, 'rds-ca.pem');
+    writeFileSync(caPath, ca);
+
+    process.env.DB_SSL = 'true';
+    process.env.NODE_ENV = 'production';
+    process.env.DB_SSL_CA = caPath;
+    expect(getPostgresSslOptions()).toEqual({
+      require: true,
+      rejectUnauthorized: true,
+      ca,
+    });
+  });
+
+  it('keeps the vendored Amazon RDS CA bundle as PEM', () => {
+    const pem = readFileSync(join(__dirname, '../../infra/certs/rds-global-bundle.pem'), 'utf8');
+    expect(pem).toContain('BEGIN CERTIFICATE');
   });
 });

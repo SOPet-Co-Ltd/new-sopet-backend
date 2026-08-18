@@ -18,7 +18,8 @@ RUN yarn build \
 FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
-RUN mkdir -p src && chown -R node:node /app
+RUN mkdir -p src certs && chown -R node:node /app
+COPY --chown=node:node infra/certs/rds-global-bundle.pem /app/certs/rds-global-bundle.pem
 USER node
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY --from=build --chown=node:node /app/node_modules ./node_modules

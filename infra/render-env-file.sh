@@ -21,6 +21,12 @@ while IFS= read -r name; do
   write_entry "$name"
 done < <(jq -r '.variables[], .secrets[]' "$MANIFEST")
 
+# Runtime image path for Amazon RDS CA (see infra/certs/). GHA migrations set
+# DB_SSL_CA to the repo copy; the container uses the file copied in the Dockerfile.
+if [ "${DB_SSL:-}" = "true" ] && [ -z "${DB_SSL_CA:-}" ]; then
+  printf 'DB_SSL_CA=%s\n' '/app/certs/rds-global-bundle.pem' >>"$OUTPUT"
+fi
+
 if [ ! -s "$OUTPUT" ]; then
   echo "::error::No application environment variables were set. Configure GitHub Environment variables/secrets (see infra/env.manifest.json)." >&2
   exit 1

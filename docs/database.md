@@ -16,6 +16,18 @@ PostgreSQL 15+ with TypeORM. Database name: `sopet_ecommerce` (from `.env.exampl
 
 Runtime SSL helpers: `src/database/postgres-ssl.util.ts`. UTC timestamp parsing for `pg` is applied in `main.ts` via `pg-timestamp.util.ts`.
 
+### SSL / Amazon RDS
+
+`DB_SSL=true` encrypts the connection. In `NODE_ENV=production`, TypeORM verifies the server certificate (`rejectUnauthorized: true`). Node’s Mozilla CA store does **not** include Amazon RDS CAs, so verification needs `infra/certs/rds-global-bundle.pem` (source URL in `infra/certs/SOURCE.txt`).
+
+| Context                      | How the CA is supplied                                                                            |
+| ---------------------------- | ------------------------------------------------------------------------------------------------- |
+| GitHub Actions `migration:*` | `DB_SSL_CA` → repo file `infra/certs/rds-global-bundle.pem`                                       |
+| Docker runtime on EC2        | File copied to `/app/certs/rds-global-bundle.pem`; `render-env-file.sh` sets `DB_SSL_CA` if unset |
+| Local                        | `DB_SSL=false` (Compose Postgres has no TLS)                                                      |
+
+Override with `DB_SSL_CA` (PEM path or inline). `DB_SSL_REJECT_UNAUTHORIZED=false` skips verification (break-glass only).
+
 ## Entities
 
 **59 entities** in `src/database/entities/` (excluding `index.ts`).

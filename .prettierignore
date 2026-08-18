@@ -7,5 +7,6 @@ package-lock.json
 pnpm-lock.yaml
 *.min.js
 schema.gql
+*.pem
 .impeccable
 graphify-out

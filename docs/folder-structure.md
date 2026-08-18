@@ -108,15 +108,15 @@ Referenced as `${API_URL}/images/email/sopet-logo-white.png` from email template
 
 **Purpose:** TypeORM persistence and seed tooling.
 
-| Path                   | Contents                                            | When to add                                                              |
-| ---------------------- | --------------------------------------------------- | ------------------------------------------------------------------------ |
-| `entities/`            | 59 entity files + `enums/` (`order`, `taxonomy`)    | New database tables                                                      |
-| `migrations/`          | 38 migration files                                  | Schema changes (always via migration)                                    |
-| `repositories/`        | 6 custom repositories (+ `index.ts`, one unit spec) | Complex reusable queries                                                 |
-| `seeds/`               | Dev/prod seed + reset scripts                       | Demo data, bootstrap accounts                                            |
-| `postgres-ssl.util.ts` | SSL options for managed Postgres                    | Shared by `AppModule` + `ormconfig`                                      |
-| `pg-timestamp.util.ts` | UTC timestamp parsing for `pg`                      | Called from `main.ts` / CLI                                              |
-| `database.module.ts`   | Alternate TypeORM module with pool `extra`          | **Not imported** — runtime uses `AppModule` `TypeOrmModule.forRootAsync` |
+| Path                   | Contents                                            | When to add                                                                             |
+| ---------------------- | --------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `entities/`            | 59 entity files + `enums/` (`order`, `taxonomy`)    | New database tables                                                                     |
+| `migrations/`          | 38 migration files                                  | Schema changes (always via migration)                                                   |
+| `repositories/`        | 6 custom repositories (+ `index.ts`, one unit spec) | Complex reusable queries                                                                |
+| `seeds/`               | Dev/prod seed + reset scripts                       | Demo data, bootstrap accounts                                                           |
+| `postgres-ssl.util.ts` | SSL options for managed Postgres                    | Shared by `AppModule` + `ormconfig`; uses `infra/certs/rds-global-bundle.pem` in deploy |
+| `pg-timestamp.util.ts` | UTC timestamp parsing for `pg`                      | Called from `main.ts` / CLI                                                             |
+| `database.module.ts`   | Alternate TypeORM module with pool `extra`          | **Not imported** — runtime uses `AppModule` `TypeOrmModule.forRootAsync`                |
 
 **Conventions:**
 

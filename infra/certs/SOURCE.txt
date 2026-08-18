@@ -1,0 +1,8 @@
+AWS RDS combined CA bundle (public trust material, not a secret).
+
+Source: https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+Docs: https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL.html
+
+Refresh:
+  curl -fsSL -o infra/certs/rds-global-bundle.pem \
+    https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem

@@ -68,17 +68,17 @@ Recommended protection:
 
 Copy names from `infra/github-env.keys` / `infra/env.manifest.json`. Typical production values:
 
-| Variable                                          | Example                              |
-| ------------------------------------------------- | ------------------------------------ |
-| `NODE_ENV`                                        | `production`                         |
-| `PORT`                                            | `3002`                               |
-| `DB_HOST` / `DB_PORT` / `DB_USERNAME` / `DB_NAME` | Production RDS                       |
-| `DB_SSL`                                          | `true`                               |
-| `API_URL`                                         | `https://api.sopet.org`              |
-| `STOREFRONT_URL` / `ADMIN_PANEL_URL`              | Production Vercel URLs               |
-| `CORS_ORIGINS`                                    | Comma-separated production frontends |
-| `CDN_URL`                                         | Production CDN / R2 public URL       |
-| `STORAGE_PROVIDER`                                | `r2` (or `s3`)                       |
+| Variable                                          | Example                                                          |
+| ------------------------------------------------- | ---------------------------------------------------------------- |
+| `NODE_ENV`                                        | `production`                                                     |
+| `PORT`                                            | `3002`                                                           |
+| `DB_HOST` / `DB_PORT` / `DB_USERNAME` / `DB_NAME` | Production RDS                                                   |
+| `DB_SSL`                                          | `true` (uses `infra/certs/rds-global-bundle.pem` for TLS verify) |
+| `API_URL`                                         | `https://api.sopet.org`                                          |
+| `STOREFRONT_URL` / `ADMIN_PANEL_URL`              | Production Vercel URLs                                           |
+| `CORS_ORIGINS`                                    | Comma-separated production frontends                             |
+| `CDN_URL`                                         | Production CDN / R2 public URL                                   |
+| `STORAGE_PROVIDER`                                | `r2` (or `s3`)                                                   |
 
 Full key list: **`infra/github-env.keys`**.
 
