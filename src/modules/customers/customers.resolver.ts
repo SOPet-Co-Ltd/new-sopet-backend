@@ -1,4 +1,4 @@
-import { Args, Int, Mutation, Query, Resolver } from '@nestjs/graphql';
+import { Args, Context, Int, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { UseGuards } from '@nestjs/common';
 import { CustomersService } from './customers.service';
 import { StoresService } from '../stores/stores.service';
@@ -17,7 +17,9 @@ import { UpdateCustomerAsAdminInput } from './customers.inputs';
 import { Customer } from '../../database/entities/customer.entity';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constants';
+import { getAuditRequestContext } from '../audit-logs/audit-request-context';
 import { AuditActorType } from '../../database/entities/audit-log.entity';
+import type { GraphqlContext } from '../../graphql/loaders/graphql-context.types';
 
 function mapVendorCustomer(customer: Customer): VendorCustomerType {
   return {
@@ -90,6 +92,7 @@ export class CustomersResolver {
     @Args('input') input: UpdateCustomerAsAdminInput,
     @CurrentUser('id') adminId: string,
     @CurrentUser('email') adminEmail?: string,
+    @Context() context?: GraphqlContext,
   ): Promise<AdminCustomerType> {
     const customer = await this.customersService.updateAsAdmin(input);
 
@@ -105,6 +108,7 @@ export class CustomersResolver {
         fullName: input.fullName,
         email: input.email,
       },
+      ...getAuditRequestContext(context?.req),
     });
 
     return mapAdminCustomer(customer);
@@ -118,6 +122,7 @@ export class CustomersResolver {
     @Args('isActive') isActive: boolean,
     @CurrentUser('id') adminId: string,
     @CurrentUser('email') adminEmail?: string,
+    @Context() context?: GraphqlContext,
   ): Promise<AdminCustomerType> {
     const customer = await this.customersService.setActive(id, isActive);
 
@@ -129,6 +134,7 @@ export class CustomersResolver {
       resourceType: AuditResourceType.CUSTOMER,
       resourceId: customer.id,
       metadata: { isActive },
+      ...getAuditRequestContext(context?.req),
     });
 
     return mapAdminCustomer(customer);

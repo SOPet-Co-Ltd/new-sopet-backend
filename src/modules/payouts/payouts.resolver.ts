@@ -1,5 +1,6 @@
 import {
   Args,
+  Context,
   Field,
   Float,
   InputType,
@@ -17,7 +18,9 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constants';
+import { getAuditRequestContext } from '../audit-logs/audit-request-context';
 import { AuditActorType } from '../../database/entities/audit-log.entity';
+import type { GraphqlContext } from '../../graphql/loaders/graphql-context.types';
 import { StoresService } from '../stores/stores.service';
 import { PaginationMeta } from '../../graphql/models/types';
 import type { PayoutSummary } from './payouts.types';
@@ -371,6 +374,7 @@ export class PayoutsResolver {
     @Args('input') input: TriggerPayoutInput,
     @CurrentUser('id') adminId: string,
     @CurrentUser('email') adminEmail?: string,
+    @Context() context?: GraphqlContext,
   ): Promise<PayoutType> {
     const payout = await this.payoutsService.triggerPayout(input.storeId, {
       amount: input.amount,
@@ -390,6 +394,7 @@ export class PayoutsResolver {
         amount: payout.amount,
         settlementRail: payout.settlementRail,
       },
+      ...getAuditRequestContext(context?.req),
     });
 
     return mapPayout(payout);
@@ -402,6 +407,7 @@ export class PayoutsResolver {
     @Args('input') input: SettleManualPayoutInput,
     @CurrentUser('id') adminId: string,
     @CurrentUser('email') adminEmail?: string,
+    @Context() context?: GraphqlContext,
   ): Promise<PayoutType> {
     const payout = await this.payoutsService.settleManualPayout(input.storeId, {
       payoutId: input.payoutId,
@@ -421,6 +427,7 @@ export class PayoutsResolver {
         amount: payout.amount,
         settlementRail: payout.settlementRail,
       },
+      ...getAuditRequestContext(context?.req),
     });
 
     return mapPayout(payout);
@@ -433,6 +440,7 @@ export class PayoutsResolver {
     @Args('input') input: RejectManualPayoutInput,
     @CurrentUser('id') adminId: string,
     @CurrentUser('email') adminEmail?: string,
+    @Context() context?: GraphqlContext,
   ): Promise<PayoutType> {
     const payout = await this.payoutsService.rejectManualPayout(input.storeId, {
       payoutId: input.payoutId,
@@ -452,6 +460,7 @@ export class PayoutsResolver {
         amount: payout.amount,
         settlementRail: payout.settlementRail,
       },
+      ...getAuditRequestContext(context?.req),
     });
 
     return mapPayout(payout);
@@ -464,6 +473,7 @@ export class PayoutsResolver {
     @Args('input') input: CreatePayoutInput,
     @CurrentUser('id') adminId: string,
     @CurrentUser('email') adminEmail?: string,
+    @Context() context?: GraphqlContext,
   ): Promise<PayoutType> {
     const payout = await this.payoutsService.triggerPayout(input.storeId, {
       amount: input.amount,
@@ -485,6 +495,7 @@ export class PayoutsResolver {
         source: 'createPayout',
         settlementRail: payout.settlementRail,
       },
+      ...getAuditRequestContext(context?.req),
     });
 
     return mapPayout(payout);

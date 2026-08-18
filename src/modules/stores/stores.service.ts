@@ -30,6 +30,7 @@ import {
 } from '../../common/utils/bank-account-crypto.util';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constants';
+import { getAuditRequestContext } from '../audit-logs/audit-request-context';
 import { StoreSuspensionHoldService } from '../orders/store-suspension-hold.service';
 import { EmailDeliveryService } from '../email/email-delivery.service';
 
@@ -120,6 +121,7 @@ export class StoresService {
     action: string,
     store: Store,
     metadata: Record<string, unknown> = {},
+    req?: unknown,
   ): Promise<void> {
     const admin = await this.userRepository.findOne({
       where: { id: adminId },
@@ -134,6 +136,7 @@ export class StoresService {
       resourceType: AuditResourceType.STORE,
       resourceId: store.id,
       metadata: { storeName: store.name, ...metadata },
+      ...getAuditRequestContext(req),
     });
   }
 
@@ -230,7 +233,7 @@ export class StoresService {
   }
 
   // Approve store (admin)
-  async approve(id: string, approveStoreDto: ApproveStoreDto): Promise<Store> {
+  async approve(id: string, approveStoreDto: ApproveStoreDto, req?: unknown): Promise<Store> {
     const store = await this.findOne(id);
 
     if (store.status !== StoreStatus.PENDING) {
@@ -250,13 +253,19 @@ export class StoresService {
       .notifyVendorAboutStoreStatus(store.ownerId, store, 'approved')
       .catch(() => {});
 
-    await this.logAdminStoreAction(approveStoreDto.adminId, AuditAction.STORE_APPROVED, store);
+    await this.logAdminStoreAction(
+      approveStoreDto.adminId,
+      AuditAction.STORE_APPROVED,
+      store,
+      {},
+      req,
+    );
 
     return store;
   }
 
   // Reject store (admin)
-  async reject(id: string, rejectStoreDto: RejectStoreDto): Promise<Store> {
+  async reject(id: string, rejectStoreDto: RejectStoreDto, req?: unknown): Promise<Store> {
     const store = await this.findOne(id);
 
     if (store.status !== StoreStatus.PENDING) {
@@ -280,27 +289,33 @@ export class StoresService {
       )
       .catch(() => {});
 
-    await this.logAdminStoreAction(rejectStoreDto.adminId, AuditAction.STORE_REJECTED, store, {
-      rejectionReason: rejectStoreDto.rejectionReason ?? null,
-    });
+    await this.logAdminStoreAction(
+      rejectStoreDto.adminId,
+      AuditAction.STORE_REJECTED,
+      store,
+      {
+        rejectionReason: rejectStoreDto.rejectionReason ?? null,
+      },
+      req,
+    );
 
     return store;
   }
 
   // Suspend store (admin)
-  async suspend(id: string, adminId: string): Promise<Store> {
+  async suspend(id: string, adminId: string, req?: unknown): Promise<Store> {
     const store = await this.findOne(id);
 
     store.status = StoreStatus.SUSPENDED;
 
     const saved = await this.storeRepository.save(store);
-    await this.logAdminStoreAction(adminId, AuditAction.STORE_SUSPENDED, saved);
+    await this.logAdminStoreAction(adminId, AuditAction.STORE_SUSPENDED, saved, {}, req);
     await this.storeSuspensionHoldService.applyHoldForStore(saved.id);
     return saved;
   }
 
   // Reactivate a suspended store (admin)
-  async reactivate(id: string, adminId: string): Promise<Store> {
+  async reactivate(id: string, adminId: string, req?: unknown): Promise<Store> {
     const store = await this.findOne(id);
 
     if (store.status !== StoreStatus.SUSPENDED) {
@@ -315,7 +330,7 @@ export class StoresService {
     store.approvedAt = new Date();
 
     const saved = await this.storeRepository.save(store);
-    await this.logAdminStoreAction(adminId, AuditAction.STORE_REACTIVATED, saved);
+    await this.logAdminStoreAction(adminId, AuditAction.STORE_REACTIVATED, saved, {}, req);
     await this.storeSuspensionHoldService.restoreHoldForStore(saved.id);
     return saved;
   }
@@ -742,6 +757,7 @@ export class StoresService {
     /** Admin actor for suspend/reactivate audit + hold side effects (GraphQL updateStoreAsAdmin). */
     adminId?: string;
     commissionRate?: number;
+    req?: unknown;
   }): Promise<Store> {
     const store = await this.findOne(input.id);
     const previousStatus = store.status;
@@ -822,12 +838,24 @@ export class StoresService {
     // StoresService.suspend/reactivate. Wire the same hold hooks so AC-007+/AC-017+ fire.
     if (input.status === StoreStatus.SUSPENDED && previousStatus !== StoreStatus.SUSPENDED) {
       if (input.adminId) {
-        await this.logAdminStoreAction(input.adminId, AuditAction.STORE_SUSPENDED, saved);
+        await this.logAdminStoreAction(
+          input.adminId,
+          AuditAction.STORE_SUSPENDED,
+          saved,
+          {},
+          input.req,
+        );
       }
       await this.storeSuspensionHoldService.applyHoldForStore(saved.id);
     } else if (previousStatus === StoreStatus.SUSPENDED && input.status === StoreStatus.APPROVED) {
       if (input.adminId) {
-        await this.logAdminStoreAction(input.adminId, AuditAction.STORE_REACTIVATED, saved);
+        await this.logAdminStoreAction(
+          input.adminId,
+          AuditAction.STORE_REACTIVATED,
+          saved,
+          {},
+          input.req,
+        );
       }
       await this.storeSuspensionHoldService.restoreHoldForStore(saved.id);
     }

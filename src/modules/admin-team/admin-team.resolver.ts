@@ -1,4 +1,4 @@
-import { Args, Field, InputType, Mutation, Query, Resolver } from '@nestjs/graphql';
+import { Args, Context, Field, InputType, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { UseGuards } from '@nestjs/common';
 import { IsEmail, IsNotEmpty, IsString, Length, Matches, MinLength } from 'class-validator';
 import { AdminTeamService } from './admin-team.service';
@@ -18,7 +18,9 @@ import { mapUserProfile } from '../../graphql/models/mappers';
 import { AuthRateLimitGuard } from '../auth/guards/auth-rate-limit.guard';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constants';
+import { getAuditRequestContext } from '../audit-logs/audit-request-context';
 import { AuditActorType } from '../../database/entities/audit-log.entity';
+import type { GraphqlContext } from '../../graphql/loaders/graphql-context.types';
 
 @InputType()
 export class InviteAdminInput {
@@ -80,6 +82,7 @@ export class AdminTeamResolver {
     @CurrentUser('id') adminId: string,
     @CurrentUser('email') adminEmail: string | undefined,
     @Args('input') input: InviteAdminInput,
+    @Context() context?: GraphqlContext,
   ): Promise<AdminInvitationType> {
     const invitation = await this.adminTeamService.invite(input.email, adminId);
 
@@ -93,6 +96,7 @@ export class AdminTeamResolver {
       resourceType: AuditResourceType.ADMIN_INVITATION,
       resourceId: invitation.id,
       metadata: { email: invitation.email },
+      ...getAuditRequestContext(context?.req),
     });
 
     return mapInvitation(invitation);
@@ -105,6 +109,7 @@ export class AdminTeamResolver {
     @CurrentUser('id') adminId: string,
     @CurrentUser('email') adminEmail: string | undefined,
     @Args('invitationId') invitationId: string,
+    @Context() context?: GraphqlContext,
   ): Promise<AdminInvitationType> {
     const invitation = await this.adminTeamService.revokeInvitation(invitationId);
 
@@ -116,6 +121,7 @@ export class AdminTeamResolver {
       resourceType: AuditResourceType.ADMIN_INVITATION,
       resourceId: invitation.id,
       metadata: { email: invitation.email },
+      ...getAuditRequestContext(context?.req),
     });
 
     return mapInvitation(invitation);
@@ -129,6 +135,7 @@ export class AdminTeamResolver {
     @CurrentUser('email') actorEmail: string | undefined,
     @Args('userId') userId: string,
     @Args('isActive') isActive: boolean,
+    @Context() context?: GraphqlContext,
   ): Promise<AdminTeamMemberType> {
     const user = await this.adminTeamService.setAdminActive(actorId, userId, isActive);
 
@@ -142,6 +149,7 @@ export class AdminTeamResolver {
       resourceType: AuditResourceType.USER,
       resourceId: user.id,
       metadata: { email: user.email, isActive },
+      ...getAuditRequestContext(context?.req),
     });
 
     return mapMember(user);
@@ -159,6 +167,7 @@ export class AdminTeamResolver {
   @UseGuards(AuthRateLimitGuard)
   async acceptAdminInvitation(
     @Args('input') input: AcceptAdminInvitationInput,
+    @Context() context?: GraphqlContext,
   ): Promise<VendorAuthPayload> {
     const user = await this.adminTeamService.acceptInvitation(
       input.token,
@@ -177,12 +186,16 @@ export class AdminTeamResolver {
       resourceType: AuditResourceType.USER,
       resourceId: user.id,
       metadata: { email: user.email, method: 'token' },
+      ...getAuditRequestContext(context?.req),
     });
 
-    const result = await this.authService.login({
-      email: user.email,
-      password: input.password,
-    });
+    const result = await this.authService.login(
+      {
+        email: user.email,
+        password: input.password,
+      },
+      context?.req,
+    );
 
     return {
       tokens: {

@@ -1,4 +1,4 @@
-import { Args, Field, InputType, Mutation, Query, Resolver } from '@nestjs/graphql';
+import { Args, Context, Field, InputType, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { BadRequestException, Inject, UseGuards, forwardRef } from '@nestjs/common';
 import { StoresService } from './stores.service';
 import { StoreTeamService } from './store-team.service';
@@ -10,7 +10,9 @@ import { VendorInvitationService } from './vendor-invitation.service';
 import { AuthService } from '../auth/auth.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constants';
+import { getAuditRequestContext } from '../audit-logs/audit-request-context';
 import { AuditActorType } from '../../database/entities/audit-log.entity';
+import type { GraphqlContext } from '../../graphql/loaders/graphql-context.types';
 import { decryptBankAccountNumber } from '../../common/utils/bank-account-crypto.util';
 import {
   StoreType,
@@ -241,8 +243,9 @@ export class StoresResolver {
   async approveStore(
     @Args('input') input: ApproveStoreInput,
     @CurrentUser('id') adminId: string,
+    @Context() context?: GraphqlContext,
   ): Promise<StoreType> {
-    const store = await this.storesService.approve(input.storeId, { adminId });
+    const store = await this.storesService.approve(input.storeId, { adminId }, context?.req);
     return mapStore(store);
   }
 
@@ -252,30 +255,41 @@ export class StoresResolver {
   async rejectStore(
     @Args('input') input: RejectStoreInput,
     @CurrentUser('id') adminId: string,
+    @Context() context?: GraphqlContext,
   ): Promise<StoreType> {
-    const store = await this.storesService.reject(input.storeId, {
-      adminId,
-      rejectionReason: input.rejectionReason,
-    });
+    const store = await this.storesService.reject(
+      input.storeId,
+      {
+        adminId,
+        rejectionReason: input.rejectionReason,
+      },
+      context?.req,
+    );
     return mapStore(store);
   }
 
   @Mutation(() => VendorAuthPayload)
   @Public()
   @UseGuards(AuthRateLimitGuard)
-  async registerVendor(@Args('input') input: RegisterVendorInput): Promise<VendorAuthPayload> {
+  async registerVendor(
+    @Args('input') input: RegisterVendorInput,
+    @Context() context?: GraphqlContext,
+  ): Promise<VendorAuthPayload> {
     const user = await this.storesService.registerVendor({
       email: input.email,
       password: input.password,
       fullName: input.fullName,
     });
 
-    await this.authService.sendEmailVerificationOnRegistration(user.id);
+    await this.authService.sendEmailVerificationOnRegistration(user.id, context?.req);
 
-    const result = await this.authService.login({
-      email: input.email,
-      password: input.password,
-    });
+    const result = await this.authService.login(
+      {
+        email: input.email,
+        password: input.password,
+      },
+      context?.req,
+    );
 
     return {
       tokens: {
@@ -289,19 +303,25 @@ export class StoresResolver {
   @Mutation(() => VendorAuthPayload)
   @Public()
   @UseGuards(AuthRateLimitGuard)
-  async registerStore(@Args('input') input: RegisterStoreInput): Promise<VendorAuthPayload> {
+  async registerStore(
+    @Args('input') input: RegisterStoreInput,
+    @Context() context?: GraphqlContext,
+  ): Promise<VendorAuthPayload> {
     const user = await this.storesService.registerVendor({
       email: input.ownerEmail,
       password: input.ownerPassword,
       fullName: input.ownerFullName,
     });
 
-    await this.authService.sendEmailVerificationOnRegistration(user.id);
+    await this.authService.sendEmailVerificationOnRegistration(user.id, context?.req);
 
-    const loginResult = await this.authService.login({
-      email: input.ownerEmail,
-      password: input.ownerPassword,
-    });
+    const loginResult = await this.authService.login(
+      {
+        email: input.ownerEmail,
+        password: input.ownerPassword,
+      },
+      context?.req,
+    );
 
     // Store request submission requires verified email — use submitStoreRequest after verification.
     return {
@@ -406,6 +426,7 @@ export class StoresResolver {
   @UseGuards(AuthRateLimitGuard)
   async acceptVendorInvitation(
     @Args('input') input: AcceptVendorInvitationInput,
+    @Context() context?: GraphqlContext,
   ): Promise<VendorAuthPayload> {
     const user = await this.vendorInvitationService.accept(
       input.token,
@@ -413,12 +434,15 @@ export class StoresResolver {
       input.fullName,
     );
 
-    await this.authService.sendEmailVerificationOnRegistration(user.id);
+    await this.authService.sendEmailVerificationOnRegistration(user.id, context?.req);
 
-    const result = await this.authService.login({
-      email: user.email,
-      password: input.password,
-    });
+    const result = await this.authService.login(
+      {
+        email: user.email,
+        password: input.password,
+      },
+      context?.req,
+    );
 
     return {
       tokens: {
@@ -466,6 +490,7 @@ export class StoresResolver {
     @Args('input') input: UpdateStoreAsAdminInput,
     @CurrentUser('id') adminId: string,
     @CurrentUser('email') adminEmail?: string,
+    @Context() context?: GraphqlContext,
   ): Promise<AdminStoreType> {
     const before = await this.storesService.findOne(input.id);
     const store = await this.storesService.updateAsAdmin({
@@ -482,9 +507,11 @@ export class StoresResolver {
       status: input.status as StoreStatus | undefined,
       commissionRate: input.commissionRate,
       adminId,
+      req: context?.req,
     });
 
     const actor = this.adminActor(adminId, adminEmail);
+    const requestContext = getAuditRequestContext(context?.req);
     await this.auditLogsService.log({
       ...actor,
       action: AuditAction.STORE_UPDATED,
@@ -499,6 +526,7 @@ export class StoresResolver {
           ownerId: input.ownerId,
         },
       },
+      ...requestContext,
     });
 
     if (input.ownerId && input.ownerId !== before.ownerId) {
@@ -512,6 +540,7 @@ export class StoresResolver {
           previousOwnerId: before.ownerId,
           newOwnerId: input.ownerId,
         },
+        ...requestContext,
       });
     }
 
@@ -522,6 +551,7 @@ export class StoresResolver {
         resourceType: AuditResourceType.STORE,
         resourceId: store.id,
         metadata: { storeName: store.name },
+        ...requestContext,
       });
     }
 
@@ -535,6 +565,7 @@ export class StoresResolver {
     @Args('input') input: CreateStoreAsAdminInput,
     @CurrentUser('id') adminId: string,
     @CurrentUser('email') adminEmail?: string,
+    @Context() context?: GraphqlContext,
   ): Promise<AdminStoreType> {
     const store = await this.storesService.createAsAdmin({
       ownerUserId: input.ownerUserId,
@@ -554,6 +585,7 @@ export class StoresResolver {
       resourceType: AuditResourceType.STORE,
       resourceId: store.id,
       metadata: { storeName: store.name, ownerUserId: input.ownerUserId },
+      ...getAuditRequestContext(context?.req),
     });
 
     return mapAdminStore(store);
@@ -597,6 +629,7 @@ export class StoresResolver {
     @Args('input') input: UpdateVendorAsAdminInput,
     @CurrentUser('id') adminId: string,
     @CurrentUser('email') adminEmail?: string,
+    @Context() context?: GraphqlContext,
   ): Promise<AdminVendorType> {
     const vendor = await this.storesService.updateVendorAsAdmin({
       id: input.id,
@@ -616,6 +649,7 @@ export class StoresResolver {
         email: input.email,
         isActive: input.isActive,
       },
+      ...getAuditRequestContext(context?.req),
     });
 
     return mapAdminVendor(withStores);
@@ -819,6 +853,7 @@ export class StoresResolver {
   @UseGuards(AuthRateLimitGuard)
   async acceptStoreMemberInvitation(
     @Args('input') input: AcceptStoreMemberInvitationInput,
+    @Context() context?: GraphqlContext,
   ): Promise<VendorAuthPayload> {
     const member = await this.storeTeamService.acceptInvitationAsNewUser(
       input.token,
@@ -834,10 +869,13 @@ export class StoresResolver {
       });
     }
 
-    const result = await this.authService.login({
-      email,
-      password: input.password,
-    });
+    const result = await this.authService.login(
+      {
+        email,
+        password: input.password,
+      },
+      context?.req,
+    );
 
     return {
       tokens: {
@@ -960,6 +998,7 @@ export class StoresResolver {
     @Args('storeId') storeId: string,
     @CurrentUser('id') adminId: string,
     @CurrentUser('email') adminEmail?: string,
+    @Context() context?: GraphqlContext,
   ): Promise<AdminStoreType> {
     const store = await this.storesService.linkStoreOmiseRecipient(storeId);
     await this.auditLogsService.log({
@@ -972,6 +1011,7 @@ export class StoresResolver {
         omiseRecipientStatus: store.omiseRecipientStatus,
         action: 'link_omise_recipient',
       },
+      ...getAuditRequestContext(context?.req),
     });
     return mapAdminStore(store);
   }

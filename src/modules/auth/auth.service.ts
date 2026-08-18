@@ -31,6 +31,7 @@ import { EmailDeliveryService } from '../email/email-delivery.service';
 import { StorageService } from '../storage/storage.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constants';
+import { getAuditRequestContext } from '../audit-logs/audit-request-context';
 import { AuditActorType } from '../../database/entities/audit-log.entity';
 import {
   finalizeCustomerDeletion,
@@ -235,7 +236,10 @@ export class AuthService {
     };
   }
 
-  async login(loginDto: LoginDto): Promise<{
+  async login(
+    loginDto: LoginDto,
+    req?: unknown,
+  ): Promise<{
     accessToken: string;
     refreshToken: string;
     user: Partial<User>;
@@ -307,6 +311,7 @@ export class AuthService {
       resourceType: AuditResourceType.USER,
       resourceId: user.id,
       metadata: { role: user.role },
+      ...getAuditRequestContext(req),
     });
 
     return {
@@ -601,14 +606,14 @@ export class AuthService {
     await this.userRepository.save(user);
   }
 
-  async requestPasswordReset(email: string): Promise<{ message: string }> {
+  async requestPasswordReset(email: string, req?: unknown): Promise<{ message: string }> {
     const normalizedEmail = email.toLowerCase();
     const user = await this.userRepository.findOne({
       where: { email: normalizedEmail, isActive: true },
     });
 
     if (user) {
-      await this.createAndSendPasswordResetToken(user);
+      await this.createAndSendPasswordResetToken(user, undefined, req);
     }
 
     return {
@@ -691,6 +696,7 @@ export class AuthService {
   async adminTriggerVendorPasswordReset(
     vendorId: string,
     admin?: { id: string; fullName?: string },
+    req?: unknown,
   ): Promise<{ message: string }> {
     const vendor = await this.userRepository.findOne({
       where: { id: vendorId, role: UserRole.VENDOR, isActive: true },
@@ -703,11 +709,15 @@ export class AuthService {
       });
     }
 
-    await this.createAndSendPasswordResetToken(vendor, {
-      actorType: AuditActorType.ADMIN,
-      actorId: admin?.id,
-      actorLabel: admin?.fullName,
-    });
+    await this.createAndSendPasswordResetToken(
+      vendor,
+      {
+        actorType: AuditActorType.ADMIN,
+        actorId: admin?.id,
+        actorLabel: admin?.fullName,
+      },
+      req,
+    );
 
     return {
       message: 'Password reset email sent to vendor',
@@ -717,6 +727,7 @@ export class AuthService {
   private async createAndSendPasswordResetToken(
     user: User,
     triggeredBy?: { actorType: AuditActorType; actorId?: string; actorLabel?: string },
+    req?: unknown,
   ): Promise<void> {
     // Only the newest reset link should work (row 34): mark prior unused tokens used.
     await this.passwordResetTokenRepository
@@ -747,10 +758,11 @@ export class AuthService {
         user.role === UserRole.VENDOR ? AuditResourceType.VENDOR : AuditResourceType.USER,
       resourceId: user.id,
       metadata: { email: user.email },
+      ...getAuditRequestContext(req),
     });
   }
 
-  async sendEmailVerificationOnRegistration(userId: string): Promise<void> {
+  async sendEmailVerificationOnRegistration(userId: string, req?: unknown): Promise<void> {
     const user = await this.userRepository.findOne({
       where: { id: userId, isActive: true },
     });
@@ -759,10 +771,10 @@ export class AuthService {
       return;
     }
 
-    await this.createAndSendEmailVerificationToken(user);
+    await this.createAndSendEmailVerificationToken(user, undefined, req);
   }
 
-  async resendEmailVerification(userId: string): Promise<{ message: string }> {
+  async resendEmailVerification(userId: string, req?: unknown): Promise<{ message: string }> {
     const user = await this.userRepository.findOne({
       where: { id: userId, isActive: true },
     });
@@ -781,11 +793,15 @@ export class AuthService {
       });
     }
 
-    await this.createAndSendEmailVerificationToken(user, {
-      actorType: AuditActorType.VENDOR,
-      actorId: user.id,
-      actorLabel: user.fullName || user.email,
-    });
+    await this.createAndSendEmailVerificationToken(
+      user,
+      {
+        actorType: AuditActorType.VENDOR,
+        actorId: user.id,
+        actorLabel: user.fullName || user.email,
+      },
+      req,
+    );
 
     return {
       message: 'Email verification sent',
@@ -795,6 +811,7 @@ export class AuthService {
   async adminResendVendorEmailVerification(
     vendorId: string,
     admin?: { id: string; fullName?: string },
+    req?: unknown,
   ): Promise<{ message: string }> {
     const vendor = await this.userRepository.findOne({
       where: { id: vendorId, role: UserRole.VENDOR, isActive: true },
@@ -814,11 +831,15 @@ export class AuthService {
       });
     }
 
-    await this.createAndSendEmailVerificationToken(vendor, {
-      actorType: AuditActorType.ADMIN,
-      actorId: admin?.id,
-      actorLabel: admin?.fullName,
-    });
+    await this.createAndSendEmailVerificationToken(
+      vendor,
+      {
+        actorType: AuditActorType.ADMIN,
+        actorId: admin?.id,
+        actorLabel: admin?.fullName,
+      },
+      req,
+    );
 
     return {
       message: 'Email verification sent to vendor',
@@ -828,6 +849,7 @@ export class AuthService {
   async adminVerifyVendorEmail(
     vendorId: string,
     admin?: { id: string; fullName?: string },
+    req?: unknown,
   ): Promise<{ message: string }> {
     const vendor = await this.userRepository.findOne({
       where: { id: vendorId, role: UserRole.VENDOR, isActive: true },
@@ -858,6 +880,7 @@ export class AuthService {
       resourceType: AuditResourceType.VENDOR,
       resourceId: vendor.id,
       metadata: { email: vendor.email, method: 'admin_override' },
+      ...getAuditRequestContext(req),
     });
 
     return {
@@ -865,7 +888,7 @@ export class AuthService {
     };
   }
 
-  async verifyEmail(token: string): Promise<{ message: string }> {
+  async verifyEmail(token: string, req?: unknown): Promise<{ message: string }> {
     const verificationToken = await this.emailVerificationTokenRepository.findOne({
       where: { token },
     });
@@ -907,6 +930,7 @@ export class AuthService {
           user.role === UserRole.VENDOR ? AuditResourceType.VENDOR : AuditResourceType.USER,
         resourceId: user.id,
         metadata: { email: user.email, method: 'token' },
+        ...getAuditRequestContext(req),
       });
     }
 
@@ -919,6 +943,7 @@ export class AuthService {
   private async createAndSendEmailVerificationToken(
     user: User,
     triggeredBy?: { actorType: AuditActorType; actorId?: string; actorLabel?: string },
+    req?: unknown,
   ): Promise<void> {
     const token = randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
@@ -940,6 +965,7 @@ export class AuthService {
         user.role === UserRole.VENDOR ? AuditResourceType.VENDOR : AuditResourceType.USER,
       resourceId: user.id,
       metadata: { email: user.email },
+      ...getAuditRequestContext(req),
     });
   }
 }
