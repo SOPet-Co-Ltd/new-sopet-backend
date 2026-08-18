@@ -152,11 +152,19 @@
 //   - On purgeExpired throw: logger.error and rethrow (not resolve undefined)
 //   - Fail if DELETE has no cutoff, batch size unbounded, or errors are swallowed
 
+import { Logger } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Test, TestingModule } from '@nestjs/testing';
+import { Job } from 'bullmq';
 import { AuditLog, AuditActorType } from '../src/database/entities/audit-log.entity';
 import { AuditLogsService } from '../src/modules/audit-logs/audit-logs.service';
 import { getAuditRequestContext } from '../src/modules/audit-logs/audit-request-context';
+import { AuditLogRetentionProcessor } from '../src/modules/audit-logs/audit-log-retention.processor';
+import { AuditLogRetentionService } from '../src/modules/audit-logs/audit-log-retention.service';
+import {
+  AUDIT_LOG_RETENTION_BATCH_SIZE,
+  AUDIT_LOG_RETENTION_JOB,
+} from '../src/modules/audit-logs/audit-log-retention.constants';
 
 type FakeQueryBuilder = {
   orderBy: jest.Mock;
@@ -315,5 +323,124 @@ describe('admin-audit-logs-console integration', () => {
   // (comment-only until backend-task-07)
 
   // Integration test 3 of 3 — Retention processor batched purge cutoff
-  // (comment-only until backend-task-05)
+  // Primary failure mode: unbounded DELETE or cutoff inclusive of now; or processor swallows errors.
+  describe('retention processor batched purge cutoff', () => {
+    const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+    type DeleteQueryBuilder = {
+      delete: jest.Mock;
+      from: jest.Mock;
+      where: jest.Mock;
+      execute: jest.Mock;
+    };
+
+    let processor: AuditLogRetentionProcessor;
+    let deleteQb: DeleteQueryBuilder;
+    let capturedCutoffs: Date[];
+    let executeAffectedQueue: number[];
+    let executeRejectOnce: Error | null;
+    let errorSpy: jest.SpyInstance;
+
+    beforeEach(async () => {
+      capturedCutoffs = [];
+      executeAffectedQueue = [1000, 0];
+      executeRejectOnce = null;
+      let executeCall = 0;
+
+      deleteQb = {
+        delete: jest.fn().mockReturnThis(),
+        from: jest.fn().mockReturnThis(),
+        where: jest
+          .fn()
+          .mockImplementation((_sql: string, params: { cutoff: Date; limit: number }) => {
+            capturedCutoffs.push(params.cutoff);
+            return deleteQb;
+          }),
+        execute: jest.fn().mockImplementation(() => {
+          if (executeRejectOnce) {
+            const err = executeRejectOnce;
+            executeRejectOnce = null;
+            return Promise.reject(err);
+          }
+          const affected =
+            executeAffectedQueue[Math.min(executeCall, executeAffectedQueue.length - 1)] ?? 0;
+          executeCall += 1;
+          return Promise.resolve({ affected });
+        }),
+      };
+
+      const retentionRepo = {
+        create: jest.fn(),
+        save: jest.fn(),
+        createQueryBuilder: jest.fn().mockReturnValue(deleteQb),
+      };
+
+      const retentionService = {
+        resolveRetentionDays: jest.fn().mockReturnValue(60),
+      };
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          AuditLogsService,
+          AuditLogRetentionProcessor,
+          { provide: getRepositoryToken(AuditLog), useValue: retentionRepo },
+          { provide: AuditLogRetentionService, useValue: retentionService },
+        ],
+      }).compile();
+
+      processor = module.get(AuditLogRetentionProcessor);
+      errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+      errorSpy.mockRestore();
+      jest.useRealTimers();
+    });
+
+    it('loops purgeExpired with ~60d cutoff; 61d eligible / 1d intact; stops at deleted=0', async () => {
+      const frozenNow = new Date('2026-08-19T10:00:00.000Z');
+      jest.useFakeTimers({ now: frozenNow });
+
+      await processor.process({ name: AUDIT_LOG_RETENTION_JOB } as Job);
+
+      // Loop: first batch 1000, second 0 → stop (two purgeExpired / execute calls)
+      expect(deleteQb.execute).toHaveBeenCalledTimes(2);
+      expect(capturedCutoffs).toHaveLength(2);
+
+      const expectedCutoff = new Date(frozenNow.getTime() - 60 * MS_PER_DAY);
+      const cutoff = capturedCutoffs[0];
+      expect(cutoff.getTime()).toBe(expectedCutoff.getTime());
+      // Not now, not 59d
+      expect(cutoff.getTime()).not.toBe(frozenNow.getTime());
+      expect(cutoff.getTime()).not.toBe(frozenNow.getTime() - 59 * MS_PER_DAY);
+      expect(Math.abs(frozenNow.getTime() - cutoff.getTime() - 60 * MS_PER_DAY)).toBe(0);
+
+      const whereCall = deleteQb.where.mock.calls[0] as [string, { cutoff: Date; limit: number }];
+      const whereSql = String(whereCall[0]);
+      expect(whereSql).toMatch(/created_at\s*<\s*:cutoff/i);
+      expect(whereSql).not.toMatch(/created_at\s*<=\s*:cutoff/i);
+      expect(whereCall[1].limit).toBe(AUDIT_LOG_RETENTION_BATCH_SIZE);
+      expect(AUDIT_LOG_RETENTION_BATCH_SIZE).toBe(1000);
+
+      // Delete predicate eligibility: 61d in set; 1d not in set
+      const eligible61d = new Date(frozenNow.getTime() - 61 * MS_PER_DAY);
+      const intact1d = new Date(frozenNow.getTime() - 1 * MS_PER_DAY);
+      expect(eligible61d.getTime()).toBeLessThan(cutoff.getTime());
+      expect(intact1d.getTime()).toBeGreaterThanOrEqual(cutoff.getTime());
+    });
+
+    it('logs error and rethrows when purgeExpired fails (no silent fail-open)', async () => {
+      const boom = new Error('db delete failed');
+      executeRejectOnce = boom;
+
+      await expect(processor.process({ name: AUDIT_LOG_RETENTION_JOB } as Job)).rejects.toThrow(
+        'db delete failed',
+      );
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/Audit log retention purge failed/i),
+        expect.any(String),
+      );
+    });
+  });
 });
