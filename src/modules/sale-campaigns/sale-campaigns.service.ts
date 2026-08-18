@@ -11,6 +11,7 @@ import {
   SaleCampaignItemInput,
   UpdateSaleCampaignInput,
 } from './sale-campaigns.inputs';
+import { roundMoney } from './sale-campaign-pricing';
 
 @Injectable()
 export class SaleCampaignsService {
@@ -48,7 +49,7 @@ export class SaleCampaignsService {
     return campaign;
   }
 
-  /** Active campaigns in the current time window for storefront strikethrough. */
+  /** Active campaigns in the current time window for storefront sale display. */
   async findActiveForStore(storeId: string): Promise<SaleCampaign[]> {
     const now = new Date();
     const campaigns = await this.campaignRepository.find({
@@ -58,29 +59,6 @@ export class SaleCampaignsService {
     });
 
     return campaigns.filter((campaign) => this.isWithinWindow(campaign, now));
-  }
-
-  /** Active campaign items that target any of the given products (catalog cards). */
-  async findActiveItemsForProducts(
-    productIds: string[],
-  ): Promise<Array<{ item: SaleCampaignItem; campaign: SaleCampaign }>> {
-    const uniqueIds = [...new Set(productIds.filter(Boolean))];
-    if (uniqueIds.length === 0) return [];
-
-    const now = new Date();
-    const items = await this.itemRepository
-      .createQueryBuilder('item')
-      .innerJoinAndSelect('item.campaign', 'campaign')
-      .where('item.product_id IN (:...productIds)', { productIds: uniqueIds })
-      .andWhere('campaign.is_active = true')
-      .andWhere('campaign.deleted_at IS NULL')
-      .andWhere('(campaign.starts_at IS NULL OR campaign.starts_at <= :now)', { now })
-      .andWhere('(campaign.expires_at IS NULL OR campaign.expires_at >= :now)', { now })
-      .orderBy('campaign.priority', 'DESC')
-      .addOrderBy('campaign.created_at', 'DESC')
-      .getMany();
-
-    return items.map((item) => ({ item, campaign: item.campaign }));
   }
 
   private isWithinWindow(campaign: SaleCampaign, now: Date): boolean {
@@ -183,12 +161,10 @@ export class SaleCampaignsService {
 
   private async assertValidItems(storeId: string, items: SaleCampaignItemInput[]): Promise<void> {
     for (const item of items) {
-      const hasCompare = item.compareAtPrice != null;
-      const hasPercent = item.discountPercent != null;
-      if (!hasCompare && !hasPercent) {
+      if (item.discountPercent == null) {
         throw new BadRequestException({
           code: 'SALE_CAMPAIGN_ITEM_DISCOUNT_REQUIRED',
-          message: 'Each campaign item needs compareAtPrice and/or discountPercent',
+          message: 'Each campaign item needs a discountPercent between 1 and 99',
         });
       }
 
@@ -202,6 +178,7 @@ export class SaleCampaignsService {
         });
       }
 
+      let catalogUnit = roundMoney(Number(product.basePrice));
       if (item.variantId) {
         const variant = await this.variantRepository.findOne({
           where: { id: item.variantId, productId: item.productId, deletedAt: IsNull() },
@@ -212,6 +189,14 @@ export class SaleCampaignsService {
             message: `Variant ${item.variantId} does not belong to product ${item.productId}`,
           });
         }
+        catalogUnit = roundMoney(Number(product.basePrice) + Number(variant.priceAdjustment ?? 0));
+      }
+
+      if (item.compareAtPrice != null && item.compareAtPrice <= catalogUnit) {
+        throw new BadRequestException({
+          code: 'SALE_CAMPAIGN_COMPARE_AT_INVALID',
+          message: 'compareAtPrice must be greater than the catalog sell price',
+        });
       }
     }
   }

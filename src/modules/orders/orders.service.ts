@@ -36,11 +36,14 @@ import {
 import { assertNotManualHoldTransition } from './store-suspension-hold.service';
 import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.service';
 import { webhookEventForOrderStatus } from '../vendor-webhooks/vendor-webhook.events';
+import { SaleCampaignPricingService } from '../sale-campaigns/sale-campaign-pricing.service';
+import { roundMoney } from '../sale-campaigns/sale-campaign-pricing';
 import { OrderAuditLogsService } from '../order-audit-logs/order-audit-logs.service';
 import {
   OrderAuditActorType,
   OrderAuditEventType,
 } from '../order-audit-logs/order-audit-log.constants';
+
 export interface StoreShippingSelection {
   storeId: string;
   shippingOptionId: string;
@@ -71,6 +74,7 @@ export class OrdersService {
     @InjectRepository(Store)
     private storeRepository: Repository<Store>,
     private vendorWebhooksService: VendorWebhooksService,
+    private saleCampaignPricing: SaleCampaignPricingService,
     private orderAuditLogsService: OrderAuditLogsService,
   ) {}
 
@@ -231,9 +235,15 @@ export class OrdersService {
 
     const shippingSnapshot = await this.resolveShippingSnapshot(customerId, createOrderDto);
 
-    const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-    const storeSubtotals = new Map<string, number>();
-    const promotionLines: PromotionCartLine[] = [];
+    const pricedLines: Array<{
+      item: (typeof items)[number];
+      variant: ProductVariant;
+      product: Product;
+      catalogUnit: number;
+      unitPrice: number;
+      saleCampaignId: string | null;
+      saleDiscountPercent: number | null;
+    }> = [];
 
     for (const item of items) {
       if (!item.variantId) {
@@ -258,13 +268,55 @@ export class OrdersService {
           message: 'Order contains items from a suspended store',
         });
       }
-      const storeId = variant.product.storeId;
-      storeSubtotals.set(storeId, (storeSubtotals.get(storeId) ?? 0) + item.price * item.quantity);
+      const catalogUnit = roundMoney(
+        Number(variant.product.basePrice) + Number(variant.priceAdjustment ?? 0),
+      );
+      pricedLines.push({
+        item,
+        variant,
+        product: variant.product,
+        catalogUnit,
+        unitPrice: catalogUnit,
+        saleCampaignId: null,
+        saleDiscountPercent: null,
+      });
+    }
+
+    const resolvedPrices = await this.saleCampaignPricing.resolveEffectiveUnitPrices(
+      pricedLines.map((line) => ({
+        productId: line.product.id,
+        variantId: line.variant.id,
+        catalogUnit: line.catalogUnit,
+      })),
+    );
+
+    for (const line of pricedLines) {
+      const resolved = resolvedPrices.get(line.variant.id);
+      if (!resolved) continue;
+      line.catalogUnit = resolved.catalogUnitPrice;
+      line.unitPrice = resolved.unitPrice;
+      line.saleCampaignId = resolved.saleCampaignId;
+      line.saleDiscountPercent = resolved.saleDiscountPercent;
+    }
+
+    const subtotal = pricedLines.reduce(
+      (sum, line) => sum + line.unitPrice * line.item.quantity,
+      0,
+    );
+    const storeSubtotals = new Map<string, number>();
+    const promotionLines: PromotionCartLine[] = [];
+
+    for (const line of pricedLines) {
+      const storeId = line.product.storeId;
+      storeSubtotals.set(
+        storeId,
+        (storeSubtotals.get(storeId) ?? 0) + line.unitPrice * line.item.quantity,
+      );
       promotionLines.push({
-        productId: variant.productId,
-        variantId: variant.id,
-        quantity: item.quantity,
-        unitPrice: item.price,
+        productId: line.product.id,
+        variantId: line.variant.id,
+        quantity: line.item.quantity,
+        unitPrice: line.unitPrice,
         storeId,
       });
     }
@@ -340,24 +392,24 @@ export class OrdersService {
       }
 
       const orderItems: OrderItem[] = [];
-      for (const item of items) {
+      for (const line of pricedLines) {
         const variant = await manager.findOne(ProductVariant, {
-          where: { id: item.variantId },
+          where: { id: line.variant.id },
           lock: { mode: 'pessimistic_write' },
         });
 
         if (!variant) {
           throw new BadRequestException({
             code: 'VARIANT_NOT_FOUND',
-            message: `Variant ${item.variantId} not found`,
+            message: `Variant ${line.variant.id} not found`,
           });
         }
 
-        const newStock = variant.stockQuantity - item.quantity;
+        const newStock = variant.stockQuantity - line.item.quantity;
         if (newStock < 0) {
           throw new BadRequestException({
             code: 'INSUFFICIENT_STOCK',
-            message: `Insufficient stock for variant ${item.variantId}`,
+            message: `Insufficient stock for variant ${line.variant.id}`,
           });
         }
 
@@ -370,7 +422,7 @@ export class OrdersService {
           manager.create(InventoryTransaction, {
             variantId: variant.id,
             type: InventoryTransactionType.SALE,
-            quantityChange: -item.quantity,
+            quantityChange: -line.item.quantity,
             quantityAfter: newStock,
             referenceId: savedOrder.id,
             referenceType: 'order',
@@ -390,9 +442,12 @@ export class OrdersService {
             variantId: variant.id,
             productName: product.name,
             variantOptions: variant.options ?? {},
-            unitPrice: item.price,
-            quantity: item.quantity,
-            subtotal: item.price * item.quantity,
+            unitPrice: line.unitPrice,
+            catalogUnitPrice: line.catalogUnit,
+            saleCampaignId: line.saleCampaignId,
+            saleDiscountPercent: line.saleDiscountPercent,
+            quantity: line.item.quantity,
+            subtotal: line.unitPrice * line.item.quantity,
           }),
         );
       }

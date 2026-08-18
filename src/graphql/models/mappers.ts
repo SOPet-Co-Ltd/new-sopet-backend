@@ -4,6 +4,7 @@ import { User } from '../../database/entities/user.entity';
 import { ProductImage } from '../../database/entities/product-image.entity';
 import { ProductVariant } from '../../database/entities/product-variant.entity';
 import { Store } from '../../database/entities/store.entity';
+import { decryptBankAccountNumber } from '../../common/utils/bank-account-crypto.util';
 import { Category } from '../../database/entities/category.entity';
 import { Tag } from '../../database/entities/tag.entity';
 import { PetType } from '../../database/entities/pet-type.entity';
@@ -204,7 +205,7 @@ export function mapAdminStore(store: Store): AdminStoreType {
     contactEmail: store.contactEmail,
     address: store.address,
     bankAccountName: store.bankAccountName,
-    bankAccountNumber: store.bankAccountNumber,
+    bankAccountNumber: decryptBankAccountNumber(store.bankAccountNumber),
     bankName: store.bankName,
     bankCode: store.bankCode,
     omiseRecipientId: store.omiseRecipientId,

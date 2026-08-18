@@ -1,5 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index } from 'typeorm';
-import { IsPhoneNumber, IsEnum, IsEmail, IsOptional, Length } from 'class-validator';
+import { IsPhoneNumber, IsEnum, IsEmail, IsOptional } from 'class-validator';
 
 export enum OtpPurpose {
   LOGIN = 'login',
@@ -23,8 +23,8 @@ export class OtpCode {
   @IsEmail()
   email!: string | null;
 
-  @Column({ name: 'code', type: 'varchar', length: 6 })
-  @Length(6, 6)
+  /** HMAC-SHA256 hex digest of the OTP (64 chars); never store plaintext. */
+  @Column({ name: 'code', type: 'varchar', length: 64 })
   code!: string;
 
   @Column({

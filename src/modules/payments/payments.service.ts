@@ -30,6 +30,7 @@ import { orderHasHeldItems } from '../orders/order-totals.util';
 import { deriveOrderStatusFromFulfillment } from '../orders/order-fulfillment.util';
 import { OrderStatusHistory } from '../../database/entities/order-status-history.entity';
 import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.service';
+import { scrubJsonForLog } from '../../common/utils/scrub-for-log.util';
 import { BankTransferSettingsService } from '../platform/bank-transfer-settings.service';
 import { OrderAuditLogsService } from '../order-audit-logs/order-audit-logs.service';
 import {
@@ -606,7 +607,7 @@ export class PaymentsService {
   ): Promise<T> {
     const data = (await response.json()) as T & { message?: string };
     if (!response.ok) {
-      this.logger.error(`Omise ${method} ${path} failed: ${JSON.stringify(data)}`);
+      this.logger.error(`Omise ${method} ${path} failed: ${scrubJsonForLog(data)}`);
       throw new BadRequestException({
         code: 'OMISE_ERROR',
         message: (data as { message?: string }).message ?? 'Payment provider error',

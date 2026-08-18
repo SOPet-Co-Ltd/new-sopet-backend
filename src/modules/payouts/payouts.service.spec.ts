@@ -15,6 +15,7 @@ import * as payoutCommissionCalculator from './payout-commission.calculator';
 function createQueryBuilderMock(result: Record<string, string>) {
   return {
     innerJoin: jest.fn().mockReturnThis(),
+    leftJoin: jest.fn().mockReturnThis(),
     where: jest.fn().mockReturnThis(),
     andWhere: jest.fn().mockReturnThis(),
     select: jest.fn().mockReturnThis(),
@@ -173,8 +174,9 @@ describe('PayoutsService', () => {
     return qb;
   }
 
-  function isShippingEntity(entity: { name?: string } | undefined) {
-    return typeof entity?.name === 'string' && entity.name.includes('OrderStoreShipping');
+  function isShippingSliceEntity(entity: { name?: string } | undefined) {
+    const name = entity?.name ?? '';
+    return name.includes('OrderStoreShipping') || name.includes('OrderItem');
   }
 
   function mockCutoffQueries(opts: {
@@ -198,7 +200,7 @@ describe('PayoutsService', () => {
       { product: lifetimeProduct, shipping: opts.shipping ?? '0' },
     ]);
     dataSource.createQueryBuilder.mockImplementation((entity: { name?: string } | undefined) => {
-      if (isShippingEntity(entity)) {
+      if (isShippingSliceEntity(entity)) {
         return shippingQb;
       }
       const promoQb = createCutoffAwareQb(opts.promoPre ?? '0', opts.promoPost ?? '0');
@@ -210,7 +212,7 @@ describe('PayoutsService', () => {
 
   function mockPromoQuery(promoQb: ReturnType<typeof createQueryBuilderMock>, shippingTotal = '0') {
     dataSource.createQueryBuilder.mockImplementation((entity?: { name?: string }) => {
-      if (isShippingEntity(entity)) {
+      if (isShippingSliceEntity(entity)) {
         return createQueryBuilderMock({ total: shippingTotal });
       }
       return promoQb;
@@ -493,7 +495,7 @@ describe('PayoutsService', () => {
         .mockImplementationOnce(() => createQueryBuilderMock({ total: '0' }))
         .mockImplementationOnce(() => createQueryBuilderMock({ total: '0' }));
       dataSource.createQueryBuilder.mockImplementation((entity?: { name?: string }) => {
-        if (isShippingEntity(entity)) {
+        if (isShippingSliceEntity(entity)) {
           return createQueryBuilderMock({ total: '0' });
         }
         return createQueryBuilderMock({ total: '750' });
@@ -511,7 +513,7 @@ describe('PayoutsService', () => {
         .mockImplementationOnce(() => createQueryBuilderMock({ total: '0' }))
         .mockImplementationOnce(() => createQueryBuilderMock({ total: '0' }));
       dataSource.createQueryBuilder.mockImplementation((entity?: { name?: string }) => {
-        if (isShippingEntity(entity)) {
+        if (isShippingSliceEntity(entity)) {
           return createQueryBuilderMock({ total: '0' });
         }
         return createQueryBuilderMock({ total: '500' });
@@ -922,11 +924,11 @@ describe('PayoutsService', () => {
       expect(selectHaystack).toMatch(/LEAST/i);
       expect(selectHaystack).not.toMatch(/store_shipping_options|option\.price/i);
 
-      const joinHaystack = shippingQb.innerJoin.mock.calls
+      const andWhereHaystack = shippingQb.andWhere.mock.calls
         .map((call) => JSON.stringify(call))
         .join(' ');
-      expect(joinHaystack).toMatch(/fulfillment_status/i);
-      expect(shippingQb.setParameter).toHaveBeenCalledWith('heldFulfillment', 'on_hold');
+      expect(andWhereHaystack).toMatch(/fulfillment_status/i);
+      expect(andWhereHaystack).toMatch(/heldFulfillment/);
     });
 
     it('requires a non-held eligible line before summing store shipping', async () => {
@@ -944,11 +946,11 @@ describe('PayoutsService', () => {
 
       await service.getPayoutSummary('store-1');
 
-      const joinHaystack = shippingQb.innerJoin.mock.calls
+      const andWhereHaystack = shippingQb.andWhere.mock.calls
         .map((call) => JSON.stringify(call))
         .join(' ');
-      expect(joinHaystack).toMatch(/fulfillment_status\s*<>\s*:heldFulfillment/i);
-      expect(shippingQb.setParameter).toHaveBeenCalledWith('heldFulfillment', 'on_hold');
+      expect(andWhereHaystack).toMatch(/fulfillment_status\s*<>\s*:heldFulfillment/i);
+      expect(andWhereHaystack).toMatch(/"heldFulfillment"\s*:\s*"on_hold"/);
     });
   });
 

@@ -6,6 +6,7 @@ import { OrderStatus } from '../src/database/entities/order.entity';
 import {
   createAuthServiceTestMocks,
   createAuthServiceTestProviders,
+  hashOtpForTest,
 } from '../src/modules/auth/auth-service.test-providers';
 
 describe('Checkout flow (integration)', () => {
@@ -27,7 +28,7 @@ describe('Checkout flow (integration)', () => {
     it('verifies OTP and merges guest cart', async () => {
       mocks.otpRepo.findOne.mockResolvedValue({
         phone: '+66812345678',
-        code: '654321',
+        code: hashOtpForTest('654321'),
         isUsed: false,
       });
       mocks.customerRepoWrapper.findActiveByPhone.mockResolvedValue({
@@ -64,8 +65,9 @@ describe('Checkout flow (integration)', () => {
       id: 'var-1',
       productId: 'prod-1',
       stockQuantity: 5,
+      priceAdjustment: 0,
       options: {},
-      product: { id: 'prod-1', storeId: 'store-1', name: 'Treats' },
+      product: { id: 'prod-1', storeId: 'store-1', name: 'Treats', basePrice: 100 },
     };
 
     beforeEach(() => {
@@ -104,6 +106,23 @@ describe('Checkout flow (integration)', () => {
         { removeItems: jest.fn() } as never,
         {} as never,
         { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) } as never,
+        {
+          resolveEffectiveUnitPrices: jest.fn(
+            async (lines: Array<{ variantId: string; catalogUnit: number }>) => {
+              const map = new Map();
+              for (const line of lines) {
+                map.set(line.variantId, {
+                  catalogUnitPrice: line.catalogUnit,
+                  unitPrice: line.catalogUnit,
+                  saleCampaignId: null,
+                  saleDiscountPercent: null,
+                  compareAtPrice: null,
+                });
+              }
+              return map;
+            },
+          ),
+        } as never,
         {
           append: jest.fn().mockResolvedValue(undefined),
           resolveCustomerActorLabel: jest.fn(),

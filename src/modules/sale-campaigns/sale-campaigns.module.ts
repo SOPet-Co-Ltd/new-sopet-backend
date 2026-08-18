@@ -6,14 +6,16 @@ import { Product } from '../../database/entities/product.entity';
 import { ProductVariant } from '../../database/entities/product-variant.entity';
 import { SaleCampaignsService } from './sale-campaigns.service';
 import { SaleCampaignsResolver } from './sale-campaigns.resolver';
+import { SaleCampaignPricingModule } from './sale-campaign-pricing.module';
 import { StoresModule } from '../stores/stores.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([SaleCampaign, SaleCampaignItem, Product, ProductVariant]),
+    SaleCampaignPricingModule,
     StoresModule,
   ],
   providers: [SaleCampaignsService, SaleCampaignsResolver],
-  exports: [SaleCampaignsService],
+  exports: [SaleCampaignsService, SaleCampaignPricingModule],
 })
 export class SaleCampaignsModule {}

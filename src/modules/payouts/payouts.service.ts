@@ -792,10 +792,7 @@ export class PayoutsService {
     );
     const orderSlices = await this.listEligibleOrderSlices(storeId, paymentMethods);
     const priorPayouts = await this.loadPriorPayoutsForConsume(storeId, rail);
-    const unpaid = consumePriorPayouts(
-      { preProduct, postProduct, postShipping: 0 },
-      priorPayouts,
-    );
+    const unpaid = consumePriorPayouts({ preProduct, postProduct, postShipping: 0 }, priorPayouts);
     unpaid.unpaidShip = unpaidShippingForRemainingProduct(
       orderSlices,
       unpaid.unpaidPre + unpaid.unpaidPost,
@@ -1054,31 +1051,34 @@ export class PayoutsService {
     paymentMethods: PaymentMethod[],
   ): Promise<{ product: number; shipping: number }[]> {
     const rows = await this.dataSource
-      .createQueryBuilder(OrderStoreShipping, 'oss')
-      .innerJoin(Order, 'order', 'order.id = oss.order_id')
-      .innerJoin(
-        OrderItem,
-        'item',
-        'item.order_id = order.id AND item.store_id = oss.store_id AND item.fulfillment_status <> :heldFulfillment',
+      .createQueryBuilder(OrderItem, 'item')
+      .innerJoin(Order, 'order', 'order.id = item.order_id')
+      .leftJoin(
+        OrderStoreShipping,
+        'oss',
+        'oss.order_id = order.id AND oss.store_id = item.store_id',
       )
-      .where('oss.store_id = :storeId', { storeId })
+      .where('item.store_id = :storeId', { storeId })
+      .andWhere('item.fulfillment_status <> :heldFulfillment', {
+        heldFulfillment: FulfillmentStatus.ON_HOLD,
+      })
       .andWhere('order.status IN (:...statuses)', {
         statuses: [OrderStatus.PAID, OrderStatus.DELIVERED],
       })
       .andWhere('order.payment_method IN (:...paymentMethods)', { paymentMethods })
       .andWhere('order.status <> :heldOrderStatus', { heldOrderStatus: OrderStatus.ON_HOLD })
-      .setParameter('heldFulfillment', FulfillmentStatus.ON_HOLD)
       .select('COALESCE(SUM(item.subtotal), 0)', 'product')
       .addSelect(
         `GREATEST(0, LEAST(
-          oss.shipping_fee,
-          GREATEST(0, order.total - COALESCE(SUM(item.subtotal), 0))
+          COALESCE(oss.shipping_fee, 0),
+          GREATEST(0, order.total - COALESCE(SUM(item.subtotal), 0) + COALESCE(order.discount_amount, 0))
         ))`,
         'shipping',
       )
       .groupBy('order.id')
       .addGroupBy('oss.shipping_fee')
       .addGroupBy('order.total')
+      .addGroupBy('order.discount_amount')
       .addGroupBy('order.paid_at')
       .addGroupBy('order.created_at')
       .orderBy('order.paid_at', 'ASC', 'NULLS FIRST')

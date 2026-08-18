@@ -1000,6 +1000,7 @@ input OrderItemInput {
 }
 
 type OrderItemType {
+  catalogUnitPrice: Float
   fulfillmentProvider: String
   fulfillmentStatus: String!
   id: String!
@@ -1007,6 +1008,8 @@ type OrderItemType {
   productImageUrl: String
   productName: String!
   quantity: Int!
+  saleCampaignId: String
+  saleDiscountPercent: Float
   storeId: String!
   subtotal: Float!
   trackingNumber: String
@@ -1585,7 +1588,7 @@ type ReviewType {
 
 input SaleCampaignItemInput {
   compareAtPrice: Float
-  discountPercent: Float
+  discountPercent: Float!
   productId: String!
   variantId: String
 }

@@ -438,6 +438,15 @@ export class OrderItemType {
   @Field(() => Float)
   unitPrice!: number;
 
+  @Field(() => Float, { nullable: true })
+  catalogUnitPrice?: number | null;
+
+  @Field(() => String, { nullable: true })
+  saleCampaignId?: string | null;
+
+  @Field(() => Float, { nullable: true })
+  saleDiscountPercent?: number | null;
+
   @Field(() => Int)
   quantity!: number;
 

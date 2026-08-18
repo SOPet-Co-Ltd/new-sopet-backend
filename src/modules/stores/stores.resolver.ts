@@ -1,5 +1,5 @@
 import { Args, Field, InputType, Mutation, Query, Resolver } from '@nestjs/graphql';
-import { BadRequestException, UseGuards } from '@nestjs/common';
+import { BadRequestException, Inject, UseGuards, forwardRef } from '@nestjs/common';
 import { StoresService } from './stores.service';
 import { StoreTeamService } from './store-team.service';
 import { ShippingOptionsService } from './shipping-options.service';
@@ -11,6 +11,7 @@ import { AuthService } from '../auth/auth.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constants';
 import { AuditActorType } from '../../database/entities/audit-log.entity';
+import { decryptBankAccountNumber } from '../../common/utils/bank-account-crypto.util';
 import {
   StoreType,
   VendorAuthPayload,
@@ -160,7 +161,7 @@ function mapMyStore(store: Store, includePayout: boolean): MyStoreType {
     contactEmail: store.contactEmail,
     address: store.address,
     bankAccountName: includePayout ? store.bankAccountName : null,
-    bankAccountNumber: includePayout ? store.bankAccountNumber : null,
+    bankAccountNumber: includePayout ? decryptBankAccountNumber(store.bankAccountNumber) : null,
     bankName: includePayout ? store.bankName : null,
     bankCode: includePayout ? store.bankCode : null,
     omiseRecipientId: includePayout ? store.omiseRecipientId : null,
@@ -180,6 +181,7 @@ export class StoresResolver {
     private readonly storeRequestService: StoreRequestService,
     private readonly storeReactivationRequestService: StoreReactivationRequestService,
     private readonly vendorInvitationService: VendorInvitationService,
+    @Inject(forwardRef(() => AuthService))
     private readonly authService: AuthService,
     private readonly auditLogsService: AuditLogsService,
   ) {}

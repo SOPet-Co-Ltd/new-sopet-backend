@@ -14,9 +14,10 @@ import { Product } from './product.entity';
 import { ProductVariant } from './product-variant.entity';
 
 /**
- * Catalog strikethrough target for a sale campaign.
+ * Timed SKU markdown for a sale campaign.
  * variantId null = applies to every variant of the product (unless a variant-specific row exists).
- * Provide compareAtPrice and/or discountPercent (percent computes compare-at from sell price).
+ * discountPercent (1–99) reduces payable unit price. compareAtPrice is an optional honest
+ * reference (must be greater than catalog); it is never invented from percent.
  */
 @Entity('sale_campaign_items')
 @Index(['campaignId'])

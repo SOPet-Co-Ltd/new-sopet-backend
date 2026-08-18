@@ -4,6 +4,7 @@ import { AuthService } from '../src/modules/auth/auth.service';
 import {
   createAuthServiceTestMocks,
   createAuthServiceTestProviders,
+  hashOtpForTest,
 } from '../src/modules/auth/auth-service.test-providers';
 
 describe('Customer suspension (e2e)', () => {
@@ -24,7 +25,7 @@ describe('Customer suspension (e2e)', () => {
   it('verifyOtp returns CUSTOMER_SUSPENDED for inactive customer', async () => {
     mocks.otpRepo.findOne.mockResolvedValue({
       phone: '+66812345678',
-      code: '123456',
+      code: hashOtpForTest('123456'),
       isUsed: false,
     });
     mocks.customerRepoWrapper.findActiveByPhone.mockResolvedValue({
@@ -45,7 +46,7 @@ describe('Customer suspension (e2e)', () => {
   it('verifyOtp succeeds for active customer', async () => {
     mocks.otpRepo.findOne.mockResolvedValue({
       phone: '+66812345678',
-      code: '654321',
+      code: hashOtpForTest('654321'),
       isUsed: false,
     });
     mocks.customerRepoWrapper.findActiveByPhone.mockResolvedValue({
@@ -72,7 +73,7 @@ describe('Customer suspension (e2e)', () => {
   it('verifyOtp throws ForbiddenException for suspended customer', async () => {
     mocks.otpRepo.findOne.mockResolvedValue({
       phone: '+66812345678',
-      code: '123456',
+      code: hashOtpForTest('123456'),
       isUsed: false,
     });
     mocks.customerRepoWrapper.findActiveByPhone.mockResolvedValue({

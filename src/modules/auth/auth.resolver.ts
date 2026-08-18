@@ -68,6 +68,7 @@ export class AuthResolver {
 
   @Mutation(() => CustomerAuthPayload)
   @Public()
+  @UseGuards(AuthRateLimitGuard)
   async verifyCustomerOtp(
     @Args('input') input: VerifyCustomerOtpInput,
   ): Promise<CustomerAuthPayload> {
@@ -133,6 +134,7 @@ export class AuthResolver {
 
   @Mutation(() => AuthTokens)
   @Public()
+  @UseGuards(AuthRateLimitGuard)
   async refreshToken(@Args('input') input: RefreshTokenInput): Promise<AuthTokens> {
     return this.authService.refreshToken(input.refreshToken);
   }
@@ -192,6 +194,7 @@ export class AuthResolver {
 
   @Mutation(() => MessagePayload)
   @Public()
+  @UseGuards(AuthRateLimitGuard)
   async resetPassword(@Args('input') input: ResetPasswordInput): Promise<MessagePayload> {
     return this.authService.resetPassword(input.token, input.newPassword);
   }
