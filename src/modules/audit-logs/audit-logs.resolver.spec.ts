@@ -34,6 +34,7 @@ describe('AuditLogsResolver', () => {
           resourceId: 'admin-1',
           metadata: { role: 'admin' },
           ipAddress: null,
+          requestId: null,
           createdAt: new Date('2026-07-14T00:00:00Z'),
         },
       ],
@@ -50,5 +51,31 @@ describe('AuditLogsResolver', () => {
     expect(result.items).toHaveLength(1);
     expect(result.items[0].metadata).toBe(JSON.stringify({ role: 'admin' }));
     expect(result.pagination.total).toBe(1);
+  });
+
+  it('maps requestId from the audit log entity onto AdminAuditLogType', async () => {
+    auditLogsService.findAllForAdmin.mockResolvedValue({
+      items: [
+        {
+          id: 'log-2',
+          actorType: AuditActorType.ADMIN,
+          actorId: 'admin-1',
+          actorLabel: 'admin@sopet.org',
+          action: AuditAction.STORE_UPDATED,
+          resourceType: AuditResourceType.STORE,
+          resourceId: 'store-1',
+          metadata: { requestId: 'req-mapped-1' },
+          ipAddress: '10.0.0.1',
+          requestId: 'req-mapped-1',
+          createdAt: new Date('2026-08-19T00:00:00Z'),
+        },
+      ],
+      total: 1,
+    });
+
+    const result = await resolver.adminAuditLogs(1, 20, { requestId: 'req-mapped-1' });
+
+    expect(result.items[0].requestId).toBe('req-mapped-1');
+    expect(result.items[0].ipAddress).toBe('10.0.0.1');
   });
 });

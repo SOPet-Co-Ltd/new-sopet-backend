@@ -19,6 +19,7 @@ function mapAuditLog(log: AuditLog): AdminAuditLogType {
     resourceId: log.resourceId,
     metadata: log.metadata ? JSON.stringify(log.metadata) : null,
     ipAddress: log.ipAddress,
+    requestId: log.requestId,
     createdAt: log.createdAt,
   };
 }

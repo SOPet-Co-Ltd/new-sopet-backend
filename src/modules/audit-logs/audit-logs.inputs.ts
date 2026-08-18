@@ -1,5 +1,5 @@
 import { Field, InputType } from '@nestjs/graphql';
-import { IsDate, IsEnum, IsOptional, IsString, IsUUID } from 'class-validator';
+import { IsDate, IsEnum, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 import { AuditActorType } from '../../database/entities/audit-log.entity';
 
 @InputType()
@@ -38,4 +38,10 @@ export class AdminAuditLogFilterInput {
   @IsOptional()
   @IsDate()
   toDate?: Date;
+
+  @Field(() => String, { nullable: true })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  requestId?: string;
 }

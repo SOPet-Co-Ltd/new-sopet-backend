@@ -15,6 +15,12 @@ export class AuditLogsService {
 
   async log(input: AuditLogInput): Promise<void> {
     try {
+      const requestId = input.requestId ?? null;
+      const metadata: Record<string, unknown> = { ...(input.metadata ?? {}) };
+      if (requestId != null) {
+        metadata.requestId = requestId;
+      }
+
       const entry = this.auditLogRepository.create({
         actorType: input.actorType,
         actorId: input.actorId ?? null,
@@ -22,8 +28,9 @@ export class AuditLogsService {
         action: input.action,
         resourceType: input.resourceType,
         resourceId: input.resourceId ?? null,
-        metadata: input.metadata ?? {},
+        metadata,
         ipAddress: input.ipAddress ?? null,
+        requestId,
       });
       await this.auditLogRepository.save(entry);
     } catch (error) {
@@ -66,6 +73,9 @@ export class AuditLogsService {
     }
     if (filter.toDate) {
       qb.andWhere('log.createdAt <= :toDate', { toDate: filter.toDate });
+    }
+    if (filter.requestId) {
+      qb.andWhere('log.requestId = :requestId', { requestId: filter.requestId });
     }
     if (filter.search?.trim()) {
       const term = `%${filter.search.trim()}%`;

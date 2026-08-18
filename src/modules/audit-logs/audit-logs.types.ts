@@ -9,6 +9,7 @@ export interface AuditLogInput {
   resourceId?: string | null;
   metadata?: Record<string, unknown>;
   ipAddress?: string | null;
+  requestId?: string | null;
 }
 
 export interface AdminAuditLogFilter {
@@ -19,4 +20,5 @@ export interface AdminAuditLogFilter {
   search?: string;
   fromDate?: Date;
   toDate?: Date;
+  requestId?: string;
 }

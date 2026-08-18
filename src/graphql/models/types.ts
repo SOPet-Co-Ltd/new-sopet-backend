@@ -2119,6 +2119,9 @@ export class AdminAuditLogType {
   @Field(() => String, { nullable: true })
   ipAddress?: string | null;
 
+  @Field(() => String, { nullable: true })
+  requestId?: string | null;
+
   @Field()
   createdAt!: Date;
 }

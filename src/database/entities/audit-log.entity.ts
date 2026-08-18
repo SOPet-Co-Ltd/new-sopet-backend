@@ -13,6 +13,7 @@ export enum AuditActorType {
 @Index(['action'])
 @Index(['resourceType', 'resourceId'])
 @Index(['actorType', 'actorId'])
+@Index('idx_audit_logs_request_id', ['requestId'])
 export class AuditLog {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -43,6 +44,9 @@ export class AuditLog {
 
   @Column({ name: 'ip_address', type: 'varchar', length: 45, nullable: true })
   ipAddress!: string | null;
+
+  @Column({ name: 'request_id', type: 'varchar', length: 64, nullable: true })
+  requestId!: string | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
   createdAt!: Date;
