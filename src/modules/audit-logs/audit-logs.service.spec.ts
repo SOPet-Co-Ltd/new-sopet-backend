@@ -185,6 +185,71 @@ describe('AuditLogsService', () => {
       requestId: 'req-cap',
     });
   });
+
+  describe('purgeExpired', () => {
+    const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+    it('deletes only rows with created_at < cutoff (61d eligible, 1d intact)', async () => {
+      const frozenNow = new Date('2026-08-19T10:00:00.000Z');
+      jest.useFakeTimers({ now: frozenNow });
+
+      let capturedCutoff: Date | undefined;
+      const deleteQb = {
+        delete: jest.fn().mockReturnThis(),
+        from: jest.fn().mockReturnThis(),
+        where: jest.fn().mockImplementation((_sql: string, params: { cutoff: Date }) => {
+          capturedCutoff = params.cutoff;
+          return deleteQb;
+        }),
+        setParameters: jest.fn().mockReturnThis(),
+        execute: jest.fn().mockResolvedValue({ affected: 2 }),
+      };
+      auditLogRepo.createQueryBuilder.mockReturnValue(deleteQb);
+
+      const cutoff = new Date(frozenNow.getTime() - 60 * MS_PER_DAY);
+      const deleted = await service.purgeExpired(cutoff, 1000);
+
+      expect(deleted).toBe(2);
+      expect(capturedCutoff).toEqual(cutoff);
+
+      const eligible61d = new Date(frozenNow.getTime() - 61 * MS_PER_DAY);
+      const intact1d = new Date(frozenNow.getTime() - 1 * MS_PER_DAY);
+      expect(eligible61d.getTime()).toBeLessThan(cutoff.getTime());
+      expect(intact1d.getTime()).toBeGreaterThanOrEqual(cutoff.getTime());
+
+      const whereCall = deleteQb.where.mock.calls[0] as [string, { cutoff: Date; limit: number }];
+      const whereSql = String(whereCall[0]);
+      expect(whereSql).toMatch(/created_at\s*<\s*:cutoff/i);
+      expect(whereSql).not.toMatch(/created_at\s*<=\s*:cutoff/i);
+
+      jest.useRealTimers();
+    });
+
+    it('uses cutoff ≈ now−60d when retentionDays is 60', async () => {
+      const frozenNow = new Date('2026-08-19T10:00:00.000Z');
+      jest.useFakeTimers({ now: frozenNow });
+
+      const deleteQb = {
+        delete: jest.fn().mockReturnThis(),
+        from: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        setParameters: jest.fn().mockReturnThis(),
+        execute: jest.fn().mockResolvedValue({ affected: 0 }),
+      };
+      auditLogRepo.createQueryBuilder.mockReturnValue(deleteQb);
+
+      const cutoff = new Date(frozenNow.getTime() - 60 * MS_PER_DAY);
+      await service.purgeExpired(cutoff, 1000);
+
+      const whereCall = deleteQb.where.mock.calls[0] as [string, { cutoff: Date; limit: number }];
+      const passed = whereCall[1];
+      expect(passed.cutoff.getTime()).toBe(cutoff.getTime());
+      expect(Math.abs(frozenNow.getTime() - passed.cutoff.getTime() - 60 * MS_PER_DAY)).toBe(0);
+      expect(passed.limit).toBe(1000);
+
+      jest.useRealTimers();
+    });
+  });
 });
 
 describe('AdminAuditLogFilterInput requestId validation', () => {

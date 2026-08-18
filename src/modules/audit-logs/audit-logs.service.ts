@@ -88,4 +88,30 @@ export class AuditLogsService {
     const [items, total] = await qb.getManyAndCount();
     return { items, total };
   }
+
+  /**
+   * Hard-delete one batch of audit_logs older than cutoff.
+   * Returns rows deleted (0 when none remain). Caller loops until 0.
+   * Only deletes where created_at < cutoff — never created_at >= cutoff.
+   */
+  async purgeExpired(cutoff: Date, limit: number): Promise<number> {
+    const result = await this.auditLogRepository
+      .createQueryBuilder()
+      .delete()
+      .from(AuditLog)
+      .where(
+        `id IN (
+          SELECT id FROM (
+            SELECT id FROM audit_logs
+            WHERE created_at < :cutoff
+            ORDER BY created_at ASC
+            LIMIT :limit
+          ) AS expired_audit_logs
+        )`,
+        { cutoff, limit },
+      )
+      .execute();
+
+    return result.affected ?? 0;
+  }
 }
