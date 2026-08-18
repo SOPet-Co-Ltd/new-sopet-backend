@@ -1,4 +1,14 @@
-import { Args, Field, ID, InputType, Int, Mutation, Query, Resolver } from '@nestjs/graphql';
+import {
+  Args,
+  Context,
+  Field,
+  ID,
+  InputType,
+  Int,
+  Mutation,
+  Query,
+  Resolver,
+} from '@nestjs/graphql';
 import { UseGuards } from '@nestjs/common';
 import {
   IsBoolean,
@@ -18,7 +28,7 @@ import {
   PlatformSponsorType,
   PlatformAdType,
 } from '../../graphql/models/types';
-import { Public, Roles } from '../../common/decorators';
+import { Public, Roles, CurrentUser } from '../../common/decorators';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { PlatformBanner } from '../../database/entities/platform-banner.entity';
@@ -28,6 +38,11 @@ import { LoginPageImagesSettingsService } from './login-page-images-settings.ser
 import { UpdateLoginPageImagesInput } from './login-page-images.inputs';
 import { BankTransferSettingsService } from './bank-transfer-settings.service';
 import { UpdateBankTransferDetailsInput } from './bank-transfer.inputs';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constants';
+import { getAuditRequestContext } from '../audit-logs/audit-request-context';
+import { AuditActorType } from '../../database/entities/audit-log.entity';
+import type { GraphqlContext } from '../../graphql/loaders/graphql-context.types';
 
 @InputType()
 export class CreatePlatformBannerInput {
@@ -269,7 +284,28 @@ export class PlatformResolver {
     private readonly platformService: PlatformService,
     private readonly loginPageImagesSettingsService: LoginPageImagesSettingsService,
     private readonly bankTransferSettingsService: BankTransferSettingsService,
+    private readonly auditLogsService: AuditLogsService,
   ) {}
+
+  private async logSettingsAudit(params: {
+    adminId: string;
+    adminEmail: string | undefined;
+    action: string;
+    resourceId: string | null;
+    metadata?: Record<string, unknown>;
+    req?: unknown;
+  }): Promise<void> {
+    await this.auditLogsService.log({
+      actorType: AuditActorType.ADMIN,
+      actorId: params.adminId,
+      actorLabel: params.adminEmail ?? null,
+      action: params.action,
+      resourceType: AuditResourceType.SETTINGS,
+      resourceId: params.resourceId,
+      metadata: params.metadata,
+      ...getAuditRequestContext(params.req),
+    });
+  }
 
   @Query(() => [PlatformBannerType])
   @Public()
@@ -332,23 +368,63 @@ export class PlatformResolver {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   async updateLoginPageImages(
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail: string | undefined,
     @Args('input') input: UpdateLoginPageImagesInput,
+    @Context() context?: GraphqlContext,
   ): Promise<LoginPageImagesType> {
-    return mapLoginPageImages(await this.loginPageImagesSettingsService.updateConfigured(input));
+    const result = mapLoginPageImages(
+      await this.loginPageImagesSettingsService.updateConfigured(input),
+    );
+    await this.logSettingsAudit({
+      adminId,
+      adminEmail,
+      action: AuditAction.SETTINGS_LOGIN_PAGE_IMAGES_UPDATED,
+      resourceId: null,
+      metadata: { settingsKey: 'platform.login_page_images' },
+      req: context?.req,
+    });
+    return result;
   }
 
   @Mutation(() => LoginPageImagesType)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
-  async clearLoginPageDesktopImage(): Promise<LoginPageImagesType> {
-    return mapLoginPageImages(await this.loginPageImagesSettingsService.clearDesktop());
+  async clearLoginPageDesktopImage(
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail: string | undefined,
+    @Context() context?: GraphqlContext,
+  ): Promise<LoginPageImagesType> {
+    const result = mapLoginPageImages(await this.loginPageImagesSettingsService.clearDesktop());
+    await this.logSettingsAudit({
+      adminId,
+      adminEmail,
+      action: AuditAction.SETTINGS_LOGIN_PAGE_IMAGES_CLEARED_DESKTOP,
+      resourceId: null,
+      metadata: { settingsKey: 'platform.login_page_images' },
+      req: context?.req,
+    });
+    return result;
   }
 
   @Mutation(() => LoginPageImagesType)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
-  async clearLoginPageMobileImage(): Promise<LoginPageImagesType> {
-    return mapLoginPageImages(await this.loginPageImagesSettingsService.clearMobile());
+  async clearLoginPageMobileImage(
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail: string | undefined,
+    @Context() context?: GraphqlContext,
+  ): Promise<LoginPageImagesType> {
+    const result = mapLoginPageImages(await this.loginPageImagesSettingsService.clearMobile());
+    await this.logSettingsAudit({
+      adminId,
+      adminEmail,
+      action: AuditAction.SETTINGS_LOGIN_PAGE_IMAGES_CLEARED_MOBILE,
+      resourceId: null,
+      metadata: { settingsKey: 'platform.login_page_images' },
+      req: context?.req,
+    });
+    return result;
   }
 
   @Query(() => BankTransferSettingsType)
@@ -362,18 +438,40 @@ export class PlatformResolver {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   async updateBankTransferDetails(
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail: string | undefined,
     @Args('input') input: UpdateBankTransferDetailsInput,
+    @Context() context?: GraphqlContext,
   ): Promise<BankTransferSettingsType> {
-    return this.bankTransferSettingsService.update(input);
+    const result = await this.bankTransferSettingsService.update(input);
+    await this.logSettingsAudit({
+      adminId,
+      adminEmail,
+      action: AuditAction.SETTINGS_BANK_TRANSFER_UPDATED,
+      resourceId: null,
+      metadata: { settingsKey: 'payment.bank_transfer' },
+      req: context?.req,
+    });
+    return result;
   }
 
   @Mutation(() => PlatformBannerType)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   async createPlatformBanner(
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail: string | undefined,
     @Args('input') input: CreatePlatformBannerInput,
+    @Context() context?: GraphqlContext,
   ): Promise<PlatformBannerType> {
     const banner = await this.platformService.createBanner(input);
+    await this.logSettingsAudit({
+      adminId,
+      adminEmail,
+      action: AuditAction.SETTINGS_BANNER_CREATED,
+      resourceId: banner.id,
+      req: context?.req,
+    });
     return mapBanner(banner);
   }
 
@@ -381,27 +479,61 @@ export class PlatformResolver {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   async updatePlatformBanner(
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail: string | undefined,
     @Args('input') input: UpdatePlatformBannerInput,
+    @Context() context?: GraphqlContext,
   ): Promise<PlatformBannerType> {
     const { id, ...data } = input;
     const banner = await this.platformService.updateBanner(id, data);
+    await this.logSettingsAudit({
+      adminId,
+      adminEmail,
+      action: AuditAction.SETTINGS_BANNER_UPDATED,
+      resourceId: banner.id,
+      req: context?.req,
+    });
     return mapBanner(banner);
   }
 
   @Mutation(() => Boolean)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
-  async deletePlatformBanner(@Args('id') id: string): Promise<boolean> {
-    return this.platformService.deleteBanner(id);
+  async deletePlatformBanner(
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail: string | undefined,
+    @Args('id') id: string,
+    @Context() context?: GraphqlContext,
+  ): Promise<boolean> {
+    const result = await this.platformService.deleteBanner(id);
+    await this.logSettingsAudit({
+      adminId,
+      adminEmail,
+      action: AuditAction.SETTINGS_BANNER_DELETED,
+      resourceId: id,
+      req: context?.req,
+    });
+    return result;
   }
 
   @Mutation(() => [PlatformBannerType])
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   async reorderPlatformBanners(
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail: string | undefined,
     @Args({ name: 'ids', type: () => [ID] }) ids: string[],
+    @Context() context?: GraphqlContext,
   ): Promise<PlatformBannerType[]> {
     const banners = await this.platformService.reorderBanners(ids);
+    await this.logSettingsAudit({
+      adminId,
+      adminEmail,
+      action: AuditAction.SETTINGS_BANNER_REORDERED,
+      resourceId: null,
+      metadata: { ids },
+      req: context?.req,
+    });
     return banners.map(mapBanner);
   }
 
@@ -409,9 +541,19 @@ export class PlatformResolver {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   async createPlatformSponsor(
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail: string | undefined,
     @Args('input') input: CreatePlatformSponsorInput,
+    @Context() context?: GraphqlContext,
   ): Promise<PlatformSponsorType> {
     const sponsor = await this.platformService.createSponsor(input);
+    await this.logSettingsAudit({
+      adminId,
+      adminEmail,
+      action: AuditAction.SETTINGS_SPONSOR_CREATED,
+      resourceId: sponsor.id,
+      req: context?.req,
+    });
     return mapSponsor(sponsor);
   }
 
@@ -419,52 +561,123 @@ export class PlatformResolver {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   async updatePlatformSponsor(
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail: string | undefined,
     @Args('input') input: UpdatePlatformSponsorInput,
+    @Context() context?: GraphqlContext,
   ): Promise<PlatformSponsorType> {
     const { id, ...data } = input;
     const sponsor = await this.platformService.updateSponsor(id, data);
+    await this.logSettingsAudit({
+      adminId,
+      adminEmail,
+      action: AuditAction.SETTINGS_SPONSOR_UPDATED,
+      resourceId: sponsor.id,
+      req: context?.req,
+    });
     return mapSponsor(sponsor);
   }
 
   @Mutation(() => Boolean)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
-  async deletePlatformSponsor(@Args('id') id: string): Promise<boolean> {
-    return this.platformService.deleteSponsor(id);
+  async deletePlatformSponsor(
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail: string | undefined,
+    @Args('id') id: string,
+    @Context() context?: GraphqlContext,
+  ): Promise<boolean> {
+    const result = await this.platformService.deleteSponsor(id);
+    await this.logSettingsAudit({
+      adminId,
+      adminEmail,
+      action: AuditAction.SETTINGS_SPONSOR_DELETED,
+      resourceId: id,
+      req: context?.req,
+    });
+    return result;
   }
 
   @Mutation(() => [PlatformSponsorType])
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   async reorderPlatformSponsors(
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail: string | undefined,
     @Args({ name: 'ids', type: () => [ID] }) ids: string[],
+    @Context() context?: GraphqlContext,
   ): Promise<PlatformSponsorType[]> {
     const sponsors = await this.platformService.reorderSponsors(ids);
+    await this.logSettingsAudit({
+      adminId,
+      adminEmail,
+      action: AuditAction.SETTINGS_SPONSOR_REORDERED,
+      resourceId: null,
+      metadata: { ids },
+      req: context?.req,
+    });
     return sponsors.map(mapSponsor);
   }
 
   @Mutation(() => PlatformAdType)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
-  async createPlatformAd(@Args('input') input: CreatePlatformAdInput): Promise<PlatformAdType> {
+  async createPlatformAd(
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail: string | undefined,
+    @Args('input') input: CreatePlatformAdInput,
+    @Context() context?: GraphqlContext,
+  ): Promise<PlatformAdType> {
     const ad = await this.platformService.createAd(input);
+    await this.logSettingsAudit({
+      adminId,
+      adminEmail,
+      action: AuditAction.SETTINGS_AD_CREATED,
+      resourceId: ad.id,
+      req: context?.req,
+    });
     return mapAd(ad);
   }
 
   @Mutation(() => PlatformAdType)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
-  async updatePlatformAd(@Args('input') input: UpdatePlatformAdInput): Promise<PlatformAdType> {
+  async updatePlatformAd(
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail: string | undefined,
+    @Args('input') input: UpdatePlatformAdInput,
+    @Context() context?: GraphqlContext,
+  ): Promise<PlatformAdType> {
     const { id, ...data } = input;
     const ad = await this.platformService.updateAd(id, data);
+    await this.logSettingsAudit({
+      adminId,
+      adminEmail,
+      action: AuditAction.SETTINGS_AD_UPDATED,
+      resourceId: ad.id,
+      req: context?.req,
+    });
     return mapAd(ad);
   }
 
   @Mutation(() => Boolean)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
-  async deletePlatformAd(@Args('id') id: string): Promise<boolean> {
-    return this.platformService.deleteAd(id);
+  async deletePlatformAd(
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail: string | undefined,
+    @Args('id') id: string,
+    @Context() context?: GraphqlContext,
+  ): Promise<boolean> {
+    const result = await this.platformService.deleteAd(id);
+    await this.logSettingsAudit({
+      adminId,
+      adminEmail,
+      action: AuditAction.SETTINGS_AD_DELETED,
+      resourceId: id,
+      req: context?.req,
+    });
+    return result;
   }
 }
 

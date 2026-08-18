@@ -4,11 +4,16 @@ import { ValidationPipe } from '../../common/pipes/validation.pipe';
 import { PromotionsResolver } from './promotions.resolver';
 import { PromotionsService } from './promotions.service';
 import { StoresService } from '../stores/stores.service';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constants';
+import { AuditActorType } from '../../database/entities/audit-log.entity';
+import { PromotionScope, PromotionType } from '../../database/entities/promotion.entity';
 import {
   MAX_VALIDATE_PROMOTIONS_TARGETS,
   ValidatePromotionsInput,
   ValidatePromotionsTargetInput,
 } from './promotions.inputs';
+import type { GraphqlContext } from '../../graphql/loaders/graphql-context.types';
 
 describe('PromotionsResolver.validatePromotion', () => {
   let resolver: PromotionsResolver;
@@ -21,6 +26,7 @@ describe('PromotionsResolver.validatePromotion', () => {
     resolver = new PromotionsResolver(
       promotionsService as unknown as PromotionsService,
       storesService as unknown as StoresService,
+      { log: jest.fn() } as unknown as AuditLogsService,
     );
   });
 
@@ -101,6 +107,7 @@ describe('PromotionsResolver.validatePromotions (Decision 6)', () => {
     resolver = new PromotionsResolver(
       promotionsService as unknown as PromotionsService,
       storesService as unknown as StoresService,
+      { log: jest.fn() } as unknown as AuditLogsService,
     );
   });
 
@@ -255,5 +262,230 @@ describe('PromotionsResolver.validatePromotions (Decision 6)', () => {
     await expect(
       resolver.validatePromotions({ promotions: [{ code: 'X' }], subtotal: 1 }, undefined),
     ).rejects.toMatchObject({ response: { code: 'INVALID_VALIDATE_PROMOTIONS_INPUT' } });
+  });
+});
+
+const ADMIN_ID = '11111111-1111-4111-8111-111111111111';
+const ADMIN_EMAIL = 'admin@sopet.org';
+const VENDOR_ID = '22222222-2222-4222-8222-222222222222';
+const PROMO_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+const STORE_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+
+const graphqlContext: GraphqlContext = {
+  req: { requestId: 'req-promo-1', headers: { 'x-forwarded-for': '203.0.113.10' } },
+  res: {},
+  loaders: { productSoldCount: { load: jest.fn() } as never },
+};
+
+function platformPromotion(overrides: Record<string, unknown> = {}) {
+  return {
+    id: PROMO_ID,
+    storeId: null,
+    code: 'SAVE10',
+    name: 'Save 10',
+    description: null,
+    type: PromotionType.PERCENTAGE,
+    scope: PromotionScope.PLATFORM,
+    discountValue: 10,
+    minPurchaseAmount: null,
+    maxDiscountAmount: null,
+    usageLimit: null,
+    usagePerCustomer: 1,
+    usageCount: 0,
+    isActive: true,
+    autoApply: false,
+    priority: 0,
+    conditions: {},
+    startsAt: null,
+    expiresAt: null,
+    createdAt: new Date('2026-01-01T00:00:00Z'),
+    updatedAt: new Date('2026-01-01T00:00:00Z'),
+    deletedAt: null,
+    ...overrides,
+  };
+}
+
+describe('PromotionsResolver audit logging (AC-B-002)', () => {
+  let resolver: PromotionsResolver;
+  let promotionsService: {
+    create: jest.Mock;
+    findOne: jest.Mock;
+    update: jest.Mock;
+    softDelete: jest.Mock;
+    toggle: jest.Mock;
+    assertCanManage: jest.Mock;
+  };
+  let storesService: { assertStoreAccess: jest.Mock };
+  let auditLogsService: { log: jest.Mock };
+
+  beforeEach(() => {
+    promotionsService = {
+      create: jest.fn(),
+      findOne: jest.fn(),
+      update: jest.fn(),
+      softDelete: jest.fn(),
+      toggle: jest.fn(),
+      assertCanManage: jest.fn(),
+    };
+    storesService = { assertStoreAccess: jest.fn().mockResolvedValue(undefined) };
+    auditLogsService = { log: jest.fn().mockResolvedValue(undefined) };
+    resolver = new PromotionsResolver(
+      promotionsService as unknown as PromotionsService,
+      storesService as unknown as StoresService,
+      auditLogsService as unknown as AuditLogsService,
+    );
+  });
+
+  const createInput = {
+    code: 'SAVE10',
+    name: 'Save 10',
+    type: PromotionType.PERCENTAGE,
+    discountValue: 10,
+  };
+
+  it('logs promotion.created once for admin PLATFORM create', async () => {
+    promotionsService.create.mockResolvedValue(platformPromotion());
+
+    await resolver.createPromotion(
+      createInput,
+      ADMIN_ID,
+      'admin',
+      undefined,
+      ADMIN_EMAIL,
+      graphqlContext,
+    );
+
+    expect(auditLogsService.log).toHaveBeenCalledTimes(1);
+    expect(auditLogsService.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorType: AuditActorType.ADMIN,
+        actorId: ADMIN_ID,
+        actorLabel: ADMIN_EMAIL,
+        action: AuditAction.PROMOTION_CREATED,
+        resourceType: AuditResourceType.PROMOTION,
+        resourceId: PROMO_ID,
+        metadata: { scope: PromotionScope.PLATFORM, isActive: true },
+        requestId: 'req-promo-1',
+      }),
+    );
+  });
+
+  it('does not log when vendor creates a STORE promotion', async () => {
+    promotionsService.create.mockResolvedValue(
+      platformPromotion({ scope: PromotionScope.STORE, storeId: STORE_ID }),
+    );
+
+    await resolver.createPromotion(createInput, VENDOR_ID, 'vendor', STORE_ID);
+
+    expect(storesService.assertStoreAccess).toHaveBeenCalled();
+    expect(auditLogsService.log).not.toHaveBeenCalled();
+  });
+
+  it('logs promotion.updated once for admin and skips vendor', async () => {
+    const promo = platformPromotion();
+    promotionsService.findOne.mockResolvedValue(promo);
+    promotionsService.update.mockResolvedValue(promo);
+
+    await resolver.updatePromotion(
+      PROMO_ID,
+      { name: 'Save 15' },
+      ADMIN_ID,
+      'admin',
+      undefined,
+      ADMIN_EMAIL,
+      graphqlContext,
+    );
+
+    expect(auditLogsService.log).toHaveBeenCalledTimes(1);
+    expect(auditLogsService.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: AuditAction.PROMOTION_UPDATED,
+        resourceType: AuditResourceType.PROMOTION,
+        resourceId: PROMO_ID,
+        metadata: { scope: PromotionScope.PLATFORM, isActive: true },
+      }),
+    );
+
+    auditLogsService.log.mockClear();
+    promotionsService.findOne.mockResolvedValue(
+      platformPromotion({ scope: PromotionScope.STORE, storeId: STORE_ID }),
+    );
+    promotionsService.update.mockResolvedValue(
+      platformPromotion({ scope: PromotionScope.STORE, storeId: STORE_ID }),
+    );
+
+    await resolver.updatePromotion(PROMO_ID, { name: 'Store save' }, VENDOR_ID, 'vendor', STORE_ID);
+
+    expect(auditLogsService.log).not.toHaveBeenCalled();
+  });
+
+  it('logs promotion.deleted once for admin and skips vendor', async () => {
+    promotionsService.findOne.mockResolvedValue(platformPromotion());
+    promotionsService.softDelete.mockResolvedValue(undefined);
+
+    await resolver.deletePromotion(
+      PROMO_ID,
+      ADMIN_ID,
+      'admin',
+      undefined,
+      ADMIN_EMAIL,
+      graphqlContext,
+    );
+
+    expect(auditLogsService.log).toHaveBeenCalledTimes(1);
+    expect(auditLogsService.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: AuditAction.PROMOTION_DELETED,
+        resourceType: AuditResourceType.PROMOTION,
+        resourceId: PROMO_ID,
+        metadata: { scope: PromotionScope.PLATFORM, isActive: true },
+      }),
+    );
+
+    auditLogsService.log.mockClear();
+    promotionsService.findOne.mockResolvedValue(
+      platformPromotion({ scope: PromotionScope.STORE, storeId: STORE_ID }),
+    );
+
+    await resolver.deletePromotion(PROMO_ID, VENDOR_ID, 'vendor', STORE_ID);
+
+    expect(auditLogsService.log).not.toHaveBeenCalled();
+  });
+
+  it('logs promotion.toggled once for admin and skips vendor', async () => {
+    promotionsService.findOne.mockResolvedValue(platformPromotion());
+    promotionsService.toggle.mockResolvedValue(platformPromotion({ isActive: false }));
+
+    await resolver.togglePromotion(
+      PROMO_ID,
+      false,
+      ADMIN_ID,
+      'admin',
+      undefined,
+      ADMIN_EMAIL,
+      graphqlContext,
+    );
+
+    expect(auditLogsService.log).toHaveBeenCalledTimes(1);
+    expect(auditLogsService.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: AuditAction.PROMOTION_TOGGLED,
+        resourceType: AuditResourceType.PROMOTION,
+        resourceId: PROMO_ID,
+        metadata: { scope: PromotionScope.PLATFORM, isActive: false },
+      }),
+    );
+
+    auditLogsService.log.mockClear();
+    promotionsService.findOne.mockResolvedValue(
+      platformPromotion({ scope: PromotionScope.STORE, storeId: STORE_ID }),
+    );
+    promotionsService.toggle.mockResolvedValue(
+      platformPromotion({ scope: PromotionScope.STORE, storeId: STORE_ID, isActive: false }),
+    );
+
+    await resolver.togglePromotion(PROMO_ID, false, VENDOR_ID, 'vendor', STORE_ID);
+
+    expect(auditLogsService.log).not.toHaveBeenCalled();
   });
 });

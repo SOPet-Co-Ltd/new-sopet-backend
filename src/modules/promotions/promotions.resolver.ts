@@ -1,10 +1,10 @@
-import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
+import { Args, Context, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { BadRequestException, UseGuards } from '@nestjs/common';
 import { PromotionsService } from './promotions.service';
 import { Public, CurrentUser, Roles } from '../../common/decorators';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
-import { PromotionScope } from '../../database/entities/promotion.entity';
+import { Promotion, PromotionScope } from '../../database/entities/promotion.entity';
 import {
   PromotionType as PromotionGraphqlType,
   PromotionValidationResult,
@@ -18,13 +18,38 @@ import {
   ValidatePromotionsInput,
 } from './promotions.inputs';
 import { StoresService } from '../stores/stores.service';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constants';
+import { getAuditRequestContext } from '../audit-logs/audit-request-context';
+import { AuditActorType } from '../../database/entities/audit-log.entity';
+import type { GraphqlContext } from '../../graphql/loaders/graphql-context.types';
 
 @Resolver()
 export class PromotionsResolver {
   constructor(
     private readonly promotionsService: PromotionsService,
     private readonly storesService: StoresService,
+    private readonly auditLogsService: AuditLogsService,
   ) {}
+
+  private async logPromotionAudit(
+    adminId: string,
+    adminEmail: string | undefined,
+    action: string,
+    promotion: Promotion,
+    req?: unknown,
+  ): Promise<void> {
+    await this.auditLogsService.log({
+      actorType: AuditActorType.ADMIN,
+      actorId: adminId,
+      actorLabel: adminEmail ?? null,
+      action,
+      resourceType: AuditResourceType.PROMOTION,
+      resourceId: promotion.id,
+      metadata: { scope: promotion.scope, isActive: promotion.isActive },
+      ...getAuditRequestContext(req),
+    });
+  }
 
   @Query(() => PromotionValidationResult)
   @Public()
@@ -107,9 +132,18 @@ export class PromotionsResolver {
     @CurrentUser('id') userId: string,
     @CurrentUser('role') role: string,
     @CurrentUser('storeId') storeId?: string,
+    @CurrentUser('email') email?: string,
+    @Context() context?: GraphqlContext,
   ): Promise<PromotionGraphqlType> {
     if (role === 'admin') {
       const promotion = await this.promotionsService.create(input, PromotionScope.PLATFORM);
+      await this.logPromotionAudit(
+        userId,
+        email,
+        AuditAction.PROMOTION_CREATED,
+        promotion,
+        context?.req,
+      );
       return mapPromotion(promotion);
     }
 
@@ -138,6 +172,8 @@ export class PromotionsResolver {
     @CurrentUser('id') userId: string,
     @CurrentUser('role') role: string,
     @CurrentUser('storeId') storeId?: string,
+    @CurrentUser('email') email?: string,
+    @Context() context?: GraphqlContext,
   ): Promise<PromotionGraphqlType> {
     const promotion = await this.promotionsService.findOne(id);
     if (role === 'vendor') {
@@ -147,6 +183,15 @@ export class PromotionsResolver {
       this.promotionsService.assertCanManage(promotion, PromotionScope.PLATFORM);
     }
     const updated = await this.promotionsService.update(id, input);
+    if (role === 'admin') {
+      await this.logPromotionAudit(
+        userId,
+        email,
+        AuditAction.PROMOTION_UPDATED,
+        updated,
+        context?.req,
+      );
+    }
     return mapPromotion(updated);
   }
 
@@ -158,6 +203,8 @@ export class PromotionsResolver {
     @CurrentUser('id') userId: string,
     @CurrentUser('role') role: string,
     @CurrentUser('storeId') storeId?: string,
+    @CurrentUser('email') email?: string,
+    @Context() context?: GraphqlContext,
   ): Promise<boolean> {
     const promotion = await this.promotionsService.findOne(id);
     if (role === 'vendor') {
@@ -167,6 +214,15 @@ export class PromotionsResolver {
       this.promotionsService.assertCanManage(promotion, PromotionScope.PLATFORM);
     }
     await this.promotionsService.softDelete(id);
+    if (role === 'admin') {
+      await this.logPromotionAudit(
+        userId,
+        email,
+        AuditAction.PROMOTION_DELETED,
+        promotion,
+        context?.req,
+      );
+    }
     return true;
   }
 
@@ -179,6 +235,8 @@ export class PromotionsResolver {
     @CurrentUser('id') userId: string,
     @CurrentUser('role') role: string,
     @CurrentUser('storeId') storeId?: string,
+    @CurrentUser('email') email?: string,
+    @Context() context?: GraphqlContext,
   ): Promise<PromotionGraphqlType> {
     const promotion = await this.promotionsService.findOne(id);
     if (role === 'vendor') {
@@ -188,6 +246,15 @@ export class PromotionsResolver {
       this.promotionsService.assertCanManage(promotion, PromotionScope.PLATFORM);
     }
     const updated = await this.promotionsService.toggle(id, isActive);
+    if (role === 'admin') {
+      await this.logPromotionAudit(
+        userId,
+        email,
+        AuditAction.PROMOTION_TOGGLED,
+        updated,
+        context?.req,
+      );
+    }
     return mapPromotion(updated);
   }
 }

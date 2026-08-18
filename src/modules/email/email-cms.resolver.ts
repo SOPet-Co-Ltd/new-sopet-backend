@@ -1,5 +1,5 @@
 import { UseGuards } from '@nestjs/common';
-import { Args, ID, Mutation, Query, Resolver } from '@nestjs/graphql';
+import { Args, Context, ID, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { CurrentUser, Roles } from '../../common/decorators';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -20,6 +20,11 @@ import {
   EmailContentTemplateType,
   EmailPreviewResultType,
 } from './email-cms.types';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constants';
+import { getAuditRequestContext } from '../audit-logs/audit-request-context';
+import { AuditActorType } from '../../database/entities/audit-log.entity';
+import type { GraphqlContext } from '../../graphql/loaders/graphql-context.types';
 
 function mapContainer(container: EmailContainer, warnings: string[] = []): EmailContainerType {
   return {
@@ -59,7 +64,10 @@ function mapContentTemplate(
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('admin')
 export class EmailCmsResolver {
-  constructor(private readonly emailCmsService: EmailCmsService) {}
+  constructor(
+    private readonly emailCmsService: EmailCmsService,
+    private readonly auditLogsService: AuditLogsService,
+  ) {}
 
   @Query(() => [EmailContainerType])
   async emailContainers(): Promise<EmailContainerType[]> {
@@ -99,36 +107,88 @@ export class EmailCmsResolver {
 
   @Mutation(() => EmailContainerType)
   async createEmailContainer(
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail: string | undefined,
     @Args('input') input: CreateEmailContainerInput,
+    @Context() context?: GraphqlContext,
   ): Promise<EmailContainerType> {
     const { container, warnings } = await this.emailCmsService.createContainer(input);
+    await this.auditLogsService.log({
+      actorType: AuditActorType.ADMIN,
+      actorId: adminId,
+      actorLabel: adminEmail ?? null,
+      action: AuditAction.EMAIL_CONTAINER_CREATED,
+      resourceType: AuditResourceType.EMAIL,
+      resourceId: container.id,
+      metadata: { isDefault: container.isDefault },
+      ...getAuditRequestContext(context?.req),
+    });
     return mapContainer(container, warnings);
   }
 
   @Mutation(() => EmailContainerType)
   async updateEmailContainer(
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail: string | undefined,
     @Args('id', { type: () => ID }) id: string,
     @Args('input') input: UpdateEmailContainerInput,
+    @Context() context?: GraphqlContext,
   ): Promise<EmailContainerType> {
     const { container, warnings } = await this.emailCmsService.updateContainer(id, input);
+    await this.auditLogsService.log({
+      actorType: AuditActorType.ADMIN,
+      actorId: adminId,
+      actorLabel: adminEmail ?? null,
+      action: AuditAction.EMAIL_CONTAINER_UPDATED,
+      resourceType: AuditResourceType.EMAIL,
+      resourceId: container.id,
+      metadata: { isDefault: container.isDefault },
+      ...getAuditRequestContext(context?.req),
+    });
     return mapContainer(container, warnings);
   }
 
   @Mutation(() => EmailContainerType)
   async setDefaultEmailContainer(
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail: string | undefined,
     @Args('id', { type: () => ID }) id: string,
+    @Context() context?: GraphqlContext,
   ): Promise<EmailContainerType> {
     const { container, warnings } = await this.emailCmsService.setDefaultContainer(id);
+    await this.auditLogsService.log({
+      actorType: AuditActorType.ADMIN,
+      actorId: adminId,
+      actorLabel: adminEmail ?? null,
+      action: AuditAction.EMAIL_CONTAINER_DEFAULT_SET,
+      resourceType: AuditResourceType.EMAIL,
+      resourceId: container.id,
+      metadata: { isDefault: container.isDefault },
+      ...getAuditRequestContext(context?.req),
+    });
     return mapContainer(container, warnings);
   }
 
   @Mutation(() => EmailContentTemplateType)
   async updateEmailContentTemplate(
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail: string | undefined,
     @Args('id', { type: () => ID }) id: string,
     @Args('input') input: UpdateEmailContentTemplateInput,
+    @Context() context?: GraphqlContext,
   ): Promise<EmailContentTemplateType> {
     const { content, warnings } = await this.emailCmsService.updateContentTemplate(id, input);
     const withContainer = await this.emailCmsService.getContentTemplate(content.id);
+    await this.auditLogsService.log({
+      actorType: AuditActorType.ADMIN,
+      actorId: adminId,
+      actorLabel: adminEmail ?? null,
+      action: AuditAction.EMAIL_CONTENT_TEMPLATE_UPDATED,
+      resourceType: AuditResourceType.EMAIL,
+      resourceId: content.id,
+      metadata: { key: content.key },
+      ...getAuditRequestContext(context?.req),
+    });
     return mapContentTemplate(withContainer ?? content, warnings);
   }
 

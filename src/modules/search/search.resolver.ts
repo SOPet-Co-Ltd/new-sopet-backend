@@ -1,8 +1,8 @@
-import { Args, Int, Mutation, Query, Resolver } from '@nestjs/graphql';
+import { Args, Context, Int, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
-import { Public, Roles } from '../../common/decorators';
+import { CurrentUser, Public, Roles } from '../../common/decorators';
 import { SearchAnalyticsService } from './search-analytics.service';
 import { SearchRepository } from './search.repository';
 import { SearchSettingsService } from './search-settings.service';
@@ -20,6 +20,11 @@ import {
   UpdateSearchSynonymInput,
 } from './search.inputs';
 import type { SearchRankingWeights } from './search.types';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constants';
+import { getAuditRequestContext } from '../audit-logs/audit-request-context';
+import { AuditActorType } from '../../database/entities/audit-log.entity';
+import type { GraphqlContext } from '../../graphql/loaders/graphql-context.types';
 
 @Resolver()
 export class SearchResolver {
@@ -29,6 +34,7 @@ export class SearchResolver {
     private readonly searchSynonymService: SearchSynonymService,
     private readonly searchAnalyticsService: SearchAnalyticsService,
     private readonly searchRepository: SearchRepository,
+    private readonly auditLogsService: AuditLogsService,
   ) {}
 
   @Query(() => SearchSuggestionsPayloadType)
@@ -72,9 +78,22 @@ export class SearchResolver {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   async updateSearchRankingWeights(
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail: string | undefined,
     @Args('input') input: UpdateSearchRankingWeightsInput,
+    @Context() context?: GraphqlContext,
   ): Promise<SearchRankingWeightsType> {
     const weights = await this.searchSettingsService.updateRankingWeights(input);
+    await this.auditLogsService.log({
+      actorType: AuditActorType.ADMIN,
+      actorId: adminId,
+      actorLabel: adminEmail ?? null,
+      action: AuditAction.SEARCH_RANKING_WEIGHTS_UPDATED,
+      resourceType: AuditResourceType.SEARCH,
+      resourceId: null,
+      metadata: { settingsKey: 'search.ranking_weights' },
+      ...getAuditRequestContext(context?.req),
+    });
     return this.mapWeights(weights);
   }
 
@@ -90,9 +109,22 @@ export class SearchResolver {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   async createSearchSynonym(
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail: string | undefined,
     @Args('input') input: CreateSearchSynonymInput,
+    @Context() context?: GraphqlContext,
   ): Promise<SearchSynonymType> {
     const row = await this.searchSynonymService.create(input);
+    await this.auditLogsService.log({
+      actorType: AuditActorType.ADMIN,
+      actorId: adminId,
+      actorLabel: adminEmail ?? null,
+      action: AuditAction.SEARCH_SYNONYM_CREATED,
+      resourceType: AuditResourceType.SEARCH,
+      resourceId: row.id,
+      metadata: { terms: row.terms },
+      ...getAuditRequestContext(context?.req),
+    });
     return this.mapSynonym(row);
   }
 
@@ -100,18 +132,46 @@ export class SearchResolver {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   async updateSearchSynonym(
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail: string | undefined,
     @Args('id') id: string,
     @Args('input') input: UpdateSearchSynonymInput,
+    @Context() context?: GraphqlContext,
   ): Promise<SearchSynonymType> {
     const row = await this.searchSynonymService.update(id, input);
+    await this.auditLogsService.log({
+      actorType: AuditActorType.ADMIN,
+      actorId: adminId,
+      actorLabel: adminEmail ?? null,
+      action: AuditAction.SEARCH_SYNONYM_UPDATED,
+      resourceType: AuditResourceType.SEARCH,
+      resourceId: row.id,
+      metadata: { terms: row.terms },
+      ...getAuditRequestContext(context?.req),
+    });
     return this.mapSynonym(row);
   }
 
   @Mutation(() => Boolean)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
-  async deleteSearchSynonym(@Args('id') id: string): Promise<boolean> {
-    return this.searchSynonymService.delete(id);
+  async deleteSearchSynonym(
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail: string | undefined,
+    @Args('id') id: string,
+    @Context() context?: GraphqlContext,
+  ): Promise<boolean> {
+    const result = await this.searchSynonymService.delete(id);
+    await this.auditLogsService.log({
+      actorType: AuditActorType.ADMIN,
+      actorId: adminId,
+      actorLabel: adminEmail ?? null,
+      action: AuditAction.SEARCH_SYNONYM_DELETED,
+      resourceType: AuditResourceType.SEARCH,
+      resourceId: id,
+      ...getAuditRequestContext(context?.req),
+    });
+    return result;
   }
 
   @Query(() => SearchAnalyticsSummaryType)
