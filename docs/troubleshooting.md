@@ -19,11 +19,11 @@ yarn migration:run
 
 ### Deploy: `self-signed certificate in certificate chain` during `migration:show`
 
-GitHub Actions talks to RDS with `DB_SSL=true` and `NODE_ENV=production`. Node then verifies the RDS cert against its built-in CAs, which do not include Amazon RDS, and fails with `SELF_SIGNED_CERT_IN_CHAIN`.
+UAT uses **Crunchy Bridge** (`*.db.postgresbridge.com`), which presents a team-private self-signed root. Pointing `DB_SSL_CA` at the Amazon RDS bundle replaces Node’s trust store with the wrong CAs and fails with `SELF_SIGNED_CERT_IN_CHAIN`.
 
-The deploy workflow sets `DB_SSL_CA` to `infra/certs/rds-global-bundle.pem` before migrations. The Docker image copies the same file to `/app/certs/rds-global-bundle.pem`.
+`getPostgresSslOptions()` encrypts Crunchy Bridge connections and skips peer verify unless a team CA is set on `DB_SSL_CA`. Amazon RDS hosts still use `infra/certs/rds-global-bundle.pem`.
 
-If this error returns after a CA rotation, refresh the bundle:
+If an RDS host fails after a CA rotation, refresh the bundle:
 
 ```bash
 curl -fsSL -o infra/certs/rds-global-bundle.pem \

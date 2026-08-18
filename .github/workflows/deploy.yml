@@ -173,10 +173,15 @@ jobs:
       - name: Run database migrations
         run: |
           yarn install --frozen-lockfile --production=false
-          # Node does not trust Amazon RDS CAs by default. Without this bundle,
-          # production (rejectUnauthorized=true) fails with SELF_SIGNED_CERT_IN_CHAIN.
-          export DB_SSL_CA="${GITHUB_WORKSPACE}/infra/certs/rds-global-bundle.pem"
-          test -s "$DB_SSL_CA"
+          # Amazon RDS needs the AWS CA bundle. Crunchy Bridge (*.postgresbridge.com)
+          # uses a team-private self-signed root — pointing DB_SSL_CA at the RDS
+          # bundle replaces Node's trust store and fails with SELF_SIGNED_CERT_IN_CHAIN.
+          case "${DB_HOST:-}" in
+            *.rds.amazonaws.com)
+              export DB_SSL_CA="${GITHUB_WORKSPACE}/infra/certs/rds-global-bundle.pem"
+              test -s "$DB_SSL_CA"
+              ;;
+          esac
           yarn typeorm migration:show -d ormconfig.ts
           yarn migration:run
 

@@ -21,10 +21,14 @@ while IFS= read -r name; do
   write_entry "$name"
 done < <(jq -r '.variables[], .secrets[]' "$MANIFEST")
 
-# Runtime image path for Amazon RDS CA (see infra/certs/). GHA migrations set
-# DB_SSL_CA to the repo copy; the container uses the file copied in the Dockerfile.
+# Runtime image path for Amazon RDS CA (see infra/certs/). Skip Crunchy Bridge
+# hosts — their team CA is not the RDS bundle.
 if [ "${DB_SSL:-}" = "true" ] && [ -z "${DB_SSL_CA:-}" ]; then
-  printf 'DB_SSL_CA=%s\n' '/app/certs/rds-global-bundle.pem' >>"$OUTPUT"
+  case "${DB_HOST:-}" in
+    *.rds.amazonaws.com)
+      printf 'DB_SSL_CA=%s\n' '/app/certs/rds-global-bundle.pem' >>"$OUTPUT"
+      ;;
+  esac
 fi
 
 if [ ! -s "$OUTPUT" ]; then
