@@ -20,6 +20,7 @@ import { InventoryService } from '../src/modules/inventory/inventory.service';
 import { CartService } from '../src/modules/cart/cart.service';
 import { VendorWebhooksService } from '../src/modules/vendor-webhooks/vendor-webhooks.service';
 import { OrderAuditLogsService } from '../src/modules/order-audit-logs/order-audit-logs.service';
+import { mockSaleCampaignPricingProvider } from './helpers/sale-campaign-pricing.mock';
 import { Order } from '../src/database/entities/order.entity';
 import { OrderItem } from '../src/database/entities/order-item.entity';
 import { OrderShippingAddress } from '../src/database/entities/order-shipping-address.entity';
@@ -128,6 +129,7 @@ describe('Promotion universal conditions createOrder (service-integration-e2e)',
           provide: VendorWebhooksService,
           useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
         },
+        mockSaleCampaignPricingProvider,
         {
           provide: OrderAuditLogsService,
           useValue: {
@@ -227,6 +229,7 @@ describe('Promotion universal conditions createOrder (service-integration-e2e)',
       storeId: store.id,
       status: ProductStatus.PUBLISHED,
       name: `BxGy Product ${label} ${seedContext.runId}`,
+      basePrice: UNIT_PRICE,
     });
     const variant = await variantRepo.save(
       variantRepo.create({

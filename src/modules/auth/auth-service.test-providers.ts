@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -16,6 +17,12 @@ import { EmailDeliveryService } from '../email/email-delivery.service';
 import { StorageService } from '../storage/storage.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuthService } from './auth.service';
+
+export const AUTH_SERVICE_TEST_JWT_SECRET = 'test-jwt-secret';
+
+export function hashOtpForTest(code: string, secret = AUTH_SERVICE_TEST_JWT_SECRET): string {
+  return createHmac('sha256', secret).update(code).digest('hex');
+}
 
 export interface AuthServiceTestMocks {
   customerRepo: {
@@ -92,7 +99,12 @@ export function createAuthServiceTestProviders(mocks: AuthServiceTestMocks) {
     },
     {
       provide: ConfigService,
-      useValue: { get: jest.fn(() => '15m') },
+      useValue: {
+        get: jest.fn((key?: string) => {
+          if (key === 'jwt.secret') return AUTH_SERVICE_TEST_JWT_SECRET;
+          return '15m';
+        }),
+      },
     },
     { provide: SmsService, useValue: { sendOtp: jest.fn() } },
     { provide: CartService, useValue: mocks.cartService },

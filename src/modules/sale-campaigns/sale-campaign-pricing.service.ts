@@ -28,8 +28,7 @@ export class SaleCampaignPricingService {
     if (lines.length === 0) return result;
 
     const productIds = [...new Set(lines.map((line) => line.productId).filter(Boolean))];
-    const rows =
-      productIds.length > 0 ? await this.findActiveItemsForProducts(productIds) : [];
+    const rows = productIds.length > 0 ? await this.findActiveItemsForProducts(productIds) : [];
 
     const items = rows.map(({ item, campaign }) => ({
       productId: item.productId,

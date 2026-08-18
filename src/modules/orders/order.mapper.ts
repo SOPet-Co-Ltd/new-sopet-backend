@@ -73,8 +73,7 @@ export function mapOrderItem(item: OrderItem, viewerStoreId?: string) {
     unitPrice: Number(item.unitPrice),
     catalogUnitPrice: item.catalogUnitPrice != null ? Number(item.catalogUnitPrice) : null,
     saleCampaignId: item.saleCampaignId ?? null,
-    saleDiscountPercent:
-      item.saleDiscountPercent != null ? Number(item.saleDiscountPercent) : null,
+    saleDiscountPercent: item.saleDiscountPercent != null ? Number(item.saleDiscountPercent) : null,
     quantity: item.quantity,
     subtotal: Number(item.subtotal),
     fulfillmentStatus: item.fulfillmentStatus,

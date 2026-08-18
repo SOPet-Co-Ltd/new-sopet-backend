@@ -61,7 +61,13 @@ export class OrderItem {
   @Column({ name: 'sale_campaign_id', type: 'uuid', nullable: true })
   saleCampaignId!: string | null;
 
-  @Column({ name: 'sale_discount_percent', type: 'decimal', precision: 5, scale: 2, nullable: true })
+  @Column({
+    name: 'sale_discount_percent',
+    type: 'decimal',
+    precision: 5,
+    scale: 2,
+    nullable: true,
+  })
   saleDiscountPercent!: number | null;
 
   @Column({ name: 'quantity', type: 'integer' })

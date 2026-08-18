@@ -6,6 +6,7 @@ import { OrderStatus } from '../src/database/entities/order.entity';
 import {
   createAuthServiceTestMocks,
   createAuthServiceTestProviders,
+  hashOtpForTest,
 } from '../src/modules/auth/auth-service.test-providers';
 
 describe('Checkout flow (integration)', () => {
@@ -27,7 +28,7 @@ describe('Checkout flow (integration)', () => {
     it('verifies OTP and merges guest cart', async () => {
       mocks.otpRepo.findOne.mockResolvedValue({
         phone: '+66812345678',
-        code: '654321',
+        code: hashOtpForTest('654321'),
         isUsed: false,
       });
       mocks.customerRepoWrapper.findActiveByPhone.mockResolvedValue({

@@ -180,6 +180,7 @@ export async function createTestProduct(
     legacyCategory?: string | null;
     tagIds?: string[];
     name?: string;
+    basePrice?: number;
   },
 ): Promise<Product> {
   const productRepo = dataSource.getRepository(Product);
@@ -191,7 +192,7 @@ export async function createTestProduct(
       name: input.name ?? `E2E Product ${input.suffix}`,
       slug,
       description: 'Search taxonomy harness product',
-      basePrice: 199,
+      basePrice: input.basePrice ?? 199,
       status: input.status,
       categoryId: input.categoryId ?? null,
       category: input.legacyCategory ?? null,
