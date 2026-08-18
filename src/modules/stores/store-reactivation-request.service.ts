@@ -141,6 +141,7 @@ export class StoreReactivationRequestService {
       });
     }
 
+    // Keep existing store.reactivated writer from StoresService.reactivate (do not replace).
     await this.storesService.reactivate(request.storeId, adminId);
 
     request.status = StoreReactivationRequestStatus.APPROVED;

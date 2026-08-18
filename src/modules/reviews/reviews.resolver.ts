@@ -1,5 +1,6 @@
 import {
   Args,
+  Context,
   Field,
   InputType,
   Int,
@@ -42,6 +43,11 @@ import {
 } from '../../graphql/models/types';
 import { StoresService } from '../stores/stores.service';
 import { Review } from '../../database/entities/review.entity';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constants';
+import { getAuditRequestContext } from '../audit-logs/audit-request-context';
+import { AuditActorType } from '../../database/entities/audit-log.entity';
+import type { GraphqlContext } from '../../graphql/loaders/graphql-context.types';
 
 @ObjectType()
 export class CustomerReviewableItemType {
@@ -297,6 +303,7 @@ export class ReviewsResolver {
   constructor(
     private readonly reviewsService: ReviewsService,
     private readonly storesService: StoresService,
+    private readonly auditLogsService: AuditLogsService,
   ) {}
 
   @Query(() => [ReviewType])
@@ -422,9 +429,21 @@ export class ReviewsResolver {
   @Roles('admin')
   async approveReview(
     @CurrentUser('id') adminUserId: string,
+    @CurrentUser('email') adminEmail: string | undefined,
     @Args('id') id: string,
+    @Context() context?: GraphqlContext,
   ): Promise<ReviewType> {
     const review = await this.reviewsService.approveReview(id, adminUserId);
+    await this.auditLogsService.log({
+      actorType: AuditActorType.ADMIN,
+      actorId: adminUserId,
+      actorLabel: adminEmail ?? null,
+      action: AuditAction.REVIEW_APPROVED,
+      resourceType: AuditResourceType.REVIEW,
+      resourceId: review.id,
+      metadata: { status: review.status },
+      ...getAuditRequestContext(context?.req),
+    });
     return mapReviewToType(review);
   }
 
@@ -433,9 +452,21 @@ export class ReviewsResolver {
   @Roles('admin')
   async rejectReview(
     @CurrentUser('id') adminUserId: string,
+    @CurrentUser('email') adminEmail: string | undefined,
     @Args('id') id: string,
+    @Context() context?: GraphqlContext,
   ): Promise<ReviewType> {
     const review = await this.reviewsService.rejectReview(id, adminUserId);
+    await this.auditLogsService.log({
+      actorType: AuditActorType.ADMIN,
+      actorId: adminUserId,
+      actorLabel: adminEmail ?? null,
+      action: AuditAction.REVIEW_REJECTED,
+      resourceType: AuditResourceType.REVIEW,
+      resourceId: review.id,
+      metadata: { status: review.status },
+      ...getAuditRequestContext(context?.req),
+    });
     return mapReviewToType(review);
   }
 

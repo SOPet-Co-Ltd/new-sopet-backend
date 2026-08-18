@@ -69,6 +69,15 @@ export const AuditAction = {
   EMAIL_CONTAINER_UPDATED: 'email.container.updated',
   EMAIL_CONTAINER_DEFAULT_SET: 'email.container.default_set',
   EMAIL_CONTENT_TEMPLATE_UPDATED: 'email.content_template.updated',
+  REVIEW_APPROVED: 'review.approved',
+  REVIEW_REJECTED: 'review.rejected',
+  SHIPPING_PROVIDER_CREATED: 'shipping_provider.created',
+  SHIPPING_PROVIDER_UPDATED: 'shipping_provider.updated',
+  SHIPPING_PROVIDER_DELETED: 'shipping_provider.deleted',
+  STORE_REACTIVATION_APPROVED: 'store.reactivation_approved',
+  STORE_REACTIVATION_REJECTED: 'store.reactivation_rejected',
+  API_KEY_CREATED: 'api_key.created',
+  API_KEY_REVOKED: 'api_key.revoked',
 } as const;
 
 export type AuditActionValue = (typeof AuditAction)[keyof typeof AuditAction];
@@ -85,6 +94,10 @@ export const AuditResourceType = {
   SETTINGS: 'settings',
   SEARCH: 'search',
   EMAIL: 'email',
+  REVIEW: 'review',
+  SHIPPING_PROVIDER: 'shipping_provider',
+  REACTIVATION_REQUEST: 'reactivation_request',
+  API_KEY: 'api_key',
 } as const;
 
 export type AuditResourceTypeValue = (typeof AuditResourceType)[keyof typeof AuditResourceType];

@@ -699,8 +699,19 @@ export class StoresResolver {
   @Roles('admin')
   async createShippingProvider(
     @Args('input') input: CreateShippingProviderInput,
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail?: string,
+    @Context() context?: GraphqlContext,
   ): Promise<ShippingProviderType> {
     const provider = await this.shippingProvidersService.create(input);
+    await this.auditLogsService.log({
+      ...this.adminActor(adminId, adminEmail),
+      action: AuditAction.SHIPPING_PROVIDER_CREATED,
+      resourceType: AuditResourceType.SHIPPING_PROVIDER,
+      resourceId: provider.id,
+      metadata: { name: provider.name },
+      ...getAuditRequestContext(context?.req),
+    });
     return mapShippingProvider(provider);
   }
 
@@ -710,16 +721,39 @@ export class StoresResolver {
   async updateShippingProvider(
     @Args('id') id: string,
     @Args('input') input: UpdateShippingProviderInput,
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail?: string,
+    @Context() context?: GraphqlContext,
   ): Promise<ShippingProviderType> {
     const provider = await this.shippingProvidersService.update(id, input);
+    await this.auditLogsService.log({
+      ...this.adminActor(adminId, adminEmail),
+      action: AuditAction.SHIPPING_PROVIDER_UPDATED,
+      resourceType: AuditResourceType.SHIPPING_PROVIDER,
+      resourceId: provider.id,
+      metadata: { name: provider.name },
+      ...getAuditRequestContext(context?.req),
+    });
     return mapShippingProvider(provider);
   }
 
   @Mutation(() => Boolean)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
-  async deleteShippingProvider(@Args('id') id: string): Promise<boolean> {
+  async deleteShippingProvider(
+    @Args('id') id: string,
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail?: string,
+    @Context() context?: GraphqlContext,
+  ): Promise<boolean> {
     await this.shippingProvidersService.delete(id);
+    await this.auditLogsService.log({
+      ...this.adminActor(adminId, adminEmail),
+      action: AuditAction.SHIPPING_PROVIDER_DELETED,
+      resourceType: AuditResourceType.SHIPPING_PROVIDER,
+      resourceId: id,
+      ...getAuditRequestContext(context?.req),
+    });
     return true;
   }
 
@@ -1103,8 +1137,22 @@ export class StoresResolver {
   async approveStoreReactivationRequest(
     @Args('id') id: string,
     @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail?: string,
+    @Context() context?: GraphqlContext,
   ): Promise<StoreReactivationRequestType> {
     const request = await this.storeReactivationRequestService.approve(id, adminId);
+    // Distinct from store.reactivated written inside StoresService.reactivate.
+    await this.auditLogsService.log({
+      ...this.adminActor(adminId, adminEmail),
+      action: AuditAction.STORE_REACTIVATION_APPROVED,
+      resourceType: AuditResourceType.REACTIVATION_REQUEST,
+      resourceId: request.id,
+      metadata: {
+        storeId: request.storeId,
+        reactivationRequestId: request.id,
+      },
+      ...getAuditRequestContext(context?.req),
+    });
     return mapStoreReactivationRequest(request);
   }
 
@@ -1114,12 +1162,26 @@ export class StoresResolver {
   async rejectStoreReactivationRequest(
     @Args('input') input: RejectStoreReactivationRequestInput,
     @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail?: string,
+    @Context() context?: GraphqlContext,
   ): Promise<StoreReactivationRequestType> {
     const request = await this.storeReactivationRequestService.reject(
       input.id,
       adminId,
       input.reviewNote,
     );
+    await this.auditLogsService.log({
+      ...this.adminActor(adminId, adminEmail),
+      action: AuditAction.STORE_REACTIVATION_REJECTED,
+      resourceType: AuditResourceType.REACTIVATION_REQUEST,
+      resourceId: request.id,
+      metadata: {
+        storeId: request.storeId,
+        reactivationRequestId: request.id,
+        ...(input.reviewNote != null ? { reviewNote: input.reviewNote } : {}),
+      },
+      ...getAuditRequestContext(context?.req),
+    });
     return mapStoreReactivationRequest(request);
   }
 }

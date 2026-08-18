@@ -19,7 +19,8 @@
 //
 // Harness: Nest TestingModule + real AuditLogsService (+ reactivation resolver path for test 2,
 // AuditLogRetentionProcessor for test 3); mocked TypeORM Repository<AuditLog> / fake query builder;
-// mocked StoreReactivationRequestService / StoresService.reactivate; mocked BullMQ queue.
+// real StoreReactivationRequestService with mocked TypeORM repos; StoresService.reactivate spy/stub
+// that writes store.reactivated via real AuditLogsService; mocked BullMQ queue.
 //
 // Test Boundaries compliance (Backend Design Doc "Mock Boundary Decisions"):
 // Mock: Repository<AuditLog> — service logic and query-builder clauses
@@ -99,8 +100,9 @@
 // only; reactivate not called.
 // @category: core-functionality
 // @lane: integration
-// @dependency: stores reactivation GraphQL path, StoreReactivationRequestService (mocked domain
-// success), StoresService.reactivate (spy), AuditLogsService (real), Repository<AuditLog> (mocked)
+// @dependency: stores reactivation GraphQL path, real StoreReactivationRequestService (TypeORM
+// repos mocked), StoresService.reactivate (spy/stub → real AuditLogsService), AuditLogsService
+// (real), Repository<AuditLog> (mocked)
 // @complexity: high
 // Primary failure mode: approve replaces store.reactivated with the namespaced action (ops lose
 // the existing store event), or approve writes two store.reactivated rows, or reject still calls
@@ -165,6 +167,18 @@ import {
   AUDIT_LOG_RETENTION_BATCH_SIZE,
   AUDIT_LOG_RETENTION_JOB,
 } from '../src/modules/audit-logs/audit-log-retention.constants';
+import { AuditAction, AuditResourceType } from '../src/modules/audit-logs/audit-log.constants';
+import { StoresResolver } from '../src/modules/stores/stores.resolver';
+import { StoresService } from '../src/modules/stores/stores.service';
+import { StoreTeamService } from '../src/modules/stores/store-team.service';
+import { ShippingOptionsService } from '../src/modules/stores/shipping-options.service';
+import { ShippingProvidersService } from '../src/modules/stores/shipping-providers.service';
+import { StoreRequestService } from '../src/modules/stores/store-request.service';
+import { StoreReactivationRequestService } from '../src/modules/stores/store-reactivation-request.service';
+import { VendorInvitationService } from '../src/modules/stores/vendor-invitation.service';
+import { AuthService } from '../src/modules/auth/auth.service';
+import { StoreReactivationRequestStatus } from '../src/database/entities/store-reactivation-request.entity';
+import type { GraphqlContext } from '../src/graphql/loaders/graphql-context.types';
 
 type FakeQueryBuilder = {
   orderBy: jest.Mock;
@@ -320,7 +334,168 @@ describe('admin-audit-logs-console integration', () => {
   });
 
   // Integration test 2 of 3 — Reactivation approve dual actions / reject does not reactivate
-  // (comment-only until backend-task-07)
+  // Primary failure mode: approve replaces store.reactivated with namespaced action, or writes two
+  // store.reactivated rows, or reject still calls reactivate / writes the approved action.
+  // TypeORM persist is mocked because this lane proves writer composition, not SQL.
+  describe('reactivation approve dual actions / reject does not reactivate', () => {
+    const REQUEST_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const STORE_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    const ADMIN_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+    const ADMIN_EMAIL = 'admin@sopet.org';
+
+    const graphqlContext: GraphqlContext = {
+      req: { requestId: 'req-reactivation-1', headers: { 'x-forwarded-for': '203.0.113.77' } },
+      res: {},
+      loaders: { productSoldCount: { load: jest.fn() } as never },
+    };
+
+    type LogCreatePayload = {
+      action: string;
+      resourceType: string;
+      resourceId: string | null;
+      metadata: Record<string, unknown>;
+    };
+
+    let resolver: StoresResolver;
+    let reactivate: jest.Mock;
+    let logCreates: LogCreatePayload[];
+
+    const seededPendingRequest = {
+      id: REQUEST_ID,
+      storeId: STORE_ID,
+      store: { name: 'Suspended Pets' },
+      submittedByUserId: 'vendor-1',
+      title: 'Please reopen',
+      content: 'We resolved the issues',
+      status: StoreReactivationRequestStatus.PENDING,
+      reviewNote: null as string | null,
+      images: [] as unknown[],
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+      updatedAt: new Date('2026-01-01T00:00:00Z'),
+      reviewedAt: null as Date | null,
+      reviewedBy: null as string | null,
+    };
+
+    beforeEach(async () => {
+      logCreates = [];
+      const auditLogRepo = {
+        create: jest.fn((x: LogCreatePayload) => {
+          logCreates.push(x);
+          return x;
+        }),
+        save: jest.fn((x: Record<string, unknown>) => Promise.resolve({ ...x, id: 'log-int-2' })),
+        createQueryBuilder: jest.fn(),
+      };
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          AuditLogsService,
+          { provide: getRepositoryToken(AuditLog), useValue: auditLogRepo },
+        ],
+      }).compile();
+
+      const auditLogsService = module.get(AuditLogsService);
+
+      // Spy/stub: production StoresService.reactivate writes store.reactivated via AuditLogsService.
+      reactivate = jest.fn().mockImplementation(async (storeId: string, adminId: string) => {
+        await auditLogsService.log({
+          actorType: AuditActorType.ADMIN,
+          actorId: adminId,
+          action: AuditAction.STORE_REACTIVATED,
+          resourceType: AuditResourceType.STORE,
+          resourceId: storeId,
+          metadata: { storeName: 'Suspended Pets' },
+        });
+        return { id: storeId, name: 'Suspended Pets', status: 'approved' };
+      });
+
+      const requestRepo = {
+        findOne: jest.fn().mockImplementation((options: { where?: { id?: string } }) => {
+          if (options?.where?.id === REQUEST_ID) {
+            return Promise.resolve({ ...seededPendingRequest });
+          }
+          return Promise.resolve(null);
+        }),
+        save: jest.fn((entity: typeof seededPendingRequest) => Promise.resolve({ ...entity })),
+        create: jest.fn(),
+        find: jest.fn(),
+      };
+      const imageRepo = { create: jest.fn(), save: jest.fn() };
+      const storeRepo = { findOne: jest.fn() };
+
+      // Real StoreReactivationRequestService: approve calls storesService.reactivate; reject does not.
+      const reactivationService = new StoreReactivationRequestService(
+        requestRepo as never,
+        imageRepo as never,
+        storeRepo as never,
+        { reactivate } as unknown as StoresService,
+      );
+
+      resolver = new StoresResolver(
+        { reactivate } as unknown as StoresService,
+        {} as StoreTeamService,
+        {} as ShippingOptionsService,
+        {} as ShippingProvidersService,
+        {} as StoreRequestService,
+        reactivationService,
+        {} as VendorInvitationService,
+        {} as AuthService,
+        auditLogsService,
+      );
+    });
+
+    it('approve writes one store.reactivation_approved and one store.reactivated (distinct actions)', async () => {
+      await resolver.approveStoreReactivationRequest(
+        REQUEST_ID,
+        ADMIN_ID,
+        ADMIN_EMAIL,
+        graphqlContext,
+      );
+
+      expect(reactivate).toHaveBeenCalledTimes(1);
+      expect(reactivate).toHaveBeenCalledWith(STORE_ID, ADMIN_ID);
+
+      const approvedRows = logCreates.filter(
+        (row) => row.action === AuditAction.STORE_REACTIVATION_APPROVED,
+      );
+      const reactivatedRows = logCreates.filter(
+        (row) => row.action === AuditAction.STORE_REACTIVATED,
+      );
+      expect(approvedRows).toHaveLength(1);
+      expect(reactivatedRows).toHaveLength(1);
+      expect(logCreates).toHaveLength(2);
+      expect(approvedRows[0].action).not.toBe(reactivatedRows[0].action);
+
+      expect(approvedRows[0].resourceType).toBe(AuditResourceType.REACTIVATION_REQUEST);
+      expect(approvedRows[0].resourceId).toBe(REQUEST_ID);
+      expect(approvedRows[0].metadata.reactivationRequestId).toBe(REQUEST_ID);
+      expect(approvedRows[0].metadata.storeId).toBe(STORE_ID);
+
+      expect(reactivatedRows[0].resourceType).toBe(AuditResourceType.STORE);
+      expect(reactivatedRows[0].resourceId).toBe(STORE_ID);
+    });
+
+    it('reject writes store.reactivation_rejected only and does not call reactivate', async () => {
+      await resolver.rejectStoreReactivationRequest(
+        { id: REQUEST_ID, reviewNote: 'Incomplete documents' },
+        ADMIN_ID,
+        ADMIN_EMAIL,
+        graphqlContext,
+      );
+
+      expect(reactivate).not.toHaveBeenCalled();
+      expect(logCreates).toHaveLength(1);
+      expect(logCreates[0].action).toBe(AuditAction.STORE_REACTIVATION_REJECTED);
+      expect(logCreates[0].resourceType).toBe(AuditResourceType.REACTIVATION_REQUEST);
+      expect(logCreates[0].resourceId).toBe(REQUEST_ID);
+      expect(logCreates[0].metadata.reactivationRequestId).toBe(REQUEST_ID);
+      expect(logCreates[0].metadata.storeId).toBe(STORE_ID);
+      expect(logCreates.map((row) => row.action)).not.toContain(
+        AuditAction.STORE_REACTIVATION_APPROVED,
+      );
+      expect(logCreates.map((row) => row.action)).not.toContain(AuditAction.STORE_REACTIVATED);
+    });
+  });
 
   // Integration test 3 of 3 — Retention processor batched purge cutoff
   // Primary failure mode: unbounded DELETE or cutoff inclusive of now; or processor swallows errors.

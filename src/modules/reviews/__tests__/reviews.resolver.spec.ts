@@ -5,7 +5,11 @@ import { IS_PUBLIC_KEY } from '../../../common/decorators/public.decorator';
 import { ROLES_KEY } from '../../../common/decorators/roles.decorator';
 import { ReviewsService } from '../reviews.service';
 import { StoresService } from '../../stores/stores.service';
+import { AuditLogsService } from '../../audit-logs/audit-logs.service';
+import { AuditAction, AuditResourceType } from '../../audit-logs/audit-log.constants';
+import { AuditActorType } from '../../../database/entities/audit-log.entity';
 import { ReviewSource, ReviewStatus } from '../../../database/entities/review.entity';
+import type { GraphqlContext } from '../../../graphql/loaders/graphql-context.types';
 
 describe('ReviewsResolver', () => {
   const summary = {
@@ -37,6 +41,12 @@ describe('ReviewsResolver', () => {
     productBreakdown: [],
   };
 
+  const graphqlContext: GraphqlContext = {
+    req: { requestId: 'req-review-1', headers: { 'x-forwarded-for': '203.0.113.9' } },
+    res: {},
+    loaders: { productSoldCount: { load: jest.fn() } as never },
+  };
+
   let reviewsService: jest.Mocked<
     Pick<
       ReviewsService,
@@ -49,9 +59,12 @@ describe('ReviewsResolver', () => {
       | 'updateReviewReply'
       | 'findReviewableItemsForCustomer'
       | 'findMyReviews'
+      | 'approveReview'
+      | 'rejectReview'
     >
   >;
   let storesService: jest.Mocked<Pick<StoresService, 'userHasStoreAccess'>>;
+  let auditLogsService: { log: jest.Mock };
   let resolver: ReviewsResolver;
 
   beforeEach(() => {
@@ -65,13 +78,17 @@ describe('ReviewsResolver', () => {
       updateReviewReply: jest.fn(),
       findReviewableItemsForCustomer: jest.fn(),
       findMyReviews: jest.fn(),
+      approveReview: jest.fn(),
+      rejectReview: jest.fn(),
     };
     storesService = {
       userHasStoreAccess: jest.fn(),
     };
+    auditLogsService = { log: jest.fn().mockResolvedValue(undefined) };
     resolver = new ReviewsResolver(
       reviewsService as unknown as ReviewsService,
       storesService as unknown as StoresService,
+      auditLogsService as unknown as AuditLogsService,
     );
   });
 
@@ -376,6 +393,73 @@ describe('ReviewsResolver', () => {
         ratingFilter: '5',
       });
       expect(result.pagination.page).toBe(2);
+    });
+  });
+
+  describe('approveReview / rejectReview audit (AC-B-006)', () => {
+    const adminId = 'admin-1';
+    const adminEmail = 'admin@sopet.org';
+    const reviewId = 'review-imported-1';
+
+    it('logs review.approved once on success', async () => {
+      reviewsService.approveReview.mockResolvedValue({
+        id: reviewId,
+        productId: 'prod-1',
+        customerId: null,
+        source: ReviewSource.VENDOR_IMPORT,
+        rating: 5,
+        comment: 'Great',
+        status: ReviewStatus.APPROVED,
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        customer: null,
+        images: [],
+      } as never);
+
+      await resolver.approveReview(adminId, adminEmail, reviewId, graphqlContext);
+
+      expect(reviewsService.approveReview).toHaveBeenCalledWith(reviewId, adminId);
+      expect(auditLogsService.log).toHaveBeenCalledTimes(1);
+      expect(auditLogsService.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actorType: AuditActorType.ADMIN,
+          actorId: adminId,
+          actorLabel: adminEmail,
+          action: AuditAction.REVIEW_APPROVED,
+          resourceType: AuditResourceType.REVIEW,
+          resourceId: reviewId,
+          metadata: { status: ReviewStatus.APPROVED },
+          requestId: 'req-review-1',
+        }),
+      );
+    });
+
+    it('logs review.rejected once on success', async () => {
+      reviewsService.rejectReview.mockResolvedValue({
+        id: reviewId,
+        productId: 'prod-1',
+        customerId: null,
+        source: ReviewSource.VENDOR_IMPORT,
+        rating: 2,
+        comment: 'Bad',
+        status: ReviewStatus.REJECTED,
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        customer: null,
+        images: [],
+      } as never);
+
+      await resolver.rejectReview(adminId, adminEmail, reviewId, graphqlContext);
+
+      expect(reviewsService.rejectReview).toHaveBeenCalledWith(reviewId, adminId);
+      expect(auditLogsService.log).toHaveBeenCalledTimes(1);
+      expect(auditLogsService.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actorType: AuditActorType.ADMIN,
+          action: AuditAction.REVIEW_REJECTED,
+          resourceType: AuditResourceType.REVIEW,
+          resourceId: reviewId,
+          metadata: { status: ReviewStatus.REJECTED },
+        }),
+      );
     });
   });
 });
