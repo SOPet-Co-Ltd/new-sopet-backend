@@ -12,7 +12,7 @@ function readMetadataRequestId(metadata: AuditLog['metadata']): string | null {
   if (!metadata || typeof metadata !== 'object') {
     return null;
   }
-  const requestId = (metadata as Record<string, unknown>).requestId;
+  const requestId = metadata.requestId;
   return typeof requestId === 'string' && requestId.trim() ? requestId.trim() : null;
 }
 

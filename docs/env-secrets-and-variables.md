@@ -55,41 +55,41 @@ GitHub Environments **`deploy/uat`** and **`deploy/production`** use the **same 
 
 ### Application (written into `/opt/sopet/.env`)
 
-| Name                               | Purpose                            | Production notes / example                                                                          |
-| ---------------------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `NODE_ENV` ★                       | Runtime mode                       | `production`                                                                                        |
-| `PORT`                             | HTTP listen port                   | `3002` (container; Caddy proxies).                                                                  |
-| `DB_HOST` ★                        | Postgres host                      | Production RDS hostname.                                                                            |
-| `DB_PORT`                          | Postgres port                      | `5432` (or RDS port).                                                                               |
-| `DB_USERNAME` ★                    | Postgres user                      | Production DB user.                                                                                 |
-| `DB_NAME` ★                        | Database name                      | Production database.                                                                                |
-| `DB_SSL` ★                         | Require SSL to Postgres            | `true` on RDS. Deploy supplies Amazon RDS CA via `infra/certs/rds-global-bundle.pem` (`DB_SSL_CA`). |
-| `DB_POOL_MAX`                      | TypeORM/pg pool size               | e.g. `20`.                                                                                          |
-| `REDIS_HOST` ★                     | Redis host                         | Production Redis; omit locally to disable queues/cache.                                             |
-| `REDIS_PORT`                       | Redis port                         | `6379`                                                                                              |
-| `REDIS_DB`                         | Redis logical DB index             | `0`                                                                                                 |
-| `STORAGE_PROVIDER` ★               | Object storage backend             | `r2` (or `s3`).                                                                                     |
-| `CDN_URL` ★                        | Public base URL for stored objects | Production CDN / R2 public domain.                                                                  |
-| `JWT_ACCESS_EXPIRES_IN`            | Access token TTL                   | e.g. `1h`                                                                                           |
-| `JWT_REFRESH_EXPIRES_IN`           | Refresh token TTL                  | e.g. `7d`                                                                                           |
-| `THAIBULKSMS_SENDER`               | SMS sender name                    | e.g. `SOPet`                                                                                        |
-| `THAIBULKSMS_FORCE`                | ThaiBulkSMS force mode             | e.g. `corporate`                                                                                    |
-| `THAIBULKSMS_SHORTEN_URL`          | Shorten URLs in SMS                | `false` typical.                                                                                    |
-| `PAYMENT_QR_EXPIRY_MINUTES`        | PromptPay QR validity (minutes)    | Default `15`.                                                                                       |
-| `PAYMENT_EXPIRY_CHECK_INTERVAL_MS` | Background expiry poll interval    | Default `30000`.                                                                                    |
-| `EMAIL_FROM` ★                     | From address for Resend            | e.g. `noreply@sopet.co.th`                                                                          |
-| `EMAIL_FROM_NAME`                  | From display name                  | e.g. `Sopet Marketplace`                                                                            |
-| `API_URL` ★                        | Public absolute API base URL       | e.g. `https://api.sopet.org` (emails, assets, logs).                                                |
-| `STOREFRONT_URL` ★                 | Customer storefront origin         | Production Vercel URL.                                                                              |
-| `ADMIN_PANEL_URL` ★                | Admin/vendor panel origin          | Production Vercel URL.                                                                              |
-| `CORS_ORIGINS` ★                   | Allowed CORS origins               | Comma-separated production frontends.                                                               |
-| `RATE_LIMIT_TTL`                   | Rate-limit window (seconds)        | e.g. `60`                                                                                           |
-| `RATE_LIMIT_MAX`                   | Max requests per window            | e.g. `100`                                                                                          |
-| `SEARCH_SMART_ENABLED`             | Enable smart search path           | `true` only when Phase wiring is ready; else `false`.                                               |
-| `REVIEW_AUTO_APPROVE`              | Deprecated / ignored               | Reviews always approved; kept for env parity.                                                       |
-| `REVIEW_WINDOW_DAYS`               | Days after delivery to review      | Default `30`.                                                                                       |
-| `PAYOUT_CRON_SCHEDULE`             | Payout BullMQ cron                 | Default `0 2 * * *`.                                                                                |
-| `PAYOUT_CRON_TIMEZONE`             | Payout cron timezone               | Default `Asia/Bangkok`.                                                                             |
+| Name                               | Purpose                            | Production notes / example                                                                                   |
+| ---------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `NODE_ENV` ★                       | Runtime mode                       | `production`                                                                                                 |
+| `PORT`                             | HTTP listen port                   | `3002` (container; Caddy proxies).                                                                           |
+| `DB_HOST` ★                        | Postgres host                      | Production RDS hostname.                                                                                     |
+| `DB_PORT`                          | Postgres port                      | `5432` (or RDS port).                                                                                        |
+| `DB_USERNAME` ★                    | Postgres user                      | Production DB user.                                                                                          |
+| `DB_NAME` ★                        | Database name                      | Production database.                                                                                         |
+| `DB_SSL` ★                         | Require SSL to Postgres            | `true` on RDS. Deploy supplies Amazon RDS CA via `infra/certs/rds-global-bundle.pem` (`DB_SSL_CA`).          |
+| `DB_POOL_MAX`                      | TypeORM/pg pool size               | e.g. `20`.                                                                                                   |
+| `REDIS_HOST` ★                     | Redis host                         | Production Redis; omit locally to disable queues/cache.                                                      |
+| `REDIS_PORT`                       | Redis port                         | `6379`                                                                                                       |
+| `REDIS_DB`                         | Redis logical DB index             | `0`                                                                                                          |
+| `STORAGE_PROVIDER` ★               | Object storage backend             | `r2` (or `s3`).                                                                                              |
+| `CDN_URL` ★                        | Public base URL for stored objects | Production CDN / R2 public domain.                                                                           |
+| `JWT_ACCESS_EXPIRES_IN`            | Access token TTL                   | e.g. `1h`                                                                                                    |
+| `JWT_REFRESH_EXPIRES_IN`           | Refresh token TTL                  | e.g. `7d`                                                                                                    |
+| `THAIBULKSMS_SENDER`               | SMS sender name                    | e.g. `SOPet`                                                                                                 |
+| `THAIBULKSMS_FORCE`                | ThaiBulkSMS force mode             | e.g. `corporate`                                                                                             |
+| `THAIBULKSMS_SHORTEN_URL`          | Shorten URLs in SMS                | `false` typical.                                                                                             |
+| `PAYMENT_QR_EXPIRY_MINUTES`        | PromptPay QR validity (minutes)    | Default `15`.                                                                                                |
+| `PAYMENT_EXPIRY_CHECK_INTERVAL_MS` | Background expiry poll interval    | Default `30000`.                                                                                             |
+| `EMAIL_FROM` ★                     | From address for Resend            | e.g. `noreply@sopet.co.th`                                                                                   |
+| `EMAIL_FROM_NAME`                  | From display name                  | e.g. `Sopet Marketplace`                                                                                     |
+| `API_URL` ★                        | Public absolute API base URL       | e.g. `https://api.sopet.org` (emails, assets, logs).                                                         |
+| `STOREFRONT_URL` ★                 | Customer storefront origin         | Production Vercel URL.                                                                                       |
+| `ADMIN_PANEL_URL` ★                | Admin/vendor panel origin          | Production Vercel URL.                                                                                       |
+| `CORS_ORIGINS` ★                   | Allowed CORS origins               | Comma-separated production frontends.                                                                        |
+| `RATE_LIMIT_TTL`                   | Rate-limit window (seconds)        | e.g. `60`                                                                                                    |
+| `RATE_LIMIT_MAX`                   | Max requests per window            | e.g. `100`                                                                                                   |
+| `SEARCH_SMART_ENABLED`             | Enable smart search path           | `true` only when Phase wiring is ready; else `false`.                                                        |
+| `REVIEW_AUTO_APPROVE`              | Deprecated / ignored               | Reviews always approved; kept for env parity.                                                                |
+| `REVIEW_WINDOW_DAYS`               | Days after delivery to review      | Default `30`.                                                                                                |
+| `PAYOUT_CRON_SCHEDULE`             | Payout BullMQ cron                 | Default `0 2 * * *`.                                                                                         |
+| `PAYOUT_CRON_TIMEZONE`             | Payout cron timezone               | Default `Asia/Bangkok`.                                                                                      |
 | `COMMISSION_GO_LIVE_AT` ★          | Platform commission cutoff instant | ISO-8601 UTC, e.g. `2026-01-01T00:00:00.000Z`. Required when `NODE_ENV=production` or the API will not boot. |
 
 **Count: 45 variables** (6 deploy/infra including optional `BUILD_ON_HOST` + `SSM_CLOUDWATCH_LOG_GROUP`, 5 Caddy, 34 application from `env.manifest.json`).

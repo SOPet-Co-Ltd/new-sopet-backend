@@ -47,7 +47,7 @@ describe('HttpExceptionFilter', () => {
   });
 
   it('keeps details and does not leak SAFE_SERVER_MESSAGE on unknown errors', () => {
-    const { host, status, json } = createHost();
+    const { host, json } = createHost();
 
     filter.catch(
       new BadRequestException({
@@ -69,7 +69,9 @@ describe('HttpExceptionFilter', () => {
     );
 
     const { host: host500, status: status500, json: json500 } = createHost();
-    const errorSpy = jest.spyOn((filter as unknown as { logger: { error: unknown } }).logger, 'error').mockImplementation();
+    const errorSpy = jest
+      .spyOn((filter as unknown as { logger: { error: unknown } }).logger, 'error')
+      .mockImplementation();
     filter.catch(new Error('database connection lost'), host500);
     errorSpy.mockRestore();
 

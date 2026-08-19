@@ -38,6 +38,7 @@ import { LoginPageImagesSettingsService } from '../src/modules/platform/login-pa
 import { BankTransferSettingsService } from '../src/modules/platform/bank-transfer-settings.service';
 import { PlatformResolver } from '../src/modules/platform/platform.resolver';
 import { PlatformService } from '../src/modules/platform/platform.service';
+import { AuditLogsService } from '../src/modules/audit-logs/audit-logs.service';
 import { RedisService } from '../src/modules/redis/redis.service';
 import { StorageService } from '../src/modules/storage/storage.service';
 
@@ -185,6 +186,7 @@ describe('Login page images GraphQL HTTP (e2e)', () => {
         { provide: getRepositoryToken(Setting), useValue: settingsRepository },
         { provide: RedisService, useValue: redisService },
         { provide: StorageService, useValue: storageService },
+        { provide: AuditLogsService, useValue: { log: jest.fn() } },
       ],
     })
       .overrideGuard(JwtAuthGuard)
