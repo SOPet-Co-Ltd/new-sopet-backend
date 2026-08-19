@@ -208,6 +208,37 @@ export class StoresService {
     return store;
   }
 
+  /**
+   * Public store-by-id discovery: approved stores for everyone; non-approved only for
+   * admin or vendor members with store access (same STORE_NOT_FOUND anti-enumeration).
+   */
+  async findOneForDiscovery(
+    id: string,
+    viewer?: { userId?: string; role?: string },
+  ): Promise<Store> {
+    const store = await this.findOne(id);
+
+    if (store.status === StoreStatus.APPROVED) {
+      return store;
+    }
+
+    if (viewer?.role === 'admin') {
+      return store;
+    }
+
+    if (viewer?.role === 'vendor' && viewer.userId) {
+      const hasAccess = await this.userHasStoreAccess(viewer.userId, id);
+      if (hasAccess) {
+        return store;
+      }
+    }
+
+    throw new NotFoundException({
+      code: 'STORE_NOT_FOUND',
+      message: 'Store not found',
+    });
+  }
+
   // Get store by slug (public discovery — approved stores only)
   async findBySlug(slug: string): Promise<Store> {
     const store = await this.storeRepository.findOne({

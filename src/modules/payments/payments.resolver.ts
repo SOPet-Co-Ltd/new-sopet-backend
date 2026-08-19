@@ -1,5 +1,5 @@
 import { Args, Mutation, Query, Resolver, Subscription } from '@nestjs/graphql';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import { PaymentEventsService, type PaymentStatusUpdatedPayload } from './payment-events.service';
 import { BankTransferDetailsType, PaymentType } from '../../graphql/models/types';
@@ -50,11 +50,13 @@ export class PaymentsResolver {
   @Public()
   async payment(
     @Args('id') id: string,
+    @Args('orderNumber', { type: () => String, nullable: true }) orderNumber?: string,
     @CurrentUser('id') customerId?: string,
     @CurrentUser('role') role?: string,
   ): Promise<PaymentType> {
     const effectiveCustomerId = role === 'customer' ? customerId : undefined;
-    const payment = await this.paymentsService.findById(id, effectiveCustomerId);
+    const guestOrderNumber = effectiveCustomerId ? undefined : orderNumber?.trim();
+    const payment = await this.paymentsService.findById(id, effectiveCustomerId, guestOrderNumber);
     return this.mapPayment(payment);
   }
 
@@ -62,11 +64,17 @@ export class PaymentsResolver {
   @Public()
   async paymentByOrderId(
     @Args('orderId') orderId: string,
+    @Args('orderNumber', { type: () => String, nullable: true }) orderNumber?: string,
     @CurrentUser('id') customerId?: string,
     @CurrentUser('role') role?: string,
   ): Promise<PaymentType> {
     const effectiveCustomerId = role === 'customer' ? customerId : undefined;
-    const payment = await this.paymentsService.findLatestByOrderId(orderId, effectiveCustomerId);
+    const guestOrderNumber = effectiveCustomerId ? undefined : orderNumber?.trim();
+    const payment = await this.paymentsService.findLatestByOrderId(
+      orderId,
+      effectiveCustomerId,
+      guestOrderNumber,
+    );
     return this.mapPayment(payment);
   }
 
@@ -87,9 +95,11 @@ export class PaymentsResolver {
     resolve: (payload: PaymentStatusUpdatedPayload) => payload.paymentStatusUpdated,
   })
   @Public()
-  paymentStatusUpdated(
+  async paymentStatusUpdated(
     @Args('paymentId', { type: () => String, nullable: true }) paymentId?: string,
     @Args('orderId', { type: () => String, nullable: true }) orderId?: string,
+    @CurrentUser('id') userId?: string,
+    @CurrentUser('role') role?: string,
   ) {
     if (!paymentId && !orderId) {
       throw new BadRequestException({
@@ -97,6 +107,12 @@ export class PaymentsResolver {
         message: 'Either paymentId or orderId is required',
       });
     }
+
+    await this.paymentsService.assertCanSubscribeToPaymentStatus({
+      paymentId,
+      orderId,
+      userId: role === 'customer' ? userId : undefined,
+    });
 
     return this.paymentEventsService.paymentStatusUpdatedIterator();
   }
@@ -118,6 +134,7 @@ export class PaymentsResolver {
       omiseToken: input.omiseToken,
       savedPaymentMethodId: input.savedPaymentMethodId,
       customerId: effectiveCustomerId,
+      orderNumber: effectiveCustomerId ? undefined : input.orderNumber?.trim(),
     });
 
     const payment = await this.paymentsService.findById(result.paymentId, effectiveCustomerId);

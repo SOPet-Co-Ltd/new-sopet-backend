@@ -19,6 +19,7 @@ import { CustomerRepository } from '../../database/repositories/customer.reposit
 import { GuestOrderLinkService } from '../orders/guest-order-link.service';
 import { StorageService } from '../storage/storage.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { RedisService } from '../redis/redis.service';
 
 describe('AuthService password reset', () => {
   let service: AuthService;
@@ -82,6 +83,15 @@ describe('AuthService password reset', () => {
           },
         },
         { provide: AuditLogsService, useValue: { log: jest.fn() } },
+        {
+          provide: RedisService,
+          useValue: {
+            isAvailable: jest.fn().mockReturnValue(false),
+            get: jest.fn(),
+            set: jest.fn(),
+            del: jest.fn(),
+          },
+        },
       ],
     }).compile();
 

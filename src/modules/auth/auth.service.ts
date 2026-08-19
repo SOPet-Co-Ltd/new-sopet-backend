@@ -10,7 +10,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, MoreThan } from 'typeorm';
-import { createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import * as bcrypt from 'bcrypt';
 import { Customer } from '../../database/entities/customer.entity';
 import { User, UserRole } from '../../database/entities/user.entity';
@@ -33,6 +33,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constants';
 import { getAuditRequestContext } from '../audit-logs/audit-request-context';
 import { AuditActorType } from '../../database/entities/audit-log.entity';
+import { RedisService } from '../redis/redis.service';
 import {
   finalizeCustomerDeletion,
   isAdminSuspended,
@@ -76,6 +77,7 @@ export class AuthService {
     private readonly emailDeliveryService: EmailDeliveryService,
     private readonly storageService: StorageService,
     private readonly auditLogsService: AuditLogsService,
+    private readonly redisService: RedisService,
   ) {}
 
   private generateOtp(): string {
@@ -351,7 +353,12 @@ export class AuthService {
         throw new UnauthorizedException('Invalid token type');
       }
 
-      const newPayload: Omit<JwtPayload, 'type'> = {
+      if (payload.jti) {
+        await this.assertRefreshTokenJtiValid(payload.jti, payload.sub);
+        await this.invalidateRefreshTokenJti(payload.jti);
+      }
+
+      const newPayload: Omit<JwtPayload, 'type' | 'jti'> = {
         sub: payload.sub,
         email: payload.email,
         phone: payload.phone,
@@ -390,11 +397,101 @@ export class AuthService {
       if (this.isSuspensionAuthError(error)) {
         throw error;
       }
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
       throw new UnauthorizedException({
         code: 'INVALID_REFRESH_TOKEN',
         message: 'Invalid or expired refresh token',
       });
     }
+  }
+
+  private refreshTokenRedisKey(jti: string): string {
+    return `refresh:jti:${jti}`;
+  }
+
+  private refreshRevokedRedisKey(sub: string): string {
+    return `refresh:revoked:${sub}`;
+  }
+
+  private getRefreshTtlSeconds(): number {
+    const configured = this.configService.get<string>('jwt.refreshTokenExpiresIn') ?? '7d';
+    const match = /^(\d+)([smhd])$/.exec(configured);
+    if (!match) {
+      return 7 * 24 * 60 * 60;
+    }
+    const amount = Number.parseInt(match[1], 10);
+    switch (match[2]) {
+      case 's':
+        return amount;
+      case 'm':
+        return amount * 60;
+      case 'h':
+        return amount * 60 * 60;
+      case 'd':
+        return amount * 24 * 60 * 60;
+      default:
+        return 7 * 24 * 60 * 60;
+    }
+  }
+
+  private async assertRefreshTokenJtiValid(jti: string, sub: string): Promise<void> {
+    if (await this.isRefreshSessionRevoked(sub)) {
+      throw new UnauthorizedException({
+        code: 'REFRESH_TOKEN_REVOKED',
+        message: 'Refresh token has been revoked',
+      });
+    }
+
+    if (!this.redisService.isAvailable()) {
+      return;
+    }
+
+    const storedSub = await this.redisService.get(this.refreshTokenRedisKey(jti));
+    if (!storedSub) {
+      await this.revokeAllRefreshSessions(sub);
+      throw new UnauthorizedException({
+        code: 'REFRESH_TOKEN_REUSE',
+        message: 'Refresh token reuse detected — all sessions revoked',
+      });
+    }
+
+    if (storedSub !== sub) {
+      throw new UnauthorizedException({
+        code: 'INVALID_REFRESH_TOKEN',
+        message: 'Invalid or expired refresh token',
+      });
+    }
+  }
+
+  private async invalidateRefreshTokenJti(jti: string): Promise<void> {
+    if (!this.redisService.isAvailable()) {
+      return;
+    }
+    await this.redisService.del(this.refreshTokenRedisKey(jti));
+  }
+
+  private async storeRefreshTokenJti(jti: string, sub: string): Promise<void> {
+    if (!this.redisService.isAvailable()) {
+      return;
+    }
+    await this.redisService.set(this.refreshTokenRedisKey(jti), sub, this.getRefreshTtlSeconds());
+  }
+
+  private async isRefreshSessionRevoked(sub: string): Promise<boolean> {
+    if (!this.redisService.isAvailable()) {
+      return false;
+    }
+    const revoked = await this.redisService.get(this.refreshRevokedRedisKey(sub));
+    return revoked === '1';
+  }
+
+  private async revokeAllRefreshSessions(sub: string): Promise<void> {
+    if (!this.redisService.isAvailable()) {
+      return;
+    }
+    await this.redisService.set(this.refreshRevokedRedisKey(sub), '1', this.getRefreshTtlSeconds());
   }
 
   private isSuspensionAuthError(error: unknown): boolean {
@@ -410,8 +507,9 @@ export class AuthService {
   }
 
   private async generateTokens(
-    payload: Omit<JwtPayload, 'type'>,
+    payload: Omit<JwtPayload, 'type' | 'jti'>,
   ): Promise<{ accessToken: string; refreshToken: string }> {
+    const refreshJti = randomUUID();
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(
         { ...payload, type: 'access' },
@@ -420,12 +518,14 @@ export class AuthService {
         },
       ),
       this.jwtService.signAsync(
-        { ...payload, type: 'refresh' },
+        { ...payload, type: 'refresh', jti: refreshJti },
         {
           expiresIn: this.configService.get<string>('jwt.refreshTokenExpiresIn'),
         },
       ),
     ]);
+
+    await this.storeRefreshTokenJti(refreshJti, payload.sub);
 
     return { accessToken, refreshToken };
   }

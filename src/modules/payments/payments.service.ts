@@ -39,10 +39,12 @@ import {
   OrderAuditEventType,
   VENDOR_ADMIN_ACTOR_LABEL,
 } from '../order-audit-logs/order-audit-log.constants';
+import { roundMoney } from '../sale-campaigns/sale-campaign-pricing';
 
 interface OmiseCharge {
   id: string;
   status: string;
+  amount?: number;
   authorize_uri?: string;
   source?: { scannable_code?: { image?: { download_uri?: string } } };
   failure_code?: string;
@@ -515,6 +517,32 @@ export class PaymentsService {
     return PaymentMethod.COD;
   }
 
+  private deriveOrderChargeAmount(order: Order): number {
+    return roundMoney(Number(order.total));
+  }
+
+  private orderTotalToSatang(orderTotal: number): number {
+    return Math.round(roundMoney(Number(orderTotal)) * 100);
+  }
+
+  private assertClientAmountMatchesOrderTotal(clientAmount: number, order: Order): void {
+    const serverAmount = this.deriveOrderChargeAmount(order);
+    const clientRounded = roundMoney(Number(clientAmount));
+    if (clientRounded !== serverAmount) {
+      throw new BadRequestException({
+        code: 'PAYMENT_AMOUNT_MISMATCH',
+        message: 'Payment amount does not match order total',
+      });
+    }
+  }
+
+  private paymentAmountMatchesOrderTotal(payment: Payment, order: Order): boolean {
+    return (
+      this.orderTotalToSatang(Number(payment.amount)) ===
+      this.orderTotalToSatang(Number(order.total))
+    );
+  }
+
   async getBankTransferDetails(): Promise<{
     bankName: string;
     accountName: string;
@@ -808,7 +836,11 @@ export class PaymentsService {
     return this.mapOmiseCardToSavedDetails(card, token.card.fingerprint);
   }
 
-  async assertCanPayForOrder(orderId: string, customerId?: string): Promise<Order> {
+  async assertCanPayForOrder(
+    orderId: string,
+    customerId?: string,
+    orderNumber?: string,
+  ): Promise<Order> {
     const order = await this.orderRepository.findOne({
       where: { id: orderId },
       relations: ['items'],
@@ -818,6 +850,22 @@ export class PaymentsService {
         code: 'ORDER_NOT_FOUND',
         message: 'Order not found',
       });
+    }
+
+    if (!customerId) {
+      const normalizedOrderNumber = orderNumber?.trim();
+      if (!normalizedOrderNumber) {
+        throw new ForbiddenException({
+          code: 'ORDER_NUMBER_REQUIRED',
+          message: 'Order number is required for guest payment access',
+        });
+      }
+      if (order.orderNumber !== normalizedOrderNumber) {
+        throw new ForbiddenException({
+          code: 'FORBIDDEN',
+          message: 'You do not have access to pay for this order',
+        });
+      }
     }
 
     if (order.customerId && order.customerId !== customerId) {
@@ -839,7 +887,54 @@ export class PaymentsService {
     return order;
   }
 
-  async findById(id: string, customerId?: string): Promise<Payment> {
+  async assertCanSubscribeToPaymentStatus(params: {
+    paymentId?: string;
+    orderId?: string;
+    userId?: string;
+  }): Promise<void> {
+    const { paymentId, orderId, userId } = params;
+
+    if (userId) {
+      const resolvedOrderId =
+        orderId ??
+        (
+          await this.paymentRepository.findOne({
+            where: { id: paymentId },
+            select: ['id', 'orderId'],
+          })
+        )?.orderId;
+
+      if (!resolvedOrderId) {
+        throw new ForbiddenException({
+          code: 'FORBIDDEN',
+          message: 'You do not have access to payment status updates for this order',
+        });
+      }
+
+      await this.assertCanPayForOrder(resolvedOrderId, userId);
+      return;
+    }
+
+    if (!orderId) {
+      throw new ForbiddenException({
+        code: 'FORBIDDEN',
+        message: 'Authentication or guest order proof is required for payment subscriptions',
+      });
+    }
+
+    const order = await this.orderRepository.findOne({
+      where: { id: orderId },
+      select: ['id', 'guestPhone', 'customerId'],
+    });
+    if (!order?.guestPhone) {
+      throw new ForbiddenException({
+        code: 'FORBIDDEN',
+        message: 'You do not have access to payment status updates for this order',
+      });
+    }
+  }
+
+  async findById(id: string, customerId?: string, orderNumber?: string): Promise<Payment> {
     const payment = await this.paymentRepository.findOne({
       where: { id },
       relations: ['order'],
@@ -851,12 +946,16 @@ export class PaymentsService {
       });
     }
 
-    await this.assertCanPayForOrder(payment.orderId, customerId);
+    await this.assertCanPayForOrder(payment.orderId, customerId, orderNumber);
     return this.expirePendingQrPaymentIfNeeded(payment);
   }
 
-  async findLatestByOrderId(orderId: string, customerId?: string): Promise<Payment> {
-    await this.assertCanPayForOrder(orderId, customerId);
+  async findLatestByOrderId(
+    orderId: string,
+    customerId?: string,
+    orderNumber?: string,
+  ): Promise<Payment> {
+    await this.assertCanPayForOrder(orderId, customerId, orderNumber);
 
     const payment = await this.paymentRepository.findOne({
       where: { orderId },
@@ -891,10 +990,11 @@ export class PaymentsService {
       omiseToken,
       savedPaymentMethodId,
       customerId,
+      orderNumber,
     } = createChargeDto;
     const paymentMethod = normalizeCheckoutPaymentMethod(rawPaymentMethod);
 
-    const order = await this.assertCanPayForOrder(orderId, customerId);
+    const order = await this.assertCanPayForOrder(orderId, customerId, orderNumber);
 
     // Eligibility gate (all methods, including COD) — unpaid-switch Backend DD.
     const latestPayment = await this.paymentRepository.findOne({
@@ -940,6 +1040,9 @@ export class PaymentsService {
         });
         this.assertOrderPayableForCreate(lockedOrder, latestUnderLock);
 
+        this.assertClientAmountMatchesOrderTotal(amount, lockedOrder);
+        const serverAmount = this.deriveOrderChargeAmount(lockedOrder);
+
         await this.supersedePendingPaymentsForOrder(orderId, manager);
 
         const previousPaymentMethod = lockedOrder.paymentMethod;
@@ -953,7 +1056,7 @@ export class PaymentsService {
 
           const payment = manager.create(Payment, {
             orderId,
-            amount,
+            amount: serverAmount,
             currency,
             paymentMethod: orderPaymentMethod,
             status: 'pending',
@@ -974,7 +1077,7 @@ export class PaymentsService {
           return {
             paymentId: payment.id,
             status: 'pending',
-            amount,
+            amount: serverAmount,
             currency,
             paymentMethod,
           };
@@ -987,11 +1090,11 @@ export class PaymentsService {
           });
         }
 
-        const amountSatang = Math.round(Number(amount) * 100);
+        const amountSatang = Math.round(serverAmount * 100);
 
         const payment = manager.create(Payment, {
           orderId,
-          amount,
+          amount: serverAmount,
           currency,
           paymentMethod: orderPaymentMethod,
           status: 'pending',
@@ -1095,7 +1198,7 @@ export class PaymentsService {
         const response: CreateChargeResult = {
           paymentId: payment.id,
           status: payment.status,
-          amount,
+          amount: serverAmount,
           currency,
           paymentMethod,
           authorizeUri: authorizeUri ?? undefined,
@@ -1229,10 +1332,12 @@ export class PaymentsService {
     }
 
     let chargeStatus = charge.status;
+    let apiChargeAmount: number | undefined;
     if (this.omiseSecretKey) {
       try {
         const apiCharge = await this.omiseRequest<OmiseCharge>(`/charges/${charge.id}`);
         chargeStatus = apiCharge.status;
+        apiChargeAmount = apiCharge.amount;
       } catch (error) {
         this.logger.error(`Failed to re-fetch Omise charge ${charge.id}: ${error}`);
         return;
@@ -1240,6 +1345,21 @@ export class PaymentsService {
     }
 
     if (payload.key === 'charge.complete' && chargeStatus === 'successful') {
+      const expectedSatang = this.orderTotalToSatang(Number(order.total));
+      if (apiChargeAmount !== undefined && apiChargeAmount !== expectedSatang) {
+        this.logger.error(
+          JSON.stringify({
+            event: 'payment_amount_mismatch_webhook',
+            orderId: order.id,
+            paymentId: payment.id,
+            omiseChargeId: charge.id,
+            expectedSatang,
+            actualSatang: apiChargeAmount,
+            orderTotal: order.total,
+          }),
+        );
+        return;
+      }
       await this.markOrderPaid(order, payment, charge.id);
       return;
     }
@@ -1267,6 +1387,22 @@ export class PaymentsService {
   }
 
   private async markOrderPaid(order: Order, payment: Payment, chargeId: string): Promise<void> {
+    if (!this.paymentAmountMatchesOrderTotal(payment, order)) {
+      this.logger.error(
+        JSON.stringify({
+          event: 'payment_amount_mismatch_mark_paid',
+          orderId: order.id,
+          paymentId: payment.id,
+          omiseChargeId: chargeId,
+          expectedSatang: this.orderTotalToSatang(Number(order.total)),
+          paymentSatang: this.orderTotalToSatang(Number(payment.amount)),
+          orderTotal: order.total,
+          paymentAmount: payment.amount,
+        }),
+      );
+      return;
+    }
+
     await this.paymentRepository.manager.transaction(async (trx) => {
       payment.status = 'paid';
       await trx.save(payment);

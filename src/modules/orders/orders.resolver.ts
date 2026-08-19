@@ -1,5 +1,6 @@
 import { Args, Int, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { ForbiddenException, NotFoundException, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { OrdersService } from './orders.service';
 import { OrderFulfillmentService } from './order-fulfillment.service';
 import { PaymentsService } from '../payments/payments.service';
@@ -114,6 +115,7 @@ export class OrdersResolver {
 
   @Query(() => OrderTrackingType)
   @Public()
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   @UseGuards(GuestOrderLookupRateLimitGuard)
   async orderTracking(@Args('orderNumber') orderNumber: string): Promise<OrderTrackingType> {
     const order = await this.ordersService.findByOrderNumber(orderNumber.trim());

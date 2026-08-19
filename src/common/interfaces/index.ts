@@ -5,6 +5,8 @@ export interface JwtPayload {
   role?: 'admin' | 'vendor' | 'customer';
   storeId?: string;
   type: 'access' | 'refresh';
+  /** Present on refresh tokens — stored in Redis for one-time rotation. */
+  jti?: string;
 }
 
 export interface PaginationParams {

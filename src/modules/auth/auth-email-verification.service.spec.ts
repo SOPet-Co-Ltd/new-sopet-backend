@@ -18,6 +18,7 @@ import { CustomerRepository } from '../../database/repositories/customer.reposit
 import { GuestOrderLinkService } from '../orders/guest-order-link.service';
 import { StorageService } from '../storage/storage.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { RedisService } from '../redis/redis.service';
 import { AuditAction } from '../audit-logs/audit-log.constants';
 
 describe('AuthService email verification', () => {
@@ -69,6 +70,15 @@ describe('AuthService email verification', () => {
           },
         },
         { provide: AuditLogsService, useValue: auditLogsService },
+        {
+          provide: RedisService,
+          useValue: {
+            isAvailable: jest.fn().mockReturnValue(false),
+            get: jest.fn(),
+            set: jest.fn(),
+            del: jest.fn(),
+          },
+        },
       ],
     }).compile();
 

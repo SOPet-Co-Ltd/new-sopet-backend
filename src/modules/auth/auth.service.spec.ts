@@ -20,6 +20,7 @@ import { GuestOrderLinkService } from '../orders/guest-order-link.service';
 import { EmailDeliveryService } from '../email/email-delivery.service';
 import { StorageService } from '../storage/storage.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { RedisService } from '../redis/redis.service';
 
 const TEST_JWT_SECRET = 'test-jwt-secret';
 
@@ -70,6 +71,12 @@ describe('AuthService', () => {
     findOne: jest.fn(),
     find: jest.fn().mockResolvedValue([]),
   };
+  const redisService = {
+    isAvailable: jest.fn().mockReturnValue(true),
+    get: jest.fn(),
+    set: jest.fn(),
+    del: jest.fn(),
+  };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -97,6 +104,7 @@ describe('AuthService', () => {
           },
         },
         { provide: AuditLogsService, useValue: { log: jest.fn() } },
+        { provide: RedisService, useValue: redisService },
       ],
     }).compile();
 
@@ -471,13 +479,44 @@ describe('AuthService', () => {
       phone: '+66812345678',
       role: 'customer',
       type: 'refresh',
+      jti: 'jti-1',
     });
     customerRepo.findOne.mockResolvedValue({ id: 'cust-1', isActive: true });
+    redisService.get.mockResolvedValue('cust-1');
 
     const result = await service.refreshToken('valid-refresh');
 
     expect(result.accessToken).toBe('token-access');
     expect(result.refreshToken).toBe('token-refresh');
+    expect(redisService.del).toHaveBeenCalledWith('refresh:jti:jti-1');
+    expect(redisService.set).toHaveBeenCalledWith(
+      expect.stringMatching(/^refresh:jti:/),
+      'cust-1',
+      expect.any(Number),
+    );
+  });
+
+  it('rejects refresh token reuse and revokes sessions', async () => {
+    jwtService.verify.mockReturnValue({
+      sub: 'cust-1',
+      phone: '+66812345678',
+      role: 'customer',
+      type: 'refresh',
+      jti: 'jti-reused',
+    });
+    redisService.get.mockImplementation(async (key: string) => {
+      if (key === 'refresh:jti:jti-reused') return null;
+      return null;
+    });
+
+    await expect(service.refreshToken('reused-refresh')).rejects.toMatchObject({
+      response: { code: 'REFRESH_TOKEN_REUSE' },
+    });
+    expect(redisService.set).toHaveBeenCalledWith(
+      'refresh:revoked:cust-1',
+      '1',
+      expect.any(Number),
+    );
   });
 
   it('rejects invalid refresh token', async () => {
@@ -494,7 +533,9 @@ describe('AuthService', () => {
       phone: '+66812345678',
       role: 'customer',
       type: 'refresh',
+      jti: 'jti-2',
     });
+    redisService.get.mockResolvedValue('cust-1');
     customerRepo.findOne.mockResolvedValue({ id: 'cust-1', isActive: false });
 
     await expect(service.refreshToken('valid-refresh')).rejects.toMatchObject({
@@ -509,7 +550,9 @@ describe('AuthService', () => {
       role: 'vendor',
       type: 'refresh',
       storeId: 'store-1',
+      jti: 'jti-3',
     });
+    redisService.get.mockResolvedValue('vendor-1');
     userRepo.findOne.mockResolvedValue({ id: 'vendor-1', isActive: false });
 
     await expect(service.refreshToken('valid-refresh')).rejects.toMatchObject({
@@ -524,7 +567,9 @@ describe('AuthService', () => {
       role: 'vendor',
       type: 'refresh',
       storeId: 'store-1',
+      jti: 'jti-4',
     });
+    redisService.get.mockResolvedValue('vendor-1');
     userRepo.findOne.mockResolvedValue({ id: 'vendor-1', isActive: true });
 
     const result = await service.refreshToken('valid-refresh');
