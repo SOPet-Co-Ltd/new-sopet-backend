@@ -8,7 +8,10 @@ export type AuditRequestContext = {
 const REQUEST_ID_MAX_LENGTH = 64;
 const IP_ADDRESS_MAX_LENGTH = 45;
 const REQUEST_ID_HEADER = 'x-request-id';
+const CLIENT_IP_HEADER = 'x-sopet-client-ip';
+const VERCEL_FORWARDED_FOR_HEADER = 'x-vercel-forwarded-for';
 const FORWARDED_FOR_HEADER = 'x-forwarded-for';
+const REAL_IP_HEADER = 'x-real-ip';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -42,6 +45,27 @@ function sliceOrNull(value: string | null, maxLength: number): string | null {
   return value.slice(0, maxLength);
 }
 
+function firstHop(value: string | null): string | null {
+  const hop = value?.split(',')[0]?.trim() ?? '';
+  return hop || null;
+}
+
+/**
+ * Prefer the BFF-stamped visitor IP. Cloudflare in front of the API often
+ * rewrites x-forwarded-for / req.ip to the Vercel serverless egress address
+ * (commonly iad1 / Virginia).
+ */
+function readClientIp(req: Record<string, unknown>): string | null {
+  const headers = req.headers;
+  return (
+    firstHop(readHeader(headers, CLIENT_IP_HEADER)) ??
+    firstHop(readHeader(headers, VERCEL_FORWARDED_FOR_HEADER)) ??
+    firstHop(readHeader(headers, REAL_IP_HEADER)) ??
+    firstHop(readHeader(headers, FORWARDED_FOR_HEADER)) ??
+    (typeof req.ip === 'string' ? req.ip.trim() || null : null)
+  );
+}
+
 /**
  * GraphQL-safe request id / client IP from context `req`.
  * Does not use HTTP-only RequestIdInterceptor / switchToHttp.
@@ -61,10 +85,7 @@ export function getAuditRequestContext(req: unknown): AuditRequestContext {
       req.requestId = requestId;
     }
 
-    const forwarded = readHeader(req.headers, FORWARDED_FOR_HEADER);
-    const firstHop = forwarded ? forwarded.split(',')[0]?.trim() || null : null;
-    const fallbackIp = typeof req.ip === 'string' ? req.ip.trim() || null : null;
-    const ipAddress = sliceOrNull(firstHop ?? fallbackIp, IP_ADDRESS_MAX_LENGTH);
+    const ipAddress = sliceOrNull(readClientIp(req), IP_ADDRESS_MAX_LENGTH);
 
     return { requestId, ipAddress };
   } catch {

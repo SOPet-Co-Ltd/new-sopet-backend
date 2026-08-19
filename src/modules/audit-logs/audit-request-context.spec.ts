@@ -59,6 +59,29 @@ describe('getAuditRequestContext', () => {
     expect(getAuditRequestContext(req).ipAddress).toBe('203.0.113.10');
   });
 
+  it('prefers x-sopet-client-ip over a Vercel/Cloudflare hop in x-forwarded-for', () => {
+    const req = {
+      headers: {
+        'x-sopet-client-ip': '203.0.113.10',
+        'x-forwarded-for': '3.82.112.93',
+      },
+      ip: '3.82.112.93',
+    };
+
+    expect(getAuditRequestContext(req).ipAddress).toBe('203.0.113.10');
+  });
+
+  it('prefers x-vercel-forwarded-for over x-forwarded-for', () => {
+    const req = {
+      headers: {
+        'x-vercel-forwarded-for': '198.51.100.7',
+        'x-forwarded-for': '3.82.112.93',
+      },
+    };
+
+    expect(getAuditRequestContext(req).ipAddress).toBe('198.51.100.7');
+  });
+
   it('falls back to req.ip when x-forwarded-for is absent', () => {
     const req = { headers: {}, ip: '198.51.100.7' };
 
