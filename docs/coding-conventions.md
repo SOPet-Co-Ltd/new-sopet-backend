@@ -68,6 +68,8 @@ Skips `type === 'custom'` arguments (GraphQL parent/context).
 
 ### Error shape
 
+Throw `{ code, message }` so the human `message` is available for **server logs**:
+
 ```typescript
 throw new BadRequestException({
   code: 'GUEST_PHONE_REQUIRED',
@@ -76,6 +78,12 @@ throw new BadRequestException({
 ```
 
 Never throw raw strings for business errors.
+
+**Published contract (clients):** only the stable code. GraphQL `errors[].message` and REST
+`error.message` are set to the same value as `extensions.code` / `error.code` via
+`toClientError()` in `graphql.module.ts` `formatError` and `HttpExceptionFilter`.
+Optional `details` (validation fields, etc.) still pass through. Catalog:
+`src/common/errors/error-codes.ts`.
 
 ## GraphQL mapping
 
@@ -93,9 +101,12 @@ Resolvers return mapped types, not raw entities.
 
 | Context | Handler                                              |
 | ------- | ---------------------------------------------------- |
-| GraphQL | `graphql.module.ts` `formatError`                    |
-| REST    | `HttpExceptionFilter`                                |
+| GraphQL | `graphql.module.ts` `formatError` + `toClientError`  |
+| REST    | `HttpExceptionFilter` + `toClientError`              |
 | Unknown | `mapUnknownException()` — TypeORM `23505` → CONFLICT |
+
+Internal mapping keeps human `message` for logs; clients only see the code (`message === code`).
+500s log the real exception text; clients receive `INTERNAL_SERVER_ERROR`.
 
 ## Logging
 

@@ -68,26 +68,36 @@ Access in resolvers via `@Context()`.
 
 ### Error format
 
-GraphQL errors are formatted in `graphql.module.ts`:
+GraphQL errors are formatted in `graphql.module.ts` via `exception-response.util.ts`
+(`mapException` / `responseFromHttpException` for logs, then `toClientError` for the response).
 
-```typescript
-formatError: (formattedError, error) => {
-  // Uses exception-response.util.ts
-};
-```
-
-Client receives:
+Clients receive **code only** — `message` is set to the same string as `extensions.code`:
 
 ```json
 {
   "errors": [
     {
-      "message": "...",
+      "message": "INSUFFICIENT_STOCK",
       "extensions": { "code": "INSUFFICIENT_STOCK" }
     }
   ]
 }
 ```
+
+REST uses the same contract in `HttpExceptionFilter`:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "INSUFFICIENT_STOCK",
+    "message": "INSUFFICIENT_STOCK"
+  }
+}
+```
+
+Human throw text stays on the server for logs only. Known codes live in
+`src/common/errors/error-codes.ts`.
 
 ### Subscriptions
 

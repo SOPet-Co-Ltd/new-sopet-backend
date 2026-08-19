@@ -72,11 +72,12 @@ Referenced as `${API_URL}/images/email/sopet-logo-white.png` from email template
 - `decorators/public.decorator.ts` — marks routes/handlers as unauthenticated
 - `decorators/roles.decorator.ts` — `@Roles('admin', 'vendor')` metadata (use with `RolesGuard`)
 - `decorators/allow-suspended-store.decorator.ts` — bypass store suspension checks
-- `filters/http-exception.filter.ts` — REST error envelope
+- `filters/http-exception.filter.ts` — REST error envelope (`message` = code)
+- `errors/error-codes.ts` — catalog of known SCREAMING_SNAKE error codes
 - `pipes/validation.pipe.ts` — global `class-validator` pipe
 - `interceptors/logging.interceptor.ts` — registered as global `APP_INTERCEPTOR`
 - `interceptors/request-id.interceptor.ts`, `transform.interceptor.ts` — present but not registered globally
-- `utils/exception-response.util.ts` — GraphQL + REST error mapping
+- `utils/exception-response.util.ts` — GraphQL + REST error mapping (`toClientError` for clients)
 - `utils/is-redis-configured.ts` — `REDIS_HOST` gate for cache/queues
 
 ---

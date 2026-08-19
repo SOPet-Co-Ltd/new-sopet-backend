@@ -8,9 +8,7 @@ import {
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { codeFromStatus, getHttpErrorStatus } from '../utils/http-error.util';
-import { mapException } from '../utils/exception-response.util';
-
-const PAYLOAD_TOO_LARGE_MESSAGE = 'ไฟล์หรือข้อมูลที่อัปโหลดมีขนาดใหญ่เกินไป';
+import { mapException, toClientError } from '../utils/exception-response.util';
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
@@ -25,31 +23,24 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
 
-    let status = HttpStatus.INTERNAL_SERVER_ERROR;
-    let message = 'Internal server error';
-    let code: string | undefined;
-    let details: unknown;
+    let mapped = mapException(exception);
 
     if (exception instanceof HttpException) {
-      const mapped = mapException(exception);
-      status = mapped.status;
-      message = mapped.message;
-      code = mapped.code;
-      details = mapped.details;
+      mapped = mapException(exception);
     } else if (getHttpErrorStatus(exception) !== undefined) {
-      status = getHttpErrorStatus(exception)!;
-      message = (exception as Error).message || message;
+      const status = getHttpErrorStatus(exception)!;
+      const internalMessage = (exception as Error).message || 'Internal server error';
       if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
-        this.logger.error(`Unhandled exception: ${message}`, (exception as Error).stack);
+        this.logger.error(`Unhandled exception: ${internalMessage}`, (exception as Error).stack);
       }
+      mapped = {
+        status,
+        code: codeFromStatus(status),
+        message: internalMessage,
+      };
     } else {
-      const mapped = mapException(exception);
-      status = mapped.status;
-      message = mapped.message;
-      code = mapped.code;
-      details = mapped.details;
-
-      if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
+      mapped = mapException(exception);
+      if (mapped.status >= HttpStatus.INTERNAL_SERVER_ERROR) {
         this.logger.error(
           `Unhandled exception: ${(exception as Error).message ?? 'unknown'}`,
           (exception as Error).stack,
@@ -57,19 +48,14 @@ export class HttpExceptionFilter implements ExceptionFilter {
       }
     }
 
-    const hasExplicitCode = code !== undefined;
-    code = code ?? codeFromStatus(status);
-
-    if (status === HttpStatus.PAYLOAD_TOO_LARGE && !hasExplicitCode) {
-      message = PAYLOAD_TOO_LARGE_MESSAGE;
-    }
+    const client = toClientError(mapped);
 
     const errorResponse = {
       success: false,
       error: {
-        code,
-        message,
-        ...(details ? { details } : {}),
+        code: client.code,
+        message: client.message,
+        ...(client.details !== undefined ? { details: client.details } : {}),
       },
       meta: {
         timestamp: new Date().toISOString(),
@@ -78,6 +64,6 @@ export class HttpExceptionFilter implements ExceptionFilter {
       },
     };
 
-    response.status(status).json(errorResponse);
+    response.status(client.status).json(errorResponse);
   }
 }

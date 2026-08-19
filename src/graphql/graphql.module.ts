@@ -8,6 +8,7 @@ import {
   mapException,
   mapUnknownException,
   responseFromHttpException,
+  toClientError,
 } from '../common/utils/exception-response.util';
 import { AppGraphqlResolver } from './app.resolver';
 import { AuthModule } from '../modules/auth/auth.module';
@@ -66,20 +67,10 @@ const graphqlErrorLogger = new Logger('GraphQLFormatError');
         ): GraphQLFormattedError => {
           const originalError = unwrapResolverError(error);
 
-          if (originalError instanceof HttpException) {
-            const mapped = responseFromHttpException(originalError);
-            return {
-              ...formattedError,
-              message: mapped.message,
-              extensions: {
-                ...formattedError.extensions,
-                code: mapped.code,
-                ...(mapped.details ? { details: mapped.details } : {}),
-              },
-            };
-          }
-
-          const mapped = mapUnknownException(originalError) ?? mapException(originalError);
+          const mapped =
+            originalError instanceof HttpException
+              ? responseFromHttpException(originalError)
+              : (mapUnknownException(originalError) ?? mapException(originalError));
 
           if (mapped.code === 'INTERNAL_SERVER_ERROR') {
             graphqlErrorLogger.error(
@@ -88,13 +79,14 @@ const graphqlErrorLogger = new Logger('GraphQLFormatError');
             );
           }
 
+          const client = toClientError(mapped);
           return {
             ...formattedError,
-            message: mapped.message,
+            message: client.message,
             extensions: {
               ...formattedError.extensions,
-              code: mapped.code,
-              ...(mapped.details ? { details: mapped.details } : {}),
+              code: client.code,
+              ...(client.details !== undefined ? { details: client.details } : {}),
             },
           };
         },

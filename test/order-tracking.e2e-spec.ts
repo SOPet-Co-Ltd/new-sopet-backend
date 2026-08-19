@@ -44,6 +44,7 @@ import {
   mapException,
   mapUnknownException,
   responseFromHttpException,
+  toClientError,
 } from '../src/common/utils/exception-response.util';
 
 const ORDER_TRACKING_QUERY = `
@@ -78,7 +79,7 @@ const ORDER_TRACKING_QUERY = `
 const SEED_ORDER_NUMBER = 'ORD-TRACK-E2E-001';
 const SEED_CREATED_AT = new Date('2024-06-15T10:30:00.000Z');
 const PRODUCT_IMAGE_URL = 'https://cdn.example.com/dog-food-thumb.jpg';
-const ORDER_NOT_FOUND_MESSAGE = 'Order not found';
+const ORDER_NOT_FOUND_CODE = 'ORDER_NOT_FOUND';
 
 interface GraphQLErrorExtension {
   code: string;
@@ -227,28 +228,19 @@ function graphqlFormatError(
 ): GraphQLFormattedError {
   const originalError = unwrapResolverError(error);
 
-  if (originalError instanceof HttpException) {
-    const mapped = responseFromHttpException(originalError);
-    return {
-      ...formattedError,
-      message: mapped.message,
-      extensions: {
-        ...formattedError.extensions,
-        code: mapped.code,
-        ...(mapped.details ? { details: mapped.details } : {}),
-      },
-    };
-  }
+  const mapped =
+    originalError instanceof HttpException
+      ? responseFromHttpException(originalError)
+      : (mapUnknownException(originalError) ?? mapException(originalError));
 
-  const mapped = mapUnknownException(originalError) ?? mapException(originalError);
-
+  const client = toClientError(mapped);
   return {
     ...formattedError,
-    message: mapped.message,
+    message: client.message,
     extensions: {
       ...formattedError.extensions,
-      code: mapped.code,
-      ...(mapped.details ? { details: mapped.details } : {}),
+      code: client.code,
+      ...(client.details ? { details: client.details } : {}),
     },
   };
 }
@@ -413,15 +405,15 @@ describe('Order tracking (e2e)', () => {
 
         expect(body.data?.orderTracking ?? null).toBeNull();
         expect(body.errors).toHaveLength(1);
-        expect(body.errors[0].extensions.code).toBe('ORDER_NOT_FOUND');
-        expect(body.errors[0].message).toBe(ORDER_NOT_FOUND_MESSAGE);
+        expect(body.errors[0].extensions.code).toBe(ORDER_NOT_FOUND_CODE);
+        expect(body.errors[0].message).toBe(ORDER_NOT_FOUND_CODE);
         errorCodes.push(body.errors[0].extensions.code);
         errorMessages.push(body.errors[0].message);
       }
 
-      expect(new Set(errorCodes)).toEqual(new Set(['ORDER_NOT_FOUND']));
+      expect(new Set(errorCodes)).toEqual(new Set([ORDER_NOT_FOUND_CODE]));
       expect(new Set(errorMessages).size).toBe(1);
-      expect(errorMessages[0]).toBe(ORDER_NOT_FOUND_MESSAGE);
+      expect(errorMessages[0]).toBe(ORDER_NOT_FOUND_CODE);
     });
   });
 });

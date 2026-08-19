@@ -7,8 +7,31 @@ export const SAFE_SERVER_MESSAGE = 'An unexpected error occurred. Please try aga
 export interface MappedExceptionResponse {
   status: number;
   code: string;
+  /** Internal / log-facing message — not published to clients. */
   message: string;
   details?: unknown;
+}
+
+/** Client-facing error shape: `message` is always the stable `code`. */
+export interface ClientExceptionResponse {
+  status: number;
+  code: string;
+  message: string;
+  details?: unknown;
+}
+
+/**
+ * Maps an internal exception payload to the published API contract.
+ * Clients must treat `code` as the only meaning; `message` equals `code`
+ * (GraphQL still requires `message`).
+ */
+export function toClientError(mapped: MappedExceptionResponse): ClientExceptionResponse {
+  return {
+    status: mapped.status,
+    code: mapped.code,
+    message: mapped.code,
+    ...(mapped.details !== undefined ? { details: mapped.details } : {}),
+  };
 }
 
 export function responseFromHttpException(exception: HttpException): MappedExceptionResponse {
