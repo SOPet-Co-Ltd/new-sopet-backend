@@ -22,7 +22,7 @@ export class GuestOrderLinkService {
         customerId: IsNull(),
         guestPhone: In(lookupValues),
       },
-      { customerId },
+      { customerId, guestPhone: null },
     );
 
     return result.affected ?? 0;

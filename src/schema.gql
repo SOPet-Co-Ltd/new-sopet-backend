@@ -769,7 +769,7 @@ type Mutation {
   clearLoginPageDesktopImage: LoginPageImagesType!
   clearLoginPageMobileImage: LoginPageImagesType!
   confirmBankTransferPaid(note: String, orderId: String!): OrderType!
-  confirmGuestOrderDelivered(input: ConfirmOrderDeliveredInput!): OrderType!
+  confirmGuestOrderDelivered(input: ConfirmOrderDeliveredInput!): OrderTrackingType!
   confirmOrderDelivered(input: ConfirmOrderDeliveredInput!): OrderType!
   createAddress(input: CreateAddressInput!): SavedAddressType!
   createBrand(input: CreateBrandInput!): BrandType!
@@ -1401,7 +1401,6 @@ type Query {
   getAdminInvitationByToken(token: String!): AdminInvitationType!
   getPasswordResetTokenStatus(token: String!): PasswordResetTokenStatusType!
   getStoreInvitationByToken(token: String!): StoreInvitationPreviewType!
-  guestOrders(guestPhone: String!): [OrderType!]!
 
   """GraphQL API health check"""
   health: HealthStatus!

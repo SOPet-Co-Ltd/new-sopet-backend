@@ -96,7 +96,6 @@ describe('OrdersResolver mapOrder extensions', () => {
       | 'findOne'
       | 'findByCustomer'
       | 'findByCustomerPaginated'
-      | 'findByGuestPhone'
       | 'findByStore'
       | 'findPendingBankTransferOrders'
       | 'findLatestPurchaseProductId'
@@ -116,7 +115,11 @@ describe('OrdersResolver mapOrder extensions', () => {
   let orderFulfillmentService: jest.Mocked<
     Pick<
       OrderFulfillmentService,
-      'markVendorOrderPaid' | 'acknowledgeVendorOrder' | 'shipVendorOrder' | 'cancelVendorOrder'
+      | 'markVendorOrderPaid'
+      | 'acknowledgeVendorOrder'
+      | 'shipVendorOrder'
+      | 'cancelVendorOrder'
+      | 'confirmOrderDelivered'
     >
   >;
   let paymentsService: jest.Mocked<
@@ -129,7 +132,6 @@ describe('OrdersResolver mapOrder extensions', () => {
       findOne: jest.fn(),
       findByCustomer: jest.fn(),
       findByCustomerPaginated: jest.fn(),
-      findByGuestPhone: jest.fn(),
       findByStore: jest.fn(),
       findPendingBankTransferOrders: jest.fn(),
       findLatestPurchaseProductId: jest.fn(),
@@ -153,6 +155,7 @@ describe('OrdersResolver mapOrder extensions', () => {
       acknowledgeVendorOrder: jest.fn(),
       shipVendorOrder: jest.fn(),
       cancelVendorOrder: jest.fn(),
+      confirmOrderDelivered: jest.fn(),
     };
     paymentsService = {
       confirmBankTransferPaid: jest.fn(),
@@ -269,21 +272,6 @@ describe('OrdersResolver mapOrder extensions', () => {
     });
   });
 
-  describe('guestOrders', () => {
-    it('returns extended fields on guest order list', async () => {
-      ordersService.findByGuestPhone.mockResolvedValue([
-        buildOrderFixture({ guestPhone: '0812345678', customerId: null }),
-      ]);
-
-      const result = await resolver.guestOrders('0812345678');
-
-      expect(result).toHaveLength(1);
-      expect(result[0].createdAt).toBeInstanceOf(Date);
-      expect(result[0].storeShippings).toHaveLength(2);
-      expect(result[0].items[0].variantId).toBe('variant-1');
-    });
-  });
-
   describe('orderTracking', () => {
     const PII_KEYS = [
       'id',
@@ -368,6 +356,60 @@ describe('OrdersResolver mapOrder extensions', () => {
       ordersService.findByOrderNumber.mockResolvedValue(buildOrderFixture());
 
       await resolver.orderTracking('ORD-TEST-001');
+
+      expect(mapOrderSpy).not.toHaveBeenCalled();
+      mapOrderSpy.mockRestore();
+    });
+  });
+
+  describe('confirmGuestOrderDelivered', () => {
+    const PII_KEYS = [
+      'id',
+      'customerId',
+      'guestPhone',
+      'guestName',
+      'guestEmail',
+      'shippingAddress',
+      'paymentMethod',
+      'paymentReference',
+      'notes',
+      'paidAt',
+    ] as const;
+
+    it('returns mapOrderTracking without PII', async () => {
+      const deliveredOrder = buildOrderFixture({
+        status: OrderStatus.DELIVERED,
+        guestPhone: '0812345678',
+        guestName: 'Guest User',
+        guestEmail: 'guest@example.com',
+      });
+      orderFulfillmentService.confirmOrderDelivered.mockResolvedValue(deliveredOrder);
+
+      const result = await resolver.confirmGuestOrderDelivered({
+        orderId: 'order-1',
+        guestPhone: '+66812345678',
+      });
+
+      expect(orderFulfillmentService.confirmOrderDelivered).toHaveBeenCalledWith(
+        'order-1',
+        undefined,
+        '+66812345678',
+      );
+      expect(result.orderNumber).toBe('ORD-TEST-001');
+      expect(result.status).toBe(OrderStatus.DELIVERED);
+      for (const key of PII_KEYS) {
+        expect(result).not.toHaveProperty(key);
+      }
+    });
+
+    it('does not invoke mapOrder', async () => {
+      const mapOrderSpy = jest.spyOn(OrderMapper, 'mapOrder');
+      orderFulfillmentService.confirmOrderDelivered.mockResolvedValue(buildOrderFixture());
+
+      await resolver.confirmGuestOrderDelivered({
+        orderId: 'order-1',
+        guestPhone: '0812345678',
+      });
 
       expect(mapOrderSpy).not.toHaveBeenCalled();
       mapOrderSpy.mockRestore();

@@ -11,6 +11,7 @@ describe('OrdersService', () => {
     findOne: jest.Mock;
     find: jest.Mock;
     update: jest.Mock;
+    count: jest.Mock;
     createQueryBuilder: jest.Mock;
   };
   let savedAddressRepository: { findOne: jest.Mock };
@@ -64,6 +65,7 @@ describe('OrdersService', () => {
       findOne: jest.fn(),
       find: jest.fn(),
       update: jest.fn(),
+      count: jest.fn().mockResolvedValue(0),
       createQueryBuilder: jest.fn(),
     };
     savedAddressRepository = { findOne: jest.fn() };

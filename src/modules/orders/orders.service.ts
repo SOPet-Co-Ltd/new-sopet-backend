@@ -1,6 +1,7 @@
+import { randomBytes } from 'crypto';
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
 import { FulfillmentStatus, OrderItem } from '../../database/entities/order-item.entity';
 import { OrderShippingAddress } from '../../database/entities/order-shipping-address.entity';
@@ -25,7 +26,7 @@ import { InventoryService } from '../inventory/inventory.service';
 import { CartService } from '../cart/cart.service';
 import { Store, StoreStatus } from '../../database/entities/store.entity';
 import { normalizeCheckoutPaymentMethod } from '../../common/utils/checkout-payment.util';
-import { guestPhoneLookupValues, normalizeThaiPhoneToLocal } from '../../common/utils/phone.util';
+import { normalizeThaiPhoneToLocal } from '../../common/utils/phone.util';
 import { PaginatedResponse } from '../../common/interfaces';
 import {
   applyCustomerOrderListFilter,
@@ -78,10 +79,23 @@ export class OrdersService {
     private orderAuditLogsService: OrderAuditLogsService,
   ) {}
 
-  private generateOrderNumber(): string {
+  private async generateUniqueOrderNumber(): Promise<string> {
     const timestamp = Date.now().toString(36).toUpperCase();
-    const random = Math.random().toString(36).substring(2, 6).toUpperCase();
-    return `ORD-${timestamp}-${random}`;
+    const maxAttempts = 3;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const random = randomBytes(4).toString('hex').toUpperCase();
+      const orderNumber = `ORD-${timestamp}-${random}`;
+      const collisionCount = await this.orderRepository.count({ where: { orderNumber } });
+      if (collisionCount === 0) {
+        return orderNumber;
+      }
+    }
+
+    throw new BadRequestException({
+      code: 'ORDER_NUMBER_GENERATION_FAILED',
+      message: 'Unable to generate unique order number',
+    });
   }
 
   private resolveAmphoe(shippingAddress: ShippingAddressDto): string {
@@ -357,7 +371,7 @@ export class OrdersService {
 
     const orderId = await this.dataSource.transaction(async (manager) => {
       const order = manager.create(Order, {
-        orderNumber: this.generateOrderNumber(),
+        orderNumber: await this.generateUniqueOrderNumber(),
         customerId: linkedCustomerId,
         guestPhone: normalizedGuestPhone ?? null,
         guestName: guestName ?? null,
@@ -658,16 +672,6 @@ export class OrdersService {
     }
 
     return order;
-  }
-
-  async findByGuestPhone(guestPhone: string): Promise<Order[]> {
-    const lookupValues = guestPhoneLookupValues(guestPhone);
-
-    return this.orderRepository.find({
-      where: { guestPhone: In(lookupValues) },
-      relations: ['items', 'shippingAddress', 'storeShippings'],
-      order: { createdAt: 'DESC' },
-    });
   }
 
   async mergeGuestOrders(customerId: string, phone: string): Promise<number> {
