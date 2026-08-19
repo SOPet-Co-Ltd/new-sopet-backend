@@ -1,6 +1,7 @@
-import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
+import { Args, Context, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { UseGuards } from '@nestjs/common';
 import { AuthService } from './auth.service';
+import type { GraphqlContext } from '../../graphql/loaders/graphql-context.types';
 import { Public, CurrentUser, Roles, AllowSuspendedStore } from '../../common/decorators';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
@@ -99,11 +100,17 @@ export class AuthResolver {
   @Mutation(() => VendorAuthPayload)
   @Public()
   @UseGuards(AuthRateLimitGuard)
-  async vendorLogin(@Args('input') input: VendorLoginInput): Promise<VendorAuthPayload> {
-    const result = await this.authService.login({
-      email: input.email,
-      password: input.password,
-    });
+  async vendorLogin(
+    @Args('input') input: VendorLoginInput,
+    @Context() context?: GraphqlContext,
+  ): Promise<VendorAuthPayload> {
+    const result = await this.authService.login(
+      {
+        email: input.email,
+        password: input.password,
+      },
+      context?.req,
+    );
 
     return {
       tokens: {
@@ -117,11 +124,17 @@ export class AuthResolver {
   @Mutation(() => VendorAuthPayload)
   @Public()
   @UseGuards(AuthRateLimitGuard)
-  async adminLogin(@Args('input') input: VendorLoginInput): Promise<VendorAuthPayload> {
-    const result = await this.authService.login({
-      email: input.email,
-      password: input.password,
-    });
+  async adminLogin(
+    @Args('input') input: VendorLoginInput,
+    @Context() context?: GraphqlContext,
+  ): Promise<VendorAuthPayload> {
+    const result = await this.authService.login(
+      {
+        email: input.email,
+        password: input.password,
+      },
+      context?.req,
+    );
 
     return {
       tokens: {
@@ -188,8 +201,9 @@ export class AuthResolver {
   @UseGuards(AuthRateLimitGuard)
   async requestPasswordReset(
     @Args('input') input: RequestPasswordResetInput,
+    @Context() context?: GraphqlContext,
   ): Promise<MessagePayload> {
-    return this.authService.requestPasswordReset(input.email);
+    return this.authService.requestPasswordReset(input.email, context?.req);
   }
 
   @Mutation(() => MessagePayload)
@@ -214,11 +228,16 @@ export class AuthResolver {
     @Args('vendorId') vendorId: string,
     @CurrentUser('id') adminId: string,
     @CurrentUser('email') adminEmail?: string,
+    @Context() context?: GraphqlContext,
   ): Promise<MessagePayload> {
-    return this.authService.adminTriggerVendorPasswordReset(vendorId, {
-      id: adminId,
-      fullName: adminEmail,
-    });
+    return this.authService.adminTriggerVendorPasswordReset(
+      vendorId,
+      {
+        id: adminId,
+        fullName: adminEmail,
+      },
+      context?.req,
+    );
   }
 
   @Mutation(() => MessagePayload)
@@ -228,11 +247,16 @@ export class AuthResolver {
     @Args('vendorId') vendorId: string,
     @CurrentUser('id') adminId: string,
     @CurrentUser('email') adminEmail?: string,
+    @Context() context?: GraphqlContext,
   ): Promise<MessagePayload> {
-    return this.authService.adminResendVendorEmailVerification(vendorId, {
-      id: adminId,
-      fullName: adminEmail,
-    });
+    return this.authService.adminResendVendorEmailVerification(
+      vendorId,
+      {
+        id: adminId,
+        fullName: adminEmail,
+      },
+      context?.req,
+    );
   }
 
   @Mutation(() => MessagePayload)
@@ -242,24 +266,35 @@ export class AuthResolver {
     @Args('vendorId') vendorId: string,
     @CurrentUser('id') adminId: string,
     @CurrentUser('email') adminEmail?: string,
+    @Context() context?: GraphqlContext,
   ): Promise<MessagePayload> {
-    return this.authService.adminVerifyVendorEmail(vendorId, {
-      id: adminId,
-      fullName: adminEmail,
-    });
+    return this.authService.adminVerifyVendorEmail(
+      vendorId,
+      {
+        id: adminId,
+        fullName: adminEmail,
+      },
+      context?.req,
+    );
   }
 
   @Mutation(() => MessagePayload)
   @Public()
-  async verifyEmail(@Args('input') input: VerifyEmailInput): Promise<MessagePayload> {
-    return this.authService.verifyEmail(input.token);
+  async verifyEmail(
+    @Args('input') input: VerifyEmailInput,
+    @Context() context?: GraphqlContext,
+  ): Promise<MessagePayload> {
+    return this.authService.verifyEmail(input.token, context?.req);
   }
 
   @Mutation(() => MessagePayload)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('vendor')
   @AllowSuspendedStore()
-  async resendEmailVerification(@CurrentUser('id') userId: string): Promise<MessagePayload> {
-    return this.authService.resendEmailVerification(userId);
+  async resendEmailVerification(
+    @CurrentUser('id') userId: string,
+    @Context() context?: GraphqlContext,
+  ): Promise<MessagePayload> {
+    return this.authService.resendEmailVerification(userId, context?.req);
   }
 }

@@ -8,7 +8,16 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../../common/decorators';
 import { AuditLog } from '../../database/entities/audit-log.entity';
 
+function readMetadataRequestId(metadata: AuditLog['metadata']): string | null {
+  if (!metadata || typeof metadata !== 'object') {
+    return null;
+  }
+  const requestId = (metadata as Record<string, unknown>).requestId;
+  return typeof requestId === 'string' && requestId.trim() ? requestId.trim() : null;
+}
+
 function mapAuditLog(log: AuditLog): AdminAuditLogType {
+  const requestId = log.requestId ?? readMetadataRequestId(log.metadata);
   return {
     id: log.id,
     actorType: log.actorType,
@@ -19,7 +28,7 @@ function mapAuditLog(log: AuditLog): AdminAuditLogType {
     resourceId: log.resourceId,
     metadata: log.metadata ? JSON.stringify(log.metadata) : null,
     ipAddress: log.ipAddress,
-    requestId: log.requestId,
+    requestId,
     createdAt: log.createdAt,
   };
 }

@@ -78,4 +78,29 @@ describe('AuditLogsResolver', () => {
     expect(result.items[0].requestId).toBe('req-mapped-1');
     expect(result.items[0].ipAddress).toBe('10.0.0.1');
   });
+
+  it('falls back to metadata.requestId when the column is null', async () => {
+    auditLogsService.findAllForAdmin.mockResolvedValue({
+      items: [
+        {
+          id: 'log-3',
+          actorType: AuditActorType.ADMIN,
+          actorId: 'admin-1',
+          actorLabel: 'admin@sopet.org',
+          action: AuditAction.LOGIN,
+          resourceType: AuditResourceType.USER,
+          resourceId: 'admin-1',
+          metadata: { requestId: 'req-from-metadata' },
+          ipAddress: null,
+          requestId: null,
+          createdAt: new Date('2026-08-19T00:00:00Z'),
+        },
+      ],
+      total: 1,
+    });
+
+    const result = await resolver.adminAuditLogs(1, 20, {});
+
+    expect(result.items[0].requestId).toBe('req-from-metadata');
+  });
 });
