@@ -16,5 +16,6 @@ export default registerAs('app', () => {
       ttl: parseInt(process.env.RATE_LIMIT_TTL || '60', 10) * 1000,
       limit: parseInt(process.env.RATE_LIMIT_MAX || '100', 10),
     },
+    healthCheckToken: process.env.HEALTH_CHECK_TOKEN || '',
   };
 });

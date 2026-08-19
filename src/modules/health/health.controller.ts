@@ -1,4 +1,4 @@
-import { Controller, Get, Logger } from '@nestjs/common';
+import { Controller, Get, Headers, Logger, UnauthorizedException } from '@nestjs/common';
 import {
   HealthCheck,
   HealthCheckService,
@@ -30,7 +30,8 @@ export class HealthController {
 
   @Get('ready')
   @HealthCheck()
-  readinessCheck() {
+  readinessCheck(@Headers('x-health-check-token') healthCheckToken?: string) {
+    this.assertHealthCheckToken(healthCheckToken);
     return this.health.check(this.buildChecks());
   }
 
@@ -38,6 +39,21 @@ export class HealthController {
   @HealthCheck()
   livenessCheck() {
     return { status: 'ok' };
+  }
+
+  private assertHealthCheckToken(providedToken?: string): void {
+    const expectedToken = this.config.get<string>('app.healthCheckToken');
+    if (!expectedToken) {
+      return;
+    }
+
+    if (providedToken !== expectedToken) {
+      this.logger.warn('Rejected /health/ready request with invalid or missing health check token');
+      throw new UnauthorizedException({
+        code: 'HEALTH_CHECK_UNAUTHORIZED',
+        message: 'Invalid or missing health check token',
+      });
+    }
   }
 
   private buildChecks(): Array<() => Promise<HealthIndicatorResult>> {

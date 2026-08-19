@@ -35,6 +35,7 @@ import { AuditLogsModule } from '../modules/audit-logs/audit-logs.module';
 import { OrderAuditLogsModule } from '../modules/order-audit-logs/order-audit-logs.module';
 import { GraphqlLoadersModule } from './loaders/graphql-loaders.module';
 import { GraphqlContextFactory } from './loaders/graphql-context.factory';
+import { buildGraphqlValidationRules, isGraphqlPlaygroundEnabled } from './graphql-validation';
 
 const graphqlErrorLogger = new Logger('GraphQLFormatError');
 
@@ -45,52 +46,57 @@ const graphqlErrorLogger = new Logger('GraphQLFormatError');
       driver: ApolloDriver,
       imports: [GraphqlLoadersModule],
       inject: [GraphqlContextFactory],
-      useFactory: (contextFactory: GraphqlContextFactory) => ({
-        autoSchemaFile: join(process.cwd(), 'src/schema.gql'),
-        sortSchema: true,
-        playground: process.env.NODE_ENV !== 'production',
-        subscriptions: {
-          'graphql-ws': true,
-        },
-        context: ({
-          req,
-          res,
-          extra,
-        }: {
-          req: unknown;
-          res: unknown;
-          extra?: { request?: unknown };
-        }) => contextFactory.create({ req: extra?.request ?? req, res }),
-        formatError: (
-          formattedError: GraphQLFormattedError,
-          error: unknown,
-        ): GraphQLFormattedError => {
-          const originalError = unwrapResolverError(error);
+      useFactory: (contextFactory: GraphqlContextFactory) => {
+        const playgroundEnabled = isGraphqlPlaygroundEnabled();
+        return {
+          autoSchemaFile: join(process.cwd(), 'src/schema.gql'),
+          sortSchema: true,
+          playground: playgroundEnabled,
+          introspection: playgroundEnabled,
+          validationRules: buildGraphqlValidationRules(),
+          subscriptions: {
+            'graphql-ws': true,
+          },
+          context: ({
+            req,
+            res,
+            extra,
+          }: {
+            req: unknown;
+            res: unknown;
+            extra?: { request?: unknown };
+          }) => contextFactory.create({ req: extra?.request ?? req, res }),
+          formatError: (
+            formattedError: GraphQLFormattedError,
+            error: unknown,
+          ): GraphQLFormattedError => {
+            const originalError = unwrapResolverError(error);
 
-          const mapped =
-            originalError instanceof HttpException
-              ? responseFromHttpException(originalError)
-              : (mapUnknownException(originalError) ?? mapException(originalError));
+            const mapped =
+              originalError instanceof HttpException
+                ? responseFromHttpException(originalError)
+                : (mapUnknownException(originalError) ?? mapException(originalError));
 
-          if (mapped.code === 'INTERNAL_SERVER_ERROR') {
-            graphqlErrorLogger.error(
-              originalError instanceof Error ? originalError.message : String(originalError),
-              originalError instanceof Error ? originalError.stack : undefined,
-            );
-          }
+            if (mapped.code === 'INTERNAL_SERVER_ERROR') {
+              graphqlErrorLogger.error(
+                originalError instanceof Error ? originalError.message : String(originalError),
+                originalError instanceof Error ? originalError.stack : undefined,
+              );
+            }
 
-          const client = toClientError(mapped);
-          return {
-            ...formattedError,
-            message: client.message,
-            extensions: {
-              ...formattedError.extensions,
-              code: client.code,
-              ...(client.details !== undefined ? { details: client.details } : {}),
-            },
-          };
-        },
-      }),
+            const client = toClientError(mapped);
+            return {
+              ...formattedError,
+              message: client.message,
+              extensions: {
+                ...formattedError.extensions,
+                code: client.code,
+                ...(client.details !== undefined ? { details: client.details } : {}),
+              },
+            };
+          },
+        };
+      },
     }),
     AuthModule,
     CartModule,

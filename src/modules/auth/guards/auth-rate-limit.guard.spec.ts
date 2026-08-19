@@ -33,16 +33,29 @@ describe('AuthRateLimitGuard', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    (
+      AuthRateLimitGuard as unknown as {
+        memoryBuckets: Map<string, { count: number; expiresAt: number }>;
+      }
+    ).memoryBuckets.clear();
     (GqlExecutionContext.create as jest.Mock).mockReturnValue({
       getContext: () => ({ req: { ip: '127.0.0.1' } }),
       getArgs: () => ({ input: { phone: '0812345678' } }),
     });
   });
 
-  it('skips rate limiting when Redis is unavailable', async () => {
+  it('uses in-memory fallback with 5/min per IP when Redis is unavailable', async () => {
     redisService.isAvailable.mockReturnValue(false);
 
     await expect(guard.canActivate(context)).resolves.toBe(true);
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    await expect(guard.canActivate(context)).rejects.toMatchObject({
+      status: HttpStatus.TOO_MANY_REQUESTS,
+      response: { code: 'RATE_LIMIT_EXCEEDED' },
+    });
     expect(redisService.get).not.toHaveBeenCalled();
     expect(redisService.set).not.toHaveBeenCalled();
   });
