@@ -8,7 +8,7 @@ import * as bcrypt from 'bcrypt';
 import { AuthService } from './auth.service';
 import { Customer } from '../../database/entities/customer.entity';
 import { User } from '../../database/entities/user.entity';
-import { OtpCode } from '../../database/entities/otp-code.entity';
+import { OtpCode, OtpPurpose } from '../../database/entities/otp-code.entity';
 import { Store, StoreStatus } from '../../database/entities/store.entity';
 import { StoreMember } from '../../database/entities/store-member.entity';
 import { PasswordResetToken } from '../../database/entities/password-reset-token.entity';
@@ -45,6 +45,7 @@ describe('AuthService', () => {
     create: jest.fn((x) => x),
     save: jest.fn(async (x) => x),
     findOne: jest.fn(),
+    update: jest.fn().mockResolvedValue({ affected: 0 }),
   };
   const jwtService = {
     signAsync: jest.fn(async (payload) => `token-${payload.type}`),
@@ -119,7 +120,12 @@ describe('AuthService', () => {
       expect.objectContaining({
         phone: '0812345678',
         code: expect.stringMatching(/^[a-f0-9]{64}$/),
+        purpose: OtpPurpose.LOGIN,
       }),
+    );
+    expect(otpRepo.update).toHaveBeenCalledWith(
+      { phone: '0812345678', isUsed: false },
+      { isUsed: true },
     );
     expect(otpRepo.save).toHaveBeenCalled();
     expect(smsService.sendOtp).toHaveBeenCalledWith('0812345678', expect.stringMatching(/^\d{6}$/));
@@ -129,8 +135,39 @@ describe('AuthService', () => {
     expect(savedCode).not.toBe(smsCode);
   });
 
+  it('invalidates previous unused OTPs before issuing a new one', async () => {
+    otpRepo.count.mockResolvedValue(1);
+
+    await service.sendOtp({ phone: '+66812345678' });
+
+    expect(otpRepo.update).toHaveBeenCalledWith(
+      { phone: '0812345678', isUsed: false },
+      { isUsed: true },
+    );
+    expect(otpRepo.update.mock.invocationCallOrder[0]).toBeLessThan(
+      otpRepo.save.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('sets OTP expiry to 5 minutes', async () => {
+    otpRepo.count.mockResolvedValue(0);
+    const before = Date.now();
+
+    await service.sendOtp({ phone: '+66812345678' });
+
+    const created = otpRepo.create.mock.calls[0][0] as { expiresAt: Date };
+    const ttlMs = created.expiresAt.getTime() - before;
+    expect(ttlMs).toBeGreaterThanOrEqual(5 * 60 * 1000 - 50);
+    expect(ttlMs).toBeLessThanOrEqual(5 * 60 * 1000 + 50);
+  });
+
   it('verifies OTP and returns tokens', async () => {
-    const otp = { phone: '0812345678', code: hashOtpForTest('123456'), isUsed: false };
+    const otp = {
+      phone: '0812345678',
+      code: hashOtpForTest('123456'),
+      isUsed: false,
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+    };
     otpRepo.findOne.mockResolvedValue(otp);
     customerRepoWrapper.findActiveByPhone.mockResolvedValue({
       id: 'cust-1',
@@ -160,11 +197,40 @@ describe('AuthService', () => {
     );
   });
 
+  it('rejects an expired OTP', async () => {
+    otpRepo.findOne.mockResolvedValue({
+      phone: '0812345678',
+      code: hashOtpForTest('123456'),
+      isUsed: false,
+      expiresAt: new Date(Date.now() - 1000),
+    });
+
+    await expect(service.verifyOtp({ phone: '+66812345678', code: '123456' })).rejects.toThrow(
+      UnauthorizedException,
+    );
+    expect(customerRepoWrapper.findActiveByPhone).not.toHaveBeenCalled();
+  });
+
+  it('rejects a previous OTP when a newer unused OTP exists', async () => {
+    otpRepo.findOne.mockResolvedValue({
+      phone: '0812345678',
+      code: hashOtpForTest('654321'),
+      isUsed: false,
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+    });
+
+    await expect(service.verifyOtp({ phone: '+66812345678', code: '123456' })).rejects.toThrow(
+      UnauthorizedException,
+    );
+    expect(customerRepoWrapper.findActiveByPhone).not.toHaveBeenCalled();
+  });
+
   it('rejects OTP verify for suspended customer', async () => {
     otpRepo.findOne.mockResolvedValue({
       phone: '0812345678',
       code: hashOtpForTest('123456'),
       isUsed: false,
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000),
     });
     customerRepoWrapper.findActiveByPhone.mockResolvedValue({
       id: 'cust-1',
@@ -184,6 +250,7 @@ describe('AuthService', () => {
       phone: '0812345678',
       code: hashOtpForTest('123456'),
       isUsed: false,
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000),
     });
     customerRepoWrapper.findActiveByPhone.mockResolvedValue({
       id: 'cust-1',
@@ -208,6 +275,7 @@ describe('AuthService', () => {
       phone: '0812345678',
       code: hashOtpForTest('123456'),
       isUsed: false,
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000),
     });
     customerRepoWrapper.findActiveByPhone.mockResolvedValue({
       id: 'cust-1',
@@ -365,6 +433,7 @@ describe('AuthService', () => {
       phone: '0811112222',
       code: hashOtpForTest('111111'),
       isUsed: false,
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000),
     });
     customerRepoWrapper.findActiveByPhone.mockResolvedValue(null);
 
@@ -379,19 +448,20 @@ describe('AuthService', () => {
       phone: '0811112222',
       code: hashOtpForTest('111111'),
       isUsed: false,
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000),
     });
     customerRepoWrapper.findActiveByPhone.mockResolvedValue(null);
 
     const result = await service.verifyOtp({ phone: '+66811112222', code: '111111' });
 
-    expect(otpRepo.findOne).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          phone: '0811112222',
-          code: hashOtpForTest('111111'),
-        }),
-      }),
-    );
+    expect(otpRepo.findOne).toHaveBeenCalledWith({
+      where: {
+        phone: '0811112222',
+        isUsed: false,
+        expiresAt: expect.anything(),
+      },
+      order: { createdAt: 'DESC' },
+    });
     expect(result.customer.phone).toBe('0811112222');
   });
 

@@ -40,6 +40,7 @@ export interface AuthServiceTestMocks {
     create: jest.Mock;
     save: jest.Mock;
     findOne: jest.Mock;
+    update: jest.Mock;
   };
   cartService: {
     mergeGuestCart: jest.Mock;
@@ -66,6 +67,7 @@ export function createAuthServiceTestMocks(): AuthServiceTestMocks {
       create: jest.fn((x) => x),
       save: jest.fn(async (x) => x),
       findOne: jest.fn(),
+      update: jest.fn().mockResolvedValue({ affected: 0 }),
     },
     cartService: {
       mergeGuestCart: jest.fn(),

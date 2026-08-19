@@ -17,7 +17,7 @@ import { User, UserRole } from '../../database/entities/user.entity';
 import { Store } from '../../database/entities/store.entity';
 import { StoreMember } from '../../database/entities/store-member.entity';
 import { pickDefaultAccessibleStoreId } from '../stores/store-selection.util';
-import { OtpCode } from '../../database/entities/otp-code.entity';
+import { OtpCode, OtpPurpose } from '../../database/entities/otp-code.entity';
 import { PasswordResetToken } from '../../database/entities/password-reset-token.entity';
 import { EmailVerificationToken } from '../../database/entities/email-verification-token.entity';
 import { CustomerRepository } from '../../database/repositories/customer.repository';
@@ -44,6 +44,9 @@ interface ReactivationJwtPayload {
   sub: string;
   purpose: 'reactivation';
 }
+
+const OTP_TTL_MS = 5 * 60 * 1000;
+const OTP_MAX_REQUESTS_PER_WINDOW = 3;
 
 @Injectable()
 export class AuthService {
@@ -98,6 +101,14 @@ export class AuthService {
     return timingSafeEqual(stored, provided);
   }
 
+  private isOtpExpired(expiresAt: Date | string | null | undefined): boolean {
+    if (!expiresAt) {
+      return true;
+    }
+    const expiresMs = new Date(expiresAt).getTime();
+    return Number.isNaN(expiresMs) || expiresMs <= Date.now();
+  }
+
   async sendOtp(sendOtpDto: SendOtpDto): Promise<{ message: string }> {
     const phone = normalizeThaiPhoneToLocal(sendOtpDto.phone);
 
@@ -105,11 +116,11 @@ export class AuthService {
     const recentAttempts = await this.otpRepository.count({
       where: {
         phone,
-        createdAt: MoreThan(new Date(Date.now() - 5 * 60 * 1000)),
+        createdAt: MoreThan(new Date(Date.now() - OTP_TTL_MS)),
       },
     });
 
-    if (recentAttempts >= 3) {
+    if (recentAttempts >= OTP_MAX_REQUESTS_PER_WINDOW) {
       throw new BadRequestException({
         code: 'TOO_MANY_ATTEMPTS',
         message: 'Too many OTP requests. Please try again in 5 minutes.',
@@ -117,11 +128,15 @@ export class AuthService {
     }
 
     const code = this.generateOtp();
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+    const expiresAt = new Date(Date.now() + OTP_TTL_MS);
+
+    // Only the newest OTP should work; mark prior unused codes as used.
+    await this.otpRepository.update({ phone, isUsed: false }, { isUsed: true });
 
     const otp = this.otpRepository.create({
       phone,
       code: this.hashOtp(code),
+      purpose: OtpPurpose.LOGIN,
       expiresAt,
     });
     await this.otpRepository.save(otp);
@@ -146,13 +161,13 @@ export class AuthService {
     const otp = await this.otpRepository.findOne({
       where: {
         phone,
-        code: this.hashOtp(code),
         isUsed: false,
         expiresAt: MoreThan(new Date()),
       },
+      order: { createdAt: 'DESC' },
     });
 
-    if (!otp || !this.otpHashesMatch(otp.code, code)) {
+    if (!otp || this.isOtpExpired(otp.expiresAt) || !this.otpHashesMatch(otp.code, code)) {
       throw new UnauthorizedException({
         code: 'INVALID_OTP',
         message: 'Invalid or expired OTP code',

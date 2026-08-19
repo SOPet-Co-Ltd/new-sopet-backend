@@ -30,6 +30,7 @@ describe('Checkout flow (integration)', () => {
         phone: '+66812345678',
         code: hashOtpForTest('654321'),
         isUsed: false,
+        expiresAt: new Date(Date.now() + 5 * 60 * 1000),
       });
       mocks.customerRepoWrapper.findActiveByPhone.mockResolvedValue({
         id: 'cust-1',

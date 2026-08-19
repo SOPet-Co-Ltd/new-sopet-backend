@@ -20,16 +20,24 @@ sequenceDiagram
   participant DB as OtpCode entity
 
   R->>S: sendOtp(phone)
-  S->>DB: Create OTP record
+  S->>DB: Invalidate unused OTPs for phone
+  S->>DB: Create OTP record (5 minute expiry)
   S->>SMS: sendOtpSms(phone, code)
   Note over SMS: Dev/log-only → ThaiBulkSMS → Twilio
+  Note over SMS: Message includes "Valid for 5 minutes"
 
   R->>S: verifyOtp(phone, code, sessionId?)
-  S->>DB: Validate OTP
+  S->>DB: Validate latest unused non-expired OTP
   S->>S: findOrCreateCustomer(phone)
   S->>S: mergeGuestCart(sessionId)
   S->>S: generateTokens(customer)
 ```
+
+OTP rules:
+
+- Each code is valid for **5 minutes** (`expiresAt`)
+- A new request marks previous unused codes as used — only the latest OTP works
+- Rate limit: max 3 send requests per phone in 5 minutes (`TOO_MANY_ATTEMPTS`)
 
 **Files:**
 
