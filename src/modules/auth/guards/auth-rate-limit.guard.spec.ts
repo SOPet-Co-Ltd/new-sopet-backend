@@ -39,12 +39,17 @@ describe('AuthRateLimitGuard', () => {
       }
     ).memoryBuckets.clear();
     (GqlExecutionContext.create as jest.Mock).mockReturnValue({
-      getContext: () => ({ req: { ip: '127.0.0.1' } }),
+      getContext: () => ({
+        req: {
+          ip: '127.0.0.1',
+          headers: { 'x-sopet-client-ip': '203.0.113.10' },
+        },
+      }),
       getArgs: () => ({ input: { phone: '0812345678' } }),
     });
   });
 
-  it('uses in-memory fallback with 5/min per IP when Redis is unavailable', async () => {
+  it('uses in-memory fallback keyed by phone when Redis is unavailable', async () => {
     redisService.isAvailable.mockReturnValue(false);
 
     await expect(guard.canActivate(context)).resolves.toBe(true);
@@ -58,6 +63,26 @@ describe('AuthRateLimitGuard', () => {
     });
     expect(redisService.get).not.toHaveBeenCalled();
     expect(redisService.set).not.toHaveBeenCalled();
+  });
+
+  it('does not share memory buckets across different emails behind the same proxy IP', async () => {
+    redisService.isAvailable.mockReturnValue(false);
+
+    for (let i = 0; i < 5; i += 1) {
+      await expect(guard.canActivate(context)).resolves.toBe(true);
+    }
+
+    (GqlExecutionContext.create as jest.Mock).mockReturnValue({
+      getContext: () => ({
+        req: {
+          ip: '127.0.0.1',
+          headers: { 'x-sopet-client-ip': '203.0.113.10' },
+        },
+      }),
+      getArgs: () => ({ input: { email: 'other@example.com' } }),
+    });
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
   });
 
   it('allows requests under the limit', async () => {
@@ -77,6 +102,28 @@ describe('AuthRateLimitGuard', () => {
     await expect(guard.canActivate(context)).rejects.toMatchObject({
       status: HttpStatus.TOO_MANY_REQUESTS,
       response: { code: 'RATE_LIMIT_EXCEEDED' },
+    });
+  });
+
+  it('falls back to a positive default when configured limit is NaN', async () => {
+    configService.get.mockImplementation((key: string) => {
+      if (key === 'app.authRateLimit.limit') return Number.NaN;
+      if (key === 'app.authRateLimit.ttl') return 60000;
+      return undefined;
+    });
+    redisService.isAvailable.mockReturnValue(true);
+    redisService.get.mockResolvedValue('9');
+    redisService.set.mockResolvedValue(undefined);
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    // Default limit is 10; count 9 is under limit so set → 10.
+    expect(redisService.set).toHaveBeenCalledWith('rate_limit:auth:0812345678', '10', 60);
+
+    // Restore defaults for isolation if other tests are added later.
+    configService.get.mockImplementation((key: string) => {
+      if (key === 'app.authRateLimit.limit') return 2;
+      if (key === 'app.authRateLimit.ttl') return 60000;
+      return undefined;
     });
   });
 });

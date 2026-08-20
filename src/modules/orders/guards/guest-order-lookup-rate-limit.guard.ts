@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { GqlExecutionContext } from '@nestjs/graphql';
+import { getClientIpTracker } from '../../audit-logs/audit-request-context';
 import { RedisService } from '../../redis/redis.service';
 import { normalizeThaiPhoneToLocal } from '../../../common/utils/phone.util';
 
@@ -29,14 +30,14 @@ export class GuestOrderLookupRateLimitGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const gqlCtx = GqlExecutionContext.create(context);
-    const req = gqlCtx.getContext().req as { ip?: string };
+    const req = gqlCtx.getContext().req as Record<string, unknown> | undefined;
     const args: {
       orderNumber?: string;
       input?: { guestPhone?: string; orderId?: string };
     } = gqlCtx.getArgs();
     const fieldName = String(gqlCtx.getInfo().fieldName);
 
-    const ip = req.ip ?? 'unknown';
+    const ip = getClientIpTracker(req);
     let keySuffix = '';
 
     if (fieldName === 'orderTracking') {

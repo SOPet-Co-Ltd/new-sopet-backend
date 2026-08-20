@@ -36,6 +36,11 @@ async function bootstrap() {
   app.useBodyParser('json', { limit: BODY_LIMIT });
   app.useBodyParser('urlencoded', { extended: true, limit: BODY_LIMIT });
 
+  // Caddy (or another reverse proxy) terminates TLS and forwards to Docker.
+  // Without this, Express `req.ip` is the proxy loopback and rate limits share
+  // one bucket for the entire site.
+  app.set('trust proxy', 1);
+
   // Public email/brand assets (e.g. /images/email/sopet-logo-white.png)
   app.useStaticAssets(join(process.cwd(), 'public'));
 

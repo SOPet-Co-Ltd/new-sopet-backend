@@ -54,8 +54,11 @@ function firstHop(value: string | null): string | null {
  * Prefer the BFF-stamped visitor IP. Cloudflare in front of the API often
  * rewrites x-forwarded-for / req.ip to the Vercel serverless egress address
  * (commonly iad1 / Virginia).
+ *
+ * Exported for rate-limit / throttler trackers (must not key only on Docker/Caddy
+ * loopback `req.ip` when the real visitor IP is in forwarded headers).
  */
-function readClientIp(req: Record<string, unknown>): string | null {
+export function readClientIp(req: Record<string, unknown>): string | null {
   const headers = req.headers;
   return (
     firstHop(readHeader(headers, CLIENT_IP_HEADER)) ??
@@ -64,6 +67,14 @@ function readClientIp(req: Record<string, unknown>): string | null {
     firstHop(readHeader(headers, FORWARDED_FOR_HEADER)) ??
     (typeof req.ip === 'string' ? req.ip.trim() || null : null)
   );
+}
+
+/** Rate-limit / throttle tracker string (never empty). */
+export function getClientIpTracker(req: unknown, fallback = 'unknown'): string {
+  if (!isRecord(req)) {
+    return fallback;
+  }
+  return sliceOrNull(readClientIp(req), IP_ADDRESS_MAX_LENGTH) || fallback;
 }
 
 /**

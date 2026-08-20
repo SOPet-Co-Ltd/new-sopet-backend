@@ -49,11 +49,29 @@ describe('AppThrottlerGuard', () => {
           req: { ip?: string };
           res: { header: (k: string, v: string) => void };
         };
-        getTracker: (req: { ip?: string }) => Promise<string>;
       }
     ).getRequestResponse(context);
 
     expect(result.req.ip).toBe('unknown');
     expect(() => result.res.header('X-RateLimit-Limit', 1)).not.toThrow();
+  });
+
+  it('tracks GraphQL requests by BFF client IP when req.ip is loopback', async () => {
+    const guard = Object.create(AppThrottlerGuard.prototype) as AppThrottlerGuard;
+    const req = {
+      ip: '127.0.0.1',
+      headers: { 'x-sopet-client-ip': '203.0.113.55' },
+    };
+
+    const tracker = await (
+      guard as unknown as {
+        getTracker: (req: {
+          ip?: string;
+          headers?: Record<string, string>;
+        }) => Promise<string>;
+      }
+    ).getTracker(req);
+
+    expect(tracker).toBe('203.0.113.55');
   });
 });

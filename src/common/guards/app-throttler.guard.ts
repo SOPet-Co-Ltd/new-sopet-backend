@@ -1,6 +1,7 @@
 import { ExecutionContext, Injectable } from '@nestjs/common';
 import { GqlExecutionContext } from '@nestjs/graphql';
 import { ThrottlerGuard } from '@nestjs/throttler';
+import { getClientIpTracker } from '../../modules/audit-logs/audit-request-context';
 
 type RequestLike = {
   ip?: string;
@@ -15,6 +16,9 @@ type ResponseLike = {
 /**
  * Nest Throttler defaults to HTTP `switchToHttp()`. GraphQL resolvers need the
  * request from `GqlExecutionContext` or `req.ip` is undefined and every query fails.
+ *
+ * Tracker must use BFF/proxy client IP headers — behind Caddy→Docker, `req.ip` is
+ * often `127.0.0.1` for all traffic and a global 120/min bucket takes down the site.
  */
 @Injectable()
 export class AppThrottlerGuard extends ThrottlerGuard {
@@ -43,6 +47,8 @@ export class AppThrottlerGuard extends ThrottlerGuard {
   }
 
   protected getTracker(req: RequestLike): Promise<string> {
-    return Promise.resolve(req.ip || req.socket?.remoteAddress || 'unknown');
+    return Promise.resolve(
+      getClientIpTracker(req, req.socket?.remoteAddress?.trim() || 'unknown'),
+    );
   }
 }

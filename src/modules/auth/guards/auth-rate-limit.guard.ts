@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GqlExecutionContext } from '@nestjs/graphql';
+import { getClientIpTracker } from '../../audit-logs/audit-request-context';
 import { RedisService } from '../../redis/redis.service';
 
 type MemoryBucket = {
@@ -15,8 +16,14 @@ type MemoryBucket = {
   expiresAt: number;
 };
 
+function resolvePositiveInt(value: unknown, fallback: number): number {
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+}
+
 @Injectable()
 export class AuthRateLimitGuard implements CanActivate {
+  /** Stricter than Redis default when Redis is down (spray resistance). */
   private static readonly MEMORY_FALLBACK_LIMIT = 5;
   private static readonly MEMORY_FALLBACK_TTL_MS = 60_000;
   private static readonly memoryBuckets = new Map<string, MemoryBucket>();
@@ -30,41 +37,50 @@ export class AuthRateLimitGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const gqlCtx = GqlExecutionContext.create(context);
-    const req = gqlCtx.getContext().req as {
-      ip?: string;
-      body?: { variables?: Record<string, unknown> };
+    const req = gqlCtx.getContext().req as Record<string, unknown> | undefined;
+    const args = gqlCtx.getArgs() as {
+      input?: { phone?: string; email?: string };
+      phone?: string;
+      email?: string;
     };
-    const args = gqlCtx.getArgs();
 
-    const identifier = args.input?.phone ?? args.input?.email ?? req.ip ?? 'unknown';
+    const phone = String(args.input?.phone ?? args.phone ?? '').trim();
+    const email = String(args.input?.email ?? args.email ?? '')
+      .trim()
+      .toLowerCase();
+    const ip = getClientIpTracker(req);
+    // Prefer phone/email so loopback/proxy IPs do not share one global bucket.
+    const identifier = phone || email || ip;
     const key = `rate_limit:auth:${identifier}`;
-    const limit =
+    const limit = resolvePositiveInt(
       this.configService.get<number>('app.authRateLimit.limit') ??
-      this.configService.get<number>('app.rateLimit.limit') ??
-      10;
-    const ttlMs =
+        this.configService.get<number>('app.rateLimit.limit'),
+      10,
+    );
+    const ttlMs = resolvePositiveInt(
       this.configService.get<number>('app.authRateLimit.ttl') ??
-      this.configService.get<number>('app.rateLimit.ttl') ??
-      60000;
-    const ttlSeconds = Math.ceil(ttlMs / 1000);
+        this.configService.get<number>('app.rateLimit.ttl'),
+      60_000,
+    );
+    const ttlSeconds = Math.max(1, Math.ceil(ttlMs / 1000));
 
     if (!this.redisService.isAvailable()) {
-      const ip = req.ip ?? 'unknown';
       this.logger.warn(
-        `Auth rate limit Redis unavailable; enforcing in-memory fallback (5/min per IP) for ${ip}`,
+        `Auth rate limit Redis unavailable; enforcing in-memory fallback (${AuthRateLimitGuard.MEMORY_FALLBACK_LIMIT}/min) for ${identifier}`,
       );
-      this.enforceMemoryFallback(ip);
+      this.enforceMemoryFallback(identifier);
       return true;
     }
 
     const current = await this.redisService.get(key);
     const count = current ? parseInt(current, 10) : 0;
+    const safeCount = Number.isFinite(count) ? count : 0;
 
-    if (count >= limit) {
+    if (safeCount >= limit) {
       this.logger.warn(
         JSON.stringify({
           event: 'auth_rate_limit_exceeded',
-          identifier: String(identifier),
+          identifier,
           limit,
         }),
       );
@@ -77,12 +93,12 @@ export class AuthRateLimitGuard implements CanActivate {
       );
     }
 
-    await this.redisService.set(key, String(count + 1), ttlSeconds);
+    await this.redisService.set(key, String(safeCount + 1), ttlSeconds);
     return true;
   }
 
-  private enforceMemoryFallback(ip: string): void {
-    const key = `rate_limit:auth:memory:${ip}`;
+  private enforceMemoryFallback(identifier: string): void {
+    const key = `rate_limit:auth:memory:${identifier}`;
     const now = Date.now();
     const bucket = AuthRateLimitGuard.memoryBuckets.get(key);
 
@@ -98,7 +114,7 @@ export class AuthRateLimitGuard implements CanActivate {
       this.logger.warn(
         JSON.stringify({
           event: 'auth_rate_limit_exceeded',
-          identifier: ip,
+          identifier,
           limit: AuthRateLimitGuard.MEMORY_FALLBACK_LIMIT,
           mode: 'memory_fallback',
         }),
