@@ -12,7 +12,7 @@ GitHub Environments **`deploy/uat`** and **`deploy/production`** use the **same 
 | -------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | `AWS_ROLE_ARN` ★                 | IAM role ARN for GitHub OIDC (ECR push + SSM) | Deploy-only; not written into app `.env`. Separate role trust for prod preferred.                                                              |
 | `DB_PASSWORD` ★                  | Postgres password                             | Production RDS; never reuse UAT password.                                                                                                      |
-| `REDIS_PASSWORD`                 | Redis auth                                    | Optional. Set if your Redis instance requires auth. Redis itself is optional (omit `REDIS_HOST`).          |
+| `REDIS_PASSWORD`                 | Redis auth                                    | Optional. Set if your Redis instance requires auth. Redis itself is optional (omit `REDIS_HOST`).                                              |
 | `CLOUDFLARE_ACCOUNT_ID` ★        | Cloudflare R2 account id                      | Required when `STORAGE_PROVIDER=r2`.                                                                                                           |
 | `CLOUDFLARE_ACCESS_KEY_ID` ★     | R2 access key id                              | R2 API token credentials.                                                                                                                      |
 | `CLOUDFLARE_SECRET_ACCESS_KEY` ★ | R2 secret access key                          | Treat as highly sensitive.                                                                                                                     |
@@ -67,7 +67,7 @@ GitHub Environments **`deploy/uat`** and **`deploy/production`** use the **same 
 | `DB_NAME` ★                        | Database name                      | Production database.                                                                                         |
 | `DB_SSL` ★                         | Require SSL to Postgres            | `true` on RDS. Deploy supplies Amazon RDS CA via `infra/certs/rds-global-bundle.pem` (`DB_SSL_CA`).          |
 | `DB_POOL_MAX`                      | TypeORM/pg pool size               | e.g. `20`.                                                                                                   |
-| `REDIS_HOST`                       | Redis host                         | Optional. Omit to disable cache/queues/refresh rotation store. `REDIS_PASSWORD` optional if auth needed. |
+| `REDIS_HOST`                       | Redis host                         | Optional. Omit to disable cache/queues/refresh rotation store. `REDIS_PASSWORD` optional if auth needed.     |
 | `REDIS_PORT`                       | Redis port                         | `6379`                                                                                                       |
 | `REDIS_DB`                         | Redis logical DB index             | `0`                                                                                                          |
 | `STORAGE_PROVIDER` ★               | Object storage backend             | `r2` (or `s3`).                                                                                              |

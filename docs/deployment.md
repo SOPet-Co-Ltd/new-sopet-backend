@@ -58,7 +58,7 @@ Dummy env vars: `JWT_SECRET`, `OMISE_*`.
 
 ### Install-time supply chain (INF2-008)
 
-`preinstall` runs `npx only-allow yarn` and `prepare` runs `husky`. Both execute unpinned installer scripts during `yarn install`. Acceptable for local/CI developer machines; production images should use `yarn install --frozen-lockfile --ignore-scripts` (or equivalent) so husky/`npx` do not run in deploy. Dependabot watches `github-actions` weekly.
+`preinstall` runs `npx only-allow yarn` and `prepare` runs `husky`. Both execute unpinned installer scripts during `yarn install`. Acceptable for local/CI developer machines; production images should use `yarn install --frozen-lockfile --ignore-scripts` (or equivalent) so husky/`npx` do not run in deploy.
 
 `.github/workflows/deploy.yml` — push to `deploy/uat` or `deploy/production` (also `workflow_dispatch` with Environment choice):
 
