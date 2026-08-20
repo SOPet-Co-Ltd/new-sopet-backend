@@ -39,6 +39,7 @@ import { GuestOrderLinkService } from '../src/modules/orders/guest-order-link.se
 import { CustomerRepository } from '../src/database/repositories/customer.repository';
 import { InventoryService } from '../src/modules/inventory/inventory.service';
 import { CartService } from '../src/modules/cart/cart.service';
+import { RedisService } from '../src/modules/redis/redis.service';
 import { resolveOrderItemImageUrl } from '../src/modules/orders/order.mapper';
 import {
   mapException,
@@ -281,6 +282,14 @@ describe('Order tracking (e2e)', () => {
         { provide: OrderFulfillmentService, useValue: {} },
         { provide: ProductsService, useValue: {} },
         { provide: StoresService, useValue: {} },
+        {
+          provide: RedisService,
+          useValue: {
+            isAvailable: () => false,
+            get: jest.fn(),
+            set: jest.fn(),
+          },
+        },
         {
           provide: PaymentsService,
           useValue: {

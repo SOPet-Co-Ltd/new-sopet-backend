@@ -87,6 +87,7 @@ describe('AuthService password reset', () => {
           provide: RedisService,
           useValue: {
             isAvailable: jest.fn().mockReturnValue(false),
+            isConfigured: jest.fn().mockReturnValue(false),
             get: jest.fn(),
             set: jest.fn(),
             del: jest.fn(),

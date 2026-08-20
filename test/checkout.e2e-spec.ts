@@ -53,7 +53,7 @@ describe('Checkout flow (integration)', () => {
   describe('guest checkout → createOrder', () => {
     let ordersService: OrdersService;
     let variantRepository: { findOne: jest.Mock };
-    let orderRepository: { findOne: jest.Mock };
+    let orderRepository: { findOne: jest.Mock; count: jest.Mock };
     let mockManager: {
       create: jest.Mock;
       save: jest.Mock;
@@ -73,7 +73,7 @@ describe('Checkout flow (integration)', () => {
 
     beforeEach(() => {
       variantRepository = { findOne: jest.fn().mockResolvedValue(variant) };
-      orderRepository = { findOne: jest.fn() };
+      orderRepository = { findOne: jest.fn(), count: jest.fn().mockResolvedValue(0) };
       mockManager = {
         create: jest.fn((_e, data) => ({ ...data })),
         save: jest.fn(async (_e, data?) => {

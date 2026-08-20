@@ -157,6 +157,7 @@ jobs:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           BANK_DATA_ENCRYPTION_KEY: ${{ secrets.BANK_DATA_ENCRYPTION_KEY }}
+          HEALTH_CHECK_TOKEN: ${{ secrets.HEALTH_CHECK_TOKEN }}
         run: |
           chmod +x infra/export-github-env.sh
           infra/export-github-env.sh

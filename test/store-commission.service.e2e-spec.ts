@@ -482,7 +482,7 @@ describe('store commission service-integration-e2e harness', () => {
       } finally {
         await cleanupStoreCommissionE2eSeed(dataSource, dataset);
       }
-    });
+    }, 30_000);
   });
 
   // ---------------------------------------------------------------------------

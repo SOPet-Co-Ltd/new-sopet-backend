@@ -141,7 +141,7 @@ describe('PaymentsResolver payment queries', () => {
           currency: 'THB',
           paymentMethod: 'promptpay',
           orderNumber: 'ORD-GUEST-001',
-        } as never,
+        },
         undefined,
         undefined,
       );

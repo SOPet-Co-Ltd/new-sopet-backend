@@ -4,7 +4,6 @@ const logger = new Logger('ProductionSecurityEnv');
 
 export const BANK_DATA_ENCRYPTION_KEY_REQUIRED = 'BANK_DATA_ENCRYPTION_KEY_REQUIRED';
 export const SMS_OTP_LOG_ONLY_FORBIDDEN = 'SMS_OTP_LOG_ONLY_FORBIDDEN_IN_PRODUCTION';
-export const REDIS_PASSWORD_REQUIRED = 'REDIS_PASSWORD_REQUIRED';
 export const NODE_ENV_REQUIRED = 'NODE_ENV_REQUIRED';
 export const HEALTH_CHECK_TOKEN_REQUIRED = 'HEALTH_CHECK_TOKEN_REQUIRED';
 export const GRAPHQL_PLAYGROUND_FORBIDDEN = 'GRAPHQL_PLAYGROUND_FORBIDDEN_IN_PRODUCTION';
@@ -15,6 +14,7 @@ export const GRAPHQL_PLAYGROUND_FORBIDDEN = 'GRAPHQL_PLAYGROUND_FORBIDDEN_IN_PRO
  *
  * - Unset NODE_ENV is rejected unless ALLOW_UNSET_NODE_ENV=true (local tooling only).
  * - Production secrets and unsafe flags are enforced when NODE_ENV=production.
+ * - Redis is optional: omit REDIS_HOST to disable cache/queues; REDIS_PASSWORD is never required.
  */
 export function validateProductionSecurityEnv(env: NodeJS.ProcessEnv = process.env): void {
   const nodeEnv = env.NODE_ENV?.trim();
@@ -38,11 +38,6 @@ export function validateProductionSecurityEnv(env: NodeJS.ProcessEnv = process.e
   if (env.SMS_OTP_LOG_ONLY === 'true') {
     logger.error(SMS_OTP_LOG_ONLY_FORBIDDEN);
     throw new Error(SMS_OTP_LOG_ONLY_FORBIDDEN);
-  }
-
-  if (!env.REDIS_PASSWORD?.trim()) {
-    logger.error(REDIS_PASSWORD_REQUIRED);
-    throw new Error(REDIS_PASSWORD_REQUIRED);
   }
 
   if (!env.HEALTH_CHECK_TOKEN?.trim()) {

@@ -470,6 +470,7 @@ describe('Unpaid order payment method switch (service-integration-e2e)', () => {
           variables: {
             input: {
               orderId: order.id,
+              orderNumber: order.orderNumber,
               amount: AMOUNT,
               currency: 'THB',
               paymentMethod: 'promptpay',

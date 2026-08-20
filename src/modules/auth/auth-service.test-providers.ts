@@ -16,6 +16,7 @@ import { GuestOrderLinkService } from '../orders/guest-order-link.service';
 import { EmailDeliveryService } from '../email/email-delivery.service';
 import { StorageService } from '../storage/storage.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { RedisService } from '../redis/redis.service';
 import { AuthService } from './auth.service';
 
 export const AUTH_SERVICE_TEST_JWT_SECRET = 'test-jwt-secret';
@@ -119,5 +120,15 @@ export function createAuthServiceTestProviders(mocks: AuthServiceTestMocks) {
       },
     },
     { provide: AuditLogsService, useValue: { log: jest.fn() } },
+    {
+      provide: RedisService,
+      useValue: {
+        isAvailable: jest.fn().mockReturnValue(false),
+        isConfigured: jest.fn().mockReturnValue(false),
+        get: jest.fn(),
+        set: jest.fn(),
+        del: jest.fn(),
+      },
+    },
   ];
 }

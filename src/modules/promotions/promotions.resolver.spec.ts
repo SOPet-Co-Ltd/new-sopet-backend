@@ -10,6 +10,7 @@ import { AuditActorType } from '../../database/entities/audit-log.entity';
 import { PromotionScope, PromotionType } from '../../database/entities/promotion.entity';
 import {
   MAX_VALIDATE_PROMOTIONS_TARGETS,
+  ValidatePromotionInput,
   ValidatePromotionsInput,
   ValidatePromotionsTargetInput,
 } from './promotions.inputs';
@@ -19,6 +20,7 @@ describe('PromotionsResolver.validatePromotion', () => {
   let resolver: PromotionsResolver;
   let promotionsService: { validateCode: jest.Mock; validatePromotionsBatch: jest.Mock };
   let storesService: Record<string, never>;
+  const validationPipe = new ValidationPipe();
 
   beforeEach(() => {
     promotionsService = { validateCode: jest.fn(), validatePromotionsBatch: jest.fn() };
@@ -28,6 +30,24 @@ describe('PromotionsResolver.validatePromotion', () => {
       storesService as unknown as StoresService,
       { log: jest.fn() } as unknown as AuditLogsService,
     );
+  });
+
+  it('ValidationPipe accepts required subtotal (whitelist + forbidNonWhitelisted)', async () => {
+    const transformed = await validationPipe.transform(
+      { code: 'TSET', subtotal: 1000 },
+      { type: 'body', metatype: ValidatePromotionInput },
+    );
+
+    expect(transformed).toMatchObject({ code: 'TSET', subtotal: 1000 });
+  });
+
+  it('ValidationPipe rejects negative subtotal', async () => {
+    await expect(
+      validationPipe.transform(
+        { code: 'TSET', subtotal: -1 },
+        { type: 'body', metatype: ValidatePromotionInput },
+      ),
+    ).rejects.toMatchObject({ response: { code: 'VALIDATION_ERROR' } });
   });
 
   it('maps soft eligibility reason and freeUnits without throwing (ADR Decision 5)', async () => {

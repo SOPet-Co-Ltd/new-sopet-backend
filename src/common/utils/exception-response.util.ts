@@ -1,4 +1,5 @@
 import { HttpException, HttpStatus } from '@nestjs/common';
+import { GraphQLError } from 'graphql';
 import { QueryFailedError } from 'typeorm';
 import { codeFromStatus } from './http-error.util';
 
@@ -68,6 +69,36 @@ export function responseFromHttpException(exception: HttpException): MappedExcep
  * see an opaque INTERNAL_SERVER_ERROR for known failure modes.
  */
 export function mapUnknownException(exception: unknown): MappedExceptionResponse | null {
+  if (exception instanceof GraphQLError) {
+    const extensionCode = exception.extensions?.code;
+    if (
+      extensionCode === 'BAD_USER_INPUT' ||
+      extensionCode === 'GRAPHQL_VALIDATION_FAILED' ||
+      extensionCode === 'GRAPHQL_PARSE_FAILED' ||
+      extensionCode === 'QUERY_TOO_COMPLEX'
+    ) {
+      return {
+        status: HttpStatus.BAD_REQUEST,
+        code: String(extensionCode),
+        message: exception.message,
+      };
+    }
+
+    // Complexity plugin / variable coercion without an Apollo code.
+    if (
+      /Variable "\$/.test(exception.message) ||
+      /was not provided/i.test(exception.message) ||
+      /exceeds maximum complexity/i.test(exception.message) ||
+      /exceeds the maximum complexity/i.test(exception.message)
+    ) {
+      return {
+        status: HttpStatus.BAD_REQUEST,
+        code: 'BAD_USER_INPUT',
+        message: exception.message,
+      };
+    }
+  }
+
   if (exception instanceof QueryFailedError) {
     const driverError = exception.driverError as { code?: string };
     if (driverError?.code === '23505') {

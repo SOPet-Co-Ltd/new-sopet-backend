@@ -50,7 +50,7 @@ yarn start:dev    # http://localhost:3002/graphql
 - **Never** publish compose ports (`5432`, `6379`, `9000`, `9001`) to the public internet.
 - MinIO’s anonymous download policy is **local-dev only**; production uses private R2/S3 (+ CDN/signed URLs).
 - Override default secrets (`postgres`/`minioadmin`/empty Redis password/`JWT_SECRET`) before any shared environment.
-- Production startup requires `BANK_DATA_ENCRYPTION_KEY`, a non-empty `REDIS_PASSWORD`, and rejects `SMS_OTP_LOG_ONLY=true`.
+- Production startup requires `BANK_DATA_ENCRYPTION_KEY`, `HEALTH_CHECK_TOKEN`, and rejects `SMS_OTP_LOG_ONLY=true`. Redis is optional (omit `REDIS_HOST`; `REDIS_PASSWORD` is never required by startup/deploy validation).
 - `yarn db:seed:prod` creates an admin with `mustChangePassword=true` — change the temporary seed password immediately.
 
 ## Key entry points

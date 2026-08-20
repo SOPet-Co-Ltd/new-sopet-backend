@@ -42,7 +42,7 @@ REQUIRED_SECRETS=(
   OMISE_WEBHOOK_SECRET
   RESEND_API_KEY
   BANK_DATA_ENCRYPTION_KEY
-  REDIS_PASSWORD
+  HEALTH_CHECK_TOKEN
 )
 
 missing=()
@@ -60,6 +60,8 @@ for name in "${REQUIRED_SECRETS[@]}"; do
     missing+=("Secret: $name")
   fi
 done
+
+# Redis is optional (omit REDIS_HOST). REDIS_PASSWORD is never required by this script.
 
 if [ "${#missing[@]}" -gt 0 ]; then
   echo "::error::Missing GitHub Environment configuration for '$ENVIRONMENT_NAME':" >&2

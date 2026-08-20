@@ -8,26 +8,27 @@ GitHub Environments **`deploy/uat`** and **`deploy/production`** use the **same 
 
 ## 1. GitHub Environment — Secrets
 
-| Name                             | Purpose                                       | Production notes                                                                  |
-| -------------------------------- | --------------------------------------------- | --------------------------------------------------------------------------------- |
-| `AWS_ROLE_ARN` ★                 | IAM role ARN for GitHub OIDC (ECR push + SSM) | Deploy-only; not written into app `.env`. Separate role trust for prod preferred. |
-| `DB_PASSWORD` ★                  | Postgres password                             | Production RDS; never reuse UAT password.                                         |
-| `REDIS_PASSWORD` ★               | Redis auth                                    | **Required** when `NODE_ENV=production` (API startup fails if empty).             |
-| `CLOUDFLARE_ACCOUNT_ID` ★        | Cloudflare R2 account id                      | Required when `STORAGE_PROVIDER=r2`.                                              |
-| `CLOUDFLARE_ACCESS_KEY_ID` ★     | R2 access key id                              | R2 API token credentials.                                                         |
-| `CLOUDFLARE_SECRET_ACCESS_KEY` ★ | R2 secret access key                          | Treat as highly sensitive.                                                        |
-| `CLOUDFLARE_R2_BUCKET` ★         | R2 bucket name                                | Production bucket only (not UAT).                                                 |
-| `JWT_SECRET` ★                   | JWT signing secret                            | Long random string; **must differ from UAT**.                                     |
-| `THAIBULKSMS_API_KEY` ★          | ThaiBulkSMS API key                           | Live SMS credentials for prod.                                                    |
-| `THAIBULKSMS_API_SECRET` ★       | ThaiBulkSMS API secret                        | Pair with API key.                                                                |
-| `OMISE_PUBLIC_KEY` ★             | Omise public key                              | **Live** keys on production (not test).                                           |
-| `OMISE_SECRET_KEY` ★             | Omise secret key                              | Live secret; never log.                                                           |
-| `OMISE_WEBHOOK_SECRET` ★         | Omise webhook HMAC secret                     | Point live webhook at `https://<API_URL>/webhooks/omise`.                         |
-| `RESEND_API_KEY` ★               | Resend email API key                          | Transactional mail.                                                               |
-| `BANK_DATA_ENCRYPTION_KEY` ★     | Encrypt vendor bank account numbers at rest   | Generate with `openssl rand -base64 32`. **Required** when `NODE_ENV=production`. |
-| `OPENAI_API_KEY`                 | OpenAI embeddings / smart search              | Optional; needed for embedding worker / semantic search.                          |
+| Name                             | Purpose                                       | Production notes                                                                                                                               |
+| -------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AWS_ROLE_ARN` ★                 | IAM role ARN for GitHub OIDC (ECR push + SSM) | Deploy-only; not written into app `.env`. Separate role trust for prod preferred.                                                              |
+| `DB_PASSWORD` ★                  | Postgres password                             | Production RDS; never reuse UAT password.                                                                                                      |
+| `REDIS_PASSWORD`                 | Redis auth                                    | Optional. Set if your Redis instance requires auth. Redis itself is optional (omit `REDIS_HOST`).          |
+| `CLOUDFLARE_ACCOUNT_ID` ★        | Cloudflare R2 account id                      | Required when `STORAGE_PROVIDER=r2`.                                                                                                           |
+| `CLOUDFLARE_ACCESS_KEY_ID` ★     | R2 access key id                              | R2 API token credentials.                                                                                                                      |
+| `CLOUDFLARE_SECRET_ACCESS_KEY` ★ | R2 secret access key                          | Treat as highly sensitive.                                                                                                                     |
+| `CLOUDFLARE_R2_BUCKET` ★         | R2 bucket name                                | Production bucket only (not UAT).                                                                                                              |
+| `JWT_SECRET` ★                   | JWT signing secret                            | Long random string; **must differ from UAT**.                                                                                                  |
+| `THAIBULKSMS_API_KEY` ★          | ThaiBulkSMS API key                           | Live SMS credentials for prod.                                                                                                                 |
+| `THAIBULKSMS_API_SECRET` ★       | ThaiBulkSMS API secret                        | Pair with API key.                                                                                                                             |
+| `OMISE_PUBLIC_KEY` ★             | Omise public key                              | **Live** keys on production (not test).                                                                                                        |
+| `OMISE_SECRET_KEY` ★             | Omise secret key                              | Live secret; never log.                                                                                                                        |
+| `OMISE_WEBHOOK_SECRET` ★         | Omise webhook HMAC secret                     | Point live webhook at `https://<API_URL>/webhooks/omise`.                                                                                      |
+| `RESEND_API_KEY` ★               | Resend email API key                          | Transactional mail.                                                                                                                            |
+| `BANK_DATA_ENCRYPTION_KEY` ★     | Encrypt vendor bank account numbers at rest   | Generate with `openssl rand -base64 32`. **Required** when `NODE_ENV=production`.                                                              |
+| `HEALTH_CHECK_TOKEN` ★           | Token for `/health` and `/health/ready`       | Send as `x-health-check-token`. Generate with `openssl rand -base64 32`. **Required** when `NODE_ENV=production`. `/health/live` stays public. |
+| `OPENAI_API_KEY`                 | OpenAI embeddings / smart search              | Optional; needed for embedding worker / semantic search.                                                                                       |
 
-**Count: 15 secrets** (14 app/deploy + `AWS_ROLE_ARN`; `OPENAI_API_KEY` may be optional. `REDIS_PASSWORD` is required at API startup in production).
+**Count: 16 secrets** (15 app/deploy + `AWS_ROLE_ARN`; `OPENAI_API_KEY` and `REDIS_PASSWORD` may be optional. `HEALTH_CHECK_TOKEN` is required at API startup in production. Redis is optional — omit `REDIS_HOST` to disable).
 
 ---
 
@@ -66,7 +67,7 @@ GitHub Environments **`deploy/uat`** and **`deploy/production`** use the **same 
 | `DB_NAME` ★                        | Database name                      | Production database.                                                                                         |
 | `DB_SSL` ★                         | Require SSL to Postgres            | `true` on RDS. Deploy supplies Amazon RDS CA via `infra/certs/rds-global-bundle.pem` (`DB_SSL_CA`).          |
 | `DB_POOL_MAX`                      | TypeORM/pg pool size               | e.g. `20`.                                                                                                   |
-| `REDIS_HOST` ★                     | Redis host                         | Production Redis; omit locally to disable queues/cache.                                                      |
+| `REDIS_HOST`                       | Redis host                         | Optional. Omit to disable cache/queues/refresh rotation store. `REDIS_PASSWORD` optional if auth needed. |
 | `REDIS_PORT`                       | Redis port                         | `6379`                                                                                                       |
 | `REDIS_DB`                         | Redis logical DB index             | `0`                                                                                                          |
 | `STORAGE_PROVIDER` ★               | Object storage backend             | `r2` (or `s3`).                                                                                              |

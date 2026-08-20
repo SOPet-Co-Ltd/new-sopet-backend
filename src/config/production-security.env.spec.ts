@@ -3,7 +3,6 @@ import {
   GRAPHQL_PLAYGROUND_FORBIDDEN,
   HEALTH_CHECK_TOKEN_REQUIRED,
   NODE_ENV_REQUIRED,
-  REDIS_PASSWORD_REQUIRED,
   SMS_OTP_LOG_ONLY_FORBIDDEN,
   validateProductionSecurityEnv,
 } from './production-security.env';
@@ -13,7 +12,6 @@ describe('validateProductionSecurityEnv', () => {
     NODE_ENV: 'production',
     BANK_DATA_ENCRYPTION_KEY: 'long-random-secret',
     SMS_OTP_LOG_ONLY: 'false',
-    REDIS_PASSWORD: 'redis-secret',
     HEALTH_CHECK_TOKEN: 'health-secret',
     GRAPHQL_PLAYGROUND: 'false',
   };
@@ -50,13 +48,24 @@ describe('validateProductionSecurityEnv', () => {
     ).toThrow(SMS_OTP_LOG_ONLY_FORBIDDEN);
   });
 
-  it('requires REDIS_PASSWORD in production', () => {
+  it('passes when Redis is unset (optional)', () => {
     expect(() =>
       validateProductionSecurityEnv({
         ...validProd,
+        REDIS_HOST: '',
         REDIS_PASSWORD: '',
       }),
-    ).toThrow(REDIS_PASSWORD_REQUIRED);
+    ).not.toThrow();
+  });
+
+  it('allows REDIS_HOST without REDIS_PASSWORD (password optional)', () => {
+    expect(() =>
+      validateProductionSecurityEnv({
+        ...validProd,
+        REDIS_HOST: 'redis.example.com',
+        REDIS_PASSWORD: '',
+      }),
+    ).not.toThrow();
   });
 
   it('requires HEALTH_CHECK_TOKEN in production', () => {
@@ -81,7 +90,6 @@ describe('validateProductionSecurityEnv', () => {
     expect(() =>
       validateProductionSecurityEnv({
         BANK_DATA_ENCRYPTION_KEY: 'x',
-        REDIS_PASSWORD: 'y',
       }),
     ).toThrow(NODE_ENV_REQUIRED);
   });

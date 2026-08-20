@@ -47,8 +47,9 @@ Recommended protection:
 | `THAIBULKSMS_API_KEY` / `THAIBULKSMS_API_SECRET`                 | SMS                                                                                                 |
 | `OMISE_PUBLIC_KEY` / `OMISE_SECRET_KEY` / `OMISE_WEBHOOK_SECRET` | **Live** Omise keys + webhook secret                                                                |
 | `RESEND_API_KEY`                                                 | Email                                                                                               |
-| `REDIS_PASSWORD`                                                 | Required when Redis auth is enabled (API fails boot in production if empty)                         |
+| `REDIS_PASSWORD`                                                 | Optional Redis auth (Redis itself is optional — omit `REDIS_HOST` to disable)                       |
 | `BANK_DATA_ENCRYPTION_KEY`                                       | Long random secret for vendor bank account encryption at rest (generate: `openssl rand -base64 32`) |
+| `HEALTH_CHECK_TOKEN`                                             | Token for `/health` + `/health/ready` (`x-health-check-token`; generate: `openssl rand -base64 32`) |
 | `OPENAI_API_KEY`                                                 | Optional (smart search / embeddings)                                                                |
 
 ### Variables (infrastructure)

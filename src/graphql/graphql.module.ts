@@ -11,6 +11,7 @@ import {
   toClientError,
 } from '../common/utils/exception-response.util';
 import { AppGraphqlResolver } from './app.resolver';
+import { GraphqlComplexityPlugin } from './graphql-complexity.plugin';
 import { AuthModule } from '../modules/auth/auth.module';
 import { CartModule } from '../modules/cart/cart.module';
 import { ProductsModule } from '../modules/products/products.module';
@@ -71,6 +72,24 @@ const graphqlErrorLogger = new Logger('GraphQLFormatError');
             error: unknown,
           ): GraphQLFormattedError => {
             const originalError = unwrapResolverError(error);
+            const apolloCode = formattedError.extensions?.code;
+
+            // Preserve Apollo/client GraphQL codes (don't collapse to 500).
+            if (
+              apolloCode === 'GRAPHQL_VALIDATION_FAILED' ||
+              apolloCode === 'GRAPHQL_PARSE_FAILED' ||
+              apolloCode === 'BAD_USER_INPUT' ||
+              apolloCode === 'QUERY_TOO_COMPLEX'
+            ) {
+              return {
+                ...formattedError,
+                message: String(apolloCode),
+                extensions: {
+                  ...formattedError.extensions,
+                  code: apolloCode,
+                },
+              };
+            }
 
             const mapped =
               originalError instanceof HttpException
@@ -121,6 +140,6 @@ const graphqlErrorLogger = new Logger('GraphQLFormatError');
     AuditLogsModule,
     OrderAuditLogsModule,
   ],
-  providers: [AppGraphqlResolver],
+  providers: [AppGraphqlResolver, GraphqlComplexityPlugin],
 })
 export class AppGraphqlModule {}

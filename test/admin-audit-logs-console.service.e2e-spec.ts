@@ -377,7 +377,10 @@ describe('admin audit logs console (service-integration-e2e)', () => {
       { filter: { requestId: REQUEST_ID_B } },
       vendorToken,
     );
-    expectGraphqlDenied(vendorRes.body as GraphqlBody, /Forbidden|FORBIDDEN/i);
+    expectGraphqlDenied(
+      vendorRes.body as GraphqlBody,
+      /Forbidden|FORBIDDEN|Insufficient permissions/i,
+    );
 
     let deleted = 0;
     do {

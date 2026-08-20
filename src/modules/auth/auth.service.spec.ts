@@ -73,6 +73,7 @@ describe('AuthService', () => {
   };
   const redisService = {
     isAvailable: jest.fn().mockReturnValue(true),
+    isConfigured: jest.fn().mockReturnValue(true),
     get: jest.fn(),
     set: jest.fn(),
     del: jest.fn(),
@@ -81,6 +82,7 @@ describe('AuthService', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     redisService.isAvailable.mockReturnValue(true);
+    redisService.isConfigured.mockReturnValue(true);
     redisService.get.mockResolvedValue(null);
     (
       AuthService as unknown as {
@@ -540,13 +542,48 @@ describe('AuthService', () => {
     });
   });
 
-  it('rejects refresh in production when Redis is unavailable', async () => {
+  it('allows refresh in production when Redis is not configured (optional)', async () => {
     configService.get.mockImplementation((key: string) => {
       if (key === 'app.environment') return 'production';
       if (key === 'jwt.secret') return TEST_JWT_SECRET;
       if (key.includes('refresh')) return '7d';
       return '15m';
     });
+    redisService.isConfigured.mockReturnValue(false);
+    redisService.isAvailable.mockReturnValue(false);
+    jwtService.verify.mockReturnValue({
+      sub: 'cust-1',
+      phone: '+66812345678',
+      role: 'customer',
+      type: 'refresh',
+      jti: 'jti-optional',
+    });
+    customerRepo.findOne.mockResolvedValue({
+      id: 'cust-1',
+      phone: '+66812345678',
+      isActive: true,
+    });
+
+    await expect(service.refreshToken('refresh-without-redis')).resolves.toMatchObject({
+      accessToken: 'token-access',
+      refreshToken: 'token-refresh',
+    });
+
+    configService.get.mockImplementation((key: string) => {
+      if (key === 'jwt.secret') return TEST_JWT_SECRET;
+      if (key.includes('refresh')) return '7d';
+      return '15m';
+    });
+  });
+
+  it('rejects refresh in production when Redis is configured but unavailable', async () => {
+    configService.get.mockImplementation((key: string) => {
+      if (key === 'app.environment') return 'production';
+      if (key === 'jwt.secret') return TEST_JWT_SECRET;
+      if (key.includes('refresh')) return '7d';
+      return '15m';
+    });
+    redisService.isConfigured.mockReturnValue(true);
     redisService.isAvailable.mockReturnValue(false);
 
     await expect(service.refreshToken('any-refresh')).rejects.toMatchObject({

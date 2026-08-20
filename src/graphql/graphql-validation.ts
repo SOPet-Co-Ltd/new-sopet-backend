@@ -1,9 +1,4 @@
 import depthLimit from 'graphql-depth-limit';
-import {
-  createComplexityLimitRule,
-  fieldExtensionsEstimator,
-  simpleEstimator,
-} from 'graphql-query-complexity';
 import type { ValidationRule } from 'graphql';
 
 export const GRAPHQL_MAX_DEPTH = 10;
@@ -13,11 +8,7 @@ export function isGraphqlPlaygroundEnabled(): boolean {
   return process.env.GRAPHQL_PLAYGROUND === 'true';
 }
 
+/** Depth-only validation rules. Complexity runs in GraphqlComplexityPlugin. */
 export function buildGraphqlValidationRules(): ValidationRule[] {
-  return [
-    depthLimit(GRAPHQL_MAX_DEPTH),
-    createComplexityLimitRule(GRAPHQL_MAX_COMPLEXITY, {
-      estimators: [fieldExtensionsEstimator(), simpleEstimator({ defaultComplexity: 1 })],
-    }),
-  ];
+  return [depthLimit(GRAPHQL_MAX_DEPTH)];
 }

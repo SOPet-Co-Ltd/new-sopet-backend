@@ -446,6 +446,10 @@ export class AuthService {
     if (!this.isProductionEnvironment()) {
       return;
     }
+    // Redis is optional — only fail closed when configured but unavailable.
+    if (!this.redisService.isConfigured()) {
+      return;
+    }
     if (this.redisService.isAvailable()) {
       return;
     }

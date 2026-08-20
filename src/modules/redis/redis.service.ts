@@ -52,6 +52,11 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return this.client?.status === 'ready';
   }
 
+  /** True when REDIS_HOST is configured (may still be disconnected). */
+  isConfigured(): boolean {
+    return this.configService.get<boolean>('redis.enabled') === true;
+  }
+
   getClient(): Redis {
     if (!this.client || this.client.status !== 'ready') {
       throw new Error('Redis is not connected');
