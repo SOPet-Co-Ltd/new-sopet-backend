@@ -290,3 +290,18 @@ Structure (OIDC → ECR → SSM → Caddy → container :3002) is identical. Sha
 4. Shared ECR repo exists + lifecycle policy; OIDC + **both** EC2 instance profiles can pull (and OIDC can push) that repo
 5. Cloudflare DNS + Omise live webhook
 6. Deploy & verify **UAT** for the release SHA, then promote that **same SHA** to **`deploy/production`** (see section 5)
+
+---
+
+## 10. Target ops hardening (INF-014–017)
+
+These items are **target architecture** for production hardening. They do not require application code changes; apply via AWS IAM, security groups, Cloudflare, and GitHub Environment design. Full checklists: workspace `docs/security/ops-hardening-runbook.md`.
+
+| ID          | Topic                  | Target                                                                                                                                                                                                                        |
+| ----------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **INF-014** | Migration runner       | Prefer TypeORM migrations from a **bastion / SSM session** (or OIDC → Secrets Manager short-lived creds + DDL-only DB user). Avoid long-lived production `DB_PASSWORD` on GitHub-hosted runners for migrate jobs.             |
+| **INF-015** | Deploy IAM             | Narrow the GitHub OIDC deploy role: replace `Resource: "*"` for SSM/ECR (and related) with **specific ARNs** (ECR repo, instance IDs, secret ARNs). Keep UAT and production scoped separately where practical.                |
+| **INF-016** | Security group port 80 | Do not leave instance (or unnecessary) TCP **80** open to `0.0.0.0/0`. Restrict to Cloudflare IP ranges, or ALB-only → private instance SG. Prefer closing 80 on the origin if Cloudflare/Caddy already terminate TLS on 443. |
+| **INF-017** | Cloudflare TLS         | Use SSL/TLS mode **Full (Strict)** with a **valid origin certificate** (Cloudflare Origin CA or public CA) on Caddy/ALB — not "Full" alone.                                                                                   |
+
+**Rollout:** UAT first → verify health/GraphQL/deploy → production. Track sign-off in the workspace ops runbook.
