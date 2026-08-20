@@ -7,6 +7,7 @@ import { type ObjectCannedACL, PutObjectCommand, S3Client } from '@aws-sdk/clien
 import sharp from 'sharp';
 import { getFolderUploadRules, isAspectRatioWithinTolerance } from './upload.rules';
 import type { UploadFolder } from './storage.inputs';
+import { isPrivateOrReservedIp } from '../../common/utils/private-ip.util';
 
 export interface UploadResult {
   url: string;
@@ -281,57 +282,12 @@ export class StorageService {
     }
 
     for (const address of addresses) {
-      if (this.isPrivateOrReservedIp(address)) {
+      if (isPrivateOrReservedIp(address)) {
         throw this.invalidImageUrlError('Image URL host is not allowed');
       }
     }
 
     return parsed;
-  }
-
-  private isPrivateOrReservedIp(address: string): boolean {
-    if (address === '::1' || address === '::' || address.startsWith('fe80:')) {
-      return true;
-    }
-
-    if (address.includes(':')) {
-      // IPv6 unique local / mapped IPv4
-      const lower = address.toLowerCase();
-      if (lower.startsWith('fc') || lower.startsWith('fd')) {
-        return true;
-      }
-      const mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-      if (mapped) {
-        return this.isPrivateOrReservedIp(mapped[1]);
-      }
-      return false;
-    }
-
-    const parts = address.split('.').map((part) => Number(part));
-    if (
-      parts.length !== 4 ||
-      parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)
-    ) {
-      return true;
-    }
-
-    const [a, b] = parts;
-    if (a === 10 || a === 127 || a === 0) {
-      return true;
-    }
-    if (a === 169 && b === 254) {
-      return true;
-    }
-    if (a === 172 && b >= 16 && b <= 31) {
-      return true;
-    }
-    if (a === 192 && b === 168) {
-      return true;
-    }
-    if (a === 100 && b >= 64 && b <= 127) {
-      return true;
-    }
-    return false;
   }
 
   private async readResponseBodyWithLimit(

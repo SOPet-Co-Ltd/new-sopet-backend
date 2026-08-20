@@ -127,9 +127,9 @@ Use for complex queries. Most modules inject `@InjectRepository(Entity)` directl
 
 **Safety:** `db:reset:dev` and `db:seed:dev` are local-only. `db:reset:migrate` is local-only unless you set `DB_RESET_ALLOW_PRODUCTION=1` (destructive on UAT/prod). Unrecognized local hosts can use `DB_RESET_ALLOW=1`.
 
-`db:seed:prod` creates **only** the platform admin (`admin@sopet.org` by default). It does not seed vendors, stores, or products. Default password: `P@ssw0rd` — change after first login.
+`db:seed:prod` creates **only** the platform admin (`admin@sopet.org` by default). It does not seed vendors, stores, or products. The temporary default password (`P@ssw0rd`) is **not** acceptable in production: the admin is created with `mustChangePassword=true`, and admin mutations (except `changePassword` / login) are blocked until the password is rotated.
 
-Default credentials after dev seed:
+Default credentials after **dev** seed only:
 
 | Role   | Email              | Password   |
 | ------ | ------------------ | ---------- |

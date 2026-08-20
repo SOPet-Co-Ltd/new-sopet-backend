@@ -57,6 +57,10 @@ export class User {
   @Column({ name: 'email_verified', type: 'boolean', default: false })
   emailVerified!: boolean;
 
+  /** When true, admin must change password before other mutations (prod seed). */
+  @Column({ name: 'must_change_password', type: 'boolean', default: false })
+  mustChangePassword!: boolean;
+
   @Column({ name: 'last_login_at', type: 'timestamp', nullable: true })
   lastLoginAt!: Date | null;
 

@@ -1,3 +1,9 @@
+# SECURITY WARNING (local Docker stack):
+# - Never expose these compose ports (5432/6379/9000/9001) to the public internet.
+# - MinIO public-read bucket policy below is for local development only;
+#   production must use private R2/S3 with CDN or signed URLs.
+# - Override ALL default credentials (postgres/minioadmin/empty Redis password)
+#   before any shared or internet-facing environment.
 services:
   postgres:
     image: postgres:15-alpine

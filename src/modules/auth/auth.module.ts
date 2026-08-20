@@ -26,6 +26,7 @@ import { AuthRateLimitGuard } from './guards/auth-rate-limit.guard';
 import { CustomerStatusGuard } from './guards/customer-status.guard';
 import { StoreStatusGuard } from './guards/store-status.guard';
 import { VendorStatusGuard } from './guards/vendor-status.guard';
+import { MustChangePasswordGuard } from './guards/must-change-password.guard';
 
 @Module({
   imports: [
@@ -65,6 +66,7 @@ import { VendorStatusGuard } from './guards/vendor-status.guard';
     StoreStatusGuard,
     CustomerStatusGuard,
     VendorStatusGuard,
+    MustChangePasswordGuard,
     AuthResolver,
     CustomerRepository,
   ],
@@ -76,6 +78,7 @@ import { VendorStatusGuard } from './guards/vendor-status.guard';
     StoreStatusGuard,
     CustomerStatusGuard,
     VendorStatusGuard,
+    MustChangePasswordGuard,
     JwtModule,
   ],
 })

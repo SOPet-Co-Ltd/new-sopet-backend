@@ -9,6 +9,8 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Queue } from 'bullmq';
 import { randomBytes } from 'node:crypto';
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
 import { Repository } from 'typeorm';
 import { Order } from '../../database/entities/order.entity';
 import {
@@ -16,6 +18,7 @@ import {
   VENDOR_WEBHOOK_EVENTS,
   VendorWebhookEvent,
 } from '../../database/entities/store-webhook.entity';
+import { isPrivateOrReservedIp } from '../../common/utils/private-ip.util';
 import { buildVendorWebhookOrderPayload, signVendorWebhookPayload } from './vendor-webhook.payload';
 import { DEFAULT_VENDOR_WEBHOOK_EVENTS } from './vendor-webhook.events';
 import { VENDOR_WEBHOOK_QUEUE, VendorWebhookJobData } from './vendor-webhooks.constants';
@@ -63,7 +66,7 @@ export class VendorWebhooksService {
       rotateSecret?: boolean;
     },
   ): Promise<StoreWebhookPublicView> {
-    this.assertHttpsUrl(input.url);
+    await this.assertSafeWebhookUrl(input.url);
     const events = this.normalizeEvents(input.events);
     const existing = await this.webhookRepository.findOne({ where: { storeId } });
 
@@ -180,6 +183,9 @@ export class VendorWebhooksService {
   }
 
   async deliverNow(job: VendorWebhookJobData): Promise<void> {
+    // Defense in depth: re-validate before every outbound fetch (SSRF).
+    await this.assertSafeWebhookUrl(job.url);
+
     const signature = signVendorWebhookPayload(job.secret, job.payloadJson);
     const response = await fetch(job.url, {
       method: 'POST',
@@ -232,7 +238,10 @@ export class VendorWebhooksService {
     return unique;
   }
 
-  private assertHttpsUrl(url: string): void {
+  /**
+   * HTTPS-only + DNS resolution must not target private/reserved IPs (A10 SSRF).
+   */
+  async assertSafeWebhookUrl(url: string): Promise<URL> {
     let parsed: URL;
     try {
       parsed = new URL(url.trim());
@@ -248,5 +257,47 @@ export class VendorWebhooksService {
         message: 'Webhook URL must use HTTPS',
       });
     }
+    if (parsed.username || parsed.password) {
+      throw new BadRequestException({
+        code: 'INVALID_WEBHOOK_URL',
+        message: 'Webhook URL must not include credentials',
+      });
+    }
+
+    const hostname = parsed.hostname.toLowerCase();
+    if (
+      hostname === 'localhost' ||
+      hostname.endsWith('.localhost') ||
+      hostname.endsWith('.local') ||
+      hostname.endsWith('.internal') ||
+      hostname === '0.0.0.0'
+    ) {
+      throw new BadRequestException({
+        code: 'INVALID_WEBHOOK_URL',
+        message: 'Webhook URL host is not allowed',
+      });
+    }
+
+    const addresses = isIP(hostname)
+      ? [hostname]
+      : (await lookup(hostname, { all: true })).map((entry) => entry.address);
+
+    if (!addresses.length) {
+      throw new BadRequestException({
+        code: 'INVALID_WEBHOOK_URL',
+        message: 'Webhook URL host could not be resolved',
+      });
+    }
+
+    for (const address of addresses) {
+      if (isPrivateOrReservedIp(address)) {
+        throw new BadRequestException({
+          code: 'INVALID_WEBHOOK_URL',
+          message: 'Webhook URL host is not allowed',
+        });
+      }
+    }
+
+    return parsed;
   }
 }

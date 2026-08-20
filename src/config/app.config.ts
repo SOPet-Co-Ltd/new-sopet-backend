@@ -1,6 +1,9 @@
 import { registerAs } from '@nestjs/config';
+import { validateProductionSecurityEnv } from './production-security.env';
 
 export default registerAs('app', () => {
+  validateProductionSecurityEnv();
+
   const port = parseInt(process.env.PORT || '3002', 10);
   return {
     port,

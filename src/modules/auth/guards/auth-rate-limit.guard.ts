@@ -55,6 +55,13 @@ export class AuthRateLimitGuard implements CanActivate {
     const count = current ? parseInt(current, 10) : 0;
 
     if (count >= limit) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'auth_rate_limit_exceeded',
+          identifier: String(identifier),
+          limit,
+        }),
+      );
       throw new HttpException(
         {
           code: 'RATE_LIMIT_EXCEEDED',
@@ -82,6 +89,14 @@ export class AuthRateLimitGuard implements CanActivate {
     }
 
     if (bucket.count >= AuthRateLimitGuard.MEMORY_FALLBACK_LIMIT) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'auth_rate_limit_exceeded',
+          identifier: ip,
+          limit: AuthRateLimitGuard.MEMORY_FALLBACK_LIMIT,
+          mode: 'memory_fallback',
+        }),
+      );
       throw new HttpException(
         {
           code: 'RATE_LIMIT_EXCEEDED',

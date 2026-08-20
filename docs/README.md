@@ -17,6 +17,7 @@ NestJS GraphQL API for the SOPET multi-vendor e-commerce platform.
 | [Deployment](deployment.md)                             | Docker, CI, EC2/ECR/SSM overview                         |
 | [Deploy production](deploy-production.md)               | Production checklist (GitHub Env, AWS, verify, rollback) |
 | [Env secrets & variables](env-secrets-and-variables.md) | GitHub Env secrets vs variables + local-only keys        |
+| [Dependency security](dependency-security.md)           | `yarn audit` High burn-down + resolutions notes          |
 | [Troubleshooting](troubleshooting.md)                   | Common issues                                            |
 
 ## Design notes
@@ -43,6 +44,14 @@ yarn migration:run
 yarn db:seed:dev
 yarn start:dev    # http://localhost:3002/graphql
 ```
+
+## Security warning (local Docker)
+
+- **Never** publish compose ports (`5432`, `6379`, `9000`, `9001`) to the public internet.
+- MinIO’s anonymous download policy is **local-dev only**; production uses private R2/S3 (+ CDN/signed URLs).
+- Override default secrets (`postgres`/`minioadmin`/empty Redis password/`JWT_SECRET`) before any shared environment.
+- Production startup requires `BANK_DATA_ENCRYPTION_KEY`, a non-empty `REDIS_PASSWORD`, and rejects `SMS_OTP_LOG_ONLY=true`.
+- `yarn db:seed:prod` creates an admin with `mustChangePassword=true` — change the temporary seed password immediately.
 
 ## Key entry points
 

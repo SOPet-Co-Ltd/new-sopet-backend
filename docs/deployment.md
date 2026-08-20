@@ -209,7 +209,7 @@ First-time setup only (migrations run automatically on each deploy after this):
 yarn db:seed:prod
 ```
 
-Creates `admin@sopet.org` with password `P@ssw0rd` — no vendor, store, or product data. Idempotent: skips if the admin already exists. Change the password after first login.
+Creates `admin@sopet.org` with a temporary default password and `mustChangePassword=true` — no vendor, store, or product data. Idempotent: skips if the admin already exists. Admin mutations remain blocked until the password is changed. Never leave the seed password in production.
 
 ## Object storage
 

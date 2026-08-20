@@ -301,6 +301,7 @@ export class AuthService {
       sub: user.id,
       email: user.email,
       role: user.role,
+      mustChangePassword: user.mustChangePassword === true,
     };
 
     // Vendors: prefer owned store, then team memberships
@@ -341,6 +342,7 @@ export class AuthService {
         role: user.role,
         profilePhotoUrl: user.profilePhotoUrl,
         emailVerified: user.emailVerified,
+        mustChangePassword: user.mustChangePassword === true,
       },
     };
   }
@@ -364,6 +366,7 @@ export class AuthService {
         phone: payload.phone,
         role: payload.role,
         storeId: payload.storeId,
+        mustChangePassword: payload.mustChangePassword,
       };
 
       if (payload.role === UserRole.CUSTOMER) {
@@ -382,13 +385,16 @@ export class AuthService {
       if (payload.role === UserRole.VENDOR || payload.role === UserRole.ADMIN) {
         const user = await this.userRepository.findOne({
           where: { id: payload.sub },
-          select: ['id', 'isActive'],
+          select: ['id', 'isActive', 'mustChangePassword'],
         });
         if (!user || !user.isActive) {
           throw new UnauthorizedException({
             code: 'ACCOUNT_SUSPENDED',
             message: 'Your account has been suspended. Please contact support for assistance.',
           });
+        }
+        if (payload.role === UserRole.ADMIN) {
+          newPayload.mustChangePassword = user.mustChangePassword === true;
         }
       }
 
@@ -718,6 +724,7 @@ export class AuthService {
     }
 
     user.passwordHash = await bcrypt.hash(newPassword, 12);
+    user.mustChangePassword = false;
     await this.userRepository.save(user);
   }
 
@@ -791,6 +798,7 @@ export class AuthService {
     }
 
     user.passwordHash = await bcrypt.hash(newPassword, 12);
+    user.mustChangePassword = false;
     await this.userRepository.save(user);
 
     resetToken.usedAt = new Date();

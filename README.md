@@ -72,12 +72,14 @@ yarn db:seed:dev        # Demo data (optional)
 yarn start:dev          # http://localhost:3002/graphql
 ```
 
-**Default credentials** after `db:seed:dev`:
+**Default credentials** after `db:seed:dev` (local/dev only — not for production):
 
 | Role   | Email              | Password   |
 | ------ | ------------------ | ---------- |
 | Admin  | `admin@sopet.org`  | `P@ssw0rd` |
 | Vendor | `vendor@sopet.org` | `P@ssw0rd` |
+
+Production bootstrap (`yarn db:seed:prod`) uses the same temporary password only as a one-time bootstrap and sets `mustChangePassword=true` so admin APIs stay locked until rotation.
 
 ## Build
 

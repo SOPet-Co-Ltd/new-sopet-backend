@@ -4,6 +4,7 @@ import {
   HttpException,
   HttpStatus,
   Injectable,
+  Logger,
 } from '@nestjs/common';
 import { GqlExecutionContext } from '@nestjs/graphql';
 import { RedisService } from '../../redis/redis.service';
@@ -21,6 +22,8 @@ export class GuestOrderLookupRateLimitGuard implements CanActivate {
   private static readonly REDIS_LIMIT = 5;
   private static readonly MEMORY_LIMIT = 3;
   private static readonly TTL_SECONDS = 15 * 60;
+
+  private readonly logger = new Logger(GuestOrderLookupRateLimitGuard.name);
 
   constructor(private readonly redisService: RedisService) {}
 
@@ -49,26 +52,26 @@ export class GuestOrderLookupRateLimitGuard implements CanActivate {
     const key = `rate_limit:guest_order_lookup:${ip}:${keySuffix}`;
 
     if (this.redisService.isAvailable()) {
-      await this.enforceRedisLimit(key);
+      await this.enforceRedisLimit(key, ip, fieldName);
       return true;
     }
 
-    this.enforceMemoryLimit(key);
+    this.enforceMemoryLimit(key, ip, fieldName);
     return true;
   }
 
-  private async enforceRedisLimit(key: string): Promise<void> {
+  private async enforceRedisLimit(key: string, ip: string, fieldName: string): Promise<void> {
     const current = await this.redisService.get(key);
     const count = current ? parseInt(current, 10) : 0;
 
     if (count >= GuestOrderLookupRateLimitGuard.REDIS_LIMIT) {
-      this.throwRateLimited();
+      this.throwRateLimited(ip, fieldName);
     }
 
     await this.redisService.set(key, String(count + 1), GuestOrderLookupRateLimitGuard.TTL_SECONDS);
   }
 
-  private enforceMemoryLimit(key: string): void {
+  private enforceMemoryLimit(key: string, ip: string, fieldName: string): void {
     const now = Date.now();
     const bucket = GuestOrderLookupRateLimitGuard.memoryBuckets.get(key);
 
@@ -81,13 +84,20 @@ export class GuestOrderLookupRateLimitGuard implements CanActivate {
     }
 
     if (bucket.count >= GuestOrderLookupRateLimitGuard.MEMORY_LIMIT) {
-      this.throwRateLimited();
+      this.throwRateLimited(ip, fieldName);
     }
 
     bucket.count += 1;
   }
 
-  private throwRateLimited(): never {
+  private throwRateLimited(ip: string, fieldName: string): never {
+    this.logger.warn(
+      JSON.stringify({
+        event: 'guest_order_lookup_rate_limited',
+        ip,
+        fieldName,
+      }),
+    );
     throw new HttpException(
       {
         code: 'GUEST_ORDER_LOOKUP_RATE_LIMITED',

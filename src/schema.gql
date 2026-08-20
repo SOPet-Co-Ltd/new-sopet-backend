@@ -2269,6 +2269,7 @@ type UserProfile {
   emailVerified: Boolean!
   fullName: String!
   id: String!
+  mustChangePassword: Boolean!
   profilePhotoUrl: String
   role: String!
   storeId: String
