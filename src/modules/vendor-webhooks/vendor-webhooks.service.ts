@@ -9,8 +9,6 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Queue } from 'bullmq';
 import { randomBytes } from 'node:crypto';
-import { lookup } from 'node:dns/promises';
-import { isIP } from 'node:net';
 import { Repository } from 'typeorm';
 import { Order } from '../../database/entities/order.entity';
 import {
@@ -18,7 +16,12 @@ import {
   VENDOR_WEBHOOK_EVENTS,
   VendorWebhookEvent,
 } from '../../database/entities/store-webhook.entity';
-import { isPrivateOrReservedIp } from '../../common/utils/private-ip.util';
+import {
+  fetchWithPinnedIp,
+  resolveSafeOutboundUrl,
+  SafeUrlPin,
+  UnsafeOutboundUrlError,
+} from '../../common/utils/safe-fetch.util';
 import { buildVendorWebhookOrderPayload, signVendorWebhookPayload } from './vendor-webhook.payload';
 import { DEFAULT_VENDOR_WEBHOOK_EVENTS } from './vendor-webhook.events';
 import { VENDOR_WEBHOOK_QUEUE, VendorWebhookJobData } from './vendor-webhooks.constants';
@@ -183,11 +186,11 @@ export class VendorWebhooksService {
   }
 
   async deliverNow(job: VendorWebhookJobData): Promise<void> {
-    // Defense in depth: re-validate before every outbound fetch (SSRF).
-    await this.assertSafeWebhookUrl(job.url);
+    // Defense in depth: re-validate + DNS-pin before every outbound fetch (SSRF / rebinding).
+    const pin = await this.assertSafeWebhookUrl(job.url);
 
     const signature = signVendorWebhookPayload(job.secret, job.payloadJson);
-    const response = await fetch(job.url, {
+    const response = await fetchWithPinnedIp(pin, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -240,64 +243,35 @@ export class VendorWebhooksService {
 
   /**
    * HTTPS-only + DNS resolution must not target private/reserved IPs (A10 SSRF).
+   * Returns a connect pin so deliverNow cannot rebind after check (BE2-010).
    */
-  async assertSafeWebhookUrl(url: string): Promise<URL> {
-    let parsed: URL;
+  async assertSafeWebhookUrl(url: string): Promise<SafeUrlPin> {
     try {
-      parsed = new URL(url.trim());
-    } catch {
-      throw new BadRequestException({
-        code: 'INVALID_WEBHOOK_URL',
-        message: 'Webhook URL must be a valid HTTPS URL',
-      });
-    }
-    if (parsed.protocol !== 'https:') {
-      throw new BadRequestException({
-        code: 'INVALID_WEBHOOK_URL',
-        message: 'Webhook URL must use HTTPS',
-      });
-    }
-    if (parsed.username || parsed.password) {
-      throw new BadRequestException({
-        code: 'INVALID_WEBHOOK_URL',
-        message: 'Webhook URL must not include credentials',
-      });
-    }
-
-    const hostname = parsed.hostname.toLowerCase();
-    if (
-      hostname === 'localhost' ||
-      hostname.endsWith('.localhost') ||
-      hostname.endsWith('.local') ||
-      hostname.endsWith('.internal') ||
-      hostname === '0.0.0.0'
-    ) {
-      throw new BadRequestException({
-        code: 'INVALID_WEBHOOK_URL',
-        message: 'Webhook URL host is not allowed',
-      });
-    }
-
-    const addresses = isIP(hostname)
-      ? [hostname]
-      : (await lookup(hostname, { all: true })).map((entry) => entry.address);
-
-    if (!addresses.length) {
-      throw new BadRequestException({
-        code: 'INVALID_WEBHOOK_URL',
-        message: 'Webhook URL host could not be resolved',
-      });
-    }
-
-    for (const address of addresses) {
-      if (isPrivateOrReservedIp(address)) {
+      return await resolveSafeOutboundUrl(url, { protocols: ['https:'] });
+    } catch (error) {
+      if (error instanceof UnsafeOutboundUrlError) {
         throw new BadRequestException({
           code: 'INVALID_WEBHOOK_URL',
-          message: 'Webhook URL host is not allowed',
+          message: mapWebhookUrlError(error.message),
         });
       }
+      throw error;
     }
-
-    return parsed;
   }
+}
+
+function mapWebhookUrlError(message: string): string {
+  if (message === 'URL is invalid') {
+    return 'Webhook URL must be a valid HTTPS URL';
+  }
+  if (message.startsWith('URL must use')) {
+    return 'Webhook URL must use HTTPS';
+  }
+  if (message === 'URL must not include credentials') {
+    return 'Webhook URL must not include credentials';
+  }
+  if (message === 'URL host could not be resolved') {
+    return 'Webhook URL host could not be resolved';
+  }
+  return 'Webhook URL host is not allowed';
 }

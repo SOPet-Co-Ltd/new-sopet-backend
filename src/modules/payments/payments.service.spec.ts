@@ -246,6 +246,168 @@ describe('PaymentsService guest access', () => {
   });
 });
 
+describe('PaymentsService assertCanSubscribeToPaymentStatus', () => {
+  let service: PaymentsService;
+  const orderRepository = {
+    findOne: jest.fn(),
+    save: jest.fn(),
+  };
+  const paymentRepository = {
+    create: jest.fn(<T>(x: T): T => x),
+    save: jest.fn((x: Payment) => Promise.resolve({ ...x, id: 'pay-1' })),
+    findOne: jest.fn(),
+    manager: {
+      transaction: jest.fn(async (cb: (manager: unknown) => Promise<void>) => cb({})),
+    },
+  };
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        PaymentsService,
+        { provide: getRepositoryToken(Payment), useValue: paymentRepository },
+        { provide: getRepositoryToken(Order), useValue: orderRepository },
+        { provide: getRepositoryToken(Customer), useValue: { findOne: jest.fn() } },
+        {
+          provide: getRepositoryToken(SavedPaymentMethod),
+          useValue: { findOne: jest.fn() },
+        },
+        {
+          provide: ConfigService,
+          useValue: { get: jest.fn(() => '') },
+        },
+        {
+          provide: NotificationsService,
+          useValue: { notifyOrderPaid: jest.fn() },
+        },
+        {
+          provide: PaymentEventsService,
+          useValue: paymentEventsServiceMock,
+        },
+        {
+          provide: InventoryService,
+          useValue: { restoreOrderStock: jest.fn().mockResolvedValue(true) },
+        },
+        { provide: PayoutsService, useValue: payoutsServiceMock },
+        { provide: StoresService, useValue: storesServiceMock },
+        {
+          provide: VendorWebhooksService,
+          useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
+        },
+        { provide: OrderAuditLogsService, useValue: orderAuditLogsServiceMock },
+        {
+          provide: BankTransferSettingsService,
+          useValue: {
+            getConfigured: jest.fn().mockResolvedValue({
+              enabled: true,
+              bankName: 'Test Bank',
+              accountName: 'SOPET',
+              accountNumber: '1234567890',
+              branchName: null,
+            }),
+            isAvailable: jest.fn().mockReturnValue(true),
+            get: jest.fn().mockResolvedValue({
+              enabled: true,
+              bankName: 'Test Bank',
+              accountName: 'SOPET',
+              accountNumber: '1234567890',
+              branchName: null,
+            }),
+            update: jest.fn(),
+          },
+        },
+      ],
+    }).compile();
+
+    service = module.get(PaymentsService);
+  });
+
+  it('rejects guest subscription without orderNumber', async () => {
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-1',
+      customerId: null,
+      guestPhone: '0812345678',
+      orderNumber: 'ORD-GUEST-001',
+    });
+
+    await expect(
+      service.assertCanSubscribeToPaymentStatus({ orderId: 'ord-1' }),
+    ).rejects.toMatchObject({
+      response: { code: 'ORDER_NUMBER_REQUIRED' },
+    });
+  });
+
+  it('rejects guest subscription when orderNumber does not match', async () => {
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-1',
+      customerId: null,
+      guestPhone: '0812345678',
+      orderNumber: 'ORD-GUEST-001',
+    });
+
+    await expect(
+      service.assertCanSubscribeToPaymentStatus({
+        orderId: 'ord-1',
+        orderNumber: 'ORD-WRONG',
+      }),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('allows guest subscription when orderNumber matches', async () => {
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-1',
+      customerId: null,
+      guestPhone: '0812345678',
+      orderNumber: 'ORD-GUEST-001',
+    });
+
+    await expect(
+      service.assertCanSubscribeToPaymentStatus({
+        orderId: 'ord-1',
+        orderNumber: 'ORD-GUEST-001',
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('resolves orderId from paymentId for guests and requires orderNumber', async () => {
+    paymentRepository.findOne.mockResolvedValue({ id: 'pay-1', orderId: 'ord-1' });
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-1',
+      customerId: null,
+      guestPhone: '0812345678',
+      orderNumber: 'ORD-GUEST-001',
+    });
+
+    await expect(
+      service.assertCanSubscribeToPaymentStatus({
+        paymentId: 'pay-1',
+        orderNumber: 'ORD-GUEST-001',
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(paymentRepository.findOne).toHaveBeenCalledWith({
+      where: { id: 'pay-1' },
+      select: ['id', 'orderId'],
+    });
+  });
+
+  it('allows authenticated customer subscription for own order without orderNumber', async () => {
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-1',
+      customerId: 'cust-1',
+      orderNumber: 'ORD-OWN-001',
+    });
+
+    await expect(
+      service.assertCanSubscribeToPaymentStatus({
+        orderId: 'ord-1',
+        userId: 'cust-1',
+      }),
+    ).resolves.toBeUndefined();
+  });
+});
+
 describe('PaymentsService payment read queries', () => {
   let service: PaymentsService;
   const orderRepository = {

@@ -48,12 +48,24 @@ import { MustChangePasswordGuard } from './guards/must-change-password.guard';
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
-      useFactory: (configService: ConfigService) => ({
-        secret: configService.get<string>('jwt.secret'),
-        signOptions: {
-          expiresIn: configService.get<string>('jwt.accessTokenExpiresIn'),
-        },
-      }),
+      useFactory: (configService: ConfigService) => {
+        const issuer = configService.get<string>('jwt.issuer');
+        const audience = configService.get<string>('jwt.audience');
+        return {
+          secret: configService.get<string>('jwt.secret'),
+          signOptions: {
+            expiresIn: configService.get<string>('jwt.accessTokenExpiresIn'),
+            algorithm: 'HS256' as const,
+            issuer,
+            audience,
+          },
+          verifyOptions: {
+            algorithms: ['HS256'] as const,
+            issuer,
+            audience,
+          },
+        };
+      },
       inject: [ConfigService],
     }),
   ],

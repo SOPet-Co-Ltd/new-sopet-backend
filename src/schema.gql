@@ -1930,7 +1930,7 @@ input SubmitStoreRequestInput {
 }
 
 type Subscription {
-  paymentStatusUpdated(orderId: String, paymentId: String): PaymentType!
+  paymentStatusUpdated(orderId: String, orderNumber: String, paymentId: String): PaymentType!
 }
 
 input SwitchStoreInput {

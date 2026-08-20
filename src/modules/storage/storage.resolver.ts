@@ -7,7 +7,7 @@ import { CurrentUser, Roles } from '../../common/decorators';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 
-const CUSTOMER_UPLOAD_FOLDERS = ['products', 'profiles'] as const;
+const CUSTOMER_UPLOAD_FOLDERS = ['profiles', 'reviews'] as const;
 
 @Resolver()
 export class StorageResolver {
@@ -21,7 +21,8 @@ export class StorageResolver {
     @Args('folder', { nullable: true }) folder?: string,
     @CurrentUser('role') role?: string,
   ): Promise<UploadResultType> {
-    const resolvedFolder = folder ?? 'products';
+    // Customers default to profiles; vendors/admins default to products (BE2-009).
+    const resolvedFolder = folder ?? (role === 'customer' ? 'profiles' : 'products');
     if (!UPLOAD_FOLDERS.includes(resolvedFolder as (typeof UPLOAD_FOLDERS)[number])) {
       throw new BadRequestException({
         code: 'INVALID_FOLDER',

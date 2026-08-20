@@ -5,11 +5,12 @@ import { Repository } from 'typeorm';
 import { User, UserRole } from '../../../database/entities/user.entity';
 import { getRequestFromContext } from '../../../common/utils/execution-context.util';
 
+const ALLOWED_QUERIES = new Set(['me']);
 const ALLOWED_MUTATIONS = new Set(['changePassword', 'refreshToken']);
 
 /**
- * Blocks admin GraphQL mutations (except password change / token refresh)
- * while `mustChangePassword` is true on the user row.
+ * While `mustChangePassword` is true, admins may only call session bootstrap ops
+ * (`me`, `changePassword`, `refreshToken`) — not other Queries or Mutations.
  */
 @Injectable()
 export class MustChangePasswordGuard implements CanActivate {
@@ -45,7 +46,7 @@ export class MustChangePasswordGuard implements CanActivate {
     const parentType = info.parentType?.name;
     const fieldName = info.fieldName;
 
-    if (parentType === 'Query') {
+    if (parentType === 'Query' && fieldName && ALLOWED_QUERIES.has(fieldName)) {
       return true;
     }
 

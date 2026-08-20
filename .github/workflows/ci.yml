@@ -9,6 +9,10 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
 
+# INF2-002 — least-privilege workflow token (read-only checkout/audit)
+permissions:
+  contents: read
+
 jobs:
   lite:
     if: github.base_ref != 'deploy/production' && github.base_ref != 'deploy/uat'

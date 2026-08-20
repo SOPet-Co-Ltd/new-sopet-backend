@@ -8,7 +8,6 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, MoreThan, QueryFailedError } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
-import { ConfigService } from '@nestjs/config';
 import { Customer } from '../../database/entities/customer.entity';
 import { SavedAddress } from '../../database/entities/saved-address.entity';
 import {
@@ -19,9 +18,9 @@ import { CustomerRepository } from '../../database/repositories/customer.reposit
 import { OtpCode } from '../../database/entities/otp-code.entity';
 import { OrdersService } from '../orders/orders.service';
 import { PaymentsService, SavedOmiseCardDetails } from '../payments/payments.service';
+import { AuthService } from '../auth/auth.service';
 import { normalizeThaiPhoneToLocal } from '../../common/utils/phone.util';
 import { UpdateProfileDto, CreateAddressDto, UpdateAddressDto } from './dto';
-import { JwtPayload } from '../../common/interfaces';
 import { isPendingDeletion, isDeletionRetentionExpired } from '../customers/customer-deletion.util';
 import { StorageService } from '../storage/storage.service';
 
@@ -44,8 +43,8 @@ export class UsersService {
     private readonly customerRepo: CustomerRepository,
     private readonly ordersService: OrdersService,
     private readonly paymentsService: PaymentsService,
+    private readonly authService: AuthService,
     private readonly jwtService: JwtService,
-    private readonly configService: ConfigService,
     private readonly storageService: StorageService,
   ) {}
 
@@ -204,7 +203,7 @@ export class UsersService {
     await this.ordersService.mergeGuestOrders(customerId, oldPhone);
     await this.ordersService.mergeGuestOrders(customerId, normalizedNewPhone);
 
-    const { accessToken, refreshToken } = await this.generateTokens({
+    const { accessToken, refreshToken } = await this.authService.generateTokens({
       sub: customer.id,
       phone: customer.phone,
       role: 'customer',
@@ -681,7 +680,7 @@ export class UsersService {
     customer.lastLoginAt = new Date();
     await this.customerRepository.save(customer);
 
-    const { accessToken, refreshToken } = await this.generateTokens({
+    const { accessToken, refreshToken } = await this.authService.generateTokens({
       sub: customer.id,
       phone: customer.phone,
       role: 'customer',
@@ -692,26 +691,5 @@ export class UsersService {
 
   async finalizeExpiredDeletion(customer: Customer): Promise<void> {
     await this.customerRepo.finalizeDeletion(customer.id);
-  }
-
-  private async generateTokens(
-    payload: Omit<JwtPayload, 'type'>,
-  ): Promise<{ accessToken: string; refreshToken: string }> {
-    const [accessToken, refreshToken] = await Promise.all([
-      this.jwtService.signAsync(
-        { ...payload, type: 'access' },
-        {
-          expiresIn: this.configService.get<string>('jwt.accessTokenExpiresIn'),
-        },
-      ),
-      this.jwtService.signAsync(
-        { ...payload, type: 'refresh' },
-        {
-          expiresIn: this.configService.get<string>('jwt.refreshTokenExpiresIn'),
-        },
-      ),
-    ]);
-
-    return { accessToken, refreshToken };
   }
 }

@@ -93,4 +93,16 @@ describe('GuestOrderLookupRateLimitGuard', () => {
     });
     expect(redisService.get).not.toHaveBeenCalled();
   });
+
+  it('rate-limits empty orderNumber by IP instead of bypassing', async () => {
+    mockGqlContext('orderTracking', { orderNumber: '   ' });
+    redisService.isAvailable.mockReturnValue(true);
+    redisService.get.mockResolvedValue('5');
+
+    await expect(guard.canActivate(context)).rejects.toMatchObject({
+      status: HttpStatus.TOO_MANY_REQUESTS,
+      response: { code: 'GUEST_ORDER_LOOKUP_RATE_LIMITED' },
+    });
+    expect(redisService.get).toHaveBeenCalledWith('rate_limit:guest_order_lookup:127.0.0.1:_empty');
+  });
 });

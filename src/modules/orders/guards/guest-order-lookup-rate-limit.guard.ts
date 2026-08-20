@@ -45,11 +45,8 @@ export class GuestOrderLookupRateLimitGuard implements CanActivate {
       keySuffix = normalizeThaiPhoneToLocal(args.input?.guestPhone);
     }
 
-    if (!keySuffix) {
-      return true;
-    }
-
-    const key = `rate_limit:guest_order_lookup:${ip}:${keySuffix}`;
+    // Empty suffix still rate-limits by IP (BE2-011) — do not bypass.
+    const key = `rate_limit:guest_order_lookup:${ip}:${keySuffix || '_empty'}`;
 
     if (this.redisService.isAvailable()) {
       await this.enforceRedisLimit(key, ip, fieldName);

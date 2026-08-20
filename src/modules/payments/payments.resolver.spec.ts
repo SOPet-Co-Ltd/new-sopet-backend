@@ -128,4 +128,28 @@ describe('PaymentsResolver payment queries', () => {
       expect(result.orderId).toBe('ord-1');
     });
   });
+
+  describe('createPayment', () => {
+    it('passes guest orderNumber into findById after createCharge', async () => {
+      paymentsService.createCharge.mockResolvedValue({ paymentId: 'pay-1' } as never);
+      paymentsService.findById.mockResolvedValue(paymentEntity as never);
+
+      await resolver.createPayment(
+        {
+          orderId: 'ord-1',
+          amount: 100,
+          currency: 'THB',
+          paymentMethod: 'promptpay',
+          orderNumber: 'ORD-GUEST-001',
+        } as never,
+        undefined,
+        undefined,
+      );
+
+      expect(paymentsService.createCharge).toHaveBeenCalledWith(
+        expect.objectContaining({ orderNumber: 'ORD-GUEST-001' }),
+      );
+      expect(paymentsService.findById).toHaveBeenCalledWith('pay-1', undefined, 'ORD-GUEST-001');
+    });
+  });
 });

@@ -61,12 +61,23 @@ describe('MustChangePasswordGuard', () => {
     await expect(guard.canActivate(buildContext())).resolves.toBe(true);
   });
 
-  it('allows Query when mustChangePassword is true', async () => {
+  it('allows me Query when mustChangePassword is true', async () => {
     findOne.mockResolvedValue({ id: 'admin-1', mustChangePassword: true });
     parentType = 'Query';
     fieldName = 'me';
 
     await expect(guard.canActivate(buildContext())).resolves.toBe(true);
+  });
+
+  it('blocks other Queries when mustChangePassword is true', async () => {
+    findOne.mockResolvedValue({ id: 'admin-1', mustChangePassword: true });
+    parentType = 'Query';
+    fieldName = 'customers';
+
+    await expect(guard.canActivate(buildContext())).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(guard.canActivate(buildContext())).rejects.toMatchObject({
+      response: { code: 'MUST_CHANGE_PASSWORD' },
+    });
   });
 
   it('allows changePassword when mustChangePassword is true', async () => {

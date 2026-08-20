@@ -38,8 +38,14 @@ export class AuthRateLimitGuard implements CanActivate {
 
     const identifier = args.input?.phone ?? args.input?.email ?? req.ip ?? 'unknown';
     const key = `rate_limit:auth:${identifier}`;
-    const limit = this.configService.get<number>('app.rateLimit.limit') ?? 100;
-    const ttlMs = this.configService.get<number>('app.rateLimit.ttl') ?? 60000;
+    const limit =
+      this.configService.get<number>('app.authRateLimit.limit') ??
+      this.configService.get<number>('app.rateLimit.limit') ??
+      10;
+    const ttlMs =
+      this.configService.get<number>('app.authRateLimit.ttl') ??
+      this.configService.get<number>('app.rateLimit.ttl') ??
+      60000;
     const ttlSeconds = Math.ceil(ttlMs / 1000);
 
     if (!this.redisService.isAvailable()) {

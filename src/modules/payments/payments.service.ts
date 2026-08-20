@@ -890,48 +890,33 @@ export class PaymentsService {
   async assertCanSubscribeToPaymentStatus(params: {
     paymentId?: string;
     orderId?: string;
+    orderNumber?: string;
     userId?: string;
   }): Promise<void> {
-    const { paymentId, orderId, userId } = params;
+    const { paymentId, orderId, orderNumber, userId } = params;
 
-    if (userId) {
-      const resolvedOrderId =
-        orderId ??
-        (
-          await this.paymentRepository.findOne({
-            where: { id: paymentId },
-            select: ['id', 'orderId'],
-          })
-        )?.orderId;
-
-      if (!resolvedOrderId) {
-        throw new ForbiddenException({
-          code: 'FORBIDDEN',
-          message: 'You do not have access to payment status updates for this order',
-        });
-      }
-
-      await this.assertCanPayForOrder(resolvedOrderId, userId);
-      return;
+    let resolvedOrderId = orderId;
+    if (!resolvedOrderId && paymentId) {
+      resolvedOrderId = (
+        await this.paymentRepository.findOne({
+          where: { id: paymentId },
+          select: ['id', 'orderId'],
+        })
+      )?.orderId;
     }
 
-    if (!orderId) {
+    if (!resolvedOrderId) {
       throw new ForbiddenException({
         code: 'FORBIDDEN',
-        message: 'Authentication or guest order proof is required for payment subscriptions',
+        message: userId
+          ? 'You do not have access to payment status updates for this order'
+          : 'Authentication or guest order proof is required for payment subscriptions',
       });
     }
 
-    const order = await this.orderRepository.findOne({
-      where: { id: orderId },
-      select: ['id', 'guestPhone', 'customerId'],
-    });
-    if (!order?.guestPhone) {
-      throw new ForbiddenException({
-        code: 'FORBIDDEN',
-        message: 'You do not have access to payment status updates for this order',
-      });
-    }
+    // Guests must prove possession of orderNumber (same bar as payment queries).
+    // Authenticated customers are ownership-checked via customerId only.
+    await this.assertCanPayForOrder(resolvedOrderId, userId, userId ? undefined : orderNumber);
   }
 
   async findById(id: string, customerId?: string, orderNumber?: string): Promise<Payment> {

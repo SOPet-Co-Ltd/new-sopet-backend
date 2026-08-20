@@ -80,6 +80,13 @@ describe('AuthService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    redisService.isAvailable.mockReturnValue(true);
+    redisService.get.mockResolvedValue(null);
+    (
+      AuthService as unknown as {
+        otpVerifyFailMemory: Map<string, { count: number; expiresAt: number }>;
+      }
+    ).otpVerifyFailMemory.clear();
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
@@ -517,6 +524,67 @@ describe('AuthService', () => {
       '1',
       expect.any(Number),
     );
+  });
+
+  it('rejects refresh token without jti when Redis is available', async () => {
+    jwtService.verify.mockReturnValue({
+      sub: 'cust-1',
+      phone: '+66812345678',
+      role: 'customer',
+      type: 'refresh',
+    });
+    redisService.isAvailable.mockReturnValue(true);
+
+    await expect(service.refreshToken('legacy-refresh-no-jti')).rejects.toMatchObject({
+      response: { code: 'REFRESH_TOKEN_JTI_REQUIRED' },
+    });
+  });
+
+  it('rejects refresh in production when Redis is unavailable', async () => {
+    configService.get.mockImplementation((key: string) => {
+      if (key === 'app.environment') return 'production';
+      if (key === 'jwt.secret') return TEST_JWT_SECRET;
+      if (key.includes('refresh')) return '7d';
+      return '15m';
+    });
+    redisService.isAvailable.mockReturnValue(false);
+
+    await expect(service.refreshToken('any-refresh')).rejects.toMatchObject({
+      response: { code: 'REDIS_REQUIRED' },
+    });
+
+    configService.get.mockImplementation((key: string) => {
+      if (key === 'jwt.secret') return TEST_JWT_SECRET;
+      if (key.includes('refresh')) return '7d';
+      return '15m';
+    });
+  });
+
+  it('locks OTP after repeated failed verifies', async () => {
+    otpRepo.findOne.mockResolvedValue({
+      id: 'otp-1',
+      phone: '0812345678',
+      code: hashOtpForTest('123456'),
+      isUsed: false,
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    redisService.get.mockResolvedValue('4');
+    redisService.set.mockResolvedValue(undefined);
+    otpRepo.update = jest.fn().mockResolvedValue({ affected: 1 });
+
+    await expect(
+      service.verifyOtp({ phone: '+66812345678', code: '000000' }),
+    ).rejects.toMatchObject({
+      response: { code: 'INVALID_OTP' },
+    });
+    expect(otpRepo.update).toHaveBeenCalled();
+
+    redisService.get.mockResolvedValue('5');
+    await expect(
+      service.verifyOtp({ phone: '+66812345678', code: '000000' }),
+    ).rejects.toMatchObject({
+      response: { code: 'OTP_LOCKED' },
+    });
   });
 
   it('rejects invalid refresh token', async () => {

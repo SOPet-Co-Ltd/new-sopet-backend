@@ -18,8 +18,8 @@ describe('AuthRateLimitGuard', () => {
   };
   const configService = {
     get: jest.fn((key: string) => {
-      if (key === 'app.rateLimit.limit') return 2;
-      if (key === 'app.rateLimit.ttl') return 60000;
+      if (key === 'app.authRateLimit.limit') return 2;
+      if (key === 'app.authRateLimit.ttl') return 60000;
       return undefined;
     }),
   };

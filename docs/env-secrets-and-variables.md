@@ -24,6 +24,7 @@ GitHub Environments **`deploy/uat`** and **`deploy/production`** use the **same 
 | `OMISE_SECRET_KEY` ★             | Omise secret key                              | Live secret; never log.                                                           |
 | `OMISE_WEBHOOK_SECRET` ★         | Omise webhook HMAC secret                     | Point live webhook at `https://<API_URL>/webhooks/omise`.                         |
 | `RESEND_API_KEY` ★               | Resend email API key                          | Transactional mail.                                                               |
+| `BANK_DATA_ENCRYPTION_KEY` ★     | Encrypt vendor bank account numbers at rest   | Generate with `openssl rand -base64 32`. **Required** when `NODE_ENV=production`. |
 | `OPENAI_API_KEY`                 | OpenAI embeddings / smart search              | Optional; needed for embedding worker / semantic search.                          |
 
 **Count: 15 secrets** (14 app/deploy + `AWS_ROLE_ARN`; `OPENAI_API_KEY` may be optional. `REDIS_PASSWORD` is required at API startup in production).
@@ -112,23 +113,24 @@ Present in `.env.example` and/or app config, but **not** listed in `infra/github
 
 ### Variables / flags (local, S3 shape, payment extras)
 
-| Name                                   | Purpose                        | Notes                                                                                    |
-| -------------------------------------- | ------------------------------ | ---------------------------------------------------------------------------------------- |
-| `MINIO_API_PORT`                       | Local MinIO API port           | Docker Compose only (`9000`).                                                            |
-| `MINIO_CONSOLE_PORT`                   | Local MinIO console port       | Docker Compose only (`9001`).                                                            |
-| `AWS_REGION`                           | S3 client region (app `.env`)  | Also a **GitHub deploy variable** for ECR/EC2; in local `.env` used for MinIO/S3 client. |
-| `AWS_S3_BUCKET`                        | S3/MinIO bucket name           | Local / AWS S3 path; R2 uses `CLOUDFLARE_R2_BUCKET`.                                     |
-| `AWS_S3_ENDPOINT`                      | S3-compatible endpoint         | e.g. `http://localhost:9000`; empty for real AWS S3.                                     |
-| `AWS_S3_FORCE_PATH_STYLE`              | Path-style S3 requests         | `true` for MinIO; `false` for real S3.                                                   |
-| `AWS_S3_PUBLIC_URL`                    | Public object URL base         | Local MinIO or CDN-style base when not using `CDN_URL` alone.                            |
-| `AWS_S3_OBJECT_ACL`                    | Optional per-object ACL        | e.g. `public-read`; often empty (bucket policy).                                         |
-| `SMS_OTP_LOG_ONLY`                     | Log OTP instead of sending SMS | UAT/testing only; **rejected at startup** when `NODE_ENV=production`.                    |
-| `BANK_DATA_ENCRYPTION_KEY`             | Encrypt bank account numbers   | **Required** in production (startup fails if unset). Local may leave unset (plaintext).  |
-| `PAYMENT_OMISE_CANCEL_TIMEOUT_MS`      | Omise cancel/expire timeout    | Default `4000`; fail-open behavior.                                                      |
-| `PAYMENT_UNPAID_ORDER_CANCEL_AFTER_MS` | Auto-cancel unpaid orders      | Default `86400000` (24h).                                                                |
-| `PAYOUT_MIN_AMOUNT`                    | Minimum payout amount          | Default `100` (THB).                                                                     |
-| `PROD_ADMIN_EMAIL`                     | Prod seed admin email          | Bootstrap/`yarn db:seed:prod` only (commented in `.env.example`).                        |
-| `DB_RESET_ALLOW_PRODUCTION`            | Gate destructive DB reset      | Must be `1` to allow `yarn db:reset:*` against non-dev; ops only.                        |
+| Name                                   | Purpose                        | Notes                                                                                                                                    |
+| -------------------------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `MINIO_API_PORT`                       | Local MinIO API port           | Docker Compose only (`9000`).                                                                                                            |
+| `MINIO_CONSOLE_PORT`                   | Local MinIO console port       | Docker Compose only (`9001`).                                                                                                            |
+| `AWS_REGION`                           | S3 client region (app `.env`)  | Also a **GitHub deploy variable** for ECR/EC2; in local `.env` used for MinIO/S3 client.                                                 |
+| `AWS_S3_BUCKET`                        | S3/MinIO bucket name           | Local / AWS S3 path; R2 uses `CLOUDFLARE_R2_BUCKET`.                                                                                     |
+| `AWS_S3_ENDPOINT`                      | S3-compatible endpoint         | e.g. `http://localhost:9000`; empty for real AWS S3.                                                                                     |
+| `AWS_S3_FORCE_PATH_STYLE`              | Path-style S3 requests         | `true` for MinIO; `false` for real S3.                                                                                                   |
+| `AWS_S3_PUBLIC_URL`                    | Public object URL base         | Local MinIO or CDN-style base when not using `CDN_URL` alone.                                                                            |
+| `AWS_S3_OBJECT_ACL`                    | Optional per-object ACL        | e.g. `public-read`; often empty (bucket policy).                                                                                         |
+| `SMS_OTP_LOG_ONLY`                     | Log OTP instead of sending SMS | UAT/testing only; **rejected at startup** when `NODE_ENV=production`.                                                                    |
+| `BANK_DATA_ENCRYPTION_KEY` ★           | Encrypt bank account numbers   | **Required** in production (startup fails if unset). Also a GitHub Environment **secret** for deploy. Local may leave unset (plaintext). |
+| `ALLOW_UNSET_NODE_ENV`                 | Allow boot without NODE_ENV    | Local tooling only (`true`). Deploy must set `NODE_ENV` explicitly.                                                                      |
+| `PAYMENT_OMISE_CANCEL_TIMEOUT_MS`      | Omise cancel/expire timeout    | Default `4000`; fail-open behavior.                                                                                                      |
+| `PAYMENT_UNPAID_ORDER_CANCEL_AFTER_MS` | Auto-cancel unpaid orders      | Default `86400000` (24h).                                                                                                                |
+| `PAYOUT_MIN_AMOUNT`                    | Minimum payout amount          | Default `100` (THB).                                                                                                                     |
+| `PROD_ADMIN_EMAIL`                     | Prod seed admin email          | Bootstrap/`yarn db:seed:prod` only (commented in `.env.example`).                                                                        |
+| `DB_RESET_ALLOW_PRODUCTION`            | Gate destructive DB reset      | Must be `1` to allow `yarn db:reset:*` against non-dev; ops only.                                                                        |
 
 ---
 
@@ -151,6 +153,7 @@ OMISE_PUBLIC_KEY
 OMISE_SECRET_KEY
 OMISE_WEBHOOK_SECRET
 RESEND_API_KEY
+BANK_DATA_ENCRYPTION_KEY
 OPENAI_API_KEY
 ```
 

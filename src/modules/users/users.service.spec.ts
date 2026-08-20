@@ -1,7 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
-import { ConfigService } from '@nestjs/config';
 import {
   BadRequestException,
   NotFoundException,
@@ -16,6 +15,7 @@ import { OtpCode } from '../../database/entities/otp-code.entity';
 import { CustomerRepository } from '../../database/repositories/customer.repository';
 import { OrdersService } from '../orders/orders.service';
 import { PaymentsService } from '../payments/payments.service';
+import { AuthService } from '../auth/auth.service';
 import { StorageService } from '../storage/storage.service';
 
 describe('UsersService', () => {
@@ -34,8 +34,11 @@ describe('UsersService', () => {
     verify: jest.fn(),
     signAsync: jest.fn(async (payload) => `token-${payload.type ?? 'reactivation'}`),
   };
-  const configService = {
-    get: jest.fn((key: string) => (key.includes('refresh') ? '7d' : '15m')),
+  const authService = {
+    generateTokens: jest.fn(async () => ({
+      accessToken: 'token-access',
+      refreshToken: 'token-refresh',
+    })),
   };
   const otpRepo = {
     findOne: jest.fn(),
@@ -78,8 +81,8 @@ describe('UsersService', () => {
         { provide: CustomerRepository, useValue: customerRepository },
         { provide: OrdersService, useValue: ordersService },
         { provide: PaymentsService, useValue: paymentsService },
+        { provide: AuthService, useValue: authService },
         { provide: JwtService, useValue: jwtService },
-        { provide: ConfigService, useValue: configService },
         {
           provide: StorageService,
           useValue: {
@@ -138,6 +141,11 @@ describe('UsersService', () => {
 
     expect(result.accessToken).toBe('token-access');
     expect(result.refreshToken).toBe('token-refresh');
+    expect(authService.generateTokens).toHaveBeenCalledWith({
+      sub: 'cust-1',
+      phone: '+66812345678',
+      role: 'customer',
+    });
     expect(customerRepo.save).toHaveBeenCalledWith(
       expect.objectContaining({
         isActive: true,
@@ -182,6 +190,11 @@ describe('UsersService', () => {
     expect(result.customer.phone).toBe('0822222222');
     expect(ordersService.mergeGuestOrders).toHaveBeenCalledWith('cust-1', '0811111111');
     expect(ordersService.mergeGuestOrders).toHaveBeenCalledWith('cust-1', '0822222222');
+    expect(authService.generateTokens).toHaveBeenCalledWith({
+      sub: 'cust-1',
+      phone: '0822222222',
+      role: 'customer',
+    });
     expect(result.accessToken).toBe('token-access');
   });
 

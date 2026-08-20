@@ -5,13 +5,28 @@ const logger = new Logger('ProductionSecurityEnv');
 export const BANK_DATA_ENCRYPTION_KEY_REQUIRED = 'BANK_DATA_ENCRYPTION_KEY_REQUIRED';
 export const SMS_OTP_LOG_ONLY_FORBIDDEN = 'SMS_OTP_LOG_ONLY_FORBIDDEN_IN_PRODUCTION';
 export const REDIS_PASSWORD_REQUIRED = 'REDIS_PASSWORD_REQUIRED';
+export const NODE_ENV_REQUIRED = 'NODE_ENV_REQUIRED';
+export const HEALTH_CHECK_TOKEN_REQUIRED = 'HEALTH_CHECK_TOKEN_REQUIRED';
+export const GRAPHQL_PLAYGROUND_FORBIDDEN = 'GRAPHQL_PLAYGROUND_FORBIDDEN_IN_PRODUCTION';
 
 /**
- * Fail-fast production env checks (INF-010 / INF-011 / INF-012).
- * Safe to call from config factories — no-ops when NODE_ENV !== production.
+ * Fail-fast env checks (INF / Audit 2 production gates).
+ * Safe to call from config factories.
+ *
+ * - Unset NODE_ENV is rejected unless ALLOW_UNSET_NODE_ENV=true (local tooling only).
+ * - Production secrets and unsafe flags are enforced when NODE_ENV=production.
  */
 export function validateProductionSecurityEnv(env: NodeJS.ProcessEnv = process.env): void {
-  if (env.NODE_ENV !== 'production') {
+  const nodeEnv = env.NODE_ENV?.trim();
+  if (!nodeEnv) {
+    if (env.ALLOW_UNSET_NODE_ENV === 'true') {
+      return;
+    }
+    logger.error(NODE_ENV_REQUIRED);
+    throw new Error(NODE_ENV_REQUIRED);
+  }
+
+  if (nodeEnv !== 'production') {
     return;
   }
 
@@ -28,5 +43,15 @@ export function validateProductionSecurityEnv(env: NodeJS.ProcessEnv = process.e
   if (!env.REDIS_PASSWORD?.trim()) {
     logger.error(REDIS_PASSWORD_REQUIRED);
     throw new Error(REDIS_PASSWORD_REQUIRED);
+  }
+
+  if (!env.HEALTH_CHECK_TOKEN?.trim()) {
+    logger.error(HEALTH_CHECK_TOKEN_REQUIRED);
+    throw new Error(HEALTH_CHECK_TOKEN_REQUIRED);
+  }
+
+  if (env.GRAPHQL_PLAYGROUND === 'true') {
+    logger.error(GRAPHQL_PLAYGROUND_FORBIDDEN);
+    throw new Error(GRAPHQL_PLAYGROUND_FORBIDDEN);
   }
 }

@@ -20,13 +20,24 @@ describe('StorageResolver uploadImage', () => {
     jest.clearAllMocks();
   });
 
-  it('allows customers to upload to products folder', async () => {
-    const result = await resolver.uploadImage('data:image/png;base64,abc', 'products', 'customer');
-    expect(result.url).toBe('https://cdn.example/key.webp');
+  it('rejects customers uploading to products folder', async () => {
+    await expect(
+      resolver.uploadImage('data:image/png;base64,abc', 'products', 'customer'),
+    ).rejects.toThrow(ForbiddenException);
   });
 
   it('allows customers to upload to profiles folder', async () => {
     await resolver.uploadImage('data:image/png;base64,abc', 'profiles', 'customer');
+    expect(storageService.buildObjectKey).toHaveBeenCalledWith('profiles', 'image/webp');
+  });
+
+  it('allows customers to upload to reviews folder', async () => {
+    await resolver.uploadImage('data:image/png;base64,abc', 'reviews', 'customer');
+    expect(storageService.buildObjectKey).toHaveBeenCalledWith('reviews', 'image/webp');
+  });
+
+  it('defaults customer uploads to profiles when folder omitted', async () => {
+    await resolver.uploadImage('data:image/png;base64,abc', undefined, 'customer');
     expect(storageService.buildObjectKey).toHaveBeenCalledWith('profiles', 'image/webp');
   });
 

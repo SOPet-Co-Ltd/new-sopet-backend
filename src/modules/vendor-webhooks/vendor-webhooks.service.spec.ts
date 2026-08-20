@@ -44,9 +44,11 @@ describe('VendorWebhooksService SSRF guards', () => {
   it('allows public HTTPS destinations', async () => {
     lookupMock.mockResolvedValue([{ address: '93.184.216.34', family: 4 }] as never);
 
-    await expect(service.assertSafeWebhookUrl('https://example.com/hook')).resolves.toBeInstanceOf(
-      URL,
-    );
+    await expect(service.assertSafeWebhookUrl('https://example.com/hook')).resolves.toMatchObject({
+      address: '93.184.216.34',
+      family: 4,
+      parsed: expect.any(URL),
+    });
   });
 
   it('deliverNow refuses private destinations before fetch', async () => {

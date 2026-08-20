@@ -35,20 +35,21 @@ Recommended protection:
 
 ### Secrets (required unless noted)
 
-| Secret                                                           | Purpose                                       |
-| ---------------------------------------------------------------- | --------------------------------------------- |
-| `AWS_ROLE_ARN`                                                   | IAM role ARN for GitHub OIDC (ECR push + SSM) |
-| `DB_PASSWORD`                                                    | Production Postgres                           |
-| `CLOUDFLARE_ACCOUNT_ID`                                          | R2                                            |
-| `CLOUDFLARE_ACCESS_KEY_ID`                                       | R2                                            |
-| `CLOUDFLARE_SECRET_ACCESS_KEY`                                   | R2                                            |
-| `CLOUDFLARE_R2_BUCKET`                                           | Production bucket name                        |
-| `JWT_SECRET`                                                     | Long random string (**different from UAT**)   |
-| `THAIBULKSMS_API_KEY` / `THAIBULKSMS_API_SECRET`                 | SMS                                           |
-| `OMISE_PUBLIC_KEY` / `OMISE_SECRET_KEY` / `OMISE_WEBHOOK_SECRET` | **Live** Omise keys + webhook secret          |
-| `RESEND_API_KEY`                                                 | Email                                         |
-| `REDIS_PASSWORD`                                                 | Optional if Redis has no auth                 |
-| `OPENAI_API_KEY`                                                 | Optional (smart search / embeddings)          |
+| Secret                                                           | Purpose                                                                                             |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `AWS_ROLE_ARN`                                                   | IAM role ARN for GitHub OIDC (ECR push + SSM)                                                       |
+| `DB_PASSWORD`                                                    | Production Postgres                                                                                 |
+| `CLOUDFLARE_ACCOUNT_ID`                                          | R2                                                                                                  |
+| `CLOUDFLARE_ACCESS_KEY_ID`                                       | R2                                                                                                  |
+| `CLOUDFLARE_SECRET_ACCESS_KEY`                                   | R2                                                                                                  |
+| `CLOUDFLARE_R2_BUCKET`                                           | Production bucket name                                                                              |
+| `JWT_SECRET`                                                     | Long random string (**different from UAT**)                                                         |
+| `THAIBULKSMS_API_KEY` / `THAIBULKSMS_API_SECRET`                 | SMS                                                                                                 |
+| `OMISE_PUBLIC_KEY` / `OMISE_SECRET_KEY` / `OMISE_WEBHOOK_SECRET` | **Live** Omise keys + webhook secret                                                                |
+| `RESEND_API_KEY`                                                 | Email                                                                                               |
+| `REDIS_PASSWORD`                                                 | Required when Redis auth is enabled (API fails boot in production if empty)                         |
+| `BANK_DATA_ENCRYPTION_KEY`                                       | Long random secret for vendor bank account encryption at rest (generate: `openssl rand -base64 32`) |
+| `OPENAI_API_KEY`                                                 | Optional (smart search / embeddings)                                                                |
 
 ### Variables (infrastructure)
 

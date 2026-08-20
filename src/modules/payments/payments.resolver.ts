@@ -81,7 +81,7 @@ export class PaymentsResolver {
   @Subscription(() => PaymentType, {
     filter: (
       payload: PaymentStatusUpdatedPayload,
-      variables: { paymentId?: string; orderId?: string },
+      variables: { paymentId?: string; orderId?: string; orderNumber?: string },
     ) => {
       const payment = payload.paymentStatusUpdated;
       if (variables.paymentId) {
@@ -98,6 +98,7 @@ export class PaymentsResolver {
   async paymentStatusUpdated(
     @Args('paymentId', { type: () => String, nullable: true }) paymentId?: string,
     @Args('orderId', { type: () => String, nullable: true }) orderId?: string,
+    @Args('orderNumber', { type: () => String, nullable: true }) orderNumber?: string,
     @CurrentUser('id') userId?: string,
     @CurrentUser('role') role?: string,
   ) {
@@ -108,10 +109,12 @@ export class PaymentsResolver {
       });
     }
 
+    const effectiveCustomerId = role === 'customer' ? userId : undefined;
     await this.paymentsService.assertCanSubscribeToPaymentStatus({
       paymentId,
       orderId,
-      userId: role === 'customer' ? userId : undefined,
+      orderNumber: effectiveCustomerId ? undefined : orderNumber?.trim(),
+      userId: effectiveCustomerId,
     });
 
     return this.paymentEventsService.paymentStatusUpdatedIterator();
@@ -125,6 +128,7 @@ export class PaymentsResolver {
     @CurrentUser('role') role?: string,
   ): Promise<PaymentType> {
     const effectiveCustomerId = role === 'customer' ? customerId : undefined;
+    const guestOrderNumber = effectiveCustomerId ? undefined : input.orderNumber?.trim();
 
     const result = await this.paymentsService.createCharge({
       orderId: input.orderId,
@@ -134,10 +138,14 @@ export class PaymentsResolver {
       omiseToken: input.omiseToken,
       savedPaymentMethodId: input.savedPaymentMethodId,
       customerId: effectiveCustomerId,
-      orderNumber: effectiveCustomerId ? undefined : input.orderNumber?.trim(),
+      orderNumber: guestOrderNumber,
     });
 
-    const payment = await this.paymentsService.findById(result.paymentId, effectiveCustomerId);
+    const payment = await this.paymentsService.findById(
+      result.paymentId,
+      effectiveCustomerId,
+      guestOrderNumber,
+    );
 
     return this.mapPayment(payment);
   }
