@@ -6,7 +6,7 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
 
-  # INF2-008 — keep Actions pins current (gitleaks, checkout, setup-node, …)
+  # INF2-008 — keep Actions pins current (checkout, setup-node, …)
   - package-ecosystem: github-actions
     directory: /
     schedule:
