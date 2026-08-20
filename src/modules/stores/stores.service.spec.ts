@@ -333,6 +333,46 @@ describe('StoresService', () => {
     });
   });
 
+  it('returns approved store on findOneForDiscovery for anonymous viewers', async () => {
+    storeRepository.findOne.mockResolvedValue({
+      id: 'store-1',
+      status: StoreStatus.APPROVED,
+    });
+
+    const store = await service.findOneForDiscovery('store-1');
+    expect(store.status).toBe(StoreStatus.APPROVED);
+  });
+
+  it('returns STORE_NOT_FOUND for pending store on findOneForDiscovery without access', async () => {
+    storeRepository.findOne.mockResolvedValue({
+      id: 'store-1',
+      status: StoreStatus.PENDING,
+    });
+
+    await expect(service.findOneForDiscovery('store-1')).rejects.toMatchObject({
+      response: { code: 'STORE_NOT_FOUND' },
+    });
+  });
+
+  it('allows vendor with store access to view pending store by id', async () => {
+    storeRepository.findOne.mockResolvedValue({
+      id: 'store-1',
+      status: StoreStatus.PENDING,
+    });
+    storeRepository.findOne.mockResolvedValueOnce({
+      id: 'store-1',
+      ownerId: 'vendor-1',
+    });
+
+    jest.spyOn(service, 'userHasStoreAccess').mockResolvedValue(true);
+
+    const store = await service.findOneForDiscovery('store-1', {
+      userId: 'vendor-1',
+      role: 'vendor',
+    });
+    expect(store.id).toBe('store-1');
+  });
+
   it('updates store owner and syncs loaded owner relation', async () => {
     const oldOwner = { id: 'owner-1', email: 'old@test.com', role: UserRole.VENDOR };
     const newOwner = { id: 'owner-2', email: 'new@test.com', role: UserRole.VENDOR };

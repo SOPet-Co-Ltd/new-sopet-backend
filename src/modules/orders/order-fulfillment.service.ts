@@ -30,6 +30,7 @@ import {
   OrderAuditActorType,
   OrderAuditEventType,
 } from '../order-audit-logs/order-audit-log.constants';
+import { guestPhoneLookupValues } from '../../common/utils/phone.util';
 
 @Injectable()
 export class OrderFulfillmentService {
@@ -380,9 +381,9 @@ export class OrderFulfillmentService {
         });
       }
     } else if (guestPhone) {
-      const normalizedGuestPhone = guestPhone.replace(/\D/g, '');
-      const orderGuestPhone = order.guestPhone?.replace(/\D/g, '');
-      if (!orderGuestPhone || orderGuestPhone !== normalizedGuestPhone) {
+      const lookupValues = guestPhoneLookupValues(guestPhone);
+      const orderGuestPhone = order.guestPhone;
+      if (!orderGuestPhone || !lookupValues.includes(orderGuestPhone)) {
         throw new ForbiddenException({
           code: 'FORBIDDEN',
           message: 'You do not have access to this order',

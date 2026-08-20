@@ -68,6 +68,9 @@ export class UserProfile {
 
   @Field(() => Boolean, { defaultValue: false })
   emailVerified!: boolean;
+
+  @Field(() => Boolean, { defaultValue: false })
+  mustChangePassword!: boolean;
 }
 
 @ObjectType()

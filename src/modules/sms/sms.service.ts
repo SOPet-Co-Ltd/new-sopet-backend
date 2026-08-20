@@ -18,17 +18,22 @@ export class SmsService {
   private readonly otpLogOnly: boolean;
 
   constructor(private readonly configService: ConfigService) {
-    this.isDev =
-      (this.configService.get<string>('app.environment') ??
-        process.env.NODE_ENV ??
-        'development') === 'development';
+    const environment =
+      this.configService.get<string>('app.environment') ?? process.env.NODE_ENV?.trim() ?? '';
+    // Never treat unset NODE_ENV as development (INF2-005) — only explicit development.
+    this.isDev = environment === 'development';
     this.otpLogOnly = this.configService.get<boolean>('thaibulksms.otpLogOnly') ?? false;
   }
 
   async sendOtp(phone: string, code: string): Promise<void> {
     const message = `Your SOPet verification code is ${code}. Valid for 5 minutes.`;
 
-    if (this.isDev || this.otpLogOnly) {
+    // Log OTP only in development, or when SMS_OTP_LOG_ONLY is set and not production
+    // (production rejects SMS_OTP_LOG_ONLY at startup).
+    const environment =
+      this.configService.get<string>('app.environment') ?? process.env.NODE_ENV?.trim() ?? '';
+    const mayLogOtp = this.isDev || (this.otpLogOnly && environment !== 'production');
+    if (mayLogOtp) {
       this.logDevSms(phone, code, message);
       return;
     }

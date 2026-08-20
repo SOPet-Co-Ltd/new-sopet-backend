@@ -32,12 +32,15 @@ export async function runProdSeed(): Promise<void> {
       password: SEED_PASSWORD,
       fullName: 'Admin SOPet',
       role: UserRole.ADMIN,
+      mustChangePassword: true,
     });
 
     if (created) {
       console.log(`Created production admin (${user.email})`);
       console.log('Skipped vendor accounts, stores, and products.');
-      console.log('\nIMPORTANT: Change the admin password after first login.');
+      console.log(
+        '\nSECURITY: Default seed password is temporary. Change it immediately — admin mutations are blocked until mustChangePassword is cleared.',
+      );
     }
   } finally {
     await dataSource.destroy();

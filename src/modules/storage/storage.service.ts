@@ -1,12 +1,16 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
-import { lookup } from 'node:dns/promises';
-import { isIP } from 'node:net';
 import { type ObjectCannedACL, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import sharp from 'sharp';
 import { getFolderUploadRules, isAspectRatioWithinTolerance } from './upload.rules';
 import type { UploadFolder } from './storage.inputs';
+import {
+  fetchWithPinnedIp,
+  resolveSafeOutboundUrl,
+  type SafeUrlPin,
+  UnsafeOutboundUrlError,
+} from '../../common/utils/safe-fetch.util';
 
 export interface UploadResult {
   url: string;
@@ -194,12 +198,11 @@ export class StorageService {
   ): Promise<{ buffer: Buffer; contentType: string }> {
     let currentUrl = sourceUrl.trim();
     for (let redirectCount = 0; redirectCount <= REMOTE_IMAGE_MAX_REDIRECTS; redirectCount++) {
-      const parsed = await this.assertSafeRemoteUrl(currentUrl);
+      const pin = await this.assertSafeRemoteUrl(currentUrl);
       let response: Response;
       try {
-        response = await fetch(parsed.toString(), {
+        response = await fetchWithPinnedIp(pin, {
           method: 'GET',
-          redirect: 'manual',
           signal: AbortSignal.timeout(REMOTE_IMAGE_FETCH_TIMEOUT_MS),
           headers: { Accept: 'image/*,*/*;q=0.8' },
         });
@@ -212,7 +215,7 @@ export class StorageService {
         if (!location) {
           throw this.invalidImageUrlError(`Image URL redirected without a Location header`);
         }
-        currentUrl = new URL(location, parsed).toString();
+        currentUrl = new URL(location, pin.parsed).toString();
         continue;
       }
 
@@ -245,93 +248,27 @@ export class StorageService {
     throw this.invalidImageUrlError('Image URL exceeded maximum redirects');
   }
 
-  private async assertSafeRemoteUrl(urlString: string): Promise<URL> {
-    let parsed: URL;
+  private async assertSafeRemoteUrl(urlString: string): Promise<SafeUrlPin> {
     try {
-      parsed = new URL(urlString);
-    } catch {
-      throw this.invalidImageUrlError('Image URL is invalid');
-    }
-
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      throw this.invalidImageUrlError('Image URL must use http or https');
-    }
-
-    if (parsed.username || parsed.password) {
-      throw this.invalidImageUrlError('Image URL must not include credentials');
-    }
-
-    const hostname = parsed.hostname.toLowerCase();
-    if (
-      hostname === 'localhost' ||
-      hostname.endsWith('.localhost') ||
-      hostname.endsWith('.local') ||
-      hostname.endsWith('.internal') ||
-      hostname === '0.0.0.0'
-    ) {
-      throw this.invalidImageUrlError('Image URL host is not allowed');
-    }
-
-    const addresses = isIP(hostname)
-      ? [hostname]
-      : (await lookup(hostname, { all: true })).map((entry) => entry.address);
-
-    if (!addresses.length) {
-      throw this.invalidImageUrlError('Image URL host could not be resolved');
-    }
-
-    for (const address of addresses) {
-      if (this.isPrivateOrReservedIp(address)) {
+      return await resolveSafeOutboundUrl(urlString, { protocols: ['http:', 'https:'] });
+    } catch (error) {
+      if (error instanceof UnsafeOutboundUrlError) {
+        if (error.message === 'URL is invalid') {
+          throw this.invalidImageUrlError('Image URL is invalid');
+        }
+        if (error.message.startsWith('URL must use')) {
+          throw this.invalidImageUrlError('Image URL must use http or https');
+        }
+        if (error.message === 'URL must not include credentials') {
+          throw this.invalidImageUrlError('Image URL must not include credentials');
+        }
+        if (error.message === 'URL host could not be resolved') {
+          throw this.invalidImageUrlError('Image URL host could not be resolved');
+        }
         throw this.invalidImageUrlError('Image URL host is not allowed');
       }
+      throw error;
     }
-
-    return parsed;
-  }
-
-  private isPrivateOrReservedIp(address: string): boolean {
-    if (address === '::1' || address === '::' || address.startsWith('fe80:')) {
-      return true;
-    }
-
-    if (address.includes(':')) {
-      // IPv6 unique local / mapped IPv4
-      const lower = address.toLowerCase();
-      if (lower.startsWith('fc') || lower.startsWith('fd')) {
-        return true;
-      }
-      const mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-      if (mapped) {
-        return this.isPrivateOrReservedIp(mapped[1]);
-      }
-      return false;
-    }
-
-    const parts = address.split('.').map((part) => Number(part));
-    if (
-      parts.length !== 4 ||
-      parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)
-    ) {
-      return true;
-    }
-
-    const [a, b] = parts;
-    if (a === 10 || a === 127 || a === 0) {
-      return true;
-    }
-    if (a === 169 && b === 254) {
-      return true;
-    }
-    if (a === 172 && b >= 16 && b <= 31) {
-      return true;
-    }
-    if (a === 192 && b === 168) {
-      return true;
-    }
-    if (a === 100 && b >= 64 && b <= 127) {
-      return true;
-    }
-    return false;
   }
 
   private async readResponseBodyWithLimit(

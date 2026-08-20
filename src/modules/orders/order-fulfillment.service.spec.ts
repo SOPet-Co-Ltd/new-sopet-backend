@@ -211,4 +211,52 @@ describe('OrderFulfillmentService hold guards', () => {
       ).rejects.toMatchObject({ response: { code: 'BANK_TRANSFER_ADMIN_ONLY' } });
     });
   });
+
+  describe('confirmOrderDelivered guest phone normalization', () => {
+    function shippedGuestOrder(guestPhone: string): Order {
+      return {
+        id: 'ord-1',
+        customerId: null,
+        guestPhone,
+        status: OrderStatus.SHIPPED,
+        items: [
+          {
+            id: 'item-1',
+            orderId: 'ord-1',
+            storeId: 'store-1',
+            fulfillmentStatus: FulfillmentStatus.SHIPPED,
+          } as OrderItem,
+        ],
+      } as Order;
+    }
+
+    it('accepts +66 guest phone when order stores local format', async () => {
+      orderRepository.findOne
+        .mockResolvedValueOnce(shippedGuestOrder('0812345678'))
+        .mockResolvedValueOnce({
+          ...shippedGuestOrder('0812345678'),
+          status: OrderStatus.DELIVERED,
+          items: [
+            {
+              id: 'item-1',
+              orderId: 'ord-1',
+              storeId: 'store-1',
+              fulfillmentStatus: FulfillmentStatus.DELIVERED,
+            } as OrderItem,
+          ],
+        });
+
+      await expect(
+        service.confirmOrderDelivered('ord-1', undefined, '+66812345678'),
+      ).resolves.toMatchObject({ status: OrderStatus.DELIVERED });
+    });
+
+    it('rejects mismatched guest phone formats', async () => {
+      orderRepository.findOne.mockResolvedValue(shippedGuestOrder('0812345678'));
+
+      await expect(
+        service.confirmOrderDelivered('ord-1', undefined, '0899999999'),
+      ).rejects.toMatchObject({ response: { code: 'FORBIDDEN' } });
+    });
+  });
 });

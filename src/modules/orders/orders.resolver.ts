@@ -1,5 +1,6 @@
 import { Args, Int, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { ForbiddenException, NotFoundException, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { OrdersService } from './orders.service';
 import { OrderFulfillmentService } from './order-fulfillment.service';
 import { PaymentsService } from '../payments/payments.service';
@@ -16,6 +17,7 @@ import { mapOrder, mapOrderTracking } from './order.mapper';
 import { CurrentUser, Public, Roles } from '../../common/decorators';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { GuestOrderLookupRateLimitGuard } from './guards/guest-order-lookup-rate-limit.guard';
 import {
   ConfirmOrderDeliveredInput,
   CreateOrderInput,
@@ -111,15 +113,10 @@ export class OrdersResolver {
     return mapOrder(order);
   }
 
-  @Query(() => [OrderType])
-  @Public()
-  async guestOrders(@Args('guestPhone') guestPhone: string): Promise<OrderType[]> {
-    const orders = await this.ordersService.findByGuestPhone(guestPhone);
-    return orders.map((order) => mapOrder(order));
-  }
-
   @Query(() => OrderTrackingType)
   @Public()
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @UseGuards(GuestOrderLookupRateLimitGuard)
   async orderTracking(@Args('orderNumber') orderNumber: string): Promise<OrderTrackingType> {
     const order = await this.ordersService.findByOrderNumber(orderNumber.trim());
     return mapOrderTracking(order);
@@ -298,11 +295,12 @@ export class OrdersResolver {
     return mapOrder(updated);
   }
 
-  @Mutation(() => OrderType)
+  @Mutation(() => OrderTrackingType)
   @Public()
+  @UseGuards(GuestOrderLookupRateLimitGuard)
   async confirmGuestOrderDelivered(
     @Args('input') input: ConfirmOrderDeliveredInput,
-  ): Promise<OrderType> {
+  ): Promise<OrderTrackingType> {
     if (!input.guestPhone) {
       throw new ForbiddenException({
         code: 'FORBIDDEN',
@@ -314,7 +312,7 @@ export class OrdersResolver {
       undefined,
       input.guestPhone,
     );
-    return mapOrder(updated);
+    return mapOrderTracking(updated);
   }
 
   @Mutation(() => OrderType)

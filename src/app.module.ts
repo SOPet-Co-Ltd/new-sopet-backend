@@ -26,6 +26,7 @@ import { RolesGuard } from './modules/auth/guards/roles.guard';
 import { StoreStatusGuard } from './modules/auth/guards/store-status.guard';
 import { VendorStatusGuard } from './modules/auth/guards/vendor-status.guard';
 import { CustomerStatusGuard } from './modules/auth/guards/customer-status.guard';
+import { MustChangePasswordGuard } from './modules/auth/guards/must-change-password.guard';
 
 // Modules
 import { AuthModule } from './modules/auth/auth.module';
@@ -163,6 +164,11 @@ import { getPostgresSslOptions } from './database/postgres-ssl.util';
     {
       provide: APP_GUARD,
       useExisting: CustomerStatusGuard,
+    },
+    // Force password rotation for seeded admins (INF-006)
+    {
+      provide: APP_GUARD,
+      useExisting: MustChangePasswordGuard,
     },
   ],
 })

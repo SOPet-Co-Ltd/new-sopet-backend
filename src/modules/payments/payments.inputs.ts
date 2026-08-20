@@ -30,4 +30,9 @@ export class CreatePaymentInput {
   @IsOptional()
   @IsUUID()
   savedPaymentMethodId?: string;
+
+  @Field({ nullable: true })
+  @IsOptional()
+  @IsString()
+  orderNumber?: string;
 }

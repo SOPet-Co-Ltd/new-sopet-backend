@@ -22,6 +22,7 @@ export async function findOrCreateUser(
     password: string;
     fullName: string;
     role: UserRole;
+    mustChangePassword?: boolean;
   },
 ): Promise<{ user: User; created: boolean }> {
   const existing = await userRepo.findOne({ where: { email: input.email } });
@@ -38,6 +39,7 @@ export async function findOrCreateUser(
       role: input.role,
       emailVerified: true,
       isActive: true,
+      mustChangePassword: input.mustChangePassword === true,
     }),
   );
 

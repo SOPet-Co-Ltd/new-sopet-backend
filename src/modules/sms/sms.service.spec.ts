@@ -30,9 +30,9 @@ describe('SmsService', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('logs OTP when SMS_OTP_LOG_ONLY is enabled', async () => {
+  it('logs OTP when SMS_OTP_LOG_ONLY is enabled outside production', async () => {
     const service = createService({
-      'app.environment': 'production',
+      'app.environment': 'test',
       'thaibulksms.otpLogOnly': true,
       'thaibulksms.apiKey': 'key',
       'thaibulksms.apiSecret': 'secret',
@@ -43,6 +43,31 @@ describe('SmsService', () => {
     await service.sendOtp('0812345678', '123456');
 
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('never logs OTP when environment is production even if otpLogOnly is set', async () => {
+    const service = createService({
+      'app.environment': 'production',
+      'thaibulksms.otpLogOnly': true,
+      'thaibulksms.apiKey': 'api-key',
+      'thaibulksms.apiSecret': 'api-secret',
+      'thaibulksms.sender': 'SOPet',
+      'thaibulksms.force': 'corporate',
+      'thaibulksms.shortenUrl': false,
+    });
+
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          phone_number_list: [{ number: '66812345678', message_id: 'msg-1', used_credit: 1 }],
+        }),
+    });
+    global.fetch = fetchMock;
+
+    await service.sendOtp('0812345678', '123456');
+
+    expect(fetchMock).toHaveBeenCalled();
   });
 
   it('throws SMS_NOT_CONFIGURED when no provider credentials are set', async () => {

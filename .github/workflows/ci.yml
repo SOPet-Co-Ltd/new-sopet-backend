@@ -9,6 +9,10 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
 
+# INF2-002 — least-privilege workflow token (read-only checkout/audit)
+permissions:
+  contents: read
+
 jobs:
   lite:
     if: github.base_ref != 'deploy/production' && github.base_ref != 'deploy/uat'
@@ -26,6 +30,16 @@ jobs:
 
       - name: Install dependencies
         run: yarn install --frozen-lockfile
+
+      - name: Audit critical dependencies
+        # Yarn classic exits with a severity bitmask; only fail on Critical (16).
+        run: |
+          set +e
+          yarn audit --level critical
+          code=$?
+          set -e
+          if (( code & 16 )); then exit 1; fi
+          exit 0
 
       - name: Format check
         run: yarn format:check
@@ -58,6 +72,16 @@ jobs:
 
       - name: Install dependencies
         run: yarn install --frozen-lockfile
+
+      - name: Audit critical dependencies
+        # Yarn classic exits with a severity bitmask; only fail on Critical (16).
+        run: |
+          set +e
+          yarn audit --level critical
+          code=$?
+          set -e
+          if (( code & 16 )); then exit 1; fi
+          exit 0
 
       - name: Format check
         run: yarn format:check

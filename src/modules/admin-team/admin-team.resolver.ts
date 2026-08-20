@@ -157,6 +157,7 @@ export class AdminTeamResolver {
 
   @Query(() => AdminInvitationType)
   @Public()
+  @UseGuards(AuthRateLimitGuard)
   async getAdminInvitationByToken(@Args('token') token: string): Promise<AdminInvitationType> {
     const invitation = await this.adminTeamService.previewInvitationByToken(token);
     return mapInvitation(invitation);

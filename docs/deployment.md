@@ -56,6 +56,10 @@ E2E tests use mocked repositories — no Postgres/Redis/MinIO in CI.
 
 Dummy env vars: `JWT_SECRET`, `OMISE_*`.
 
+### Install-time supply chain (INF2-008)
+
+`preinstall` runs `npx only-allow yarn` and `prepare` runs `husky`. Both execute unpinned installer scripts during `yarn install`. Acceptable for local/CI developer machines; production images should use `yarn install --frozen-lockfile --ignore-scripts` (or equivalent) so husky/`npx` do not run in deploy.
+
 `.github/workflows/deploy.yml` — push to `deploy/uat` or `deploy/production` (also `workflow_dispatch` with Environment choice):
 
 1. **`resolve-runner`** — reads Environment `DOCKER_PLATFORM`, outputs `ubuntu-24.04-arm` (arm64) or `ubuntu-latest` (amd64)
@@ -209,7 +213,7 @@ First-time setup only (migrations run automatically on each deploy after this):
 yarn db:seed:prod
 ```
 
-Creates `admin@sopet.org` with password `P@ssw0rd` — no vendor, store, or product data. Idempotent: skips if the admin already exists. Change the password after first login.
+Creates `admin@sopet.org` with a temporary default password and `mustChangePassword=true` — no vendor, store, or product data. Idempotent: skips if the admin already exists. Admin mutations remain blocked until the password is changed. Never leave the seed password in production.
 
 ## Object storage
 

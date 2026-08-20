@@ -16,6 +16,12 @@ import {
   VENDOR_WEBHOOK_EVENTS,
   VendorWebhookEvent,
 } from '../../database/entities/store-webhook.entity';
+import {
+  fetchWithPinnedIp,
+  resolveSafeOutboundUrl,
+  SafeUrlPin,
+  UnsafeOutboundUrlError,
+} from '../../common/utils/safe-fetch.util';
 import { buildVendorWebhookOrderPayload, signVendorWebhookPayload } from './vendor-webhook.payload';
 import { DEFAULT_VENDOR_WEBHOOK_EVENTS } from './vendor-webhook.events';
 import { VENDOR_WEBHOOK_QUEUE, VendorWebhookJobData } from './vendor-webhooks.constants';
@@ -63,7 +69,7 @@ export class VendorWebhooksService {
       rotateSecret?: boolean;
     },
   ): Promise<StoreWebhookPublicView> {
-    this.assertHttpsUrl(input.url);
+    await this.assertSafeWebhookUrl(input.url);
     const events = this.normalizeEvents(input.events);
     const existing = await this.webhookRepository.findOne({ where: { storeId } });
 
@@ -180,8 +186,11 @@ export class VendorWebhooksService {
   }
 
   async deliverNow(job: VendorWebhookJobData): Promise<void> {
+    // Defense in depth: re-validate + DNS-pin before every outbound fetch (SSRF / rebinding).
+    const pin = await this.assertSafeWebhookUrl(job.url);
+
     const signature = signVendorWebhookPayload(job.secret, job.payloadJson);
-    const response = await fetch(job.url, {
+    const response = await fetchWithPinnedIp(pin, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -232,21 +241,37 @@ export class VendorWebhooksService {
     return unique;
   }
 
-  private assertHttpsUrl(url: string): void {
-    let parsed: URL;
+  /**
+   * HTTPS-only + DNS resolution must not target private/reserved IPs (A10 SSRF).
+   * Returns a connect pin so deliverNow cannot rebind after check (BE2-010).
+   */
+  async assertSafeWebhookUrl(url: string): Promise<SafeUrlPin> {
     try {
-      parsed = new URL(url.trim());
-    } catch {
-      throw new BadRequestException({
-        code: 'INVALID_WEBHOOK_URL',
-        message: 'Webhook URL must be a valid HTTPS URL',
-      });
-    }
-    if (parsed.protocol !== 'https:') {
-      throw new BadRequestException({
-        code: 'INVALID_WEBHOOK_URL',
-        message: 'Webhook URL must use HTTPS',
-      });
+      return await resolveSafeOutboundUrl(url, { protocols: ['https:'] });
+    } catch (error) {
+      if (error instanceof UnsafeOutboundUrlError) {
+        throw new BadRequestException({
+          code: 'INVALID_WEBHOOK_URL',
+          message: mapWebhookUrlError(error.message),
+        });
+      }
+      throw error;
     }
   }
+}
+
+function mapWebhookUrlError(message: string): string {
+  if (message === 'URL is invalid') {
+    return 'Webhook URL must be a valid HTTPS URL';
+  }
+  if (message.startsWith('URL must use')) {
+    return 'Webhook URL must use HTTPS';
+  }
+  if (message === 'URL must not include credentials') {
+    return 'Webhook URL must not include credentials';
+  }
+  if (message === 'URL host could not be resolved') {
+    return 'Webhook URL host could not be resolved';
+  }
+  return 'Webhook URL host is not allowed';
 }

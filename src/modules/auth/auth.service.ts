@@ -5,12 +5,13 @@ import {
   ForbiddenException,
   NotFoundException,
   Logger,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, MoreThan } from 'typeorm';
-import { createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import * as bcrypt from 'bcrypt';
 import { Customer } from '../../database/entities/customer.entity';
 import { User, UserRole } from '../../database/entities/user.entity';
@@ -33,6 +34,7 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constants';
 import { getAuditRequestContext } from '../audit-logs/audit-request-context';
 import { AuditActorType } from '../../database/entities/audit-log.entity';
+import { RedisService } from '../redis/redis.service';
 import {
   finalizeCustomerDeletion,
   isAdminSuspended,
@@ -47,6 +49,8 @@ interface ReactivationJwtPayload {
 
 const OTP_TTL_MS = 5 * 60 * 1000;
 const OTP_MAX_REQUESTS_PER_WINDOW = 3;
+const OTP_MAX_VERIFY_FAILURES = 5;
+const OTP_VERIFY_FAIL_TTL_SECONDS = Math.ceil(OTP_TTL_MS / 1000);
 
 @Injectable()
 export class AuthService {
@@ -76,6 +80,7 @@ export class AuthService {
     private readonly emailDeliveryService: EmailDeliveryService,
     private readonly storageService: StorageService,
     private readonly auditLogsService: AuditLogsService,
+    private readonly redisService: RedisService,
   ) {}
 
   private generateOtp(): string {
@@ -158,6 +163,8 @@ export class AuthService {
     const { code, sessionId } = verifyOtpDto;
     const phone = normalizeThaiPhoneToLocal(verifyOtpDto.phone);
 
+    await this.assertOtpVerifyNotLocked(phone);
+
     const otp = await this.otpRepository.findOne({
       where: {
         phone,
@@ -168,11 +175,14 @@ export class AuthService {
     });
 
     if (!otp || this.isOtpExpired(otp.expiresAt) || !this.otpHashesMatch(otp.code, code)) {
+      await this.recordOtpVerifyFailure(phone, otp?.id);
       throw new UnauthorizedException({
         code: 'INVALID_OTP',
         message: 'Invalid or expired OTP code',
       });
     }
+
+    await this.clearOtpVerifyFailures(phone);
 
     otp.isUsed = true;
     await this.otpRepository.save(otp);
@@ -299,6 +309,7 @@ export class AuthService {
       sub: user.id,
       email: user.email,
       role: user.role,
+      mustChangePassword: user.mustChangePassword === true,
     };
 
     // Vendors: prefer owned store, then team memberships
@@ -339,24 +350,42 @@ export class AuthService {
         role: user.role,
         profilePhotoUrl: user.profilePhotoUrl,
         emailVerified: user.emailVerified,
+        mustChangePassword: user.mustChangePassword === true,
       },
     };
   }
 
   async refreshToken(token: string): Promise<{ accessToken: string; refreshToken: string }> {
     try {
+      await this.assertRefreshRedisAvailableInProduction();
+
       const payload = this.jwtService.verify<JwtPayload>(token);
 
       if (payload.type !== 'refresh') {
         throw new UnauthorizedException('Invalid token type');
       }
 
-      const newPayload: Omit<JwtPayload, 'type'> = {
+      if (!payload.jti) {
+        // Pre-fix / UsersService mint paths issued refresh JWTs without jti.
+        // When Redis is up, reject those so stolen tokens cannot refresh forever.
+        if (this.redisService.isAvailable()) {
+          throw new UnauthorizedException({
+            code: 'REFRESH_TOKEN_JTI_REQUIRED',
+            message: 'Invalid or expired refresh token',
+          });
+        }
+      } else {
+        await this.assertRefreshTokenJtiValid(payload.jti, payload.sub);
+        await this.invalidateRefreshTokenJti(payload.jti);
+      }
+
+      const newPayload: Omit<JwtPayload, 'type' | 'jti'> = {
         sub: payload.sub,
         email: payload.email,
         phone: payload.phone,
         role: payload.role,
         storeId: payload.storeId,
+        mustChangePassword: payload.mustChangePassword,
       };
 
       if (payload.role === UserRole.CUSTOMER) {
@@ -375,7 +404,7 @@ export class AuthService {
       if (payload.role === UserRole.VENDOR || payload.role === UserRole.ADMIN) {
         const user = await this.userRepository.findOne({
           where: { id: payload.sub },
-          select: ['id', 'isActive'],
+          select: ['id', 'isActive', 'mustChangePassword'],
         });
         if (!user || !user.isActive) {
           throw new UnauthorizedException({
@@ -383,11 +412,20 @@ export class AuthService {
             message: 'Your account has been suspended. Please contact support for assistance.',
           });
         }
+        if (payload.role === UserRole.ADMIN) {
+          newPayload.mustChangePassword = user.mustChangePassword === true;
+        }
       }
 
       return this.generateTokens(newPayload);
     } catch (error) {
+      if (error instanceof ServiceUnavailableException) {
+        throw error;
+      }
       if (this.isSuspensionAuthError(error)) {
+        throw error;
+      }
+      if (error instanceof UnauthorizedException) {
         throw error;
       }
       throw new UnauthorizedException({
@@ -395,6 +433,201 @@ export class AuthService {
         message: 'Invalid or expired refresh token',
       });
     }
+  }
+
+  private isProductionEnvironment(): boolean {
+    return (
+      this.configService.get<string>('app.environment') === 'production' ||
+      process.env.NODE_ENV === 'production'
+    );
+  }
+
+  private async assertRefreshRedisAvailableInProduction(): Promise<void> {
+    if (!this.isProductionEnvironment()) {
+      return;
+    }
+    // Redis is optional — only fail closed when configured but unavailable.
+    if (!this.redisService.isConfigured()) {
+      return;
+    }
+    if (this.redisService.isAvailable()) {
+      return;
+    }
+    this.logger.error(
+      JSON.stringify({
+        event: 'refresh_redis_unavailable',
+        message: 'Rejecting refresh in production because Redis rotation store is unavailable',
+      }),
+    );
+    throw new ServiceUnavailableException({
+      code: 'REDIS_REQUIRED',
+      message: 'Authentication service temporarily unavailable',
+    });
+  }
+
+  private otpVerifyFailKey(phone: string): string {
+    return `otp:verify_fail:${phone}`;
+  }
+
+  private static readonly otpVerifyFailMemory = new Map<
+    string,
+    { count: number; expiresAt: number }
+  >();
+
+  private async assertOtpVerifyNotLocked(phone: string): Promise<void> {
+    const key = this.otpVerifyFailKey(phone);
+    let failures = 0;
+
+    if (this.redisService.isAvailable()) {
+      const raw = await this.redisService.get(key);
+      failures = raw ? parseInt(raw, 10) : 0;
+    } else {
+      const bucket = AuthService.otpVerifyFailMemory.get(key);
+      if (bucket && bucket.expiresAt > Date.now()) {
+        failures = bucket.count;
+      }
+    }
+
+    if (failures >= OTP_MAX_VERIFY_FAILURES) {
+      throw new UnauthorizedException({
+        code: 'OTP_LOCKED',
+        message: 'Too many failed OTP attempts. Request a new code.',
+      });
+    }
+  }
+
+  private async recordOtpVerifyFailure(phone: string, otpId?: string): Promise<void> {
+    const key = this.otpVerifyFailKey(phone);
+    let next = 1;
+
+    if (this.redisService.isAvailable()) {
+      const raw = await this.redisService.get(key);
+      next = (raw ? parseInt(raw, 10) : 0) + 1;
+      await this.redisService.set(key, String(next), OTP_VERIFY_FAIL_TTL_SECONDS);
+    } else {
+      const now = Date.now();
+      const bucket = AuthService.otpVerifyFailMemory.get(key);
+      if (!bucket || bucket.expiresAt <= now) {
+        AuthService.otpVerifyFailMemory.set(key, {
+          count: 1,
+          expiresAt: now + OTP_TTL_MS,
+        });
+        next = 1;
+      } else {
+        bucket.count += 1;
+        next = bucket.count;
+      }
+    }
+
+    if (next >= OTP_MAX_VERIFY_FAILURES) {
+      if (otpId) {
+        await this.otpRepository.update({ id: otpId }, { isUsed: true });
+      } else {
+        await this.otpRepository.update({ phone, isUsed: false }, { isUsed: true });
+      }
+      this.logger.warn(
+        JSON.stringify({
+          event: 'otp_verify_locked',
+          phone,
+          failures: next,
+        }),
+      );
+    }
+  }
+
+  private async clearOtpVerifyFailures(phone: string): Promise<void> {
+    const key = this.otpVerifyFailKey(phone);
+    if (this.redisService.isAvailable()) {
+      await this.redisService.del(key);
+    }
+    AuthService.otpVerifyFailMemory.delete(key);
+  }
+
+  private refreshTokenRedisKey(jti: string): string {
+    return `refresh:jti:${jti}`;
+  }
+
+  private refreshRevokedRedisKey(sub: string): string {
+    return `refresh:revoked:${sub}`;
+  }
+
+  private getRefreshTtlSeconds(): number {
+    const configured = this.configService.get<string>('jwt.refreshTokenExpiresIn') ?? '7d';
+    const match = /^(\d+)([smhd])$/.exec(configured);
+    if (!match) {
+      return 7 * 24 * 60 * 60;
+    }
+    const amount = Number.parseInt(match[1], 10);
+    switch (match[2]) {
+      case 's':
+        return amount;
+      case 'm':
+        return amount * 60;
+      case 'h':
+        return amount * 60 * 60;
+      case 'd':
+        return amount * 24 * 60 * 60;
+      default:
+        return 7 * 24 * 60 * 60;
+    }
+  }
+
+  private async assertRefreshTokenJtiValid(jti: string, sub: string): Promise<void> {
+    if (await this.isRefreshSessionRevoked(sub)) {
+      throw new UnauthorizedException({
+        code: 'REFRESH_TOKEN_REVOKED',
+        message: 'Refresh token has been revoked',
+      });
+    }
+
+    if (!this.redisService.isAvailable()) {
+      return;
+    }
+
+    const storedSub = await this.redisService.get(this.refreshTokenRedisKey(jti));
+    if (!storedSub) {
+      await this.revokeAllRefreshSessions(sub);
+      throw new UnauthorizedException({
+        code: 'REFRESH_TOKEN_REUSE',
+        message: 'Refresh token reuse detected — all sessions revoked',
+      });
+    }
+
+    if (storedSub !== sub) {
+      throw new UnauthorizedException({
+        code: 'INVALID_REFRESH_TOKEN',
+        message: 'Invalid or expired refresh token',
+      });
+    }
+  }
+
+  private async invalidateRefreshTokenJti(jti: string): Promise<void> {
+    if (!this.redisService.isAvailable()) {
+      return;
+    }
+    await this.redisService.del(this.refreshTokenRedisKey(jti));
+  }
+
+  private async storeRefreshTokenJti(jti: string, sub: string): Promise<void> {
+    if (!this.redisService.isAvailable()) {
+      return;
+    }
+    await this.redisService.set(this.refreshTokenRedisKey(jti), sub, this.getRefreshTtlSeconds());
+  }
+
+  private async isRefreshSessionRevoked(sub: string): Promise<boolean> {
+    if (!this.redisService.isAvailable()) {
+      return false;
+    }
+    const revoked = await this.redisService.get(this.refreshRevokedRedisKey(sub));
+    return revoked === '1';
+  }
+
+  private async revokeAllRefreshSessions(sub: string): Promise<void> {
+    if (!this.redisService.isAvailable()) {
+      return;
+    }
+    await this.redisService.set(this.refreshRevokedRedisKey(sub), '1', this.getRefreshTtlSeconds());
   }
 
   private isSuspensionAuthError(error: unknown): boolean {
@@ -409,9 +642,15 @@ export class AuthService {
     return code === 'CUSTOMER_SUSPENDED' || code === 'ACCOUNT_SUSPENDED';
   }
 
-  private async generateTokens(
-    payload: Omit<JwtPayload, 'type'>,
+  /**
+   * Mint access + refresh JWTs. Refresh always includes `jti` and is stored in Redis
+   * when available (rotation / reuse detection). Prefer this over signing refresh
+   * tokens directly from other modules.
+   */
+  async generateTokens(
+    payload: Omit<JwtPayload, 'type' | 'jti'>,
   ): Promise<{ accessToken: string; refreshToken: string }> {
+    const refreshJti = randomUUID();
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(
         { ...payload, type: 'access' },
@@ -420,12 +659,14 @@ export class AuthService {
         },
       ),
       this.jwtService.signAsync(
-        { ...payload, type: 'refresh' },
+        { ...payload, type: 'refresh', jti: refreshJti },
         {
           expiresIn: this.configService.get<string>('jwt.refreshTokenExpiresIn'),
         },
       ),
     ]);
+
+    await this.storeRefreshTokenJti(refreshJti, payload.sub);
 
     return { accessToken, refreshToken };
   }
@@ -618,6 +859,7 @@ export class AuthService {
     }
 
     user.passwordHash = await bcrypt.hash(newPassword, 12);
+    user.mustChangePassword = false;
     await this.userRepository.save(user);
   }
 
@@ -691,6 +933,7 @@ export class AuthService {
     }
 
     user.passwordHash = await bcrypt.hash(newPassword, 12);
+    user.mustChangePassword = false;
     await this.userRepository.save(user);
 
     resetToken.usedAt = new Date();

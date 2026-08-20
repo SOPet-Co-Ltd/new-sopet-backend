@@ -23,6 +23,7 @@ import { User } from '../../database/entities/user.entity';
 import { Customer } from '../../database/entities/customer.entity';
 import { CustomerRepository } from '../../database/repositories/customer.repository';
 import { OrdersResolver } from './orders.resolver';
+import { GuestOrderLookupRateLimitGuard } from './guards/guest-order-lookup-rate-limit.guard';
 import { GuestOrderLinkModule } from './guest-order-link.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { PaymentsModule } from '../payments/payments.module';
@@ -63,6 +64,7 @@ import { SaleCampaignPricingModule } from '../sale-campaigns/sale-campaign-prici
     OrderFulfillmentService,
     StoreSuspensionHoldService,
     OrdersResolver,
+    GuestOrderLookupRateLimitGuard,
     CustomerRepository,
   ],
   exports: [OrdersService, OrderFulfillmentService, StoreSuspensionHoldService],

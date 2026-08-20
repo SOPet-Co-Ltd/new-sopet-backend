@@ -1,11 +1,13 @@
 import { Args, Mutation, Resolver } from '@nestjs/graphql';
-import { BadRequestException, UseGuards } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, UseGuards } from '@nestjs/common';
 import { StorageService } from './storage.service';
 import { UPLOAD_FOLDERS, type UploadFolder } from './storage.inputs';
 import { UploadResultType } from '../../graphql/models/types';
-import { Roles } from '../../common/decorators';
+import { CurrentUser, Roles } from '../../common/decorators';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+
+const CUSTOMER_UPLOAD_FOLDERS = ['profiles', 'reviews'] as const;
 
 @Resolver()
 export class StorageResolver {
@@ -17,12 +19,24 @@ export class StorageResolver {
   async uploadImage(
     @Args('base64') base64: string,
     @Args('folder', { nullable: true }) folder?: string,
+    @CurrentUser('role') role?: string,
   ): Promise<UploadResultType> {
-    const resolvedFolder = folder ?? 'products';
+    // Customers default to profiles; vendors/admins default to products (BE2-009).
+    const resolvedFolder = folder ?? (role === 'customer' ? 'profiles' : 'products');
     if (!UPLOAD_FOLDERS.includes(resolvedFolder as (typeof UPLOAD_FOLDERS)[number])) {
       throw new BadRequestException({
         code: 'INVALID_FOLDER',
         message: `Folder must be one of: ${UPLOAD_FOLDERS.join(', ')}`,
+      });
+    }
+
+    if (
+      role === 'customer' &&
+      !CUSTOMER_UPLOAD_FOLDERS.includes(resolvedFolder as (typeof CUSTOMER_UPLOAD_FOLDERS)[number])
+    ) {
+      throw new ForbiddenException({
+        code: 'UPLOAD_FOLDER_FORBIDDEN',
+        message: `Customers may only upload to: ${CUSTOMER_UPLOAD_FOLDERS.join(', ')}`,
       });
     }
 

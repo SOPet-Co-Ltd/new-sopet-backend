@@ -38,6 +38,7 @@ OTP rules:
 - Each code is valid for **5 minutes** (`expiresAt`)
 - A new request marks previous unused codes as used — only the latest OTP works
 - Rate limit: max 3 send requests per phone in 5 minutes (`TOO_MANY_ATTEMPTS`)
+- Verify lockout: after **5** failed verify attempts for a phone (OTP window), the active OTP is invalidated and further verifies return `OTP_LOCKED` until a new code is requested
 
 **Files:**
 
@@ -126,7 +127,9 @@ All registered globally in `app.module.ts`.
 
 ### Rate limiting
 
-`AuthRateLimitGuard` — Redis-backed limits on OTP send, login, password reset. Skipped when Redis is not configured or unavailable.
+`AuthRateLimitGuard` — Redis-backed limits on OTP send/verify, vendor/admin login, password reset, and public token probes (`getPasswordResetTokenStatus`, `verifyEmail`, `getAdminInvitationByToken`). Defaults: `AUTH_RATE_LIMIT_MAX=10` / `AUTH_RATE_LIMIT_TTL=60` (seconds). When Redis is unavailable, falls back to an in-memory **5/min per IP** limit (stricter than the Redis default for spray resistance).
+
+Refresh tokens in production require Redis for JTI rotation (`REDIS_REQUIRED` / 503 when Redis is down).
 
 ## Token refresh
 

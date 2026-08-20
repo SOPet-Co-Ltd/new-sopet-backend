@@ -55,7 +55,16 @@ export function mapCustomerProfile(
 }
 
 export function mapUserProfile(
-  user: Pick<User, 'id' | 'email' | 'fullName' | 'role' | 'profilePhotoUrl' | 'emailVerified'>,
+  user: Pick<
+    User,
+    | 'id'
+    | 'email'
+    | 'fullName'
+    | 'role'
+    | 'profilePhotoUrl'
+    | 'emailVerified'
+    | 'mustChangePassword'
+  >,
   storeId?: string | null,
 ): UserProfile {
   return {
@@ -66,6 +75,7 @@ export function mapUserProfile(
     storeId: storeId ?? null,
     profilePhotoUrl: user.profilePhotoUrl,
     emailVerified: user.emailVerified ?? false,
+    mustChangePassword: user.mustChangePassword ?? false,
   };
 }
 

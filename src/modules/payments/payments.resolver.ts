@@ -50,11 +50,13 @@ export class PaymentsResolver {
   @Public()
   async payment(
     @Args('id') id: string,
+    @Args('orderNumber', { type: () => String, nullable: true }) orderNumber?: string,
     @CurrentUser('id') customerId?: string,
     @CurrentUser('role') role?: string,
   ): Promise<PaymentType> {
     const effectiveCustomerId = role === 'customer' ? customerId : undefined;
-    const payment = await this.paymentsService.findById(id, effectiveCustomerId);
+    const guestOrderNumber = effectiveCustomerId ? undefined : orderNumber?.trim();
+    const payment = await this.paymentsService.findById(id, effectiveCustomerId, guestOrderNumber);
     return this.mapPayment(payment);
   }
 
@@ -62,18 +64,24 @@ export class PaymentsResolver {
   @Public()
   async paymentByOrderId(
     @Args('orderId') orderId: string,
+    @Args('orderNumber', { type: () => String, nullable: true }) orderNumber?: string,
     @CurrentUser('id') customerId?: string,
     @CurrentUser('role') role?: string,
   ): Promise<PaymentType> {
     const effectiveCustomerId = role === 'customer' ? customerId : undefined;
-    const payment = await this.paymentsService.findLatestByOrderId(orderId, effectiveCustomerId);
+    const guestOrderNumber = effectiveCustomerId ? undefined : orderNumber?.trim();
+    const payment = await this.paymentsService.findLatestByOrderId(
+      orderId,
+      effectiveCustomerId,
+      guestOrderNumber,
+    );
     return this.mapPayment(payment);
   }
 
   @Subscription(() => PaymentType, {
     filter: (
       payload: PaymentStatusUpdatedPayload,
-      variables: { paymentId?: string; orderId?: string },
+      variables: { paymentId?: string; orderId?: string; orderNumber?: string },
     ) => {
       const payment = payload.paymentStatusUpdated;
       if (variables.paymentId) {
@@ -87,9 +95,12 @@ export class PaymentsResolver {
     resolve: (payload: PaymentStatusUpdatedPayload) => payload.paymentStatusUpdated,
   })
   @Public()
-  paymentStatusUpdated(
+  async paymentStatusUpdated(
     @Args('paymentId', { type: () => String, nullable: true }) paymentId?: string,
     @Args('orderId', { type: () => String, nullable: true }) orderId?: string,
+    @Args('orderNumber', { type: () => String, nullable: true }) orderNumber?: string,
+    @CurrentUser('id') userId?: string,
+    @CurrentUser('role') role?: string,
   ) {
     if (!paymentId && !orderId) {
       throw new BadRequestException({
@@ -97,6 +108,14 @@ export class PaymentsResolver {
         message: 'Either paymentId or orderId is required',
       });
     }
+
+    const effectiveCustomerId = role === 'customer' ? userId : undefined;
+    await this.paymentsService.assertCanSubscribeToPaymentStatus({
+      paymentId,
+      orderId,
+      orderNumber: effectiveCustomerId ? undefined : orderNumber?.trim(),
+      userId: effectiveCustomerId,
+    });
 
     return this.paymentEventsService.paymentStatusUpdatedIterator();
   }
@@ -109,6 +128,7 @@ export class PaymentsResolver {
     @CurrentUser('role') role?: string,
   ): Promise<PaymentType> {
     const effectiveCustomerId = role === 'customer' ? customerId : undefined;
+    const guestOrderNumber = effectiveCustomerId ? undefined : input.orderNumber?.trim();
 
     const result = await this.paymentsService.createCharge({
       orderId: input.orderId,
@@ -118,9 +138,14 @@ export class PaymentsResolver {
       omiseToken: input.omiseToken,
       savedPaymentMethodId: input.savedPaymentMethodId,
       customerId: effectiveCustomerId,
+      orderNumber: guestOrderNumber,
     });
 
-    const payment = await this.paymentsService.findById(result.paymentId, effectiveCustomerId);
+    const payment = await this.paymentsService.findById(
+      result.paymentId,
+      effectiveCustomerId,
+      guestOrderNumber,
+    );
 
     return this.mapPayment(payment);
   }

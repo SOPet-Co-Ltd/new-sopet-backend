@@ -47,9 +47,9 @@ describe('PaymentsResolver payment queries', () => {
     it('maps payment entity to PaymentType for guest', async () => {
       paymentsService.findById.mockResolvedValue(paymentEntity as never);
 
-      const result = await resolver.payment('pay-1', undefined, undefined);
+      const result = await resolver.payment('pay-1', undefined, undefined, undefined);
 
-      expect(paymentsService.findById).toHaveBeenCalledWith('pay-1', undefined);
+      expect(paymentsService.findById).toHaveBeenCalledWith('pay-1', undefined, undefined);
       expect(result).toEqual({
         id: 'pay-1',
         orderId: 'ord-1',
@@ -70,7 +70,7 @@ describe('PaymentsResolver payment queries', () => {
         order: { orderNumber: 'ORD-ABC-1234' },
       } as never);
 
-      const result = await resolver.payment('pay-1', undefined, undefined);
+      const result = await resolver.payment('pay-1', undefined, undefined, undefined);
 
       expect(result.orderNumber).toBe('ORD-ABC-1234');
     });
@@ -78,17 +78,25 @@ describe('PaymentsResolver payment queries', () => {
     it('passes customer id when role is customer', async () => {
       paymentsService.findById.mockResolvedValue(paymentEntity as never);
 
-      await resolver.payment('pay-1', 'cust-1', 'customer');
+      await resolver.payment('pay-1', undefined, 'cust-1', 'customer');
 
-      expect(paymentsService.findById).toHaveBeenCalledWith('pay-1', 'cust-1');
+      expect(paymentsService.findById).toHaveBeenCalledWith('pay-1', 'cust-1', undefined);
     });
 
     it('ignores non-customer roles for ownership check', async () => {
       paymentsService.findById.mockResolvedValue(paymentEntity as never);
 
-      await resolver.payment('pay-1', 'admin-1', 'admin');
+      await resolver.payment('pay-1', undefined, 'admin-1', 'admin');
 
-      expect(paymentsService.findById).toHaveBeenCalledWith('pay-1', undefined);
+      expect(paymentsService.findById).toHaveBeenCalledWith('pay-1', undefined, undefined);
+    });
+
+    it('passes guest orderNumber to service for unauthenticated callers', async () => {
+      paymentsService.findById.mockResolvedValue(paymentEntity as never);
+
+      await resolver.payment('pay-1', 'ORD-GUEST-001', undefined, undefined);
+
+      expect(paymentsService.findById).toHaveBeenCalledWith('pay-1', undefined, 'ORD-GUEST-001');
     });
   });
 
@@ -109,11 +117,39 @@ describe('PaymentsResolver payment queries', () => {
         status: 'paid',
       } as never);
 
-      const result = await resolver.paymentByOrderId('ord-1', undefined, undefined);
+      const result = await resolver.paymentByOrderId('ord-1', undefined, undefined, undefined);
 
-      expect(paymentsService.findLatestByOrderId).toHaveBeenCalledWith('ord-1', undefined);
+      expect(paymentsService.findLatestByOrderId).toHaveBeenCalledWith(
+        'ord-1',
+        undefined,
+        undefined,
+      );
       expect(result.status).toBe('paid');
       expect(result.orderId).toBe('ord-1');
+    });
+  });
+
+  describe('createPayment', () => {
+    it('passes guest orderNumber into findById after createCharge', async () => {
+      paymentsService.createCharge.mockResolvedValue({ paymentId: 'pay-1' } as never);
+      paymentsService.findById.mockResolvedValue(paymentEntity as never);
+
+      await resolver.createPayment(
+        {
+          orderId: 'ord-1',
+          amount: 100,
+          currency: 'THB',
+          paymentMethod: 'promptpay',
+          orderNumber: 'ORD-GUEST-001',
+        },
+        undefined,
+        undefined,
+      );
+
+      expect(paymentsService.createCharge).toHaveBeenCalledWith(
+        expect.objectContaining({ orderNumber: 'ORD-GUEST-001' }),
+      );
+      expect(paymentsService.findById).toHaveBeenCalledWith('pay-1', undefined, 'ORD-GUEST-001');
     });
   });
 });

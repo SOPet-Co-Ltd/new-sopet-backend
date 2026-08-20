@@ -6,6 +6,7 @@ import { StorageService } from './storage.service';
 
 const mockSend = jest.fn();
 const mockLookup = jest.fn();
+const mockFetchWithPinnedIp = jest.fn();
 
 jest.mock('@aws-sdk/client-s3', () => ({
   S3Client: jest.fn().mockImplementation(() => ({ send: mockSend })),
@@ -15,6 +16,14 @@ jest.mock('@aws-sdk/client-s3', () => ({
 jest.mock('node:dns/promises', () => ({
   lookup: (...args: unknown[]) => mockLookup(...args),
 }));
+
+jest.mock('../../common/utils/safe-fetch.util', () => {
+  const actual = jest.requireActual('../../common/utils/safe-fetch.util');
+  return {
+    ...actual,
+    fetchWithPinnedIp: (...args: unknown[]) => mockFetchWithPinnedIp(...args),
+  };
+});
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
@@ -261,21 +270,18 @@ describe('StorageService', () => {
     const pngBase64 =
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
     const pngBuffer = Buffer.from(pngBase64, 'base64');
-    let fetchMock: jest.Mock;
 
     beforeEach(() => {
       mockLookup.mockResolvedValue([{ address: '203.0.113.10', family: 4 }]);
-      fetchMock = jest.fn();
-      global.fetch = fetchMock;
+      mockFetchWithPinnedIp.mockReset();
     });
 
     afterEach(() => {
-      delete (global as { fetch?: typeof fetch }).fetch;
       mockLookup.mockReset();
     });
 
     it('downloads, validates, converts to WebP, and uploads', async () => {
-      fetchMock.mockResolvedValue({
+      mockFetchWithPinnedIp.mockResolvedValue({
         ok: true,
         status: 200,
         headers: new Headers({ 'content-type': 'image/png' }),
@@ -308,17 +314,18 @@ describe('StorageService', () => {
           ContentType: 'image/webp',
         }),
       );
+      expect(mockFetchWithPinnedIp).toHaveBeenCalled();
     });
 
     it('rejects private/localhost hosts', async () => {
       await expect(
         service.importImageFromUrl('http://127.0.0.1/secret.png', 'products'),
       ).rejects.toMatchObject({ response: { code: 'INVALID_IMAGE_URL' } });
-      expect(fetchMock).not.toHaveBeenCalled();
+      expect(mockFetchWithPinnedIp).not.toHaveBeenCalled();
     });
 
     it('rejects oversized Content-Length before reading body', async () => {
-      fetchMock.mockResolvedValue({
+      mockFetchWithPinnedIp.mockResolvedValue({
         ok: true,
         status: 200,
         headers: new Headers({

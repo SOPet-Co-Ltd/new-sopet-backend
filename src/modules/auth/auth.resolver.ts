@@ -215,6 +215,7 @@ export class AuthResolver {
 
   @Query(() => PasswordResetTokenStatusType)
   @Public()
+  @UseGuards(AuthRateLimitGuard)
   async getPasswordResetTokenStatus(
     @Args('token') token: string,
   ): Promise<PasswordResetTokenStatusType> {
@@ -280,6 +281,7 @@ export class AuthResolver {
 
   @Mutation(() => MessagePayload)
   @Public()
+  @UseGuards(AuthRateLimitGuard)
   async verifyEmail(
     @Args('input') input: VerifyEmailInput,
     @Context() context?: GraphqlContext,

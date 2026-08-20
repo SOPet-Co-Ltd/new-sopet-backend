@@ -420,6 +420,7 @@ input CreatePaymentInput {
   currency: String! = "THB"
   omiseToken: String
   orderId: String!
+  orderNumber: String
   paymentMethod: String!
   savedPaymentMethodId: String
 }
@@ -769,7 +770,7 @@ type Mutation {
   clearLoginPageDesktopImage: LoginPageImagesType!
   clearLoginPageMobileImage: LoginPageImagesType!
   confirmBankTransferPaid(note: String, orderId: String!): OrderType!
-  confirmGuestOrderDelivered(input: ConfirmOrderDeliveredInput!): OrderType!
+  confirmGuestOrderDelivered(input: ConfirmOrderDeliveredInput!): OrderTrackingType!
   confirmOrderDelivered(input: ConfirmOrderDeliveredInput!): OrderType!
   createAddress(input: CreateAddressInput!): SavedAddressType!
   createBrand(input: CreateBrandInput!): BrandType!
@@ -1401,7 +1402,6 @@ type Query {
   getAdminInvitationByToken(token: String!): AdminInvitationType!
   getPasswordResetTokenStatus(token: String!): PasswordResetTokenStatusType!
   getStoreInvitationByToken(token: String!): StoreInvitationPreviewType!
-  guestOrders(guestPhone: String!): [OrderType!]!
 
   """GraphQL API health check"""
   health: HealthStatus!
@@ -1424,8 +1424,8 @@ type Query {
   orderAuditLog(orderId: String!, storeId: String!): OrderAuditLogType!
   orderTracking(orderNumber: String!): OrderTrackingType!
   orders(filter: CustomerOrderListFilter = ALL, limit: Int = 10, page: Int = 1): OrderConnection!
-  payment(id: String!): PaymentType!
-  paymentByOrderId(orderId: String!): PaymentType!
+  payment(id: String!, orderNumber: String): PaymentType!
+  paymentByOrderId(orderId: String!, orderNumber: String): PaymentType!
   paymentMethods: [SavedPaymentMethodType!]!
   pendingAdminInvitations: [AdminInvitationType!]!
   pendingBankTransferOrders(limit: Int = 20, page: Int = 1): OrderConnection!
@@ -1930,7 +1930,7 @@ input SubmitStoreRequestInput {
 }
 
 type Subscription {
-  paymentStatusUpdated(orderId: String, paymentId: String): PaymentType!
+  paymentStatusUpdated(orderId: String, orderNumber: String, paymentId: String): PaymentType!
 }
 
 input SwitchStoreInput {
@@ -2269,6 +2269,7 @@ type UserProfile {
   emailVerified: Boolean!
   fullName: String!
   id: String!
+  mustChangePassword: Boolean!
   profilePhotoUrl: String
   role: String!
   storeId: String

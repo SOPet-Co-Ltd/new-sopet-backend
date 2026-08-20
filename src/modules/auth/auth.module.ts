@@ -26,6 +26,7 @@ import { AuthRateLimitGuard } from './guards/auth-rate-limit.guard';
 import { CustomerStatusGuard } from './guards/customer-status.guard';
 import { StoreStatusGuard } from './guards/store-status.guard';
 import { VendorStatusGuard } from './guards/vendor-status.guard';
+import { MustChangePasswordGuard } from './guards/must-change-password.guard';
 
 @Module({
   imports: [
@@ -47,12 +48,24 @@ import { VendorStatusGuard } from './guards/vendor-status.guard';
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
-      useFactory: (configService: ConfigService) => ({
-        secret: configService.get<string>('jwt.secret'),
-        signOptions: {
-          expiresIn: configService.get<string>('jwt.accessTokenExpiresIn'),
-        },
-      }),
+      useFactory: (configService: ConfigService) => {
+        const issuer = configService.get<string>('jwt.issuer');
+        const audience = configService.get<string>('jwt.audience');
+        return {
+          secret: configService.get<string>('jwt.secret'),
+          signOptions: {
+            expiresIn: configService.get<string>('jwt.accessTokenExpiresIn'),
+            algorithm: 'HS256' as const,
+            issuer,
+            audience,
+          },
+          verifyOptions: {
+            algorithms: ['HS256'] as const,
+            issuer,
+            audience,
+          },
+        };
+      },
       inject: [ConfigService],
     }),
   ],
@@ -65,6 +78,7 @@ import { VendorStatusGuard } from './guards/vendor-status.guard';
     StoreStatusGuard,
     CustomerStatusGuard,
     VendorStatusGuard,
+    MustChangePasswordGuard,
     AuthResolver,
     CustomerRepository,
   ],
@@ -76,6 +90,7 @@ import { VendorStatusGuard } from './guards/vendor-status.guard';
     StoreStatusGuard,
     CustomerStatusGuard,
     VendorStatusGuard,
+    MustChangePasswordGuard,
     JwtModule,
   ],
 })

@@ -205,8 +205,12 @@ export class StoresResolver {
 
   @Query(() => StoreType)
   @Public()
-  async store(@Args('id') id: string): Promise<StoreType> {
-    const store = await this.storesService.findOne(id);
+  async store(
+    @Args('id') id: string,
+    @CurrentUser('id') userId?: string,
+    @CurrentUser('role') role?: string,
+  ): Promise<StoreType> {
+    const store = await this.storesService.findOneForDiscovery(id, { userId, role });
     return mapStore(store);
   }
 

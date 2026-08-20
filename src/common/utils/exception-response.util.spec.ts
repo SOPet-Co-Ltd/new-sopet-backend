@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, HttpStatus } from '@nestjs/common';
+import { GraphQLError } from 'graphql';
 import { QueryFailedError } from 'typeorm';
 import {
   SAFE_SERVER_MESSAGE,
@@ -41,6 +42,28 @@ describe('exception-response.util', () => {
       status: HttpStatus.BAD_REQUEST,
       code: 'INSUFFICIENT_STOCK',
       message: 'Insufficient stock for Dog Food',
+    });
+  });
+
+  it('maps GraphQL missing-variable errors to BAD_USER_INPUT', () => {
+    expect(
+      mapUnknownException(
+        new GraphQLError('Variable "$id" of required type "String!" was not provided.'),
+      ),
+    ).toEqual({
+      status: HttpStatus.BAD_REQUEST,
+      code: 'BAD_USER_INPUT',
+      message: 'Variable "$id" of required type "String!" was not provided.',
+    });
+  });
+
+  it('maps GraphQLError with BAD_USER_INPUT extension', () => {
+    expect(
+      mapUnknownException(new GraphQLError('bad', { extensions: { code: 'BAD_USER_INPUT' } })),
+    ).toEqual({
+      status: HttpStatus.BAD_REQUEST,
+      code: 'BAD_USER_INPUT',
+      message: 'bad',
     });
   });
 

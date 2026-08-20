@@ -52,4 +52,12 @@ export class CreateChargeDto {
   @IsOptional()
   @IsUUID()
   customerId?: string;
+
+  @ApiProperty({
+    required: false,
+    description: 'Order number proof required for unauthenticated guest checkout',
+  })
+  @IsOptional()
+  @IsString()
+  orderNumber?: string;
 }

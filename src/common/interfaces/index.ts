@@ -4,7 +4,11 @@ export interface JwtPayload {
   phone?: string;
   role?: 'admin' | 'vendor' | 'customer';
   storeId?: string;
+  /** Admin-only claim — frontend should force change-password UX. */
+  mustChangePassword?: boolean;
   type: 'access' | 'refresh';
+  /** Present on refresh tokens — stored in Redis for one-time rotation. */
+  jti?: string;
 }
 
 export interface PaginationParams {

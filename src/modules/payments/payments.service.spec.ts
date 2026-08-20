@@ -161,14 +161,39 @@ describe('PaymentsService guest access', () => {
     service = module.get(PaymentsService);
   });
 
-  it('allows payment for guest orders without customerId', async () => {
+  it('allows payment for guest orders without customerId when orderNumber matches', async () => {
     orderRepository.findOne.mockResolvedValue({
       id: 'ord-1',
       customerId: null,
+      orderNumber: 'ORD-GUEST-001',
     });
 
-    const order = await service.assertCanPayForOrder('ord-1');
+    const order = await service.assertCanPayForOrder('ord-1', undefined, 'ORD-GUEST-001');
     expect(order.id).toBe('ord-1');
+  });
+
+  it('rejects guest payment without orderNumber', async () => {
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-1',
+      customerId: null,
+      orderNumber: 'ORD-GUEST-001',
+    });
+
+    await expect(service.assertCanPayForOrder('ord-1')).rejects.toMatchObject({
+      response: { code: 'ORDER_NUMBER_REQUIRED' },
+    });
+  });
+
+  it('rejects guest payment when orderNumber does not match', async () => {
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-1',
+      customerId: null,
+      orderNumber: 'ORD-GUEST-001',
+    });
+
+    await expect(service.assertCanPayForOrder('ord-1', undefined, 'ORD-WRONG')).rejects.toThrow(
+      ForbiddenException,
+    );
   });
 
   it('rejects payment when customer does not own the order', async () => {
@@ -196,14 +221,15 @@ describe('PaymentsService guest access', () => {
     await expect(service.assertCanPayForOrder('missing')).rejects.toThrow(BadRequestException);
   });
 
-  it('allows unauthenticated access to a guest order linked to a member', async () => {
+  it('allows unauthenticated access to a guest order linked to a member when orderNumber matches', async () => {
     orderRepository.findOne.mockResolvedValue({
       id: 'ord-1',
       customerId: 'member-1',
       guestPhone: '0812345678',
+      orderNumber: 'ORD-LINKED-001',
     });
 
-    const order = await service.assertCanPayForOrder('ord-1');
+    const order = await service.assertCanPayForOrder('ord-1', undefined, 'ORD-LINKED-001');
     expect(order.id).toBe('ord-1');
   });
 
@@ -217,6 +243,168 @@ describe('PaymentsService guest access', () => {
     await expect(service.assertCanPayForOrder('ord-1', 'cust-2')).rejects.toThrow(
       ForbiddenException,
     );
+  });
+});
+
+describe('PaymentsService assertCanSubscribeToPaymentStatus', () => {
+  let service: PaymentsService;
+  const orderRepository = {
+    findOne: jest.fn(),
+    save: jest.fn(),
+  };
+  const paymentRepository = {
+    create: jest.fn(<T>(x: T): T => x),
+    save: jest.fn((x: Payment) => Promise.resolve({ ...x, id: 'pay-1' })),
+    findOne: jest.fn(),
+    manager: {
+      transaction: jest.fn(async (cb: (manager: unknown) => Promise<void>) => cb({})),
+    },
+  };
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        PaymentsService,
+        { provide: getRepositoryToken(Payment), useValue: paymentRepository },
+        { provide: getRepositoryToken(Order), useValue: orderRepository },
+        { provide: getRepositoryToken(Customer), useValue: { findOne: jest.fn() } },
+        {
+          provide: getRepositoryToken(SavedPaymentMethod),
+          useValue: { findOne: jest.fn() },
+        },
+        {
+          provide: ConfigService,
+          useValue: { get: jest.fn(() => '') },
+        },
+        {
+          provide: NotificationsService,
+          useValue: { notifyOrderPaid: jest.fn() },
+        },
+        {
+          provide: PaymentEventsService,
+          useValue: paymentEventsServiceMock,
+        },
+        {
+          provide: InventoryService,
+          useValue: { restoreOrderStock: jest.fn().mockResolvedValue(true) },
+        },
+        { provide: PayoutsService, useValue: payoutsServiceMock },
+        { provide: StoresService, useValue: storesServiceMock },
+        {
+          provide: VendorWebhooksService,
+          useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
+        },
+        { provide: OrderAuditLogsService, useValue: orderAuditLogsServiceMock },
+        {
+          provide: BankTransferSettingsService,
+          useValue: {
+            getConfigured: jest.fn().mockResolvedValue({
+              enabled: true,
+              bankName: 'Test Bank',
+              accountName: 'SOPET',
+              accountNumber: '1234567890',
+              branchName: null,
+            }),
+            isAvailable: jest.fn().mockReturnValue(true),
+            get: jest.fn().mockResolvedValue({
+              enabled: true,
+              bankName: 'Test Bank',
+              accountName: 'SOPET',
+              accountNumber: '1234567890',
+              branchName: null,
+            }),
+            update: jest.fn(),
+          },
+        },
+      ],
+    }).compile();
+
+    service = module.get(PaymentsService);
+  });
+
+  it('rejects guest subscription without orderNumber', async () => {
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-1',
+      customerId: null,
+      guestPhone: '0812345678',
+      orderNumber: 'ORD-GUEST-001',
+    });
+
+    await expect(
+      service.assertCanSubscribeToPaymentStatus({ orderId: 'ord-1' }),
+    ).rejects.toMatchObject({
+      response: { code: 'ORDER_NUMBER_REQUIRED' },
+    });
+  });
+
+  it('rejects guest subscription when orderNumber does not match', async () => {
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-1',
+      customerId: null,
+      guestPhone: '0812345678',
+      orderNumber: 'ORD-GUEST-001',
+    });
+
+    await expect(
+      service.assertCanSubscribeToPaymentStatus({
+        orderId: 'ord-1',
+        orderNumber: 'ORD-WRONG',
+      }),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('allows guest subscription when orderNumber matches', async () => {
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-1',
+      customerId: null,
+      guestPhone: '0812345678',
+      orderNumber: 'ORD-GUEST-001',
+    });
+
+    await expect(
+      service.assertCanSubscribeToPaymentStatus({
+        orderId: 'ord-1',
+        orderNumber: 'ORD-GUEST-001',
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('resolves orderId from paymentId for guests and requires orderNumber', async () => {
+    paymentRepository.findOne.mockResolvedValue({ id: 'pay-1', orderId: 'ord-1' });
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-1',
+      customerId: null,
+      guestPhone: '0812345678',
+      orderNumber: 'ORD-GUEST-001',
+    });
+
+    await expect(
+      service.assertCanSubscribeToPaymentStatus({
+        paymentId: 'pay-1',
+        orderNumber: 'ORD-GUEST-001',
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(paymentRepository.findOne).toHaveBeenCalledWith({
+      where: { id: 'pay-1' },
+      select: ['id', 'orderId'],
+    });
+  });
+
+  it('allows authenticated customer subscription for own order without orderNumber', async () => {
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-1',
+      customerId: 'cust-1',
+      orderNumber: 'ORD-OWN-001',
+    });
+
+    await expect(
+      service.assertCanSubscribeToPaymentStatus({
+        orderId: 'ord-1',
+        userId: 'cust-1',
+      }),
+    ).resolves.toBeUndefined();
   });
 });
 
@@ -235,7 +423,7 @@ describe('PaymentsService payment read queries', () => {
     },
   };
 
-  const guestOrder = { id: 'ord-1', customerId: null };
+  const guestOrder = { id: 'ord-1', customerId: null, orderNumber: 'ORD-GUEST-001' };
   const ownedOrder = { id: 'ord-2', customerId: 'cust-1' };
   const basePayment = {
     id: 'pay-1',
@@ -313,7 +501,7 @@ describe('PaymentsService payment read queries', () => {
       paymentRepository.findOne.mockResolvedValue(basePayment);
       orderRepository.findOne.mockResolvedValue(guestOrder);
 
-      const payment = await service.findById('pay-1');
+      const payment = await service.findById('pay-1', undefined, 'ORD-GUEST-001');
 
       expect(payment).toEqual(basePayment);
       expect(paymentRepository.findOne).toHaveBeenCalledWith({
@@ -351,7 +539,7 @@ describe('PaymentsService payment read queries', () => {
       const latestPayment = { ...basePayment, id: 'pay-latest', status: 'paid' };
       paymentRepository.findOne.mockResolvedValue(latestPayment);
 
-      const payment = await service.findLatestByOrderId('ord-1');
+      const payment = await service.findLatestByOrderId('ord-1', undefined, 'ORD-GUEST-001');
 
       expect(payment).toEqual(latestPayment);
       expect(paymentRepository.findOne).toHaveBeenCalledWith({
@@ -382,7 +570,9 @@ describe('PaymentsService payment read queries', () => {
       orderRepository.findOne.mockResolvedValue(guestOrder);
       paymentRepository.findOne.mockResolvedValue(null);
 
-      await expect(service.findLatestByOrderId('ord-1')).rejects.toThrow(NotFoundException);
+      await expect(
+        service.findLatestByOrderId('ord-1', undefined, 'ORD-GUEST-001'),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 });
@@ -522,6 +712,7 @@ describe('PaymentsService createCharge return_uri', () => {
       id: 'ord-1',
       customerId: 'cust-1',
       status: OrderStatus.PENDING_PAYMENT,
+      total: 300,
     });
     orderRepository.save.mockResolvedValue(undefined);
   });
@@ -1059,6 +1250,7 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
     id: 'ord-supersede-1',
     customerId: 'cust-1',
     status: OrderStatus.PENDING_PAYMENT,
+    total: 300,
     paymentReference: OLD_CHARGE_ID as string | null,
   };
 
@@ -2125,6 +2317,7 @@ describe('PaymentsService payment held gate + Decision #16 recompute (AC-026–0
       id: 'ord-held-all',
       status: OrderStatus.PENDING_PAYMENT,
       customerId: null,
+      orderNumber: 'ORD-HELD-ALL',
       items: [
         { id: 'i1', fulfillmentStatus: FulfillmentStatus.ON_HOLD },
         { id: 'i2', fulfillmentStatus: FulfillmentStatus.ON_HOLD },
@@ -2138,6 +2331,7 @@ describe('PaymentsService payment held gate + Decision #16 recompute (AC-026–0
         amount: 100,
         currency: 'THB',
         paymentMethod: 'promptpay',
+        orderNumber: 'ORD-HELD-ALL',
       }),
     ).rejects.toMatchObject({ response: { code: 'PAYMENT_HELD_PORTION_BLOCKED' } });
   });
@@ -2147,6 +2341,7 @@ describe('PaymentsService payment held gate + Decision #16 recompute (AC-026–0
       id: 'ord-held-mixed',
       status: OrderStatus.PENDING_PAYMENT,
       customerId: null,
+      orderNumber: 'ORD-HELD-MIXED',
       items: [
         { id: 'i1', fulfillmentStatus: FulfillmentStatus.ON_HOLD },
         { id: 'i2', fulfillmentStatus: FulfillmentStatus.PENDING },
@@ -2160,6 +2355,7 @@ describe('PaymentsService payment held gate + Decision #16 recompute (AC-026–0
         amount: 100,
         currency: 'THB',
         paymentMethod: 'cod',
+        orderNumber: 'ORD-HELD-MIXED',
       }),
     ).rejects.toMatchObject({ response: { code: 'PAYMENT_HELD_PORTION_BLOCKED' } });
   });
@@ -2170,6 +2366,7 @@ describe('PaymentsService payment held gate + Decision #16 recompute (AC-026–0
       id: 'ord-after-sla',
       status: OrderStatus.PENDING_PAYMENT,
       customerId: null,
+      orderNumber: 'ORD-AFTER-SLA',
       subtotal: 300,
       shippingFee: 50,
       discountAmount: 0,
@@ -2210,10 +2407,258 @@ describe('PaymentsService payment held gate + Decision #16 recompute (AC-026–0
       amount: 120,
       currency: 'THB',
       paymentMethod: 'cod',
+      orderNumber: 'ORD-AFTER-SLA',
     });
 
     expect(result.paymentMethod).toBe('cod');
     expect(result.status).toBe('pending');
+  });
+});
+
+describe('PaymentsService BE-000 payment amount validation', () => {
+  let service: PaymentsService;
+  let notificationsService: { notifyOrderPaid: jest.Mock };
+  let managerSave: jest.Mock;
+  const STOREFRONT_ORIGIN = 'https://shop.example.com';
+  const PAYMENT_ID = 'pay-amount-1';
+  const ORDER_TOTAL = 350;
+
+  const orderRepository = {
+    findOne: jest.fn(),
+    save: jest.fn(),
+  };
+  const paymentRepository = {
+    create: jest.fn(<T>(x: T): T => x),
+    save: jest.fn((x: Payment) => {
+      Object.assign(x, { id: PAYMENT_ID });
+      return Promise.resolve(x);
+    }),
+    findOne: jest.fn().mockResolvedValue(null),
+    find: jest.fn().mockResolvedValue([]),
+    manager: {
+      transaction: jest.fn(),
+    },
+  };
+
+  async function compileService() {
+    notificationsService = { notifyOrderPaid: jest.fn() };
+    managerSave = jest.fn((entity: unknown) => Promise.resolve(entity));
+    paymentRepository.manager.transaction.mockImplementation(
+      async (cb: (manager: ReturnType<typeof createPhaseBManagerMock>) => Promise<unknown>) =>
+        cb(createPhaseBManagerMock({ orderRepository, paymentRepository })),
+    );
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        PaymentsService,
+        { provide: getRepositoryToken(Payment), useValue: paymentRepository },
+        { provide: getRepositoryToken(Order), useValue: orderRepository },
+        { provide: getRepositoryToken(Customer), useValue: { findOne: jest.fn() } },
+        { provide: getRepositoryToken(SavedPaymentMethod), useValue: { findOne: jest.fn() } },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn((key: string) => {
+              if (key === 'omise.secretKey') return 'skey_test';
+              if (key === 'omise.publicKey') return 'pkey_test';
+              if (key === 'app.storefrontUrl') return STOREFRONT_ORIGIN;
+              return '';
+            }),
+          },
+        },
+        { provide: NotificationsService, useValue: notificationsService },
+        { provide: PaymentEventsService, useValue: paymentEventsServiceMock },
+        { provide: InventoryService, useValue: { restoreOrderStock: jest.fn() } },
+        { provide: PayoutsService, useValue: payoutsServiceMock },
+        { provide: StoresService, useValue: storesServiceMock },
+        {
+          provide: VendorWebhooksService,
+          useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
+        },
+        { provide: OrderAuditLogsService, useValue: orderAuditLogsServiceMock },
+        {
+          provide: BankTransferSettingsService,
+          useValue: {
+            getConfigured: jest.fn().mockResolvedValue({
+              enabled: true,
+              bankName: 'Test Bank',
+              accountName: 'SOPET',
+              accountNumber: '1234567890',
+              branchName: null,
+            }),
+            isAvailable: jest.fn().mockReturnValue(true),
+            get: jest.fn().mockResolvedValue({
+              enabled: true,
+              bankName: 'Test Bank',
+              accountName: 'SOPET',
+              accountNumber: '1234567890',
+              branchName: null,
+            }),
+            update: jest.fn(),
+          },
+        },
+      ],
+    }).compile();
+
+    return module.get(PaymentsService);
+  }
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-amount-1',
+      customerId: 'cust-1',
+      status: OrderStatus.PENDING_PAYMENT,
+      total: ORDER_TOTAL,
+    });
+    orderRepository.save.mockResolvedValue(undefined);
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          id: 'chrg_amount_test',
+          status: 'pending',
+        }),
+    });
+    service = await compileService();
+  });
+
+  it('rejects createCharge when client amount underpays order total', async () => {
+    await expect(
+      service.createCharge({
+        orderId: 'ord-amount-1',
+        amount: 100,
+        currency: 'THB',
+        paymentMethod: 'promptpay',
+        customerId: 'cust-1',
+      }),
+    ).rejects.toMatchObject({ response: { code: 'PAYMENT_AMOUNT_MISMATCH' } });
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(paymentRepository.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects createCharge when client amount overpays order total', async () => {
+    await expect(
+      service.createCharge({
+        orderId: 'ord-amount-1',
+        amount: 500,
+        currency: 'THB',
+        paymentMethod: 'cod',
+        customerId: 'cust-1',
+      }),
+    ).rejects.toMatchObject({ response: { code: 'PAYMENT_AMOUNT_MISMATCH' } });
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(paymentRepository.create).not.toHaveBeenCalled();
+  });
+
+  it('uses server order total for Omise charge when client amount matches', async () => {
+    await service.createCharge({
+      orderId: 'ord-amount-1',
+      amount: ORDER_TOTAL,
+      currency: 'THB',
+      paymentMethod: 'promptpay',
+      customerId: 'cust-1',
+    });
+
+    const createCall = (global.fetch as jest.Mock).mock.calls.find(
+      ([url]: [string]) =>
+        typeof url === 'string' &&
+        url.includes('/charges') &&
+        !url.includes('/expire') &&
+        !url.includes('/reverse'),
+    ) as [string, RequestInit] | undefined;
+    expect(createCall).toBeDefined();
+    const body = JSON.parse(createCall![1].body as string) as { amount: number };
+    expect(body.amount).toBe(Math.round(ORDER_TOTAL * 100));
+
+    const savedPayment = paymentRepository.save.mock.calls.find(
+      (c: [Payment]) => c[0].amount === ORDER_TOTAL,
+    );
+    expect(savedPayment).toBeDefined();
+  });
+
+  it('webhook amount mismatch does not mark order paid', async () => {
+    const CHARGE_ID = 'chrg_mismatch';
+    const order = {
+      id: 'ord-webhook-mismatch',
+      status: OrderStatus.PENDING_PAYMENT,
+      paymentReference: CHARGE_ID,
+      total: ORDER_TOTAL,
+    };
+    const payment = {
+      id: 'pay-webhook-mismatch',
+      orderId: order.id,
+      status: 'pending',
+      paymentMethod: 'promptpay',
+      amount: ORDER_TOTAL,
+    };
+    orderRepository.findOne.mockResolvedValue(order);
+    paymentRepository.findOne.mockResolvedValue(payment);
+    paymentRepository.manager.transaction.mockImplementation(
+      async (cb: (manager: { save: jest.Mock }) => Promise<void>) => {
+        await cb({ save: managerSave });
+      },
+    );
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          id: CHARGE_ID,
+          status: 'successful',
+          amount: 10000,
+        }),
+    });
+    const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+
+    await service.handleWebhook({
+      key: 'charge.complete',
+      data: { object: 'charge', id: CHARGE_ID, status: 'successful' },
+    });
+
+    expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
+    expect(payment.status).toBe('pending');
+    expect(notificationsService.notifyOrderPaid).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('payment_amount_mismatch_webhook'),
+    );
+    errorSpy.mockRestore();
+  });
+
+  it('markOrderPaid refuses when payment amount disagrees with order total', async () => {
+    const order = {
+      id: 'ord-mark-paid-mismatch',
+      status: OrderStatus.PENDING_PAYMENT,
+      total: ORDER_TOTAL,
+    };
+    const payment = {
+      id: 'pay-mark-paid-mismatch',
+      orderId: order.id,
+      status: 'pending',
+      amount: 100,
+    } as Payment;
+    paymentRepository.manager.transaction.mockImplementation(
+      async (cb: (manager: { save: jest.Mock }) => Promise<void>) => {
+        await cb({ save: managerSave });
+      },
+    );
+    const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+
+    await (
+      service as unknown as {
+        markOrderPaid: (o: typeof order, p: Payment, chargeId: string) => Promise<void>;
+      }
+    ).markOrderPaid(order, payment, 'chrg_mismatch');
+
+    expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
+    expect(payment.status).toBe('pending');
+    expect(paymentRepository.manager.transaction).not.toHaveBeenCalled();
+    expect(notificationsService.notifyOrderPaid).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('payment_amount_mismatch_mark_paid'),
+    );
+    errorSpy.mockRestore();
   });
 });
 

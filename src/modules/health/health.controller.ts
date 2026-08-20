@@ -1,4 +1,4 @@
-import { Controller, Get, Logger } from '@nestjs/common';
+import { Controller, Get, Headers, Logger, UnauthorizedException } from '@nestjs/common';
 import {
   HealthCheck,
   HealthCheckService,
@@ -24,13 +24,18 @@ export class HealthController {
 
   @Get()
   @HealthCheck()
-  check() {
+  check(@Headers('x-health-check-token') healthCheckToken?: string) {
+    // In production, detailed /health requires the same token as /ready (BE2-007).
+    if (this.isProduction()) {
+      this.assertHealthCheckToken(healthCheckToken);
+    }
     return this.health.check(this.buildChecks());
   }
 
   @Get('ready')
   @HealthCheck()
-  readinessCheck() {
+  readinessCheck(@Headers('x-health-check-token') healthCheckToken?: string) {
+    this.assertHealthCheckToken(healthCheckToken);
     return this.health.check(this.buildChecks());
   }
 
@@ -38,6 +43,35 @@ export class HealthController {
   @HealthCheck()
   livenessCheck() {
     return { status: 'ok' };
+  }
+
+  private isProduction(): boolean {
+    return this.config.get<string>('app.environment') === 'production';
+  }
+
+  private assertHealthCheckToken(providedToken?: string): void {
+    const expectedToken = this.config.get<string>('app.healthCheckToken')?.trim();
+    const requireToken = this.isProduction() || Boolean(expectedToken);
+
+    if (!requireToken) {
+      return;
+    }
+
+    if (!expectedToken) {
+      this.logger.error('HEALTH_CHECK_TOKEN missing while production health auth is required');
+      throw new UnauthorizedException({
+        code: 'HEALTH_CHECK_UNAUTHORIZED',
+        message: 'Invalid or missing health check token',
+      });
+    }
+
+    if (providedToken !== expectedToken) {
+      this.logger.warn('Rejected health request with invalid or missing health check token');
+      throw new UnauthorizedException({
+        code: 'HEALTH_CHECK_UNAUTHORIZED',
+        message: 'Invalid or missing health check token',
+      });
+    }
   }
 
   private buildChecks(): Array<() => Promise<HealthIndicatorResult>> {
