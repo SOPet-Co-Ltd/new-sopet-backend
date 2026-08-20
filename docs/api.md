@@ -132,7 +132,7 @@ Unknown, malformed, or whitespace-only `orderNumber` all throw the identical `No
 | `DELETE` | `/api/v1/stores/:storeId/webhook`                                 | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (remove webhook)                                 |
 | `PATCH`  | `/api/v1/stores/:storeId/orders/:orderId/tracking`                | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (tracking / ship)                                |
 | `POST`   | `/api/v1/stores/:storeId/products/:productId/reviews`             | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (import review → pending / unknown customer)     |
-| `GET`    | `/health`, `/health/ready`                                        | `@Public()`                   | `health.controller.ts` (Terminus: Postgres ping + Redis when configured)    |
+| `GET`    | `/health`, `/health/ready`                                        | `@Public()` + `x-health-check-token` in production | `health.controller.ts` (Terminus: Postgres ping + Redis when configured) |
 | `GET`    | `/health/live`                                                    | `@Public()`                   | `health.controller.ts` (static liveness, no dependency checks)              |
 
 There are **no** `/v1/*` REST routes for application features. Admin and storefront use GraphQL exclusively.

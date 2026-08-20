@@ -83,10 +83,24 @@ if ! docker ps --filter "name=$CONTAINER_NAME" --filter "status=running" -q | gr
   exit 1
 fi
 
+# Production /health requires x-health-check-token (BE2-007). /health/live is public
+# but does not ping Postgres — keep readiness on /health with the env token.
+HEALTH_CHECK_TOKEN="$(grep -E '^HEALTH_CHECK_TOKEN=' "$ENV_FILE" | head -n1 | cut -d= -f2- || true)"
+HEALTH_CHECK_TOKEN="${HEALTH_CHECK_TOKEN%\"}"
+HEALTH_CHECK_TOKEN="${HEALTH_CHECK_TOKEN#\"}"
+HEALTH_CHECK_TOKEN="${HEALTH_CHECK_TOKEN%\'}"
+HEALTH_CHECK_TOKEN="${HEALTH_CHECK_TOKEN#\'}"
+if [ -z "$HEALTH_CHECK_TOKEN" ]; then
+  echo "ERROR: HEALTH_CHECK_TOKEN missing from $ENV_FILE (required for /health in production)" >&2
+  exit 1
+fi
+
 echo "Waiting for /health (Postgres ping)..."
 health_ok=0
 for _ in $(seq 1 24); do
-  if curl -fsS --max-time 5 "http://127.0.0.1:${PORT}/health" -o /dev/null; then
+  if curl -fsS --max-time 5 "http://127.0.0.1:${PORT}/health" \
+    -H "x-health-check-token: ${HEALTH_CHECK_TOKEN}" \
+    -o /dev/null; then
     health_ok=1
     break
   fi

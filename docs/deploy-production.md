@@ -218,9 +218,14 @@ If you see `ubuntu-latest` + arm64 platform, stop and fix `DOCKER_PLATFORM` / En
 ## 7. Post-deploy verify
 
 ```bash
-# Public
-curl -fsS "https://api.sopet.org/health"
-curl -fsS "https://api.sopet.org/health/ready"
+# Liveness (public)
+curl -fsS "https://api.sopet.org/health/live"
+
+# Detailed / ready (requires HEALTH_CHECK_TOKEN as x-health-check-token)
+curl -fsS "https://api.sopet.org/health" \
+  -H "x-health-check-token: ${HEALTH_CHECK_TOKEN}"
+curl -fsS "https://api.sopet.org/health/ready" \
+  -H "x-health-check-token: ${HEALTH_CHECK_TOKEN}"
 
 # GraphQL smoke
 curl -fsS "https://api.sopet.org/graphql" \
@@ -234,7 +239,9 @@ On the instance (Session Manager):
 docker ps --filter name=sopet-api
 docker logs sopet-api --tail 100
 systemctl status caddy   # or how Caddy was installed by setup-caddy.sh
-curl -fsS http://127.0.0.1:3002/health
+# Token is in /opt/sopet/.env (same value as GitHub secret HEALTH_CHECK_TOKEN)
+HEALTH_CHECK_TOKEN="$(grep -E '^HEALTH_CHECK_TOKEN=' /opt/sopet/.env | cut -d= -f2-)"
+curl -fsS http://127.0.0.1:3002/health -H "x-health-check-token: ${HEALTH_CHECK_TOKEN}"
 ```
 
 Also confirm storefront/admin GraphQL base URLs and Omise webhook delivery.

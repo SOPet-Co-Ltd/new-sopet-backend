@@ -49,7 +49,11 @@ Most common after a UAT deploy: Nest never finishes boot. `NODE_ENV=production` 
 Confirm origin health:
 
 ```bash
-curl -fsS "https://api-new-uat.sopet.org/health"
+# Liveness (public)
+curl -fsS "https://api-new-uat.sopet.org/health/live"
+# Detailed health (production requires header)
+curl -fsS "https://api-new-uat.sopet.org/health" \
+  -H "x-health-check-token: ${HEALTH_CHECK_TOKEN}"
 ```
 
 ### Schema out of date
