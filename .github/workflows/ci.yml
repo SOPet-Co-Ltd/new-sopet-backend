@@ -27,6 +27,9 @@ jobs:
       - name: Install dependencies
         run: yarn install --frozen-lockfile
 
+      - name: Audit critical dependencies
+        run: yarn audit --level critical
+
       - name: Format check
         run: yarn format:check
 
@@ -58,6 +61,9 @@ jobs:
 
       - name: Install dependencies
         run: yarn install --frozen-lockfile
+
+      - name: Audit critical dependencies
+        run: yarn audit --level critical
 
       - name: Format check
         run: yarn format:check
