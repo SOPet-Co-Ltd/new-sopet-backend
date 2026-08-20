@@ -30,11 +30,11 @@ export class GuestOrderLookupRateLimitGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const gqlCtx = GqlExecutionContext.create(context);
     const req = gqlCtx.getContext().req as { ip?: string };
-    const args = gqlCtx.getArgs() as {
+    const args: {
       orderNumber?: string;
       input?: { guestPhone?: string; orderId?: string };
-    };
-    const fieldName = gqlCtx.getInfo().fieldName as string;
+    } = gqlCtx.getArgs();
+    const fieldName = String(gqlCtx.getInfo().fieldName);
 
     const ip = req.ip ?? 'unknown';
     let keySuffix = '';

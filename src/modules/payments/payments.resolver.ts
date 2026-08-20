@@ -1,5 +1,5 @@
 import { Args, Mutation, Query, Resolver, Subscription } from '@nestjs/graphql';
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import { PaymentEventsService, type PaymentStatusUpdatedPayload } from './payment-events.service';
 import { BankTransferDetailsType, PaymentType } from '../../graphql/models/types';

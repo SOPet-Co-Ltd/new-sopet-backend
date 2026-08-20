@@ -44,9 +44,10 @@ describe('RolesGuard', () => {
   });
 
   it('allows when user has a required role', () => {
-    reflector.getAllAndOverride = jest.fn().mockReturnValue(['vendor', 'admin']);
+    const getAllAndOverride = jest.fn().mockReturnValue(['vendor', 'admin']);
+    reflector.getAllAndOverride = getAllAndOverride;
 
     expect(guard.canActivate(buildContext({ role: 'vendor' }))).toBe(true);
-    expect(reflector.getAllAndOverride).toHaveBeenCalledWith(ROLES_KEY, expect.any(Array));
+    expect(getAllAndOverride).toHaveBeenCalledWith(ROLES_KEY, expect.any(Array));
   });
 });
