@@ -28,7 +28,14 @@ jobs:
         run: yarn install --frozen-lockfile
 
       - name: Audit critical dependencies
-        run: yarn audit --level critical
+        # Yarn classic exits with a severity bitmask; only fail on Critical (16).
+        run: |
+          set +e
+          yarn audit --level critical
+          code=$?
+          set -e
+          if (( code & 16 )); then exit 1; fi
+          exit 0
 
       - name: Format check
         run: yarn format:check
@@ -63,7 +70,14 @@ jobs:
         run: yarn install --frozen-lockfile
 
       - name: Audit critical dependencies
-        run: yarn audit --level critical
+        # Yarn classic exits with a severity bitmask; only fail on Critical (16).
+        run: |
+          set +e
+          yarn audit --level critical
+          code=$?
+          set -e
+          if (( code & 16 )); then exit 1; fi
+          exit 0
 
       - name: Format check
         run: yarn format:check
