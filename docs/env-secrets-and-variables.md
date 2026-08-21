@@ -76,7 +76,7 @@ GitHub Environments **`deploy/uat`** and **`deploy/production`** use the **same 
 | `JWT_REFRESH_EXPIRES_IN`           | Refresh token TTL                  | e.g. `7d`                                                                                                    |
 | `JWT_ISSUER`                       | JWT `iss` claim                    | Default `sopet-api`.                                                                                         |
 | `JWT_AUDIENCE`                     | JWT `aud` claim                    | Default `sopet`.                                                                                             |
-| `DB_SSL_REJECT_UNAUTHORIZED`       | Postgres TLS peer verify           | Crunchy Bridge without team CA: set `false` (break-glass). Prefer `DB_SSL_CA` when you have the team PEM.  |
+| `DB_SSL_REJECT_UNAUTHORIZED`       | Postgres TLS peer verify           | Crunchy Bridge without team CA: set `false` (break-glass). Prefer `DB_SSL_CA` when you have the team PEM.    |
 | `THAIBULKSMS_SENDER`               | SMS sender name                    | e.g. `SOPet`                                                                                                 |
 | `THAIBULKSMS_FORCE`                | ThaiBulkSMS force mode             | e.g. `corporate`                                                                                             |
 | `THAIBULKSMS_SHORTEN_URL`          | Shorten URLs in SMS                | `false` typical.                                                                                             |
