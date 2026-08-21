@@ -1758,10 +1758,10 @@
     path-to-regexp "8.4.2"
     swagger-ui-dist "5.32.8"
 
-"@nestjs/terminus@^10.2.3":
-  version "10.3.0"
-  resolved "https://registry.yarnpkg.com/@nestjs/terminus/-/terminus-10.3.0.tgz#03eee5d8622cab6834190f00e929234d1b1fc78a"
-  integrity sha512-vOJGCwt1OgrFuuxWQwPoaHqy9m9CfIk2qMUX2mosZLK5dFVJSEjHXrklkh3/Fw9PiUnfzvYFfiAdJRzUaxx+5Q==
+"@nestjs/terminus@^11.1.1":
+  version "11.1.1"
+  resolved "https://registry.yarnpkg.com/@nestjs/terminus/-/terminus-11.1.1.tgz#22da9e59597917630419331360e8cc662b071e35"
+  integrity sha512-Ssql79H+EQY/Wg108eJqN4NiNsO/tLrj+qbzOWSQUf2JE4vJQ2RG3WTqUOrYjfjWmVHD3+Ys0+azed7LSMKScw==
   dependencies:
     boxen "5.1.2"
     check-disk-space "3.4.0"
