@@ -10,7 +10,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, MoreThan } from 'typeorm';
-import { createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import * as bcrypt from 'bcrypt';
 import { Customer } from '../../database/entities/customer.entity';
 import { User, UserRole } from '../../database/entities/user.entity';
@@ -83,10 +83,15 @@ export class AuthService {
   }
 
   /** HMAC-SHA256 hex digest; plaintext OTP is never persisted. */
+  /** SHA-256 hex digest for password-reset / email-verify tokens at rest (SOPET-H-02). */
+  private hashAuthToken(token: string): string {
+    return createHash('sha256').update(token).digest('hex');
+  }
+
   private hashOtp(code: string): string {
-    const secret = this.configService.get<string>('jwt.secret');
+    const secret = this.configService.get<string>('otp.hmacSecret');
     if (!secret) {
-      throw new Error('JWT_SECRET is required to hash OTP codes');
+      throw new Error('OTP_HMAC_SECRET is required to hash OTP codes');
     }
     return createHmac('sha256', secret).update(code).digest('hex');
   }
@@ -167,7 +172,20 @@ export class AuthService {
       order: { createdAt: 'DESC' },
     });
 
-    if (!otp || this.isOtpExpired(otp.expiresAt) || !this.otpHashesMatch(otp.code, code)) {
+    if (!otp || this.isOtpExpired(otp.expiresAt)) {
+      throw new UnauthorizedException({
+        code: 'INVALID_OTP',
+        message: 'Invalid or expired OTP code',
+      });
+    }
+
+    if (!this.otpHashesMatch(otp.code, code)) {
+      otp.failedAttempts = (otp.failedAttempts ?? 0) + 1;
+      const maxFailed = this.configService.get<number>('otp.maxFailedAttempts') ?? 5;
+      if (otp.failedAttempts >= maxFailed) {
+        otp.isUsed = true;
+      }
+      await this.otpRepository.save(otp);
       throw new UnauthorizedException({
         code: 'INVALID_OTP',
         message: 'Invalid or expired OTP code',
@@ -229,6 +247,7 @@ export class AuthService {
       sub: customer.id,
       phone: customer.phone,
       role: 'customer',
+      ver: customer.tokenVersion ?? 0,
     });
 
     if (sessionId) {
@@ -299,6 +318,7 @@ export class AuthService {
       sub: user.id,
       email: user.email,
       role: user.role,
+      ver: user.tokenVersion ?? 0,
     };
 
     // Vendors: prefer owned store, then team memberships
@@ -345,10 +365,55 @@ export class AuthService {
 
   async refreshToken(token: string): Promise<{ accessToken: string; refreshToken: string }> {
     try {
-      const payload = this.jwtService.verify<JwtPayload>(token);
+      const payload = this.jwtService.verify<JwtPayload>(token, {
+        issuer: this.configService.get<string>('jwt.issuer'),
+        audience: this.configService.get<string>('jwt.audience'),
+      });
 
       if (payload.type !== 'refresh') {
         throw new UnauthorizedException('Invalid token type');
+      }
+
+      let tokenVersion = payload.ver ?? 0;
+
+      if (payload.role === UserRole.CUSTOMER) {
+        const customer = await this.customerRepository.findOne({
+          where: { id: payload.sub },
+          select: ['id', 'isActive', 'tokenVersion'],
+        });
+        if (!customer || !customer.isActive) {
+          throw new UnauthorizedException({
+            code: 'CUSTOMER_SUSPENDED',
+            message: 'Your account has been suspended. Please contact support for assistance.',
+          });
+        }
+        if ((customer.tokenVersion ?? 0) !== tokenVersion) {
+          throw new UnauthorizedException({
+            code: 'INVALID_REFRESH_TOKEN',
+            message: 'Invalid or expired refresh token',
+          });
+        }
+        tokenVersion = customer.tokenVersion ?? 0;
+      }
+
+      if (payload.role === UserRole.VENDOR || payload.role === UserRole.ADMIN) {
+        const user = await this.userRepository.findOne({
+          where: { id: payload.sub },
+          select: ['id', 'isActive', 'tokenVersion'],
+        });
+        if (!user || !user.isActive) {
+          throw new UnauthorizedException({
+            code: 'ACCOUNT_SUSPENDED',
+            message: 'Your account has been suspended. Please contact support for assistance.',
+          });
+        }
+        if ((user.tokenVersion ?? 0) !== tokenVersion) {
+          throw new UnauthorizedException({
+            code: 'INVALID_REFRESH_TOKEN',
+            message: 'Invalid or expired refresh token',
+          });
+        }
+        tokenVersion = user.tokenVersion ?? 0;
       }
 
       const newPayload: Omit<JwtPayload, 'type'> = {
@@ -357,33 +422,8 @@ export class AuthService {
         phone: payload.phone,
         role: payload.role,
         storeId: payload.storeId,
+        ver: tokenVersion,
       };
-
-      if (payload.role === UserRole.CUSTOMER) {
-        const customer = await this.customerRepository.findOne({
-          where: { id: payload.sub },
-          select: ['id', 'isActive'],
-        });
-        if (!customer || !customer.isActive) {
-          throw new UnauthorizedException({
-            code: 'CUSTOMER_SUSPENDED',
-            message: 'Your account has been suspended. Please contact support for assistance.',
-          });
-        }
-      }
-
-      if (payload.role === UserRole.VENDOR || payload.role === UserRole.ADMIN) {
-        const user = await this.userRepository.findOne({
-          where: { id: payload.sub },
-          select: ['id', 'isActive'],
-        });
-        if (!user || !user.isActive) {
-          throw new UnauthorizedException({
-            code: 'ACCOUNT_SUSPENDED',
-            message: 'Your account has been suspended. Please contact support for assistance.',
-          });
-        }
-      }
 
       return this.generateTokens(newPayload);
     } catch (error) {
@@ -412,16 +452,23 @@ export class AuthService {
   private async generateTokens(
     payload: Omit<JwtPayload, 'type'>,
   ): Promise<{ accessToken: string; refreshToken: string }> {
+    const signOptions = {
+      issuer: this.configService.get<string>('jwt.issuer'),
+      audience: this.configService.get<string>('jwt.audience'),
+    };
+    const tokenPayload = { ...payload, ver: payload.ver ?? 0 };
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(
-        { ...payload, type: 'access' },
+        { ...tokenPayload, type: 'access' },
         {
+          ...signOptions,
           expiresIn: this.configService.get<string>('jwt.accessTokenExpiresIn'),
         },
       ),
       this.jwtService.signAsync(
-        { ...payload, type: 'refresh' },
+        { ...tokenPayload, type: 'refresh' },
         {
+          ...signOptions,
           expiresIn: this.configService.get<string>('jwt.refreshTokenExpiresIn'),
         },
       ),
@@ -510,6 +557,7 @@ export class AuthService {
       email: user.email,
       role: user.role,
       storeId,
+      ver: user.tokenVersion ?? 0,
     };
 
     const { accessToken, refreshToken } = await this.generateTokens(payload);
@@ -618,6 +666,7 @@ export class AuthService {
     }
 
     user.passwordHash = await bcrypt.hash(newPassword, 12);
+    user.tokenVersion = (user.tokenVersion ?? 0) + 1;
     await this.userRepository.save(user);
   }
 
@@ -645,7 +694,7 @@ export class AuthService {
     token: string,
   ): Promise<{ valid: boolean; status: 'valid' | 'expired' | 'used' | 'invalid' }> {
     const resetToken = await this.passwordResetTokenRepository.findOne({
-      where: { token },
+      where: { token: this.hashAuthToken(token) },
     });
 
     if (!resetToken) {
@@ -663,7 +712,7 @@ export class AuthService {
 
   async resetPassword(token: string, newPassword: string): Promise<{ message: string }> {
     const resetToken = await this.passwordResetTokenRepository.findOne({
-      where: { token },
+      where: { token: this.hashAuthToken(token) },
     });
 
     if (!resetToken || resetToken.usedAt) {
@@ -691,6 +740,7 @@ export class AuthService {
     }
 
     user.passwordHash = await bcrypt.hash(newPassword, 12);
+    user.tokenVersion = (user.tokenVersion ?? 0) + 1;
     await this.userRepository.save(user);
 
     resetToken.usedAt = new Date();
@@ -758,7 +808,7 @@ export class AuthService {
 
     const resetToken = this.passwordResetTokenRepository.create({
       email: user.email,
-      token,
+      token: this.hashAuthToken(token),
       expiresAt,
     });
     await this.passwordResetTokenRepository.save(resetToken);
@@ -905,7 +955,7 @@ export class AuthService {
 
   async verifyEmail(token: string, req?: unknown): Promise<{ message: string }> {
     const verificationToken = await this.emailVerificationTokenRepository.findOne({
-      where: { token },
+      where: { token: this.hashAuthToken(token) },
     });
 
     if (!verificationToken || verificationToken.usedAt) {
@@ -965,7 +1015,7 @@ export class AuthService {
 
     const verificationToken = this.emailVerificationTokenRepository.create({
       email: user.email,
-      token,
+      token: this.hashAuthToken(token),
       expiresAt,
     });
     await this.emailVerificationTokenRepository.save(verificationToken);

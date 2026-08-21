@@ -82,6 +82,8 @@ export class ValidatePromotionInput {
   code!: string;
 
   @Field(() => Float)
+  @IsNumber()
+  @Min(0)
   subtotal!: number;
 
   @Field({ nullable: true })

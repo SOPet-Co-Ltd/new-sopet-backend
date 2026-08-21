@@ -89,6 +89,8 @@ import { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 import { JwtPayload } from '../src/common/interfaces';
 import { AuditActorType, AuditLog } from '../src/database/entities/audit-log.entity';
+import { Customer } from '../src/database/entities/customer.entity';
+import { User, UserRole } from '../src/database/entities/user.entity';
 import { JwtAuthGuard } from '../src/modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../src/modules/auth/guards/roles.guard';
 import { JwtStrategy } from '../src/modules/auth/strategies/jwt.strategy';
@@ -162,6 +164,7 @@ function signAccessToken(input: {
     email: input.email,
     role: input.role,
     type: 'access',
+    ver: 0,
     ...(input.storeId ? { storeId: input.storeId } : {}),
   };
   return jwtService.sign(payload);
@@ -173,6 +176,8 @@ describe('admin audit logs console (service-integration-e2e)', () => {
   let moduleFixture: TestingModule | undefined;
   let dataSource: DataSource;
   let auditLogsService: AuditLogsService;
+  let adminUserId = '';
+  let vendorUserId = '';
   let rowAId = '';
   let rowBId = '';
   let rowCId = '';
@@ -199,7 +204,7 @@ describe('admin audit logs console (service-integration-e2e)', () => {
         ConfigModule.forRoot({ isGlobal: true }),
         PassportModule.register({ defaultStrategy: 'jwt' }),
         TypeOrmModule.forRoot(createTypeOrmTestOptions()),
-        TypeOrmModule.forFeature([AuditLog]),
+        TypeOrmModule.forFeature([AuditLog, User, Customer]),
         GraphQLModule.forRoot<ApolloDriverConfig>({
           driver: ApolloDriver,
           autoSchemaFile: true,
@@ -229,14 +234,39 @@ describe('admin audit logs console (service-integration-e2e)', () => {
     auditLogsService = moduleFixture.get(AuditLogsService);
 
     actorLabel = `e2e-audit-console-${Date.now()}`;
+    const userRepo = dataSource.getRepository(User);
+    const adminUser = await userRepo.save(
+      userRepo.create({
+        email: `admin-audit-e2e-${actorLabel}@sopet.test`,
+        passwordHash: 'e2e-unused-hash',
+        fullName: 'E2E Admin Audit',
+        role: UserRole.ADMIN,
+        emailVerified: true,
+        isActive: true,
+        tokenVersion: 0,
+      }),
+    );
+    const vendorUser = await userRepo.save(
+      userRepo.create({
+        email: `vendor-audit-e2e-${actorLabel}@sopet.test`,
+        passwordHash: 'e2e-unused-hash',
+        fullName: 'E2E Vendor Audit',
+        role: UserRole.VENDOR,
+        emailVerified: true,
+        isActive: true,
+        tokenVersion: 0,
+      }),
+    );
+    adminUserId = adminUser.id;
+    vendorUserId = vendorUser.id;
     adminToken = signAccessToken({
-      userId: randomUUID(),
-      email: 'admin-audit-e2e@sopet.test',
+      userId: adminUser.id,
+      email: adminUser.email,
       role: 'admin',
     });
     vendorToken = signAccessToken({
-      userId: randomUUID(),
-      email: 'vendor-audit-e2e@sopet.test',
+      userId: vendorUser.id,
+      email: vendorUser.email,
       role: 'vendor',
       storeId: randomUUID(),
     });
@@ -267,6 +297,11 @@ describe('admin audit logs console (service-integration-e2e)', () => {
   afterAll(async () => {
     if (dataSource?.isInitialized) {
       await dataSource.query(`DELETE FROM audit_logs WHERE actor_label = $1`, [actorLabel]);
+      if (adminUserId || vendorUserId) {
+        await dataSource.query(`DELETE FROM users WHERE id = ANY($1::uuid[])`, [
+          [adminUserId, vendorUserId].filter(Boolean),
+        ]);
+      }
     }
     if (app) {
       await app.close();
@@ -377,7 +412,10 @@ describe('admin audit logs console (service-integration-e2e)', () => {
       { filter: { requestId: REQUEST_ID_B } },
       vendorToken,
     );
-    expectGraphqlDenied(vendorRes.body as GraphqlBody, /Forbidden|FORBIDDEN/i);
+    expectGraphqlDenied(
+      vendorRes.body as GraphqlBody,
+      /Forbidden|FORBIDDEN|Insufficient permissions/i,
+    );
 
     let deleted = 0;
     do {

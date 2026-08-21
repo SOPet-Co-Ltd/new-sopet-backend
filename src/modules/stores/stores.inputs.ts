@@ -29,7 +29,7 @@ export class RegisterVendorInput {
   @Field()
   @IsNotEmpty()
   @IsString()
-  @MinLength(6)
+  @MinLength(8)
   password!: string;
 
   @Field()
@@ -137,7 +137,7 @@ export class AcceptVendorInvitationInput {
   @Field()
   @IsNotEmpty()
   @IsString()
-  @MinLength(6)
+  @MinLength(8)
   password!: string;
 
   @Field()

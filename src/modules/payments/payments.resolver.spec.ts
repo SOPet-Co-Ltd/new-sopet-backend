@@ -49,7 +49,7 @@ describe('PaymentsResolver payment queries', () => {
 
       const result = await resolver.payment('pay-1', undefined, undefined);
 
-      expect(paymentsService.findById).toHaveBeenCalledWith('pay-1', undefined);
+      expect(paymentsService.findById).toHaveBeenCalledWith('pay-1', undefined, undefined);
       expect(result).toEqual({
         id: 'pay-1',
         orderId: 'ord-1',
@@ -80,7 +80,7 @@ describe('PaymentsResolver payment queries', () => {
 
       await resolver.payment('pay-1', 'cust-1', 'customer');
 
-      expect(paymentsService.findById).toHaveBeenCalledWith('pay-1', 'cust-1');
+      expect(paymentsService.findById).toHaveBeenCalledWith('pay-1', 'cust-1', undefined);
     });
 
     it('ignores non-customer roles for ownership check', async () => {
@@ -88,7 +88,7 @@ describe('PaymentsResolver payment queries', () => {
 
       await resolver.payment('pay-1', 'admin-1', 'admin');
 
-      expect(paymentsService.findById).toHaveBeenCalledWith('pay-1', undefined);
+      expect(paymentsService.findById).toHaveBeenCalledWith('pay-1', undefined, undefined);
     });
   });
 
@@ -111,7 +111,11 @@ describe('PaymentsResolver payment queries', () => {
 
       const result = await resolver.paymentByOrderId('ord-1', undefined, undefined);
 
-      expect(paymentsService.findLatestByOrderId).toHaveBeenCalledWith('ord-1', undefined);
+      expect(paymentsService.findLatestByOrderId).toHaveBeenCalledWith(
+        'ord-1',
+        undefined,
+        undefined,
+      );
       expect(result.status).toBe('paid');
       expect(result.orderId).toBe('ord-1');
     });

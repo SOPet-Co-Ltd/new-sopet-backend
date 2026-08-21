@@ -51,6 +51,12 @@ import { VendorStatusGuard } from './guards/vendor-status.guard';
         secret: configService.get<string>('jwt.secret'),
         signOptions: {
           expiresIn: configService.get<string>('jwt.accessTokenExpiresIn'),
+          issuer: configService.get<string>('jwt.issuer'),
+          audience: configService.get<string>('jwt.audience'),
+        },
+        verifyOptions: {
+          issuer: configService.get<string>('jwt.issuer'),
+          audience: configService.get<string>('jwt.audience'),
         },
       }),
       inject: [ConfigService],

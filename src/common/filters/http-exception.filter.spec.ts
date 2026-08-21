@@ -70,8 +70,11 @@ describe('HttpExceptionFilter', () => {
 
     const { host: host500, status: status500, json: json500 } = createHost();
     const errorSpy = jest
-      .spyOn((filter as unknown as { logger: { error: unknown } }).logger, 'error')
-      .mockImplementation();
+      .spyOn(
+        (filter as unknown as { logger: { error: (...args: unknown[]) => void } }).logger,
+        'error',
+      )
+      .mockImplementation(() => undefined);
     filter.catch(new Error('database connection lost'), host500);
     errorSpy.mockRestore();
 

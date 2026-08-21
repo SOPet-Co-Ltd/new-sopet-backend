@@ -3,6 +3,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import * as bcrypt from 'bcrypt';
 import { AuthService } from './auth.service';
 import { Customer } from '../../database/entities/customer.entity';
@@ -19,6 +20,10 @@ import { CustomerRepository } from '../../database/repositories/customer.reposit
 import { GuestOrderLinkService } from '../orders/guest-order-link.service';
 import { StorageService } from '../storage/storage.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
+
+function sha256Hex(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
 
 describe('AuthService password reset', () => {
   let service: AuthService;
@@ -105,6 +110,10 @@ describe('AuthService password reset', () => {
         expiresAt: expect.any(Date),
       }),
     );
+    const stored = passwordResetRepo.create.mock.calls[0][0] as { token: string };
+    const emailedToken = emailDeliveryService.sendPasswordReset.mock.calls[0][1] as string;
+    expect(stored.token).toBe(sha256Hex(emailedToken));
+    expect(stored.token).not.toBe(emailedToken);
     expect(passwordResetRepo.save).toHaveBeenCalled();
     expect(emailDeliveryService.sendPasswordReset).toHaveBeenCalledWith(
       'vendor@test.com',
@@ -169,6 +178,7 @@ describe('AuthService password reset', () => {
     expect(userRepo.save).toHaveBeenCalledWith(
       expect.objectContaining({
         passwordHash: expect.not.stringContaining(hash),
+        tokenVersion: 1,
       }),
     );
     expect(passwordResetRepo.save).toHaveBeenCalledWith(

@@ -36,7 +36,8 @@ export class AuthResolver {
   constructor(private readonly authService: AuthService) {}
 
   @Query(() => MeResult)
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('customer', 'vendor', 'admin')
   @AllowSuspendedStore()
   async me(
     @CurrentUser('id') userId: string,

@@ -42,6 +42,7 @@ import { EmailDeliveryService } from '../src/modules/email/email-delivery.servic
 import { Payout } from '../src/database/entities/payout.entity';
 import { Store } from '../src/database/entities/store.entity';
 import { User } from '../src/database/entities/user.entity';
+import { Customer } from '../src/database/entities/customer.entity';
 import { StoreMember } from '../src/database/entities/store-member.entity';
 import { Order, OrderStatus, PaymentMethod } from '../src/database/entities/order.entity';
 import { OrderItem, FulfillmentStatus } from '../src/database/entities/order-item.entity';
@@ -189,6 +190,7 @@ describe('store commission service-integration-e2e harness', () => {
           Payout,
           Store,
           User,
+          Customer,
           StoreMember,
           Order,
           OrderItem,

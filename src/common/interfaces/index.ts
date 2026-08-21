@@ -4,6 +4,8 @@ export interface JwtPayload {
   phone?: string;
   role?: 'admin' | 'vendor' | 'customer';
   storeId?: string;
+  /** Session version; must match entity token_version (SOPET-M-01). */
+  ver: number;
   type: 'access' | 'refresh';
 }
 

@@ -17,7 +17,9 @@ GitHub Environments **`deploy/uat`** and **`deploy/production`** use the **same 
 | `CLOUDFLARE_ACCESS_KEY_ID` ★     | R2 access key id                              | R2 API token credentials.                                                                |
 | `CLOUDFLARE_SECRET_ACCESS_KEY` ★ | R2 secret access key                          | Treat as highly sensitive.                                                               |
 | `CLOUDFLARE_R2_BUCKET` ★         | R2 bucket name                                | Production bucket only (not UAT).                                                        |
-| `JWT_SECRET` ★                   | JWT signing secret                            | Long random string; **must differ from UAT**.                                            |
+| `JWT_SECRET` ★                   | JWT signing secret                            | Long random string (≥32 chars in production); **must differ from UAT**; no placeholders. |
+| `OTP_HMAC_SECRET` ★              | Dedicated HMAC key for OTP at-rest hashing    | ≥32 chars; **must not equal** `JWT_SECRET`; **must differ from UAT**.                    |
+| `BANK_DATA_ENCRYPTION_KEY` ★     | AES-256-GCM key for vendor bank numbers       | Required in production boot; **must differ from UAT**.                                   |
 | `THAIBULKSMS_API_KEY` ★          | ThaiBulkSMS API key                           | Live SMS credentials for prod.                                                           |
 | `THAIBULKSMS_API_SECRET` ★       | ThaiBulkSMS API secret                        | Pair with API key.                                                                       |
 | `OMISE_PUBLIC_KEY` ★             | Omise public key                              | **Live** keys on production (not test).                                                  |
@@ -26,7 +28,7 @@ GitHub Environments **`deploy/uat`** and **`deploy/production`** use the **same 
 | `RESEND_API_KEY` ★               | Resend email API key                          | Transactional mail.                                                                      |
 | `OPENAI_API_KEY`                 | OpenAI embeddings / smart search              | Optional; needed for embedding worker / semantic search.                                 |
 
-**Count: 15 secrets** (14 app/deploy + `AWS_ROLE_ARN`; `REDIS_PASSWORD` / `OPENAI_API_KEY` may be optional).
+**Count: 17 secrets** (16 app/deploy + `AWS_ROLE_ARN`; `REDIS_PASSWORD` / `OPENAI_API_KEY` may be optional).
 
 ---
 
@@ -72,6 +74,9 @@ GitHub Environments **`deploy/uat`** and **`deploy/production`** use the **same 
 | `CDN_URL` ★                        | Public base URL for stored objects | Production CDN / R2 public domain.                                                                           |
 | `JWT_ACCESS_EXPIRES_IN`            | Access token TTL                   | e.g. `1h`                                                                                                    |
 | `JWT_REFRESH_EXPIRES_IN`           | Refresh token TTL                  | e.g. `7d`                                                                                                    |
+| `JWT_ISSUER`                       | JWT `iss` claim                    | Default `sopet-api`.                                                                                         |
+| `JWT_AUDIENCE`                     | JWT `aud` claim                    | Default `sopet`.                                                                                             |
+| `DB_SSL_REJECT_UNAUTHORIZED`       | Postgres TLS peer verify           | Crunchy Bridge without team CA: set `false` (break-glass). Prefer `DB_SSL_CA` when you have the team PEM.  |
 | `THAIBULKSMS_SENDER`               | SMS sender name                    | e.g. `SOPet`                                                                                                 |
 | `THAIBULKSMS_FORCE`                | ThaiBulkSMS force mode             | e.g. `corporate`                                                                                             |
 | `THAIBULKSMS_SHORTEN_URL`          | Shorten URLs in SMS                | `false` typical.                                                                                             |

@@ -208,6 +208,7 @@ export class UsersService {
       sub: customer.id,
       phone: customer.phone,
       role: 'customer',
+      ver: customer.tokenVersion ?? 0,
     });
 
     return { accessToken, refreshToken, customer };
@@ -685,6 +686,7 @@ export class UsersService {
       sub: customer.id,
       phone: customer.phone,
       role: 'customer',
+      ver: customer.tokenVersion ?? 0,
     });
 
     return { accessToken, refreshToken, customer };
@@ -697,16 +699,23 @@ export class UsersService {
   private async generateTokens(
     payload: Omit<JwtPayload, 'type'>,
   ): Promise<{ accessToken: string; refreshToken: string }> {
+    const signOptions = {
+      issuer: this.configService.get<string>('jwt.issuer'),
+      audience: this.configService.get<string>('jwt.audience'),
+    };
+    const tokenPayload = { ...payload, ver: payload.ver ?? 0 };
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(
-        { ...payload, type: 'access' },
+        { ...tokenPayload, type: 'access' },
         {
+          ...signOptions,
           expiresIn: this.configService.get<string>('jwt.accessTokenExpiresIn'),
         },
       ),
       this.jwtService.signAsync(
-        { ...payload, type: 'refresh' },
+        { ...tokenPayload, type: 'refresh' },
         {
+          ...signOptions,
           expiresIn: this.configService.get<string>('jwt.refreshTokenExpiresIn'),
         },
       ),

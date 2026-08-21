@@ -1,10 +1,11 @@
 import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { UseGuards } from '@nestjs/common';
 import { CartService, CartWithWarnings } from './cart.service';
+import { Public, CurrentUser, Roles } from '../../common/decorators';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
 import { CartType, CartItemType, CartWarningType } from '../../graphql/models/types';
 import { mapVariant } from '../../graphql/models/mappers';
-import { Public, CurrentUser } from '../../common/decorators';
 import { AddToCartInput, RemoveCartItemInput, UpdateCartItemInput } from './cart.inputs';
 import { honestDisplayCompareAt } from '../sale-campaigns/sale-campaign-pricing';
 import { SaleCampaignPricingService } from '../sale-campaigns/sale-campaign-pricing.service';
@@ -120,7 +121,8 @@ export class CartResolver {
   }
 
   @Mutation(() => CartType)
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('customer')
   async mergeCart(
     @CurrentUser('id') customerId: string,
     @Args('sessionId') sessionId: string,

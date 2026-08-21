@@ -16,6 +16,7 @@ import {
   VENDOR_WEBHOOK_EVENTS,
   VendorWebhookEvent,
 } from '../../database/entities/store-webhook.entity';
+import { assertSafeRemoteUrl } from '../../common/utils/safe-remote-url.util';
 import { buildVendorWebhookOrderPayload, signVendorWebhookPayload } from './vendor-webhook.payload';
 import { DEFAULT_VENDOR_WEBHOOK_EVENTS } from './vendor-webhook.events';
 import { VENDOR_WEBHOOK_QUEUE, VendorWebhookJobData } from './vendor-webhooks.constants';
@@ -63,7 +64,7 @@ export class VendorWebhooksService {
       rotateSecret?: boolean;
     },
   ): Promise<StoreWebhookPublicView> {
-    this.assertHttpsUrl(input.url);
+    await this.assertSafeWebhookUrl(input.url);
     const events = this.normalizeEvents(input.events);
     const existing = await this.webhookRepository.findOne({ where: { storeId } });
 
@@ -180,8 +181,10 @@ export class VendorWebhooksService {
   }
 
   async deliverNow(job: VendorWebhookJobData): Promise<void> {
+    // Re-check immediately before fetch (DNS rebinding defense).
+    const safeUrl = await this.assertSafeWebhookUrl(job.url);
     const signature = signVendorWebhookPayload(job.secret, job.payloadJson);
-    const response = await fetch(job.url, {
+    const response = await fetch(safeUrl.toString(), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -232,21 +235,11 @@ export class VendorWebhooksService {
     return unique;
   }
 
-  private assertHttpsUrl(url: string): void {
-    let parsed: URL;
-    try {
-      parsed = new URL(url.trim());
-    } catch {
-      throw new BadRequestException({
-        code: 'INVALID_WEBHOOK_URL',
-        message: 'Webhook URL must be a valid HTTPS URL',
-      });
-    }
-    if (parsed.protocol !== 'https:') {
-      throw new BadRequestException({
-        code: 'INVALID_WEBHOOK_URL',
-        message: 'Webhook URL must use HTTPS',
-      });
-    }
+  private async assertSafeWebhookUrl(url: string): Promise<URL> {
+    return assertSafeRemoteUrl(url.trim(), {
+      allowedProtocols: ['https:'],
+      errorCode: 'INVALID_WEBHOOK_URL',
+      errorMessagePrefix: 'Webhook URL',
+    });
   }
 }

@@ -6,6 +6,7 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
 import appConfig from './config/app.config';
 import jwtConfig from './config/jwt.config';
+import otpConfig from './config/otp.config';
 import omiseConfig from './config/omise.config';
 import storageConfig from './config/storage.config';
 import twilioConfig from './config/twilio.config';
@@ -57,6 +58,7 @@ import { getPostgresSslOptions } from './database/postgres-ssl.util';
       load: [
         appConfig,
         jwtConfig,
+        otpConfig,
         omiseConfig,
         storageConfig,
         twilioConfig,
@@ -144,7 +146,7 @@ import { getPostgresSslOptions } from './database/postgres-ssl.util';
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
     },
-    // Enforce @Roles when present (no-op when metadata absent)
+    // Enforce @Roles (deny when missing); @Public bypasses
     {
       provide: APP_GUARD,
       useClass: RolesGuard,

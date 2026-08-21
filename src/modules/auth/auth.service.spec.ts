@@ -22,9 +22,10 @@ import { StorageService } from '../storage/storage.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 
 const TEST_JWT_SECRET = 'test-jwt-secret';
+const TEST_OTP_HMAC_SECRET = 'test-otp-hmac-secret';
 
 function hashOtpForTest(code: string): string {
-  return createHmac('sha256', TEST_JWT_SECRET).update(code).digest('hex');
+  return createHmac('sha256', TEST_OTP_HMAC_SECRET).update(code).digest('hex');
 }
 
 describe('AuthService', () => {
@@ -54,6 +55,10 @@ describe('AuthService', () => {
   const configService = {
     get: jest.fn((key: string) => {
       if (key === 'jwt.secret') return TEST_JWT_SECRET;
+      if (key === 'otp.hmacSecret') return TEST_OTP_HMAC_SECRET;
+      if (key === 'otp.maxFailedAttempts') return 5;
+      if (key === 'jwt.issuer') return 'sopet-api';
+      if (key === 'jwt.audience') return 'sopet';
       if (key.includes('refresh')) return '7d';
       return '15m';
     }),
@@ -195,6 +200,25 @@ describe('AuthService', () => {
     await expect(service.verifyOtp({ phone: '+66812345678', code: '000000' })).rejects.toThrow(
       UnauthorizedException,
     );
+  });
+
+  it('locks OTP after too many failed verify attempts', async () => {
+    const otp = {
+      phone: '0812345678',
+      code: hashOtpForTest('123456'),
+      isUsed: false,
+      failedAttempts: 4,
+      expiresAt: new Date(Date.now() + 60_000),
+    };
+    otpRepo.findOne.mockResolvedValue(otp);
+
+    await expect(service.verifyOtp({ phone: '+66812345678', code: '000000' })).rejects.toThrow(
+      UnauthorizedException,
+    );
+
+    expect(otp.failedAttempts).toBe(5);
+    expect(otp.isUsed).toBe(true);
+    expect(otpRepo.save).toHaveBeenCalledWith(otp);
   });
 
   it('rejects an expired OTP', async () => {

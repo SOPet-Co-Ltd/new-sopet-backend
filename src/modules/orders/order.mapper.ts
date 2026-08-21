@@ -141,6 +141,7 @@ export function mapOrder(order: Order, viewerStoreId?: string): OrderType {
     guestPhone: order.guestPhone ?? null,
     guestName: order.guestName ?? null,
     guestEmail: order.guestEmail ?? null,
+    guestPayToken: order.guestPayToken ?? null,
     createdAt: order.createdAt,
     storeShippings:
       order.storeShippings?.map((shipping) =>

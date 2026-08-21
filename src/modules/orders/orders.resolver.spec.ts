@@ -96,7 +96,6 @@ describe('OrdersResolver mapOrder extensions', () => {
       | 'findOne'
       | 'findByCustomer'
       | 'findByCustomerPaginated'
-      | 'findByGuestPhone'
       | 'findByStore'
       | 'findPendingBankTransferOrders'
       | 'findLatestPurchaseProductId'
@@ -129,7 +128,6 @@ describe('OrdersResolver mapOrder extensions', () => {
       findOne: jest.fn(),
       findByCustomer: jest.fn(),
       findByCustomerPaginated: jest.fn(),
-      findByGuestPhone: jest.fn(),
       findByStore: jest.fn(),
       findPendingBankTransferOrders: jest.fn(),
       findLatestPurchaseProductId: jest.fn(),
@@ -266,21 +264,6 @@ describe('OrdersResolver mapOrder extensions', () => {
       expect(result.items[0].createdAt).toEqual(new Date('2024-06-15T10:30:00.000Z'));
       expect(result.items[0].storeShippings).toHaveLength(2);
       expect(result.items[0].items[0].variantId).toBe('variant-1');
-    });
-  });
-
-  describe('guestOrders', () => {
-    it('returns extended fields on guest order list', async () => {
-      ordersService.findByGuestPhone.mockResolvedValue([
-        buildOrderFixture({ guestPhone: '0812345678', customerId: null }),
-      ]);
-
-      const result = await resolver.guestOrders('0812345678');
-
-      expect(result).toHaveLength(1);
-      expect(result[0].createdAt).toBeInstanceOf(Date);
-      expect(result[0].storeShippings).toHaveLength(2);
-      expect(result[0].items[0].variantId).toBe('variant-1');
     });
   });
 

@@ -12,12 +12,12 @@ export class LoginDto {
   email!: string;
 
   @ApiProperty({
-    description: 'Account password (minimum 6 characters)',
+    description: 'Account password (minimum 8 characters)',
     example: 'S3curePass',
-    minLength: 6,
+    minLength: 8,
   })
   @IsNotEmpty({ message: 'Password is required' })
   @IsString()
-  @MinLength(6, { message: 'Password must be at least 6 characters' })
+  @MinLength(8, { message: 'Password must be at least 8 characters' })
   password!: string;
 }

@@ -24,30 +24,38 @@ describe('AuthRateLimitGuard', () => {
     }),
   };
 
-  const guard = new AuthRateLimitGuard(
-    redisService as unknown as RedisService,
-    configService as unknown as ConfigService,
-  );
-
+  let guard: AuthRateLimitGuard;
   const context = {} as never;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    guard = new AuthRateLimitGuard(
+      redisService as unknown as RedisService,
+      configService as unknown as ConfigService,
+    );
     (GqlExecutionContext.create as jest.Mock).mockReturnValue({
       getContext: () => ({ req: { ip: '127.0.0.1' } }),
       getArgs: () => ({ input: { phone: '0812345678' } }),
     });
   });
 
-  it('skips rate limiting when Redis is unavailable', async () => {
+  it('uses in-memory limiting when Redis is unavailable (does not 503)', async () => {
     redisService.isAvailable.mockReturnValue(false);
 
-    await expect(guard.canActivate(context)).resolves.toBe(true);
+    for (let i = 0; i < 5; i++) {
+      await expect(guard.canActivate(context)).resolves.toBe(true);
+    }
+
+    await expect(guard.canActivate(context)).rejects.toBeInstanceOf(HttpException);
+    await expect(guard.canActivate(context)).rejects.toMatchObject({
+      status: HttpStatus.TOO_MANY_REQUESTS,
+      response: { code: 'RATE_LIMIT_EXCEEDED' },
+    });
     expect(redisService.get).not.toHaveBeenCalled();
     expect(redisService.set).not.toHaveBeenCalled();
   });
 
-  it('allows requests under the limit', async () => {
+  it('allows requests under the Redis limit', async () => {
     redisService.isAvailable.mockReturnValue(true);
     redisService.get.mockResolvedValue('0');
     redisService.set.mockResolvedValue(undefined);
@@ -56,7 +64,7 @@ describe('AuthRateLimitGuard', () => {
     expect(redisService.set).toHaveBeenCalledWith('rate_limit:auth:0812345678', '1', 60);
   });
 
-  it('rejects when the limit is exceeded', async () => {
+  it('rejects when the Redis limit is exceeded', async () => {
     redisService.isAvailable.mockReturnValue(true);
     redisService.get.mockResolvedValue('2');
 

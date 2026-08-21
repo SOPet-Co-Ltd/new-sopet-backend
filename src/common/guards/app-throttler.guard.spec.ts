@@ -47,7 +47,7 @@ describe('AppThrottlerGuard', () => {
       guard as unknown as {
         getRequestResponse: (ctx: ExecutionContext) => {
           req: { ip?: string };
-          res: { header: (k: string, v: string) => void };
+          res: { header: (k: string, v: string | number) => void };
         };
         getTracker: (req: { ip?: string }) => Promise<string>;
       }

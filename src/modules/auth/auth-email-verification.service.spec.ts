@@ -3,6 +3,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import { AuthService } from './auth.service';
 import { Customer } from '../../database/entities/customer.entity';
 import { User, UserRole } from '../../database/entities/user.entity';
@@ -19,6 +20,10 @@ import { GuestOrderLinkService } from '../orders/guest-order-link.service';
 import { StorageService } from '../storage/storage.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuditAction } from '../audit-logs/audit-log.constants';
+
+function sha256Hex(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
 
 describe('AuthService email verification', () => {
   let service: AuthService;
@@ -97,6 +102,10 @@ describe('AuthService email verification', () => {
         expiresAt: expect.any(Date),
       }),
     );
+    const stored = emailVerificationRepo.create.mock.calls[0][0] as { token: string };
+    const emailedToken = emailDeliveryService.sendEmailVerification.mock.calls[0][1] as string;
+    expect(stored.token).toBe(sha256Hex(emailedToken));
+    expect(stored.token).not.toBe(emailedToken);
     expect(emailDeliveryService.sendEmailVerification).toHaveBeenCalledWith(
       'vendor@test.com',
       expect.any(String),

@@ -1,9 +1,10 @@
 import { Args, Mutation, Resolver } from '@nestjs/graphql';
-import { BadRequestException, UseGuards } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, UseGuards } from '@nestjs/common';
 import { StorageService } from './storage.service';
 import { UPLOAD_FOLDERS, type UploadFolder } from './storage.inputs';
+import { foldersAllowedForRole } from './upload-folder-acl';
 import { UploadResultType } from '../../graphql/models/types';
-import { Roles } from '../../common/decorators';
+import { CurrentUser, Roles } from '../../common/decorators';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 
@@ -16,6 +17,7 @@ export class StorageResolver {
   @Roles('vendor', 'admin', 'customer')
   async uploadImage(
     @Args('base64') base64: string,
+    @CurrentUser('role') role: string,
     @Args('folder', { nullable: true }) folder?: string,
   ): Promise<UploadResultType> {
     const resolvedFolder = folder ?? 'products';
@@ -23,6 +25,14 @@ export class StorageResolver {
       throw new BadRequestException({
         code: 'INVALID_FOLDER',
         message: `Folder must be one of: ${UPLOAD_FOLDERS.join(', ')}`,
+      });
+    }
+
+    const allowed = foldersAllowedForRole(role);
+    if (!allowed.includes(resolvedFolder as UploadFolder)) {
+      throw new ForbiddenException({
+        code: 'FORBIDDEN',
+        message: 'You do not have permission to upload to this folder',
       });
     }
 
