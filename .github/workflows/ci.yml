@@ -1,6 +1,7 @@
 # SOPET Backend CI
 # Lite (format + lint): PRs whose base is NOT deploy/production or deploy/uat
 # Full (format + build + unit + e2e): PRs targeting deploy/production or deploy/uat
+# Security (yarn audit): all PRs; advisory (continue-on-error) while known highs remain
 # E2E tests use mocked repositories/services — no PostgreSQL, Redis, or MinIO required.
 
 name: CI
@@ -10,6 +11,28 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
 
 jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      # Yarn classic: --level high fails when high/critical exist (exit bitmask).
+      # Transitive highs (e.g. typeorm → brace-expansion) currently block a hard gate;
+      # keep advisory (continue-on-error) until the dependency tree clears.
+      - name: Dependency audit (high+)
+        continue-on-error: true
+        run: yarn audit --level high --groups dependencies
+
   lite:
     if: github.base_ref != 'deploy/production' && github.base_ref != 'deploy/uat'
     runs-on: ubuntu-latest

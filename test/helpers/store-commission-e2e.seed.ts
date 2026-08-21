@@ -172,6 +172,7 @@ export function signStoreCommissionAccessToken(input: {
     email: input.email,
     role: input.role,
     type: 'access',
+    ver: 0,
     ...(input.storeId ? { storeId: input.storeId } : {}),
   };
   return jwtService.sign(payload);

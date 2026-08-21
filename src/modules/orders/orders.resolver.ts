@@ -111,13 +111,6 @@ export class OrdersResolver {
     return mapOrder(order);
   }
 
-  @Query(() => [OrderType])
-  @Public()
-  async guestOrders(@Args('guestPhone') guestPhone: string): Promise<OrderType[]> {
-    const orders = await this.ordersService.findByGuestPhone(guestPhone);
-    return orders.map((order) => mapOrder(order));
-  }
-
   @Query(() => OrderTrackingType)
   @Public()
   async orderTracking(@Args('orderNumber') orderNumber: string): Promise<OrderTrackingType> {
@@ -313,6 +306,7 @@ export class OrdersResolver {
       input.orderId,
       undefined,
       input.guestPhone,
+      input.guestPayToken,
     );
     return mapOrder(updated);
   }

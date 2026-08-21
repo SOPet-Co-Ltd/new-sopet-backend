@@ -365,6 +365,7 @@ input ChangePasswordInput {
 }
 
 input ConfirmOrderDeliveredInput {
+  guestPayToken: String
   guestPhone: String
   orderId: String!
 }
@@ -418,6 +419,7 @@ input CreateOrderInput {
 input CreatePaymentInput {
   amount: Float!
   currency: String! = "THB"
+  guestPayToken: String
   omiseToken: String
   orderId: String!
   paymentMethod: String!
@@ -1084,6 +1086,7 @@ type OrderType {
   discountAmount: Float!
   guestEmail: String
   guestName: String
+  guestPayToken: String
   guestPhone: String
   id: String!
   items: [OrderItemType!]!
@@ -1401,7 +1404,6 @@ type Query {
   getAdminInvitationByToken(token: String!): AdminInvitationType!
   getPasswordResetTokenStatus(token: String!): PasswordResetTokenStatusType!
   getStoreInvitationByToken(token: String!): StoreInvitationPreviewType!
-  guestOrders(guestPhone: String!): [OrderType!]!
 
   """GraphQL API health check"""
   health: HealthStatus!
@@ -1424,8 +1426,8 @@ type Query {
   orderAuditLog(orderId: String!, storeId: String!): OrderAuditLogType!
   orderTracking(orderNumber: String!): OrderTrackingType!
   orders(filter: CustomerOrderListFilter = ALL, limit: Int = 10, page: Int = 1): OrderConnection!
-  payment(id: String!): PaymentType!
-  paymentByOrderId(orderId: String!): PaymentType!
+  payment(guestPayToken: String, id: String!): PaymentType!
+  paymentByOrderId(guestPayToken: String, orderId: String!): PaymentType!
   paymentMethods: [SavedPaymentMethodType!]!
   pendingAdminInvitations: [AdminInvitationType!]!
   pendingBankTransferOrders(limit: Int = 20, page: Int = 1): OrderConnection!
@@ -1930,7 +1932,7 @@ input SubmitStoreRequestInput {
 }
 
 type Subscription {
-  paymentStatusUpdated(orderId: String, paymentId: String): PaymentType!
+  paymentStatusUpdated(guestPayToken: String, orderId: String, paymentId: String): PaymentType!
 }
 
 input SwitchStoreInput {

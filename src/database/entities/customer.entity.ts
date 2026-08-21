@@ -57,6 +57,10 @@ export class Customer {
   @Column({ name: 'last_login_at', type: 'timestamp', nullable: true })
   lastLoginAt!: Date | null;
 
+  /** Bumped to revoke outstanding JWTs (SOPET-M-01). */
+  @Column({ name: 'token_version', type: 'int', default: 0 })
+  tokenVersion!: number;
+
   @Column({ name: 'omise_customer_id', type: 'varchar', length: 255, nullable: true })
   omiseCustomerId!: string | null;
 

@@ -39,6 +39,10 @@ export class OtpCode {
   @Column({ name: 'is_used', type: 'boolean', default: false })
   isUsed!: boolean;
 
+  /** Failed verify attempts for this code (SOPET-M-15); lockout marks is_used. */
+  @Column({ name: 'failed_attempts', type: 'int', default: 0 })
+  failedAttempts!: number;
+
   @Column({ name: 'expires_at', type: 'timestamp' })
   expiresAt!: Date;
 

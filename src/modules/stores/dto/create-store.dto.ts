@@ -57,11 +57,11 @@ export class CreateStoreDto {
   @ApiProperty({
     description: 'Password for the store owner account',
     example: 'S3cureP@ss',
-    minLength: 6,
+    minLength: 8,
   })
   @IsNotEmpty()
   @IsString()
-  @MinLength(6)
+  @MinLength(8)
   ownerPassword!: string;
 
   @ApiProperty({

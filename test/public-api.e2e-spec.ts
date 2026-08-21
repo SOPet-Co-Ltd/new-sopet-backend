@@ -10,6 +10,9 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { PublicApiController } from '../src/modules/public-api/public-api.controller';
 import { ApiKeyGuard } from '../src/modules/api-keys/guards/api-key.guard';
+import { ApiKeyRateLimitGuard } from '../src/modules/api-keys/guards/api-key-rate-limit.guard';
+import { RedisService } from '../src/modules/redis/redis.service';
+import { ConfigService } from '@nestjs/config';
 import { ApiKeysService } from '../src/modules/api-keys/api-keys.service';
 import { ProductsService } from '../src/modules/products/products.service';
 import { OrderFulfillmentService } from '../src/modules/orders/order-fulfillment.service';
@@ -181,6 +184,21 @@ describe('Public API products (e2e)', () => {
       controllers: [PublicApiController],
       providers: [
         ApiKeyGuard,
+        ApiKeyRateLimitGuard,
+        {
+          provide: RedisService,
+          useValue: {
+            isAvailable: () => false,
+            get: jest.fn(),
+            set: jest.fn(),
+          },
+        },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn().mockReturnValue(undefined),
+          },
+        },
         { provide: ApiKeysService, useValue: apiKeysService },
         { provide: ProductsService, useValue: productsService },
         { provide: OrderFulfillmentService, useValue: orderFulfillmentService },

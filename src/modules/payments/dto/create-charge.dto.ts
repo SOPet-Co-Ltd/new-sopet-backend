@@ -52,4 +52,9 @@ export class CreateChargeDto {
   @IsOptional()
   @IsUUID()
   customerId?: string;
+
+  @ApiProperty({ required: false, description: 'Guest pay token from createOrder (SOPET-H-07)' })
+  @IsOptional()
+  @IsString()
+  guestPayToken?: string;
 }

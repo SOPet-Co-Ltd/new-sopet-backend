@@ -165,6 +165,8 @@ describe('PaymentsService guest access', () => {
     orderRepository.findOne.mockResolvedValue({
       id: 'ord-1',
       customerId: null,
+      guestPhone: '0812345678',
+      guestPayTokenHash: null,
     });
 
     const order = await service.assertCanPayForOrder('ord-1');
@@ -196,11 +198,12 @@ describe('PaymentsService guest access', () => {
     await expect(service.assertCanPayForOrder('missing')).rejects.toThrow(BadRequestException);
   });
 
-  it('allows unauthenticated access to a guest order linked to a member', async () => {
+  it('allows unauthenticated access to a guest order linked to a member (legacy null hash)', async () => {
     orderRepository.findOne.mockResolvedValue({
       id: 'ord-1',
       customerId: 'member-1',
       guestPhone: '0812345678',
+      guestPayTokenHash: null,
     });
 
     const order = await service.assertCanPayForOrder('ord-1');
@@ -212,11 +215,46 @@ describe('PaymentsService guest access', () => {
       id: 'ord-1',
       customerId: 'member-1',
       guestPhone: '0812345678',
+      guestPayTokenHash: null,
     });
 
     await expect(service.assertCanPayForOrder('ord-1', 'cust-2')).rejects.toThrow(
       ForbiddenException,
     );
+  });
+
+  it('allows owner JWT without guest pay token', async () => {
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-1',
+      customerId: 'cust-1',
+      guestPhone: '0812345678',
+      guestPayTokenHash: 'abc',
+      guestPayTokenExpiresAt: new Date(Date.now() + 60_000),
+    });
+
+    const order = await service.assertCanPayForOrder('ord-1', 'cust-1');
+    expect(order.id).toBe('ord-1');
+  });
+
+  it('requires matching guest pay token when hash is set', async () => {
+    const { createHash } = await import('node:crypto');
+    const plaintext = 'a'.repeat(64);
+    const hash = createHash('sha256').update(plaintext).digest('hex');
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-1',
+      customerId: null,
+      guestPhone: '0812345678',
+      guestPayTokenHash: hash,
+      guestPayTokenExpiresAt: new Date(Date.now() + 60_000),
+    });
+
+    await expect(service.assertCanPayForOrder('ord-1')).rejects.toThrow(ForbiddenException);
+    await expect(service.assertCanPayForOrder('ord-1', undefined, 'b'.repeat(64))).rejects.toThrow(
+      ForbiddenException,
+    );
+
+    const order = await service.assertCanPayForOrder('ord-1', undefined, plaintext);
+    expect(order.id).toBe('ord-1');
   });
 });
 
@@ -235,7 +273,12 @@ describe('PaymentsService payment read queries', () => {
     },
   };
 
-  const guestOrder = { id: 'ord-1', customerId: null };
+  const guestOrder = {
+    id: 'ord-1',
+    customerId: null,
+    guestPhone: '0812345678',
+    guestPayTokenHash: null,
+  };
   const ownedOrder = { id: 'ord-2', customerId: 'cust-1' };
   const basePayment = {
     id: 'pay-1',
@@ -406,7 +449,7 @@ describe('PaymentsService createCharge return_uri', () => {
     findOne: jest.fn().mockResolvedValue(null),
     find: jest.fn().mockResolvedValue([]),
     manager: {
-      transaction: jest.fn(async (cb: (manager: unknown) => Promise<void>) => cb({})),
+      transaction: jest.fn(async (cb: (manager: unknown) => Promise<unknown>) => cb({})),
     },
   };
   const customerRepository = {
@@ -522,8 +565,43 @@ describe('PaymentsService createCharge return_uri', () => {
       id: 'ord-1',
       customerId: 'cust-1',
       status: OrderStatus.PENDING_PAYMENT,
+      total: 300,
     });
     orderRepository.save.mockResolvedValue(undefined);
+  });
+
+  it('binds Omise charge amount to order.total ignoring client underpay', async () => {
+    service = await compileService(STOREFRONT_ORIGIN);
+
+    await service.createCharge({
+      orderId: 'ord-1',
+      amount: 1,
+      currency: 'THB',
+      paymentMethod: 'promptpay',
+      customerId: 'cust-1',
+    });
+
+    const body = parseChargeBody();
+    expect(body.amount).toBe(30000);
+    const savedPayment = paymentRepository.save.mock.calls
+      .map((c: [Payment]) => c[0])
+      .find((p) => p.omiseChargeId === 'chrg_test_1' || p.amount === 300);
+    expect(savedPayment?.amount).toBe(300);
+  });
+
+  it('binds Omise charge amount to order.total ignoring client overpay', async () => {
+    service = await compileService(STOREFRONT_ORIGIN);
+
+    await service.createCharge({
+      orderId: 'ord-1',
+      amount: 9999,
+      currency: 'THB',
+      paymentMethod: 'promptpay',
+      customerId: 'cust-1',
+    });
+
+    const body = parseChargeBody();
+    expect(body.amount).toBe(30000);
   });
 
   it('includes return_uri ending /payment/{paymentId} for credit_card + token', async () => {
@@ -970,6 +1048,84 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
     warnSpy.mockRestore();
   });
 
+  it('does not mark paid when Omise charge amount mismatches order.total satang', async () => {
+    service = await compileService('skey_test');
+    const order = {
+      id: 'ord-amt-mismatch',
+      status: OrderStatus.PENDING_PAYMENT,
+      paymentReference: CHARGE_ID,
+      total: 300,
+    };
+    const payment = {
+      id: 'pay-amt-mismatch',
+      orderId: 'ord-amt-mismatch',
+      status: 'pending',
+      paymentMethod: 'promptpay',
+      amount: 300,
+    };
+    orderRepository.findOne.mockResolvedValue(order);
+    paymentRepository.findOne.mockResolvedValue(payment);
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          id: CHARGE_ID,
+          status: 'successful',
+          amount: 100, // underpay in satang vs expected 30000
+        }),
+    });
+
+    await service.handleWebhook({
+      key: 'charge.complete',
+      data: { object: 'charge', id: CHARGE_ID, status: 'successful' },
+    });
+
+    expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
+    expect(payment.status).toBe('pending');
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('payment_amount_mismatch'));
+    expect(paymentEventsServiceMock.publishPaymentStatusUpdated).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('marks paid when Omise charge amount matches order.total satang', async () => {
+    service = await compileService('skey_test');
+    const order = {
+      id: 'ord-amt-ok',
+      status: OrderStatus.PENDING_PAYMENT,
+      paymentReference: CHARGE_ID,
+      total: 300,
+      paidAt: null as Date | null,
+    };
+    const payment = {
+      id: 'pay-amt-ok',
+      orderId: 'ord-amt-ok',
+      status: 'pending',
+      paymentMethod: 'promptpay',
+      amount: 300,
+    };
+    orderRepository.findOne.mockResolvedValue(order);
+    paymentRepository.findOne.mockResolvedValue(payment);
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          id: CHARGE_ID,
+          status: 'successful',
+          amount: 30000,
+        }),
+    });
+
+    await service.handleWebhook({
+      key: 'charge.complete',
+      data: { object: 'charge', id: CHARGE_ID, status: 'successful' },
+    });
+
+    expect(order.status).toBe(OrderStatus.PAID);
+    expect(payment.status).toBe('paid');
+    expect(paymentEventsServiceMock.publishPaymentStatusUpdated).toHaveBeenCalledWith(payment);
+  });
+
   it('PromptPay QR expiry fails payment only and keeps order pending for new QR', async () => {
     service = await compileService('skey_test');
     const createdAt = new Date(Date.now() - 20 * 60 * 1000);
@@ -1060,6 +1216,8 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
     customerId: 'cust-1',
     status: OrderStatus.PENDING_PAYMENT,
     paymentReference: OLD_CHARGE_ID as string | null,
+    paymentMethod: null as string | null,
+    total: 300,
   };
 
   const paymentRepository = {
@@ -1068,7 +1226,7 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
     findOne: jest.fn(),
     find: jest.fn(),
     manager: {
-      transaction: jest.fn(async (cb: (manager: unknown) => Promise<void>) => cb({})),
+      transaction: jest.fn(async (cb: (manager: unknown) => Promise<unknown>) => cb({})),
     },
   };
   const orderRepository = {
@@ -2125,6 +2283,8 @@ describe('PaymentsService payment held gate + Decision #16 recompute (AC-026–0
       id: 'ord-held-all',
       status: OrderStatus.PENDING_PAYMENT,
       customerId: null,
+      guestPhone: '0812345678',
+      guestPayTokenHash: null,
       items: [
         { id: 'i1', fulfillmentStatus: FulfillmentStatus.ON_HOLD },
         { id: 'i2', fulfillmentStatus: FulfillmentStatus.ON_HOLD },
@@ -2147,6 +2307,8 @@ describe('PaymentsService payment held gate + Decision #16 recompute (AC-026–0
       id: 'ord-held-mixed',
       status: OrderStatus.PENDING_PAYMENT,
       customerId: null,
+      guestPhone: '0812345678',
+      guestPayTokenHash: null,
       items: [
         { id: 'i1', fulfillmentStatus: FulfillmentStatus.ON_HOLD },
         { id: 'i2', fulfillmentStatus: FulfillmentStatus.PENDING },
@@ -2170,6 +2332,8 @@ describe('PaymentsService payment held gate + Decision #16 recompute (AC-026–0
       id: 'ord-after-sla',
       status: OrderStatus.PENDING_PAYMENT,
       customerId: null,
+      guestPhone: '0812345678',
+      guestPayTokenHash: null,
       subtotal: 300,
       shippingFee: 50,
       discountAmount: 0,
@@ -2196,7 +2360,7 @@ describe('PaymentsService payment held gate + Decision #16 recompute (AC-026–0
         { storeId: 'store-a', shippingFee: 30 },
         { storeId: 'store-b', shippingFee: 20 },
       ],
-    } as never;
+    } as Order;
 
     recomputeOrderPayableTotals(order);
     expect(order.subtotal).toBe(100);

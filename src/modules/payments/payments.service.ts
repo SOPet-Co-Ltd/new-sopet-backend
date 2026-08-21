@@ -31,6 +31,7 @@ import { deriveOrderStatusFromFulfillment } from '../orders/order-fulfillment.ut
 import { OrderStatusHistory } from '../../database/entities/order-status-history.entity';
 import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.service';
 import { scrubJsonForLog } from '../../common/utils/scrub-for-log.util';
+import { assertGuestPayTokenAccess } from '../../common/utils/guest-pay-token.util';
 import { BankTransferSettingsService } from '../platform/bank-transfer-settings.service';
 import { OrderAuditLogsService } from '../order-audit-logs/order-audit-logs.service';
 import {
@@ -43,6 +44,7 @@ import {
 interface OmiseCharge {
   id: string;
   status: string;
+  amount?: number;
   authorize_uri?: string;
   source?: { scannable_code?: { image?: { download_uri?: string } } };
   failure_code?: string;
@@ -808,7 +810,11 @@ export class PaymentsService {
     return this.mapOmiseCardToSavedDetails(card, token.card.fingerprint);
   }
 
-  async assertCanPayForOrder(orderId: string, customerId?: string): Promise<Order> {
+  async assertCanPayForOrder(
+    orderId: string,
+    customerId?: string,
+    guestPayToken?: string,
+  ): Promise<Order> {
     const order = await this.orderRepository.findOne({
       where: { id: orderId },
       relations: ['items'],
@@ -820,26 +826,50 @@ export class PaymentsService {
       });
     }
 
-    if (order.customerId && order.customerId !== customerId) {
-      // Guest checkouts placed with an existing member's phone are linked to that
-      // member's account at creation time. Such orders still carry a guestPhone, so
-      // the unauthenticated buyer (identified by possession of the order UUID) must
-      // keep access to pay for and view them. Pure member orders (no guestPhone)
-      // remain accessible only to their owning customer.
-      const isGuestOriginatedOrder = Boolean(order.guestPhone);
-      const isUnauthenticatedGuest = !customerId;
-      if (!(isGuestOriginatedOrder && isUnauthenticatedGuest)) {
-        throw new ForbiddenException({
-          code: 'FORBIDDEN',
-          message: 'You do not have access to pay for this order',
-        });
-      }
+    // Authenticated order owner — JWT is sufficient (no guest pay token).
+    if (customerId && order.customerId === customerId) {
+      return order;
     }
 
+    // Authenticated non-owner is always denied (including guest-linked member orders).
+    if (customerId) {
+      throw new ForbiddenException({
+        code: 'FORBIDDEN',
+        message: 'You do not have access to pay for this order',
+      });
+    }
+
+    // Unauthenticated: guest-originated orders only (legacy null hash or matching token).
+    if (!order.guestPhone) {
+      throw new ForbiddenException({
+        code: 'FORBIDDEN',
+        message: 'You do not have access to pay for this order',
+      });
+    }
+
+    assertGuestPayTokenAccess(order, guestPayToken);
     return order;
   }
 
-  async findById(id: string, customerId?: string): Promise<Payment> {
+  async assertCanAccessPayment(
+    paymentId: string,
+    customerId?: string,
+    guestPayToken?: string,
+  ): Promise<void> {
+    const payment = await this.paymentRepository.findOne({
+      where: { id: paymentId },
+      select: ['id', 'orderId'],
+    });
+    if (!payment) {
+      throw new NotFoundException({
+        code: 'PAYMENT_NOT_FOUND',
+        message: 'Payment not found',
+      });
+    }
+    await this.assertCanPayForOrder(payment.orderId, customerId, guestPayToken);
+  }
+
+  async findById(id: string, customerId?: string, guestPayToken?: string): Promise<Payment> {
     const payment = await this.paymentRepository.findOne({
       where: { id },
       relations: ['order'],
@@ -851,12 +881,16 @@ export class PaymentsService {
       });
     }
 
-    await this.assertCanPayForOrder(payment.orderId, customerId);
+    await this.assertCanPayForOrder(payment.orderId, customerId, guestPayToken);
     return this.expirePendingQrPaymentIfNeeded(payment);
   }
 
-  async findLatestByOrderId(orderId: string, customerId?: string): Promise<Payment> {
-    await this.assertCanPayForOrder(orderId, customerId);
+  async findLatestByOrderId(
+    orderId: string,
+    customerId?: string,
+    guestPayToken?: string,
+  ): Promise<Payment> {
+    await this.assertCanPayForOrder(orderId, customerId, guestPayToken);
 
     const payment = await this.paymentRepository.findOne({
       where: { orderId },
@@ -885,16 +919,16 @@ export class PaymentsService {
   }> {
     const {
       orderId,
-      amount,
       paymentMethod: rawPaymentMethod,
       currency,
       omiseToken,
       savedPaymentMethodId,
       customerId,
+      guestPayToken,
     } = createChargeDto;
     const paymentMethod = normalizeCheckoutPaymentMethod(rawPaymentMethod);
 
-    const order = await this.assertCanPayForOrder(orderId, customerId);
+    const order = await this.assertCanPayForOrder(orderId, customerId, guestPayToken);
 
     // Eligibility gate (all methods, including COD) — unpaid-switch Backend DD.
     const latestPayment = await this.paymentRepository.findOne({
@@ -942,6 +976,15 @@ export class PaymentsService {
 
         await this.supersedePendingPaymentsForOrder(orderId, manager);
 
+        // Always charge the locked order total — ignore client-supplied CreatePaymentInput.amount.
+        const orderAmount = Number(lockedOrder.total);
+        if (!Number.isFinite(orderAmount) || orderAmount < 0) {
+          throw new BadRequestException({
+            code: 'INVALID_ORDER_TOTAL',
+            message: 'Order total is invalid',
+          });
+        }
+
         const previousPaymentMethod = lockedOrder.paymentMethod;
         const orderPaymentMethod = this.toOrderPaymentMethod(paymentMethod);
 
@@ -953,7 +996,7 @@ export class PaymentsService {
 
           const payment = manager.create(Payment, {
             orderId,
-            amount,
+            amount: orderAmount,
             currency,
             paymentMethod: orderPaymentMethod,
             status: 'pending',
@@ -974,7 +1017,7 @@ export class PaymentsService {
           return {
             paymentId: payment.id,
             status: 'pending',
-            amount,
+            amount: orderAmount,
             currency,
             paymentMethod,
           };
@@ -987,11 +1030,11 @@ export class PaymentsService {
           });
         }
 
-        const amountSatang = Math.round(Number(amount) * 100);
+        const amountSatang = Math.round(orderAmount * 100);
 
         const payment = manager.create(Payment, {
           orderId,
-          amount,
+          amount: orderAmount,
           currency,
           paymentMethod: orderPaymentMethod,
           status: 'pending',
@@ -1095,7 +1138,7 @@ export class PaymentsService {
         const response: CreateChargeResult = {
           paymentId: payment.id,
           status: payment.status,
-          amount,
+          amount: orderAmount,
           currency,
           paymentMethod,
           authorizeUri: authorizeUri ?? undefined,
@@ -1229,10 +1272,12 @@ export class PaymentsService {
     }
 
     let chargeStatus = charge.status;
+    let apiChargeAmount: number | undefined;
     if (this.omiseSecretKey) {
       try {
         const apiCharge = await this.omiseRequest<OmiseCharge>(`/charges/${charge.id}`);
         chargeStatus = apiCharge.status;
+        apiChargeAmount = apiCharge.amount;
       } catch (error) {
         this.logger.error(`Failed to re-fetch Omise charge ${charge.id}: ${error}`);
         return;
@@ -1240,6 +1285,24 @@ export class PaymentsService {
     }
 
     if (payload.key === 'charge.complete' && chargeStatus === 'successful') {
+      const expectedSatang = Math.round(Number(order.total) * 100);
+      if (
+        typeof apiChargeAmount !== 'number' ||
+        !Number.isFinite(apiChargeAmount) ||
+        apiChargeAmount !== expectedSatang
+      ) {
+        this.logger.warn(
+          JSON.stringify({
+            event: 'payment_amount_mismatch',
+            orderId: order.id,
+            paymentId: payment.id,
+            omiseChargeId: charge.id,
+            expectedSatang,
+            omiseAmountSatang: apiChargeAmount ?? null,
+          }),
+        );
+        return;
+      }
       await this.markOrderPaid(order, payment, charge.id);
       return;
     }

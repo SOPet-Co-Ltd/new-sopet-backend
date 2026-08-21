@@ -1,4 +1,6 @@
 import { join } from 'path';
+import * as express from 'express';
+import type { OptionsJson } from 'body-parser';
 import { configurePgUtcTimestampParsing } from './database/pg-timestamp.util';
 
 configurePgUtcTimestampParsing();
@@ -8,17 +10,22 @@ import { ConfigService } from '@nestjs/config';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { assertProductionSecurityConfig } from './config/security-boot.util';
 
 // Base64 image uploads via the `uploadImage` GraphQL mutation can exceed the
 // default ~100kb body-parser limit. 10mb comfortably fits the client's 5MB
 // image cap once base64-encoded (~33% overhead).
-const BODY_LIMIT = '10mb';
+const GRAPHQL_BODY_LIMIT = '10mb';
+/** Smaller JSON limit for REST public API and payment webhooks (SOPET-L-01). */
+const REST_BODY_LIMIT = '256kb';
 
 async function bootstrap() {
+  assertProductionSecurityConfig();
+
   // `bodyParser: false` skips Nest's default (100kb) parser registration so we
-  // can register our own with a larger limit below. `rawBody: true` is still
-  // honored by `useBodyParser`, preserving `req.rawBody` for the Omise webhook
-  // HMAC signature verification.
+  // can register path-specific parsers below. `rawBody: true` is still honored
+  // by Nest's body parser helpers for Omise webhook HMAC verification; we also
+  // set rawBody on the webhook path via verify().
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     rawBody: true,
     bodyParser: false,
@@ -33,8 +40,18 @@ async function bootstrap() {
     }),
   );
 
-  app.useBodyParser('json', { limit: BODY_LIMIT });
-  app.useBodyParser('urlencoded', { extended: true, limit: BODY_LIMIT });
+  const captureRawBody: OptionsJson['verify'] = (req, _res, buf) => {
+    (req as express.Request & { rawBody?: Buffer }).rawBody = buf;
+  };
+
+  // Path-specific smaller limits first (SOPET-L-01)
+  app.use('/webhooks/omise', express.json({ limit: REST_BODY_LIMIT, verify: captureRawBody }));
+  app.use('/api/v1', express.json({ limit: REST_BODY_LIMIT }));
+  app.use('/api/v1', express.urlencoded({ extended: true, limit: REST_BODY_LIMIT }));
+
+  // GraphQL and other routes keep the larger limit for base64 uploads
+  app.useBodyParser('json', { limit: GRAPHQL_BODY_LIMIT });
+  app.useBodyParser('urlencoded', { extended: true, limit: GRAPHQL_BODY_LIMIT });
 
   // Public email/brand assets (e.g. /images/email/sopet-logo-white.png)
   app.useStaticAssets(join(process.cwd(), 'public'));

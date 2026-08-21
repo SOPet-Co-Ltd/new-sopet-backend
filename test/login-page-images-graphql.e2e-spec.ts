@@ -398,7 +398,7 @@ describe('Login page images GraphQL HTTP (e2e)', () => {
       const body = res.body as GraphQLBody;
       expect(body.data?.clearLoginPageDesktopImage ?? null).toBeNull();
       expect(body.errors?.length).toBeGreaterThan(0);
-      expect(body.errors![0].message).toMatch(/Forbidden|forbidden/i);
+      expect(body.errors![0].message).toMatch(/Forbidden|forbidden|Insufficient permissions/i);
 
       expect(settingStore.get(SETTINGS_KEY)).toEqual(settingBefore);
       expect(settingStore.get(SETTINGS_KEY)?.value).toEqual(configuredValue);

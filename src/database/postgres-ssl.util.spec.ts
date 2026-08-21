@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { getPostgresSslOptions } from './postgres-ssl.util';
+import { getPostgresSslOptions, assertPostgresSslBootConfig } from './postgres-ssl.util';
 
 describe('getPostgresSslOptions', () => {
   const env = { ...process.env };
@@ -69,9 +69,9 @@ describe('getPostgresSslOptions', () => {
     });
   });
 
-  it('encrypts Crunchy Bridge without the Amazon RDS trust store', () => {
+  it('encrypts Crunchy Bridge without the Amazon RDS trust store outside break-glass', () => {
     process.env.DB_SSL = 'true';
-    process.env.NODE_ENV = 'production';
+    process.env.NODE_ENV = 'development';
     process.env.DB_HOST = 'p.example.db.postgresbridge.com';
     process.env.DB_SSL_CA = '/runner/work/repo/infra/certs/rds-global-bundle.pem';
     delete process.env.DB_SSL_REJECT_UNAUTHORIZED;
@@ -94,6 +94,30 @@ describe('getPostgresSslOptions', () => {
       require: true,
       rejectUnauthorized: true,
       ca,
+    });
+  });
+
+  it('fails production Crunchy boot without CA or break-glass', () => {
+    process.env.DB_SSL = 'true';
+    process.env.NODE_ENV = 'production';
+    process.env.DB_HOST = 'p.example.db.postgresbridge.com';
+    delete process.env.DB_SSL_CA;
+    delete process.env.DB_SSL_REJECT_UNAUTHORIZED;
+
+    expect(() => assertPostgresSslBootConfig()).toThrow(/DB_SSL_CA/);
+  });
+
+  it('allows production Crunchy break-glass without CA', () => {
+    process.env.DB_SSL = 'true';
+    process.env.NODE_ENV = 'production';
+    process.env.DB_HOST = 'p.example.db.postgresbridge.com';
+    delete process.env.DB_SSL_CA;
+    process.env.DB_SSL_REJECT_UNAUTHORIZED = 'false';
+
+    expect(() => assertPostgresSslBootConfig()).not.toThrow();
+    expect(getPostgresSslOptions()).toEqual({
+      require: true,
+      rejectUnauthorized: false,
     });
   });
 

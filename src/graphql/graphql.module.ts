@@ -49,8 +49,47 @@ const graphqlErrorLogger = new Logger('GraphQLFormatError');
         autoSchemaFile: join(process.cwd(), 'src/schema.gql'),
         sortSchema: true,
         playground: process.env.NODE_ENV !== 'production',
+        // SOPET-M-06: disable introspection in production
+        introspection: process.env.NODE_ENV !== 'production',
         subscriptions: {
-          'graphql-ws': true,
+          'graphql-ws': {
+            // SOPET-M-05: wire JWT / guestPayToken from connectionParams onto the
+            // upgrade request so JwtAuthGuard and future guest-pay checks can use them.
+            // Anonymous connect remains allowed for legacy guest payment subscriptions
+            // until storefront sends credentials and H-07 enforces guestPayToken.
+            onConnect: (context: {
+              connectionParams?: Record<string, unknown> | undefined;
+              // graphql-ws types `extra` as unknown; Nest upgrade request is attached here.
+              extra?: unknown;
+            }) => {
+              const params = context.connectionParams ?? {};
+              const extra = context.extra as
+                | { request?: { headers?: Record<string, unknown>; guestPayToken?: string } }
+                | undefined;
+              if (!extra) {
+                return true;
+              }
+
+              const request = (extra.request ??= { headers: {} });
+              request.headers = request.headers ?? {};
+
+              const authRaw =
+                params.Authorization ?? params.authorization ?? params.authToken ?? params.token;
+              if (typeof authRaw === 'string' && authRaw.trim()) {
+                const value = authRaw.trim();
+                request.headers.authorization = value.toLowerCase().startsWith('bearer ')
+                  ? value
+                  : `Bearer ${value}`;
+              }
+
+              const guestPayToken = params.guestPayToken;
+              if (typeof guestPayToken === 'string' && guestPayToken.trim()) {
+                request.guestPayToken = guestPayToken.trim();
+              }
+
+              return true;
+            },
+          },
         },
         context: ({
           req,

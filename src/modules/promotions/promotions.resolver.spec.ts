@@ -10,10 +10,33 @@ import { AuditActorType } from '../../database/entities/audit-log.entity';
 import { PromotionScope, PromotionType } from '../../database/entities/promotion.entity';
 import {
   MAX_VALIDATE_PROMOTIONS_TARGETS,
+  ValidatePromotionInput,
   ValidatePromotionsInput,
   ValidatePromotionsTargetInput,
 } from './promotions.inputs';
 import type { GraphqlContext } from '../../graphql/loaders/graphql-context.types';
+
+describe('ValidatePromotionInput (ValidationPipe whitelist)', () => {
+  const validationPipe = new ValidationPipe();
+
+  it('accepts storefront apply payload with subtotal (SOPET-L-09)', async () => {
+    const result = await validationPipe.transform(
+      { code: 'STORE150', subtotal: 500, storeId: '22222222-2222-4222-8222-222222222222' },
+      { type: 'body', metatype: ValidatePromotionInput },
+    );
+
+    expect(result).toMatchObject({ code: 'STORE150', subtotal: 500 });
+  });
+
+  it('rejects unknown properties on ValidatePromotionInput', async () => {
+    await expect(
+      validationPipe.transform(
+        { code: 'STORE150', subtotal: 500, unexpected: true },
+        { type: 'body', metatype: ValidatePromotionInput },
+      ),
+    ).rejects.toMatchObject({ response: { code: 'VALIDATION_ERROR' } });
+  });
+});
 
 describe('PromotionsResolver.validatePromotion', () => {
   let resolver: PromotionsResolver;
@@ -127,7 +150,7 @@ describe('PromotionsResolver.validatePromotions (Decision 6)', () => {
     });
 
     const input: ValidatePromotionsInput = {
-      promotions: [{ code: 'SAVE10' }],
+      promotions: [{ code: 'SAVE10' } as ValidatePromotionsTargetInput],
       subtotal: 500,
     };
 
@@ -166,7 +189,7 @@ describe('PromotionsResolver.validatePromotions (Decision 6)', () => {
 
     const storeId = '22222222-2222-2222-2222-222222222222';
     const input: ValidatePromotionsInput = {
-      promotions: [{ id: 'p2', code: 'NEWCUST' }],
+      promotions: [{ id: 'p2', code: 'NEWCUST' } as ValidatePromotionsTargetInput],
       subtotal: 1000,
       storeId,
       lines,
@@ -211,7 +234,13 @@ describe('PromotionsResolver.validatePromotions (Decision 6)', () => {
     });
 
     const result = await resolver.validatePromotions(
-      { promotions: [{ code: 'PCT10' }, { code: 'BAD' }], subtotal: 1000 },
+      {
+        promotions: [
+          { code: 'PCT10' } as ValidatePromotionsTargetInput,
+          { code: 'BAD' } as ValidatePromotionsTargetInput,
+        ],
+        subtotal: 1000,
+      },
       undefined,
     );
 
@@ -260,7 +289,10 @@ describe('PromotionsResolver.validatePromotions (Decision 6)', () => {
     );
 
     await expect(
-      resolver.validatePromotions({ promotions: [{ code: 'X' }], subtotal: 1 }, undefined),
+      resolver.validatePromotions(
+        { promotions: [{ code: 'X' } as ValidatePromotionsTargetInput], subtotal: 1 },
+        undefined,
+      ),
     ).rejects.toMatchObject({ response: { code: 'INVALID_VALIDATE_PROMOTIONS_INPUT' } });
   });
 });

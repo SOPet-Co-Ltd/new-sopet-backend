@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
 import { FulfillmentStatus, OrderItem } from '../../database/entities/order-item.entity';
 import { OrderShippingAddress } from '../../database/entities/order-shipping-address.entity';
@@ -25,7 +25,8 @@ import { InventoryService } from '../inventory/inventory.service';
 import { CartService } from '../cart/cart.service';
 import { Store, StoreStatus } from '../../database/entities/store.entity';
 import { normalizeCheckoutPaymentMethod } from '../../common/utils/checkout-payment.util';
-import { guestPhoneLookupValues, normalizeThaiPhoneToLocal } from '../../common/utils/phone.util';
+import { normalizeThaiPhoneToLocal } from '../../common/utils/phone.util';
+import { issueGuestPayToken } from '../../common/utils/guest-pay-token.util';
 import { PaginatedResponse } from '../../common/interfaces';
 import {
   applyCustomerOrderListFilter,
@@ -355,6 +356,9 @@ export class OrdersService {
 
     const total = subtotal + shippingFee - discountAmount;
 
+    // Guest checkout (no JWT): issue pay token once. Authenticated create skips this.
+    const guestPayTokenIssue = !customerId && normalizedGuestPhone ? issueGuestPayToken() : null;
+
     const orderId = await this.dataSource.transaction(async (manager) => {
       const order = manager.create(Order, {
         orderNumber: this.generateOrderNumber(),
@@ -362,6 +366,8 @@ export class OrdersService {
         guestPhone: normalizedGuestPhone ?? null,
         guestName: guestName ?? null,
         guestEmail: guestEmail ?? null,
+        guestPayTokenHash: guestPayTokenIssue?.hash ?? null,
+        guestPayTokenExpiresAt: guestPayTokenIssue?.expiresAt ?? null,
         status: OrderStatus.PENDING_PAYMENT,
         subtotal,
         shippingFee,
@@ -504,7 +510,11 @@ export class OrdersService {
       );
     }
 
-    return this.findOne(orderId);
+    const created = await this.findOne(orderId);
+    if (guestPayTokenIssue) {
+      created.guestPayToken = guestPayTokenIssue.plaintext;
+    }
+    return created;
   }
 
   async findOne(id: string): Promise<Order> {
@@ -658,16 +668,6 @@ export class OrdersService {
     }
 
     return order;
-  }
-
-  async findByGuestPhone(guestPhone: string): Promise<Order[]> {
-    const lookupValues = guestPhoneLookupValues(guestPhone);
-
-    return this.orderRepository.find({
-      where: { guestPhone: In(lookupValues) },
-      relations: ['items', 'shippingAddress', 'storeShippings'],
-      order: { createdAt: 'DESC' },
-    });
   }
 
   async mergeGuestOrders(customerId: string, phone: string): Promise<number> {

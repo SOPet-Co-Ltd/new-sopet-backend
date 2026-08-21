@@ -211,6 +211,14 @@ describe('OrdersService', () => {
 
     expect(dataSource.transaction).toHaveBeenCalled();
     expect(mockManager.save).toHaveBeenCalled();
+    expect(mockManager.create).toHaveBeenCalledWith(
+      Order,
+      expect.objectContaining({
+        guestPhone: '0812345678',
+        guestPayTokenHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+        guestPayTokenExpiresAt: expect.any(Date),
+      }),
+    );
     expect(orderAuditLogsService.append).toHaveBeenCalledWith(
       mockManager,
       expect.objectContaining({
@@ -220,6 +228,50 @@ describe('OrdersService', () => {
       }),
     );
     expect(result.id).toBe('ord-1');
+    expect(result.guestPayToken).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('does not issue guest pay token for authenticated createOrder', async () => {
+    savedAddressRepository.findOne.mockResolvedValue({
+      id: 'addr-1',
+      customerId: 'cust-1',
+      fullName: 'Customer',
+      phone: '+66812345678',
+      addressLine1: '1 Road',
+      addressLine2: null,
+      tumbon: 'Tumbon',
+      amphoe: 'Amphoe',
+      province: 'Bangkok',
+      postalCode: '10110',
+    });
+    variantRepository.findOne.mockResolvedValue(variant);
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-auth',
+      status: OrderStatus.PENDING_PAYMENT,
+      items: [],
+      shippingAddress: {},
+      storeShippings: [],
+      statusHistory: [],
+    });
+
+    const result = await service.create(
+      {
+        items: [{ productId: 'p1', variantId: 'var-1', quantity: 1, price: 100 }],
+        paymentMethod: 'promptpay',
+        savedAddressId: 'addr-1',
+      },
+      'cust-1',
+    );
+
+    expect(mockManager.create).toHaveBeenCalledWith(
+      Order,
+      expect.objectContaining({
+        customerId: 'cust-1',
+        guestPayTokenHash: null,
+        guestPayTokenExpiresAt: null,
+      }),
+    );
+    expect(result.guestPayToken).toBeUndefined();
   });
 
   it('overwrites client price with campaign sale unit and snapshots catalog (AC-004/013)', async () => {

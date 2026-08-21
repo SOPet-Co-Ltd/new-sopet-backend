@@ -39,7 +39,7 @@ export class AcceptAdminInvitationInput {
   @Field()
   @IsNotEmpty()
   @IsString()
-  @MinLength(6)
+  @MinLength(8)
   password!: string;
 
   @Field()

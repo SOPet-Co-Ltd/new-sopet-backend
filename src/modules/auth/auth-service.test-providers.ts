@@ -19,8 +19,9 @@ import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuthService } from './auth.service';
 
 export const AUTH_SERVICE_TEST_JWT_SECRET = 'test-jwt-secret';
+export const AUTH_SERVICE_TEST_OTP_HMAC_SECRET = 'test-otp-hmac-secret';
 
-export function hashOtpForTest(code: string, secret = AUTH_SERVICE_TEST_JWT_SECRET): string {
+export function hashOtpForTest(code: string, secret = AUTH_SERVICE_TEST_OTP_HMAC_SECRET): string {
   return createHmac('sha256', secret).update(code).digest('hex');
 }
 
@@ -104,6 +105,10 @@ export function createAuthServiceTestProviders(mocks: AuthServiceTestMocks) {
       useValue: {
         get: jest.fn((key?: string) => {
           if (key === 'jwt.secret') return AUTH_SERVICE_TEST_JWT_SECRET;
+          if (key === 'otp.hmacSecret') return AUTH_SERVICE_TEST_OTP_HMAC_SECRET;
+          if (key === 'otp.maxFailedAttempts') return 5;
+          if (key === 'jwt.issuer') return 'sopet-api';
+          if (key === 'jwt.audience') return 'sopet';
           return '15m';
         }),
       },

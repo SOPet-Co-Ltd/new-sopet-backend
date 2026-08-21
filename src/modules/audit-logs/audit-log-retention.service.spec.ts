@@ -4,7 +4,7 @@ import { AUDIT_LOG_RETENTION_JOB } from './audit-log-retention.constants';
 
 describe('AuditLogRetentionService', () => {
   const configService = {
-    get: jest.fn((key: string) => {
+    get: jest.fn((key: string): number | string | undefined => {
       if (key === 'auditLog.cronSchedule') return '0 3 * * *';
       if (key === 'auditLog.cronTimezone') return 'Asia/Bangkok';
       if (key === 'auditLog.retentionDays') return 60;

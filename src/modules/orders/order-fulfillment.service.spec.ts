@@ -12,7 +12,10 @@ describe('OrderFulfillmentService hold guards', () => {
     notifyVendorsAboutOrderStatus: jest.Mock;
   };
   let vendorWebhooksService: { dispatchOrderEvent: jest.Mock };
-  let dataSource: { transaction: jest.Mock; manager: { save: jest.Mock } };
+  let dataSource: {
+    transaction: jest.Mock;
+    manager: { save: jest.Mock; findOne: jest.Mock };
+  };
 
   beforeEach(() => {
     orderRepository = { findOne: jest.fn() };

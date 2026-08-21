@@ -14,6 +14,7 @@ import {
 } from '@nestjs/common';
 import { Public } from '../../common/decorators';
 import { ApiKeyGuard } from '../api-keys/guards/api-key.guard';
+import { ApiKeyRateLimitGuard } from '../api-keys/guards/api-key-rate-limit.guard';
 import { ApiKeyAuth, ApiKeyAuthContext } from '../api-keys/decorators/api-key-auth.decorator';
 import { ProductsService } from '../products/products.service';
 import { OrderFulfillmentService } from '../orders/order-fulfillment.service';
@@ -34,6 +35,7 @@ import { PaginatedResponse } from '../../common/interfaces';
 
 @Controller('api/v1/stores/:storeId')
 @Public()
+@UseGuards(ApiKeyGuard, ApiKeyRateLimitGuard)
 export class PublicApiController {
   constructor(
     private readonly productsService: ProductsService,
@@ -43,7 +45,6 @@ export class PublicApiController {
   ) {}
 
   @Get('products')
-  @UseGuards(ApiKeyGuard)
   async listProducts(
     @Param('storeId') storeId: string,
     @Query() query: ListPublicProductsQueryDto,
@@ -61,7 +62,6 @@ export class PublicApiController {
   }
 
   @Get('products/:productId')
-  @UseGuards(ApiKeyGuard)
   async getProduct(
     @Param('storeId') storeId: string,
     @Param('productId') productId: string,
@@ -72,7 +72,6 @@ export class PublicApiController {
 
   @Post('products')
   @HttpCode(201)
-  @UseGuards(ApiKeyGuard)
   async createProduct(
     @Param('storeId') storeId: string,
     @Body() dto: CreatePublicProductDto,
@@ -103,7 +102,6 @@ export class PublicApiController {
   }
 
   @Patch('products/:productId')
-  @UseGuards(ApiKeyGuard)
   async updateProduct(
     @Param('storeId') storeId: string,
     @Param('productId') productId: string,
@@ -131,7 +129,6 @@ export class PublicApiController {
 
   @Delete('products/:productId')
   @HttpCode(204)
-  @UseGuards(ApiKeyGuard)
   async deleteProduct(
     @Param('storeId') storeId: string,
     @Param('productId') productId: string,
@@ -142,7 +139,6 @@ export class PublicApiController {
 
   @Post('products/:productId/reviews')
   @HttpCode(201)
-  @UseGuards(ApiKeyGuard)
   async createImportedReview(
     @Param('storeId') storeId: string,
     @Param('productId') productId: string,
@@ -173,7 +169,6 @@ export class PublicApiController {
   }
 
   @Patch('products/:productId/variants/:variantId')
-  @UseGuards(ApiKeyGuard)
   async updateVariantById(
     @Param('storeId') storeId: string,
     @Param('productId') productId: string,
@@ -195,7 +190,6 @@ export class PublicApiController {
   }
 
   @Patch('variants/by-sku/:sku')
-  @UseGuards(ApiKeyGuard)
   async updateVariantBySku(
     @Param('storeId') storeId: string,
     @Param('sku') sku: string,
@@ -215,7 +209,6 @@ export class PublicApiController {
   }
 
   @Get('webhook')
-  @UseGuards(ApiKeyGuard)
   async getWebhook(@Param('storeId') storeId: string) {
     const webhook = await this.vendorWebhooksService.getForStore(storeId);
     if (!webhook) {
@@ -228,7 +221,6 @@ export class PublicApiController {
   }
 
   @Put('webhook')
-  @UseGuards(ApiKeyGuard)
   async upsertWebhook(@Param('storeId') storeId: string, @Body() dto: UpsertPublicWebhookDto) {
     return this.vendorWebhooksService.upsertForStore(storeId, {
       url: dto.url,
@@ -240,13 +232,11 @@ export class PublicApiController {
 
   @Delete('webhook')
   @HttpCode(204)
-  @UseGuards(ApiKeyGuard)
   async deleteWebhook(@Param('storeId') storeId: string): Promise<void> {
     await this.vendorWebhooksService.deleteForStore(storeId);
   }
 
   @Patch('orders/:orderId/tracking')
-  @UseGuards(ApiKeyGuard)
   async updateOrderTracking(
     @Param('storeId') storeId: string,
     @Param('orderId') orderId: string,

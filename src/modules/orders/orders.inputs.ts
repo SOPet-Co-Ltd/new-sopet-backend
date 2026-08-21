@@ -208,4 +208,9 @@ export class ConfirmOrderDeliveredInput {
   @IsOptional()
   @IsString()
   guestPhone?: string;
+
+  @Field(() => String, { nullable: true })
+  @IsOptional()
+  @IsString()
+  guestPayToken?: string;
 }

@@ -53,6 +53,18 @@ export class Order {
   @IsOptional()
   guestEmail!: string | null;
 
+  /** SHA-256 hex of guest pay token; null = legacy UUID-only guest access (SOPET-H-07). */
+  @Column({ name: 'guest_pay_token_hash', type: 'varchar', length: 64, nullable: true })
+  guestPayTokenHash!: string | null;
+
+  @Column({ name: 'guest_pay_token_expires_at', type: 'timestamp', nullable: true })
+  guestPayTokenExpiresAt!: Date | null;
+
+  /**
+   * Ephemeral plaintext returned once from createOrder for guests. Not a DB column.
+   */
+  guestPayToken?: string | null;
+
   @Column({
     name: 'status',
     type: 'enum',

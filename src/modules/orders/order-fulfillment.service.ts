@@ -30,6 +30,7 @@ import {
   OrderAuditActorType,
   OrderAuditEventType,
 } from '../order-audit-logs/order-audit-log.constants';
+import { assertGuestPayTokenAccess } from '../../common/utils/guest-pay-token.util';
 
 @Injectable()
 export class OrderFulfillmentService {
@@ -369,6 +370,7 @@ export class OrderFulfillmentService {
     orderId: string,
     customerId?: string,
     guestPhone?: string,
+    guestPayToken?: string,
   ): Promise<Order> {
     const order = await this.loadOrderWithItems(orderId);
 
@@ -388,6 +390,7 @@ export class OrderFulfillmentService {
           message: 'You do not have access to this order',
         });
       }
+      assertGuestPayTokenAccess(order, guestPayToken);
     } else {
       throw new ForbiddenException({
         code: 'FORBIDDEN',

@@ -501,6 +501,13 @@ export class OrderType {
   @Field(() => String, { nullable: true })
   guestEmail?: string | null;
 
+  /**
+   * Guest pay capability secret — populated only on createOrder for new guest orders.
+   * Never returned on later order queries (SOPET-H-07).
+   */
+  @Field(() => String, { nullable: true })
+  guestPayToken?: string | null;
+
   @Field(() => [OrderItemType])
   items!: OrderItemType[];
 

@@ -91,7 +91,7 @@ describe('PayoutsService', () => {
     notifyAdminsAboutManualPayoutRequest: jest.fn().mockResolvedValue(null),
   };
   const configService = {
-    get: jest.fn((key: string) => {
+    get: jest.fn((key: string): number | Date | undefined => {
       if (key === 'payout.minPayoutAmount') return 500;
       if (key === 'commission.defaultRatePercent') return 7;
       return undefined;
@@ -1095,7 +1095,9 @@ describe('PayoutsService', () => {
       expect(partial.amount).toBe(200);
       expect(partial.netAmount).toBe(200);
       expect(partial.fee).toBe(0);
-      expect(partial.productSold - partial.commissionAmount + partial.shippingFees).toBe(200);
+      expect(
+        (partial.productSold ?? 0) - (partial.commissionAmount ?? 0) + (partial.shippingFees ?? 0),
+      ).toBe(200);
       expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('partialConsume=true'));
       logSpy.mockRestore();
     });
