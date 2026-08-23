@@ -1,10 +1,13 @@
 import { NotFoundException } from '@nestjs/common';
 import { PublicApiController } from './public-api.controller';
 import { ProductsService } from '../products/products.service';
+import { OrdersService } from '../orders/orders.service';
 import { OrderFulfillmentService } from '../orders/order-fulfillment.service';
 import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.service';
 import { ReviewsService } from '../reviews/reviews.service';
 import { ProductStatus } from '../../database/entities/product.entity';
+import { OrderStatus } from '../../database/entities/order.entity';
+import { FulfillmentStatus } from '../../database/entities/order-item.entity';
 import { ReviewSource, ReviewStatus } from '../../database/entities/review.entity';
 import { CreatePublicProductDto } from './dto/create-public-product.dto';
 import { UpdatePublicProductDto, UpdatePublicVariantDto } from './dto/update-public-product.dto';
@@ -19,6 +22,7 @@ describe('PublicApiController', () => {
     updateVariantStockPriceForPublicApi: jest.Mock;
     removeForPublicApi: jest.Mock;
   };
+  let ordersService: { findAllForPublicApi: jest.Mock };
   let orderFulfillmentService: { updateTrackingForPublicApi: jest.Mock };
   let vendorWebhooksService: {
     getForStore: jest.Mock;
@@ -94,6 +98,54 @@ describe('PublicApiController', () => {
       }),
       removeForPublicApi: jest.fn().mockResolvedValue(undefined),
     };
+    ordersService = {
+      findAllForPublicApi: jest.fn().mockResolvedValue({
+        items: [
+          {
+            id: 'ord-1',
+            orderNumber: 'ORD-1',
+            status: OrderStatus.PAID,
+            paymentMethod: 'promptpay',
+            paidAt: new Date('2026-08-01T00:00:00Z'),
+            createdAt: new Date('2026-08-01T00:00:00Z'),
+            updatedAt: new Date('2026-08-02T00:00:00Z'),
+            guestName: 'Somchai',
+            guestPhone: '0812345678',
+            guestEmail: null,
+            customer: null,
+            shippingAddress: {
+              fullName: 'Somchai',
+              phone: '0812345678',
+              addressLine1: '1 Road',
+              addressLine2: null,
+              tumbon: null,
+              amphoe: 'Bang Rak',
+              province: 'Bangkok',
+              postalCode: '10500',
+            },
+            items: [
+              {
+                id: 'item-1',
+                storeId: 'store-1',
+                productName: 'Food',
+                variantId: 'var-1',
+                variantOptions: {},
+                quantity: 1,
+                unitPrice: 100,
+                subtotal: 100,
+                fulfillmentStatus: FulfillmentStatus.PENDING,
+                trackingNumber: null,
+                fulfillmentProvider: null,
+                trackingUrl: null,
+                shippedAt: null,
+                productVariant: { sku: 'CAT-1' },
+              },
+            ],
+          },
+        ],
+        pagination: { page: 1, limit: 20, total: 1, totalPages: 1 },
+      }),
+    };
     orderFulfillmentService = {
       updateTrackingForPublicApi: jest.fn().mockResolvedValue({
         id: 'ord-1',
@@ -101,7 +153,13 @@ describe('PublicApiController', () => {
         status: 'shipped',
         paymentMethod: 'promptpay',
         paidAt: new Date('2026-08-01T00:00:00Z'),
+        createdAt: new Date('2026-08-01T00:00:00Z'),
         updatedAt: new Date('2026-08-02T00:00:00Z'),
+        guestName: null,
+        guestPhone: null,
+        guestEmail: null,
+        customer: null,
+        shippingAddress: null,
         items: [
           {
             id: 'item-1',
@@ -117,6 +175,7 @@ describe('PublicApiController', () => {
             fulfillmentProvider: 'Kerry',
             trackingUrl: null,
             shippedAt: new Date('2026-08-02T00:00:00Z'),
+            productVariant: { sku: 'CAT-1' },
           },
         ],
       }),
@@ -168,6 +227,7 @@ describe('PublicApiController', () => {
     };
     controller = new PublicApiController(
       productsService as unknown as ProductsService,
+      ordersService as unknown as OrdersService,
       orderFulfillmentService as unknown as OrderFulfillmentService,
       vendorWebhooksService as unknown as VendorWebhooksService,
       reviewsService as unknown as ReviewsService,
@@ -270,6 +330,30 @@ describe('PublicApiController', () => {
     expect(vendorWebhooksService.upsertForStore).toHaveBeenCalled();
     expect(vendorWebhooksService.getForStore).toHaveBeenCalledWith('store-1');
     expect(vendorWebhooksService.deleteForStore).toHaveBeenCalledWith('store-1');
+  });
+
+  it('delegates order list and maps store-scoped items', async () => {
+    const result = await controller.listOrders('store-1', {
+      page: 1,
+      limit: 20,
+      status: OrderStatus.PAID,
+      fulfillmentStatus: FulfillmentStatus.PENDING,
+      updatedSince: '2026-08-01T00:00:00.000Z',
+    });
+
+    expect(ordersService.findAllForPublicApi).toHaveBeenCalledWith('store-1', {
+      page: 1,
+      limit: 20,
+      status: OrderStatus.PAID,
+      fulfillmentStatus: FulfillmentStatus.PENDING,
+      updatedSince: '2026-08-01T00:00:00.000Z',
+      createdSince: undefined,
+      createdUntil: undefined,
+    });
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].orderId).toBe('ord-1');
+    expect(result.items[0].items[0].sku).toBe('CAT-1');
+    expect(result.pagination.total).toBe(1);
   });
 
   it('delegates tracking update and returns store-scoped order', async () => {

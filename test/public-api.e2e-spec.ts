@@ -15,12 +15,15 @@ import { RedisService } from '../src/modules/redis/redis.service';
 import { ConfigService } from '@nestjs/config';
 import { ApiKeysService } from '../src/modules/api-keys/api-keys.service';
 import { ProductsService } from '../src/modules/products/products.service';
+import { OrdersService } from '../src/modules/orders/orders.service';
 import { OrderFulfillmentService } from '../src/modules/orders/order-fulfillment.service';
 import { VendorWebhooksService } from '../src/modules/vendor-webhooks/vendor-webhooks.service';
 import { ReviewsService } from '../src/modules/reviews/reviews.service';
 import { ValidationPipe } from '../src/common/pipes/validation.pipe';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { ProductStatus } from '../src/database/entities/product.entity';
+import { OrderStatus } from '../src/database/entities/order.entity';
+import { FulfillmentStatus } from '../src/database/entities/order-item.entity';
 import { ReviewSource, ReviewStatus } from '../src/database/entities/review.entity';
 
 describe('Public API products (e2e)', () => {
@@ -34,6 +37,7 @@ describe('Public API products (e2e)', () => {
     updateVariantStockPriceForPublicApi: jest.Mock;
     removeForPublicApi: jest.Mock;
   };
+  let ordersService: { findAllForPublicApi: jest.Mock };
   let orderFulfillmentService: { updateTrackingForPublicApi: jest.Mock };
   let vendorWebhooksService: {
     getForStore: jest.Mock;
@@ -115,6 +119,54 @@ describe('Public API products (e2e)', () => {
       updateVariantStockPriceForPublicApi: jest.fn().mockResolvedValue(updatedVariant),
       removeForPublicApi: jest.fn().mockResolvedValue(undefined),
     };
+    ordersService = {
+      findAllForPublicApi: jest.fn().mockResolvedValue({
+        items: [
+          {
+            id: 'ord-1',
+            orderNumber: 'ORD-1',
+            status: OrderStatus.PAID,
+            paymentMethod: 'promptpay',
+            paidAt: new Date('2026-08-01T00:00:00Z'),
+            createdAt: new Date('2026-08-01T00:00:00Z'),
+            updatedAt: new Date('2026-08-02T00:00:00Z'),
+            guestName: 'Somchai',
+            guestPhone: '0812345678',
+            guestEmail: null,
+            customer: null,
+            shippingAddress: {
+              fullName: 'Somchai',
+              phone: '0812345678',
+              addressLine1: '1 Road',
+              addressLine2: null,
+              tumbon: null,
+              amphoe: 'Bang Rak',
+              province: 'Bangkok',
+              postalCode: '10500',
+            },
+            items: [
+              {
+                id: 'item-1',
+                storeId,
+                productName: 'Food',
+                variantId: 'var-1',
+                variantOptions: {},
+                quantity: 1,
+                unitPrice: 100,
+                subtotal: 100,
+                fulfillmentStatus: FulfillmentStatus.PENDING,
+                trackingNumber: null,
+                fulfillmentProvider: null,
+                trackingUrl: null,
+                shippedAt: null,
+                productVariant: { sku: 'CAT-1' },
+              },
+            ],
+          },
+        ],
+        pagination: { page: 1, limit: 20, total: 1, totalPages: 1 },
+      }),
+    };
     orderFulfillmentService = {
       updateTrackingForPublicApi: jest.fn().mockResolvedValue({
         id: 'ord-1',
@@ -122,7 +174,13 @@ describe('Public API products (e2e)', () => {
         status: 'shipped',
         paymentMethod: 'promptpay',
         paidAt: new Date('2026-08-01T00:00:00Z'),
+        createdAt: new Date('2026-08-01T00:00:00Z'),
         updatedAt: new Date('2026-08-02T00:00:00Z'),
+        guestName: null,
+        guestPhone: null,
+        guestEmail: null,
+        customer: null,
+        shippingAddress: null,
         items: [
           {
             id: 'item-1',
@@ -138,6 +196,7 @@ describe('Public API products (e2e)', () => {
             fulfillmentProvider: 'Kerry',
             trackingUrl: null,
             shippedAt: new Date('2026-08-02T00:00:00Z'),
+            productVariant: { sku: 'CAT-1' },
           },
         ],
       }),
@@ -201,6 +260,7 @@ describe('Public API products (e2e)', () => {
         },
         { provide: ApiKeysService, useValue: apiKeysService },
         { provide: ProductsService, useValue: productsService },
+        { provide: OrdersService, useValue: ordersService },
         { provide: OrderFulfillmentService, useValue: orderFulfillmentService },
         { provide: VendorWebhooksService, useValue: vendorWebhooksService },
         { provide: ReviewsService, useValue: reviewsService },
@@ -600,6 +660,34 @@ describe('Public API products (e2e)', () => {
       storeId,
       expect.objectContaining({ url: 'https://example.com/hook' }),
     );
+  });
+
+  it('GET /orders lists store-scoped orders with filters', async () => {
+    const res = await request(app.getHttpServer())
+      .get(`/api/v1/stores/${storeId}/orders`)
+      .query({
+        page: 1,
+        limit: 20,
+        status: OrderStatus.PAID,
+        fulfillmentStatus: FulfillmentStatus.PENDING,
+        updatedSince: '2026-08-01T00:00:00.000Z',
+      })
+      .set('Authorization', 'Bearer sopet_sk_valid_key')
+      .expect(200);
+
+    expect(res.body.items).toHaveLength(1);
+    expect(res.body.items[0].orderId).toBe('ord-1');
+    expect(res.body.items[0].items[0].sku).toBe('CAT-1');
+    expect(res.body.pagination.total).toBe(1);
+    expect(ordersService.findAllForPublicApi).toHaveBeenCalledWith(storeId, {
+      page: 1,
+      limit: 20,
+      status: OrderStatus.PAID,
+      fulfillmentStatus: FulfillmentStatus.PENDING,
+      updatedSince: '2026-08-01T00:00:00.000Z',
+      createdSince: undefined,
+      createdUntil: undefined,
+    });
   });
 
   it('PATCH /orders/:orderId/tracking updates tracking', async () => {

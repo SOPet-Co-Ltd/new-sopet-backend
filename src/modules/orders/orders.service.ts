@@ -686,6 +686,116 @@ export class OrdersService {
       .getMany();
   }
 
+  /**
+   * Paginated store-scoped orders for Vendor REST (webhook catch-up / polling).
+   * Ordered by updatedAt DESC then createdAt DESC.
+   */
+  async findAllForPublicApi(
+    storeId: string,
+    query: {
+      page?: number;
+      limit?: number;
+      status?: OrderStatus;
+      fulfillmentStatus?: FulfillmentStatus;
+      updatedSince?: Date | string;
+      createdSince?: Date | string;
+      createdUntil?: Date | string;
+    } = {},
+  ): Promise<PaginatedResponse<Order>> {
+    const page = Math.max(query.page ?? 1, 1);
+    const limit = Math.min(Math.max(query.limit ?? 20, 1), 100);
+    const offset = (page - 1) * limit;
+
+    const applyFilters = (qb: ReturnType<Repository<Order>['createQueryBuilder']>) => {
+      qb.innerJoin('order.items', 'filterItem', 'filterItem.storeId = :storeId', { storeId });
+
+      if (query.status) {
+        qb.andWhere('order.status = :status', { status: query.status });
+      }
+      if (query.fulfillmentStatus) {
+        qb.andWhere('filterItem.fulfillmentStatus = :fulfillmentStatus', {
+          fulfillmentStatus: query.fulfillmentStatus,
+        });
+      }
+      if (query.updatedSince) {
+        qb.andWhere('order.updatedAt >= :updatedSince', {
+          updatedSince: new Date(query.updatedSince),
+        });
+      }
+      if (query.createdSince) {
+        qb.andWhere('order.createdAt >= :createdSince', {
+          createdSince: new Date(query.createdSince),
+        });
+      }
+      if (query.createdUntil) {
+        qb.andWhere('order.createdAt <= :createdUntil', {
+          createdUntil: new Date(query.createdUntil),
+        });
+      }
+      return qb;
+    };
+
+    const countRow = await applyFilters(this.orderRepository.createQueryBuilder('order'))
+      .select('COUNT(DISTINCT order.id)', 'cnt')
+      .getRawOne<{ cnt: string }>();
+    const total = Number(countRow?.cnt ?? 0);
+
+    if (total === 0) {
+      return {
+        items: [],
+        pagination: { page, limit, total: 0, totalPages: 1 },
+      };
+    }
+
+    const idRows = await applyFilters(this.orderRepository.createQueryBuilder('order'))
+      .select('order.id', 'id')
+      .addSelect('order.updatedAt', 'updatedAt')
+      .addSelect('order.createdAt', 'createdAt')
+      .groupBy('order.id')
+      .addGroupBy('order.updatedAt')
+      .addGroupBy('order.createdAt')
+      .orderBy('order.updatedAt', 'DESC')
+      .addOrderBy('order.createdAt', 'DESC')
+      .offset(offset)
+      .limit(limit)
+      .getRawMany<{ id: string }>();
+
+    const ids = idRows.map((row) => row.id);
+    if (ids.length === 0) {
+      return {
+        items: [],
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.max(1, Math.ceil(total / limit)),
+        },
+      };
+    }
+
+    const orders = await this.orderRepository
+      .createQueryBuilder('order')
+      .leftJoinAndSelect('order.items', 'items')
+      .leftJoinAndSelect('items.productVariant', 'productVariant')
+      .leftJoinAndSelect('order.shippingAddress', 'shippingAddress')
+      .leftJoinAndSelect('order.customer', 'customer')
+      .where('order.id IN (:...ids)', { ids })
+      .getMany();
+
+    const byId = new Map(orders.map((order) => [order.id, order]));
+    const items = ids.map((id) => byId.get(id)).filter((order): order is Order => Boolean(order));
+
+    return {
+      items,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+    };
+  }
+
   async findPendingBankTransferOrders(options?: {
     page?: number;
     limit?: number;

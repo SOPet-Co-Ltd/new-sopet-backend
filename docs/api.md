@@ -130,6 +130,7 @@ Unknown, malformed, or whitespace-only `orderNumber` all throw the identical `No
 | `PUT`    | `/api/v1/stores/:storeId/webhook`                                 | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (upsert outbound order webhook)                  |
 | `GET`    | `/api/v1/stores/:storeId/webhook`                                 | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (get webhook config)                             |
 | `DELETE` | `/api/v1/stores/:storeId/webhook`                                 | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (remove webhook)                                 |
+| `GET`    | `/api/v1/stores/:storeId/orders`                                  | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (paginated store-scoped order list / catch-up)   |
 | `PATCH`  | `/api/v1/stores/:storeId/orders/:orderId/tracking`                | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (tracking / ship)                                |
 | `POST`   | `/api/v1/stores/:storeId/products/:productId/reviews`             | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (import review → pending / unknown customer)     |
 | `GET`    | `/health`, `/health/ready`                                        | `@Public()`                   | `health.controller.ts` (Terminus: Postgres ping + Redis when configured)    |

@@ -48,7 +48,7 @@ export class OrderFulfillmentService {
   private async loadOrderWithItems(orderId: string): Promise<Order> {
     const order = await this.orderRepository.findOne({
       where: { id: orderId },
-      relations: ['items', 'shippingAddress', 'storeShippings', 'customer'],
+      relations: ['items', 'items.productVariant', 'shippingAddress', 'storeShippings', 'customer'],
     });
     if (!order) {
       throw new NotFoundException({

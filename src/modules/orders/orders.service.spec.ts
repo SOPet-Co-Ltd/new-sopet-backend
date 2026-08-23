@@ -1010,6 +1010,82 @@ describe('OrdersService', () => {
     });
   });
 
+  describe('findAllForPublicApi', () => {
+    function createPublicApiListQb(overrides: Record<string, jest.Mock> = {}) {
+      return {
+        innerJoin: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        addGroupBy: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        offset: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getRawOne: jest.fn().mockResolvedValue({ cnt: '0' }),
+        getRawMany: jest.fn().mockResolvedValue([]),
+        getMany: jest.fn().mockResolvedValue([]),
+        ...overrides,
+      };
+    }
+
+    it('returns empty page when store has no matching orders', async () => {
+      const qb = createPublicApiListQb();
+      orderRepository.createQueryBuilder.mockReturnValue(qb);
+
+      const result = await service.findAllForPublicApi('store-1', { page: 1, limit: 20 });
+
+      expect(result.items).toEqual([]);
+      expect(result.pagination).toEqual({ page: 1, limit: 20, total: 0, totalPages: 1 });
+    });
+
+    it('loads orders by id after distinct pagination and applies filters', async () => {
+      const countQb = createPublicApiListQb({
+        getRawOne: jest.fn().mockResolvedValue({ cnt: '2' }),
+      });
+      const idQb = createPublicApiListQb({
+        getRawMany: jest.fn().mockResolvedValue([{ id: 'ord-2' }, { id: 'ord-1' }]),
+      });
+      const loadQb = createPublicApiListQb({
+        getMany: jest.fn().mockResolvedValue([
+          { id: 'ord-1', orderNumber: 'A' },
+          { id: 'ord-2', orderNumber: 'B' },
+        ]),
+      });
+
+      orderRepository.createQueryBuilder
+        .mockReturnValueOnce(countQb)
+        .mockReturnValueOnce(idQb)
+        .mockReturnValueOnce(loadQb);
+
+      const result = await service.findAllForPublicApi('store-1', {
+        page: 1,
+        limit: 20,
+        status: OrderStatus.PAID,
+        fulfillmentStatus: FulfillmentStatus.PENDING,
+        updatedSince: '2026-08-01T00:00:00.000Z',
+      });
+
+      expect(countQb.andWhere).toHaveBeenCalledWith('order.status = :status', {
+        status: OrderStatus.PAID,
+      });
+      expect(countQb.andWhere).toHaveBeenCalledWith(
+        'filterItem.fulfillmentStatus = :fulfillmentStatus',
+        { fulfillmentStatus: FulfillmentStatus.PENDING },
+      );
+      expect(idQb.offset).toHaveBeenCalledWith(0);
+      expect(idQb.limit).toHaveBeenCalledWith(20);
+      expect(loadQb.where).toHaveBeenCalledWith('order.id IN (:...ids)', {
+        ids: ['ord-2', 'ord-1'],
+      });
+      expect(result.items.map((o) => o.id)).toEqual(['ord-2', 'ord-1']);
+      expect(result.pagination.total).toBe(2);
+    });
+  });
+
   describe('findLatestPurchaseProductId', () => {
     it('returns product id from latest order item', async () => {
       const queryBuilder = {
