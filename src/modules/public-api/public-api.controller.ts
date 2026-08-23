@@ -17,11 +17,13 @@ import { ApiKeyGuard } from '../api-keys/guards/api-key.guard';
 import { ApiKeyRateLimitGuard } from '../api-keys/guards/api-key-rate-limit.guard';
 import { ApiKeyAuth, ApiKeyAuthContext } from '../api-keys/decorators/api-key-auth.decorator';
 import { ProductsService } from '../products/products.service';
+import { OrdersService } from '../orders/orders.service';
 import { OrderFulfillmentService } from '../orders/order-fulfillment.service';
 import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.service';
 import { ReviewsService, resolveReviewCustomerName } from '../reviews/reviews.service';
 import { CreatePublicProductDto } from './dto/create-public-product.dto';
 import { CreatePublicReviewDto } from './dto/create-public-review.dto';
+import { ListPublicOrdersQueryDto } from './dto/list-public-orders-query.dto';
 import { ListPublicProductsQueryDto } from './dto/list-public-products-query.dto';
 import { UpdatePublicProductDto, UpdatePublicVariantDto } from './dto/update-public-product.dto';
 import {
@@ -39,6 +41,7 @@ import { PaginatedResponse } from '../../common/interfaces';
 export class PublicApiController {
   constructor(
     private readonly productsService: ProductsService,
+    private readonly ordersService: OrdersService,
     private readonly orderFulfillmentService: OrderFulfillmentService,
     private readonly vendorWebhooksService: VendorWebhooksService,
     private readonly reviewsService: ReviewsService,
@@ -234,6 +237,26 @@ export class PublicApiController {
   @HttpCode(204)
   async deleteWebhook(@Param('storeId') storeId: string): Promise<void> {
     await this.vendorWebhooksService.deleteForStore(storeId);
+  }
+
+  @Get('orders')
+  async listOrders(
+    @Param('storeId') storeId: string,
+    @Query() query: ListPublicOrdersQueryDto,
+  ): Promise<PaginatedResponse<ReturnType<typeof mapPublicApiOrder>>> {
+    const result = await this.ordersService.findAllForPublicApi(storeId, {
+      page: query.page,
+      limit: query.limit,
+      status: query.status,
+      fulfillmentStatus: query.fulfillmentStatus,
+      updatedSince: query.updatedSince,
+      createdSince: query.createdSince,
+      createdUntil: query.createdUntil,
+    });
+    return {
+      items: result.items.map((order) => mapPublicApiOrder(order, storeId)),
+      pagination: result.pagination,
+    };
   }
 
   @Patch('orders/:orderId/tracking')
