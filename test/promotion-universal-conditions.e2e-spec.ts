@@ -47,6 +47,7 @@ import {
   createTestStore,
   createTestUser,
   isPostgresAvailable,
+  uniqueTestPhone,
 } from './helpers';
 import { createTypeOrmTestOptions } from './helpers/typeorm-test.config';
 
@@ -245,7 +246,7 @@ describe('Promotion universal conditions createOrder (service-integration-e2e)',
   }
 
   async function seedCustomer(phoneSuffix: string): Promise<Customer> {
-    const phone = `08${phoneSuffix}`.slice(0, 10);
+    const phone = uniqueTestPhone();
     const customer = await customerRepo.save(
       customerRepo.create({
         phone,

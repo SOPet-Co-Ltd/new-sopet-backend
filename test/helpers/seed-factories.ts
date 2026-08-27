@@ -1,3 +1,4 @@
+import { randomInt } from 'crypto';
 import { DataSource, Repository } from 'typeorm';
 import { hashSeedPassword } from '../../src/database/seeds/helpers';
 import { User, UserRole } from '../../src/database/entities/user.entity';
@@ -47,6 +48,15 @@ export interface RejectedTaxonomySeedDataset {
 
 function slugFor(runId: string, suffix: string): string {
   return `${runId}-${suffix}`.slice(0, 255);
+}
+
+/**
+ * Collision-resistant Thai mobile number for seeded customers.
+ * Derivations from Date.now() collide across parallel Jest workers
+ * (unique idx_customers_phone), so use crypto randomness instead.
+ */
+export function uniqueTestPhone(): string {
+  return `08${randomInt(0, 100_000_000).toString().padStart(8, '0')}`;
 }
 
 export async function createTestUser(

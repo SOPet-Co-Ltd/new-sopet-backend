@@ -10,6 +10,7 @@ export {
   createTestUser,
   seedListingParityDataset,
   seedRejectedTaxonomyDataset,
+  uniqueTestPhone,
 } from './seed-factories';
 export type {
   ListingParitySeedDataset,
