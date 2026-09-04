@@ -52,10 +52,12 @@ describe('AuthService', () => {
     signAsync: jest.fn(async (payload) => `token-${payload.type}`),
     verify: jest.fn(),
   };
+  let otpBypassCode: string | undefined;
   const configService = {
     get: jest.fn((key: string) => {
       if (key === 'jwt.secret') return TEST_JWT_SECRET;
       if (key === 'otp.hmacSecret') return TEST_OTP_HMAC_SECRET;
+      if (key === 'otp.bypassCode') return otpBypassCode;
       if (key === 'otp.maxFailedAttempts') return 5;
       if (key === 'jwt.issuer') return 'sopet-api';
       if (key === 'jwt.audience') return 'sopet';
@@ -78,6 +80,7 @@ describe('AuthService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    otpBypassCode = undefined;
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
@@ -200,6 +203,50 @@ describe('AuthService', () => {
     await expect(service.verifyOtp({ phone: '+66812345678', code: '000000' })).rejects.toThrow(
       UnauthorizedException,
     );
+  });
+
+  it('accepts OTP_BYPASS_CODE after send even when it does not match the SMS hash', async () => {
+    otpBypassCode = '000000';
+    otpRepo.findOne.mockResolvedValue({
+      phone: '0812345678',
+      code: hashOtpForTest('123456'),
+      isUsed: false,
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+    });
+    customerRepoWrapper.findActiveByPhone.mockResolvedValue(null);
+    customerRepo.create.mockImplementation((x) => x);
+
+    const result = await service.verifyOtp({ phone: '+66812345678', code: '000000' });
+
+    expect(result.accessToken).toBe('token-access');
+    expect(result.refreshToken).toBe('token-refresh');
+    expect(otpRepo.save).toHaveBeenCalledWith(expect.objectContaining({ isUsed: true }));
+  });
+
+  it('still requires a sent unused OTP when OTP_BYPASS_CODE is set', async () => {
+    otpBypassCode = '000000';
+    otpRepo.findOne.mockResolvedValue(null);
+
+    await expect(service.verifyOtp({ phone: '+66812345678', code: '000000' })).rejects.toThrow(
+      UnauthorizedException,
+    );
+    expect(customerRepoWrapper.findActiveByPhone).not.toHaveBeenCalled();
+  });
+
+  it('rejects a non-bypass code when OTP_BYPASS_CODE is set', async () => {
+    otpBypassCode = '000000';
+    otpRepo.findOne.mockResolvedValue({
+      phone: '0812345678',
+      code: hashOtpForTest('123456'),
+      isUsed: false,
+      failedAttempts: 0,
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+    });
+
+    await expect(service.verifyOtp({ phone: '+66812345678', code: '111111' })).rejects.toThrow(
+      UnauthorizedException,
+    );
+    expect(customerRepoWrapper.findActiveByPhone).not.toHaveBeenCalled();
   });
 
   it('locks OTP after too many failed verify attempts', async () => {

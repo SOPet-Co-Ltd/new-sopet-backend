@@ -76,6 +76,7 @@ GitHub Environments **`deploy/uat`** and **`deploy/production`** use the **same 
 | `JWT_REFRESH_EXPIRES_IN`           | Refresh token TTL                  | e.g. `7d`                                                                                                    |
 | `JWT_ISSUER`                       | JWT `iss` claim                    | Default `sopet-api`.                                                                                         |
 | `JWT_AUDIENCE`                     | JWT `aud` claim                    | Default `sopet`.                                                                                             |
+| `OTP_BYPASS_CODE`                  | 6-digit customer OTP bypass        | UAT/local only, e.g. `000000`. **Leave unset on production.** Requires `sendCustomerOtp` first.              |
 | `DB_SSL_REJECT_UNAUTHORIZED`       | Postgres TLS peer verify           | Crunchy Bridge without team CA: set `false` (break-glass). Prefer `DB_SSL_CA` when you have the team PEM.    |
 | `THAIBULKSMS_SENDER`               | SMS sender name                    | e.g. `SOPet`                                                                                                 |
 | `THAIBULKSMS_FORCE`                | ThaiBulkSMS force mode             | e.g. `corporate`                                                                                             |
@@ -97,7 +98,7 @@ GitHub Environments **`deploy/uat`** and **`deploy/production`** use the **same 
 | `PAYOUT_CRON_TIMEZONE`             | Payout cron timezone               | Default `Asia/Bangkok`.                                                                                      |
 | `COMMISSION_GO_LIVE_AT` ★          | Platform commission cutoff instant | ISO-8601 UTC, e.g. `2026-01-01T00:00:00.000Z`. Required when `NODE_ENV=production` or the API will not boot. |
 
-**Count: 45 variables** (6 deploy/infra including optional `BUILD_ON_HOST` + `SSM_CLOUDWATCH_LOG_GROUP`, 5 Caddy, 34 application from `env.manifest.json`).
+**Count: 46 variables** (6 deploy/infra including optional `BUILD_ON_HOST` + `SSM_CLOUDWATCH_LOG_GROUP`, 5 Caddy, 35 application from `env.manifest.json`).
 
 ---
 
@@ -187,6 +188,7 @@ STORAGE_PROVIDER
 CDN_URL
 JWT_ACCESS_EXPIRES_IN
 JWT_REFRESH_EXPIRES_IN
+OTP_BYPASS_CODE
 THAIBULKSMS_SENDER
 THAIBULKSMS_FORCE
 THAIBULKSMS_SHORTEN_URL
@@ -212,5 +214,5 @@ PAYOUT_CRON_TIMEZONE
 - [ ] All ★ secrets set on `deploy/production` (live Omise, unique `JWT_SECRET`, prod R2 + DB)
 - [ ] All ★ variables set (`DOCKER_PLATFORM`, ECR, EC2, Caddy host, API/CORS/CDN URLs, `STORAGE_PROVIDER=r2`)
 - [ ] `ECR_REPOSITORY` matches UAT (shared repo); OIDC + both EC2 instance roles can pull/push that repo
-- [ ] `BUILD_ON_HOST` left unset; `SMS_OTP_LOG_ONLY` not enabled in rendered `.env`
+- [ ] `BUILD_ON_HOST` left unset; `SMS_OTP_LOG_ONLY` not enabled; `OTP_BYPASS_CODE` unset in rendered `.env`
 - [ ] Cross-check [deploy-production.md](deploy-production.md) (UAT first, then promote same SHA)
