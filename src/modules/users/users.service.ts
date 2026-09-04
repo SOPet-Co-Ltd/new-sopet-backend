@@ -20,6 +20,7 @@ import { OtpCode } from '../../database/entities/otp-code.entity';
 import { OrdersService } from '../orders/orders.service';
 import { PaymentsService, SavedOmiseCardDetails } from '../payments/payments.service';
 import { normalizeThaiPhoneToLocal } from '../../common/utils/phone.util';
+import { isAcceptedOtpCode } from '../../common/utils/otp-code.util';
 import { UpdateProfileDto, CreateAddressDto, UpdateAddressDto } from './dto';
 import { JwtPayload } from '../../common/interfaces';
 import { isPendingDeletion, isDeletionRetentionExpired } from '../customers/customer-deletion.util';
@@ -181,13 +182,24 @@ export class UsersService {
     const otp = await this.otpRepository.findOne({
       where: {
         phone: normalizedNewPhone,
-        code,
         isUsed: false,
         expiresAt: MoreThan(new Date()),
       },
+      order: { createdAt: 'DESC' },
     });
 
-    if (!otp) {
+    const hmacSecret = this.configService.get<string>('otp.hmacSecret');
+    const accepted =
+      !!otp &&
+      !!hmacSecret &&
+      isAcceptedOtpCode(
+        otp.code,
+        code,
+        hmacSecret,
+        this.configService.get<string>('otp.bypassCode'),
+      );
+
+    if (!otp || !accepted) {
       throw new UnauthorizedException({
         code: 'INVALID_OTP',
         message: 'Invalid or expired OTP code',

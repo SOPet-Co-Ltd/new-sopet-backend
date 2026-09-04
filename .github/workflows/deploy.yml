@@ -125,6 +125,8 @@ jobs:
           JWT_REFRESH_EXPIRES_IN: ${{ vars.JWT_REFRESH_EXPIRES_IN }}
           JWT_ISSUER: ${{ vars.JWT_ISSUER }}
           JWT_AUDIENCE: ${{ vars.JWT_AUDIENCE }}
+          # UAT/local only — never set on deploy/production.
+          OTP_BYPASS_CODE: ${{ vars.OTP_BYPASS_CODE }}
           DB_SSL_REJECT_UNAUTHORIZED: ${{ vars.DB_SSL_REJECT_UNAUTHORIZED }}
           THAIBULKSMS_SENDER: ${{ vars.THAIBULKSMS_SENDER }}
           THAIBULKSMS_FORCE: ${{ vars.THAIBULKSMS_FORCE }}

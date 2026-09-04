@@ -1,4 +1,5 @@
 import { registerAs } from '@nestjs/config';
+import { parseOtpBypassCode } from '../common/utils/otp-code.util';
 
 /**
  * Dedicated HMAC key for OTP at-rest hashing (SOPET-M-03).
@@ -37,5 +38,7 @@ export default registerAs('otp', () => {
     hmacSecret: secret,
     /** Failed verify attempts before the OTP row is locked / marked used (SOPET-M-15). */
     maxFailedAttempts: parseInt(process.env.OTP_MAX_FAILED_ATTEMPTS || '5', 10) || 5,
+    /** UAT/local only. Unset on production. Requires a prior sendCustomerOtp. */
+    bypassCode: parseOtpBypassCode(process.env.OTP_BYPASS_CODE),
   };
 });

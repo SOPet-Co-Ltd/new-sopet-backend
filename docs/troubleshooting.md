@@ -82,6 +82,8 @@ GraphQL error codes from `sendCustomerOtp`:
 | `INVALID_PHONE`       | Provider rejected the phone number                                                  |
 | `TOO_MANY_ATTEMPTS`   | More than 3 OTP requests in 5 minutes for the same phone                            |
 
+Local/UAT: after `sendCustomerOtp`, `OTP_BYPASS_CODE` (e.g. `000000`) also verifies. Never set on production.
+
 UAT requires GitHub Environment secrets `THAIBULKSMS_API_KEY` and `THAIBULKSMS_API_SECRET` (see `infra/validate-deploy-env.sh`). Optional vars: `THAIBULKSMS_SENDER`, `THAIBULKSMS_FORCE`, `THAIBULKSMS_SHORTEN_URL`.
 
 ### JWT errors

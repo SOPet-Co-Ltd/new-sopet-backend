@@ -17,6 +17,13 @@ import { CustomerRepository } from '../../database/repositories/customer.reposit
 import { OrdersService } from '../orders/orders.service';
 import { PaymentsService } from '../payments/payments.service';
 import { StorageService } from '../storage/storage.service';
+import { createHmac } from 'node:crypto';
+
+const TEST_OTP_HMAC_SECRET = 'test-otp-hmac-secret';
+
+function hashOtpForTest(code: string): string {
+  return createHmac('sha256', TEST_OTP_HMAC_SECRET).update(code).digest('hex');
+}
 
 describe('UsersService', () => {
   let service: UsersService;
@@ -30,12 +37,17 @@ describe('UsersService', () => {
     finalizeDeletion: jest.fn(),
     findOtherActiveByPhone: jest.fn(),
   };
+  let otpBypassCode: string | undefined;
   const jwtService = {
     verify: jest.fn(),
     signAsync: jest.fn(async (payload) => `token-${payload.type ?? 'reactivation'}`),
   };
   const configService = {
-    get: jest.fn((key: string) => (key.includes('refresh') ? '7d' : '15m')),
+    get: jest.fn((key: string) => {
+      if (key === 'otp.hmacSecret') return TEST_OTP_HMAC_SECRET;
+      if (key === 'otp.bypassCode') return otpBypassCode;
+      return key.includes('refresh') ? '7d' : '15m';
+    }),
   };
   const otpRepo = {
     findOne: jest.fn(),
@@ -67,6 +79,7 @@ describe('UsersService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    otpBypassCode = undefined;
     paymentMethodQueryBuilder.getOne.mockResolvedValue(null);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -173,8 +186,9 @@ describe('UsersService', () => {
     customerRepository.findOtherActiveByPhone.mockResolvedValue(null);
     otpRepo.findOne.mockResolvedValue({
       phone: '0822222222',
-      code: '123456',
+      code: hashOtpForTest('123456'),
       isUsed: false,
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000),
     });
 
     const result = await service.changeCustomerPhone('cust-1', '0822222222', '123456');
@@ -183,6 +197,58 @@ describe('UsersService', () => {
     expect(ordersService.mergeGuestOrders).toHaveBeenCalledWith('cust-1', '0811111111');
     expect(ordersService.mergeGuestOrders).toHaveBeenCalledWith('cust-1', '0822222222');
     expect(result.accessToken).toBe('token-access');
+  });
+
+  it('accepts OTP_BYPASS_CODE for phone change after send', async () => {
+    otpBypassCode = '000000';
+    customerRepo.findOne.mockResolvedValue({
+      id: 'cust-1',
+      phone: '0811111111',
+    });
+    customerRepository.findOtherActiveByPhone.mockResolvedValue(null);
+    otpRepo.findOne.mockResolvedValue({
+      phone: '0822222222',
+      code: hashOtpForTest('123456'),
+      isUsed: false,
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+    });
+
+    const result = await service.changeCustomerPhone('cust-1', '0822222222', '000000');
+
+    expect(result.customer.phone).toBe('0822222222');
+    expect(otpRepo.save).toHaveBeenCalledWith(expect.objectContaining({ isUsed: true }));
+  });
+
+  it('rejects phone change bypass when no unused OTP was sent', async () => {
+    otpBypassCode = '000000';
+    customerRepo.findOne.mockResolvedValue({
+      id: 'cust-1',
+      phone: '0811111111',
+    });
+    customerRepository.findOtherActiveByPhone.mockResolvedValue(null);
+    otpRepo.findOne.mockResolvedValue(null);
+
+    await expect(service.changeCustomerPhone('cust-1', '0822222222', '000000')).rejects.toThrow(
+      UnauthorizedException,
+    );
+  });
+
+  it('rejects a wrong OTP on phone change when bypass is unset', async () => {
+    customerRepo.findOne.mockResolvedValue({
+      id: 'cust-1',
+      phone: '0811111111',
+    });
+    customerRepository.findOtherActiveByPhone.mockResolvedValue(null);
+    otpRepo.findOne.mockResolvedValue({
+      phone: '0822222222',
+      code: hashOtpForTest('123456'),
+      isUsed: false,
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+    });
+
+    await expect(service.changeCustomerPhone('cust-1', '0822222222', '000000')).rejects.toThrow(
+      UnauthorizedException,
+    );
   });
 
   it('rejects phone change when number is already in use', async () => {

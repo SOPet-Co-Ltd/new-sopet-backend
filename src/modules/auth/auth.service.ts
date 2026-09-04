@@ -10,7 +10,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, MoreThan } from 'typeorm';
-import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomInt } from 'node:crypto';
 import * as bcrypt from 'bcrypt';
 import { Customer } from '../../database/entities/customer.entity';
 import { User, UserRole } from '../../database/entities/user.entity';
@@ -24,6 +24,7 @@ import { CustomerRepository } from '../../database/repositories/customer.reposit
 import { SendOtpDto, VerifyOtpDto, LoginDto } from './dto';
 import { JwtPayload } from '../../common/interfaces';
 import { normalizeThaiPhoneToLocal } from '../../common/utils/phone.util';
+import { hashOtpCode, isAcceptedOtpCode } from '../../common/utils/otp-code.util';
 import { SmsService } from '../sms/sms.service';
 import { CartService } from '../cart/cart.service';
 import { GuestOrderLinkService } from '../orders/guest-order-link.service';
@@ -82,28 +83,30 @@ export class AuthService {
     return randomInt(100000, 1000000).toString();
   }
 
-  /** HMAC-SHA256 hex digest; plaintext OTP is never persisted. */
   /** SHA-256 hex digest for password-reset / email-verify tokens at rest (SOPET-H-02). */
   private hashAuthToken(token: string): string {
     return createHash('sha256').update(token).digest('hex');
   }
 
-  private hashOtp(code: string): string {
+  private otpHmacSecret(): string {
     const secret = this.configService.get<string>('otp.hmacSecret');
     if (!secret) {
       throw new Error('OTP_HMAC_SECRET is required to hash OTP codes');
     }
-    return createHmac('sha256', secret).update(code).digest('hex');
+    return secret;
   }
 
-  private otpHashesMatch(storedHash: string, providedCode: string): boolean {
-    const providedHash = this.hashOtp(providedCode);
-    const stored = Buffer.from(storedHash, 'utf8');
-    const provided = Buffer.from(providedHash, 'utf8');
-    if (stored.length !== provided.length) {
-      return false;
-    }
-    return timingSafeEqual(stored, provided);
+  private hashOtp(code: string): string {
+    return hashOtpCode(code, this.otpHmacSecret());
+  }
+
+  private isAcceptedOtp(storedHash: string, providedCode: string): boolean {
+    return isAcceptedOtpCode(
+      storedHash,
+      providedCode,
+      this.otpHmacSecret(),
+      this.configService.get<string>('otp.bypassCode'),
+    );
   }
 
   private isOtpExpired(expiresAt: Date | string | null | undefined): boolean {
@@ -179,7 +182,7 @@ export class AuthService {
       });
     }
 
-    if (!this.otpHashesMatch(otp.code, code)) {
+    if (!this.isAcceptedOtp(otp.code, code)) {
       otp.failedAttempts = (otp.failedAttempts ?? 0) + 1;
       const maxFailed = this.configService.get<number>('otp.maxFailedAttempts') ?? 5;
       if (otp.failedAttempts >= maxFailed) {

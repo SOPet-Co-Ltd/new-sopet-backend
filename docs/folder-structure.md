@@ -90,6 +90,7 @@ Referenced as `${API_URL}/images/email/sopet-logo-white.png` from email template
 | ----------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
 | `app.config.ts`         | `PORT`, `API_URL`, `CORS_ORIGINS`, `STOREFRONT_URL`, `ADMIN_PANEL_URL`, rate limits | `AppModule` `ConfigModule.load`                                              |
 | `jwt.config.ts`         | `JWT_SECRET`, `JWT_ACCESS_EXPIRES_IN`, `JWT_REFRESH_EXPIRES_IN`                     | `AppModule`                                                                  |
+| `otp.config.ts`         | `OTP_HMAC_SECRET`, `OTP_MAX_FAILED_ATTEMPTS`, `OTP_BYPASS_CODE`                     | `AppModule`                                                                  |
 | `omise.config.ts`       | `OMISE_*`                                                                           | `AppModule`                                                                  |
 | `storage.config.ts`     | `AWS_*`, `CLOUDFLARE_*`, `STORAGE_PROVIDER`, `CDN_URL`                              | `AppModule`                                                                  |
 | `redis.config.ts`       | `REDIS_*`                                                                           | `AppModule`                                                                  |

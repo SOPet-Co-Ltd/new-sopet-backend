@@ -38,6 +38,9 @@ OTP rules:
 - Each code is valid for **5 minutes** (`expiresAt`)
 - A new request marks previous unused codes as used — only the latest OTP works
 - Rate limit: max 3 send requests per phone in 5 minutes (`TOO_MANY_ATTEMPTS`)
+- Optional UAT/local bypass: when `OTP_BYPASS_CODE` is a 6-digit value (e.g. `000000`), `verifyCustomerOtp` and customer phone-change accept that code **after** `sendCustomerOtp`. Leave unset on production (UAT uses `NODE_ENV=production`, so presence of the env var is the switch).
+
+**Files:**
 
 **Files:**
 
