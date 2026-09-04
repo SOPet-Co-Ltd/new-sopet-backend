@@ -58,6 +58,9 @@ JWT_ACCESS_EXPIRES_IN
 JWT_REFRESH_EXPIRES_IN
 JWT_ISSUER
 JWT_AUDIENCE
+# Optional UAT/local only — never set on production. 6-digit customer OTP bypass
+# after sendCustomerOtp (login/register + phone change).
+OTP_BYPASS_CODE
 THAIBULKSMS_SENDER
 THAIBULKSMS_FORCE
 THAIBULKSMS_SHORTEN_URL
