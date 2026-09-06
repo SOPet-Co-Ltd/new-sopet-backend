@@ -118,7 +118,7 @@ export class Store {
   @IsOptional()
   bankAccountName!: string | null;
 
-  @Column({ name: 'bank_account_number', type: 'varchar', length: 50, nullable: true })
+  @Column({ name: 'bank_account_number', type: 'varchar', length: 255, nullable: true })
   @IsOptional()
   bankAccountNumber!: string | null;
 
