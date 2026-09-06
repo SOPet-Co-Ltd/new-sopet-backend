@@ -810,6 +810,16 @@ describe('StoresService', () => {
   });
 
   describe('Omise payout bank change', () => {
+    const previousBankKey = process.env.BANK_DATA_ENCRYPTION_KEY;
+
+    beforeAll(() => {
+      process.env.BANK_DATA_ENCRYPTION_KEY = 'test-bank-encryption-key';
+    });
+
+    afterAll(() => {
+      process.env.BANK_DATA_ENCRYPTION_KEY = previousBankKey;
+    });
+
     it('resets Omise status when bank details change', async () => {
       const { OmiseRecipientStatus } = await import('../../database/entities/store.entity');
       storeRepository.findOne.mockResolvedValue({
@@ -834,9 +844,42 @@ describe('StoresService', () => {
       expect(storeRepository.save).toHaveBeenCalledWith(
         expect.objectContaining({
           omiseRecipientStatus: OmiseRecipientStatus.NOT_CONNECTED,
-          bankAccountNumber: '2222222222',
+          bankAccountNumber: expect.stringMatching(/^enc:v1:/),
         }),
       );
+    });
+
+    it('persists plaintext bank number when encryption key is missing', async () => {
+      const key = process.env.BANK_DATA_ENCRYPTION_KEY;
+      delete process.env.BANK_DATA_ENCRYPTION_KEY;
+      try {
+        const { OmiseRecipientStatus } = await import('../../database/entities/store.entity');
+        storeRepository.findOne.mockResolvedValue({
+          id: 'store-1',
+          bankAccountName: 'Old Name',
+          bankAccountNumber: '1111111111',
+          bankName: 'ธนาคารกสิกรไทย',
+          bankCode: 'kbank',
+          omiseRecipientId: 'recp_old',
+          omiseRecipientStatus: OmiseRecipientStatus.ACTIVE,
+          omiseRecipientFailureMessage: null,
+        });
+
+        await service.updateStorePayout('store-1', {
+          bankAccountName: 'New Name',
+          bankAccountNumber: '2222222222',
+          bankName: 'ธนาคารกรุงศรีอยุธยา',
+          bankCode: 'bay',
+        });
+
+        expect(storeRepository.save).toHaveBeenCalledWith(
+          expect.objectContaining({
+            bankAccountNumber: '2222222222',
+          }),
+        );
+      } finally {
+        process.env.BANK_DATA_ENCRYPTION_KEY = key;
+      }
     });
 
     it('does not refresh Omise status while NOT_CONNECTED after bank change', async () => {
