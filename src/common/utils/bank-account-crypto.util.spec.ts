@@ -1,3 +1,5 @@
+import { getMetadataArgsStorage } from 'typeorm';
+import { Store } from '../../database/entities/store.entity';
 import {
   decryptBankAccountNumber,
   encryptBankAccountNumber,
@@ -30,5 +32,19 @@ describe('bank-account-crypto', () => {
 
   it('masks account numbers', () => {
     expect(maskBankAccountNumber('1234567890')).toBe('****7890');
+  });
+
+  it('ciphertext for max-length account fits Store.bankAccountNumber column', () => {
+    // Frontend allows up to 15 digits; encrypted payload must fit the DB column.
+    const encrypted = encryptBankAccountNumber('123456789012345');
+    expect(encrypted).toMatch(/^enc:v1:/);
+    expect(encrypted!.length).toBeGreaterThan(50);
+
+    const column = getMetadataArgsStorage().columns.find(
+      (c) => c.target === Store && c.propertyName === 'bankAccountNumber',
+    );
+    expect(column).toBeDefined();
+    const length = (column!.options as { length?: number | string }).length;
+    expect(Number(length)).toBeGreaterThanOrEqual(encrypted!.length);
   });
 });
