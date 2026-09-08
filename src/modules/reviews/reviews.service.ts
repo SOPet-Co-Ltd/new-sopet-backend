@@ -5,7 +5,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, QueryFailedError, SelectQueryBuilder } from 'typeorm';
+import { In, Repository, QueryFailedError, SelectQueryBuilder } from 'typeorm';
 import { Review, ReviewSource, ReviewStatus } from '../../database/entities/review.entity';
 import { ReviewReply, REVIEW_REPLY_MAX_LENGTH } from '../../database/entities/review-reply.entity';
 import { ReviewImage } from '../../database/entities/review-image.entity';
@@ -23,6 +23,20 @@ export type StoreReviewRatingFilter = 'all' | '1' | '2' | '3' | '4' | '5';
 
 export const STORE_PRODUCT_REVIEWS_DEFAULT_LIMIT = 20;
 export const STORE_PRODUCT_REVIEWS_MAX_LIMIT = 100;
+
+export type BatchApproveReviewFailure = {
+  reviewId: string;
+  code: string;
+  message: string;
+};
+
+export type BatchApproveReviewsResult = {
+  approvedCount: number;
+  failedCount: number;
+  approvedIds: string[];
+  newlyApprovedIds: string[];
+  failures: BatchApproveReviewFailure[];
+};
 
 export function normalizeStoreReviewReplyFilter(value?: string | null): StoreReviewReplyFilter {
   if (value === 'unreplied' || value === 'replied') {
@@ -450,6 +464,111 @@ export class ReviewsService {
       relations: ['images', 'customer', 'product'],
     });
     return withRelations ?? review;
+  }
+
+  static readonly BATCH_APPROVE_MAX_IDS = 50;
+  static readonly PENDING_IMPORTED_IDS_MAX = 2000;
+
+  async findPendingImportedReviewIds(): Promise<{ ids: string[]; total: number }> {
+    const [items, total] = await this.reviewRepository.findAndCount({
+      where: {
+        source: ReviewSource.VENDOR_IMPORT,
+        status: ReviewStatus.PENDING,
+      },
+      select: ['id'],
+      order: { createdAt: 'ASC' },
+      take: ReviewsService.PENDING_IMPORTED_IDS_MAX,
+    });
+
+    return {
+      ids: items.map((review) => review.id),
+      total,
+    };
+  }
+
+  async approveMany(ids: string[], adminUserId: string): Promise<BatchApproveReviewsResult> {
+    if (ids.length === 0) {
+      throw new BadRequestException({
+        code: 'BATCH_APPROVE_EMPTY',
+        message: 'At least one review id is required',
+      });
+    }
+
+    if (ids.length > ReviewsService.BATCH_APPROVE_MAX_IDS) {
+      throw new BadRequestException({
+        code: 'BATCH_APPROVE_TOO_MANY',
+        message: `Cannot approve more than ${ReviewsService.BATCH_APPROVE_MAX_IDS} reviews at once`,
+      });
+    }
+
+    const uniqueIds = [...new Set(ids)];
+    const reviews = await this.reviewRepository.find({
+      where: { id: In(uniqueIds) },
+      select: ['id', 'status', 'productId'],
+    });
+    const byId = new Map(reviews.map((review) => [review.id, review]));
+
+    const approvedIds: string[] = [];
+    const newlyApprovedIds: string[] = [];
+    const failures: BatchApproveReviewFailure[] = [];
+    const toApprove: Review[] = [];
+
+    for (const id of uniqueIds) {
+      const review = byId.get(id);
+      if (!review) {
+        failures.push({
+          reviewId: id,
+          code: 'REVIEW_NOT_FOUND',
+          message: 'Review not found',
+        });
+        continue;
+      }
+
+      if (review.status === ReviewStatus.APPROVED) {
+        approvedIds.push(id);
+        continue;
+      }
+
+      if (review.status !== ReviewStatus.PENDING) {
+        failures.push({
+          reviewId: id,
+          code: 'INVALID_REVIEW_STATUS',
+          message: 'Only pending reviews can be approved',
+        });
+        continue;
+      }
+
+      toApprove.push(review);
+      approvedIds.push(id);
+      newlyApprovedIds.push(id);
+    }
+
+    if (toApprove.length > 0) {
+      const moderatedAt = new Date();
+      await this.reviewRepository
+        .createQueryBuilder()
+        .update(Review)
+        .set({
+          status: ReviewStatus.APPROVED,
+          moderatedBy: adminUserId,
+          moderatedAt,
+        })
+        .where('id IN (:...ids)', { ids: toApprove.map((review) => review.id) })
+        .execute();
+
+      const productIds = [...new Set(toApprove.map((review) => review.productId))];
+      for (const productId of productIds) {
+        await this.syncProductReviewStats(productId);
+      }
+    }
+
+    return {
+      approvedCount: approvedIds.length,
+      failedCount: failures.length,
+      approvedIds,
+      newlyApprovedIds,
+      failures,
+    };
   }
 
   async rejectReview(reviewId: string, adminUserId: string): Promise<Review> {

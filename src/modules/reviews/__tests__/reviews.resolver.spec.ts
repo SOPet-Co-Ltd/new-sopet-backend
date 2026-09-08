@@ -61,6 +61,8 @@ describe('ReviewsResolver', () => {
       | 'findMyReviews'
       | 'approveReview'
       | 'rejectReview'
+      | 'approveMany'
+      | 'findPendingImportedReviewIds'
     >
   >;
   let storesService: jest.Mocked<Pick<StoresService, 'userHasStoreAccess'>>;
@@ -80,6 +82,8 @@ describe('ReviewsResolver', () => {
       findMyReviews: jest.fn(),
       approveReview: jest.fn(),
       rejectReview: jest.fn(),
+      approveMany: jest.fn(),
+      findPendingImportedReviewIds: jest.fn(),
     };
     storesService = {
       userHasStoreAccess: jest.fn(),
@@ -460,6 +464,78 @@ describe('ReviewsResolver', () => {
           metadata: { status: ReviewStatus.REJECTED },
         }),
       );
+    });
+  });
+
+  describe('approveReviews audit', () => {
+    const adminId = 'admin-1';
+    const adminEmail = 'admin@sopet.org';
+
+    it('logs review.approved once per newly approved id only', async () => {
+      reviewsService.approveMany.mockResolvedValue({
+        approvedCount: 2,
+        failedCount: 1,
+        approvedIds: ['review-new', 'review-already'],
+        newlyApprovedIds: ['review-new'],
+        failures: [
+          {
+            reviewId: 'review-missing',
+            code: 'REVIEW_NOT_FOUND',
+            message: 'Review not found',
+          },
+        ],
+      });
+
+      const result = await resolver.approveReviews(
+        adminId,
+        adminEmail,
+        ['review-new', 'review-already', 'review-missing'],
+        graphqlContext,
+      );
+
+      expect(reviewsService.approveMany).toHaveBeenCalledWith(
+        ['review-new', 'review-already', 'review-missing'],
+        adminId,
+      );
+      expect(result).toEqual({
+        approvedCount: 2,
+        failedCount: 1,
+        approvedIds: ['review-new', 'review-already'],
+        failures: [
+          {
+            reviewId: 'review-missing',
+            code: 'REVIEW_NOT_FOUND',
+            message: 'Review not found',
+          },
+        ],
+      });
+      expect(auditLogsService.log).toHaveBeenCalledTimes(1);
+      expect(auditLogsService.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actorType: AuditActorType.ADMIN,
+          actorId: adminId,
+          actorLabel: adminEmail,
+          action: AuditAction.REVIEW_APPROVED,
+          resourceType: AuditResourceType.REVIEW,
+          resourceId: 'review-new',
+          metadata: { status: ReviewStatus.APPROVED },
+          requestId: 'req-review-1',
+        }),
+      );
+    });
+  });
+
+  describe('pendingImportedReviewIds', () => {
+    it('returns ids from the service', async () => {
+      reviewsService.findPendingImportedReviewIds.mockResolvedValue({
+        ids: ['review-1', 'review-2'],
+        total: 2,
+      });
+
+      const result = await resolver.pendingImportedReviewIds();
+
+      expect(result).toEqual({ ids: ['review-1', 'review-2'], total: 2 });
+      expect(reviewsService.findPendingImportedReviewIds).toHaveBeenCalled();
     });
   });
 });

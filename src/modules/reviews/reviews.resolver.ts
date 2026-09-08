@@ -42,7 +42,7 @@ import {
   StoreReviewSummaryType,
 } from '../../graphql/models/types';
 import { StoresService } from '../stores/stores.service';
-import { Review } from '../../database/entities/review.entity';
+import { Review, ReviewStatus } from '../../database/entities/review.entity';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constants';
 import { getAuditRequestContext } from '../audit-logs/audit-request-context';
@@ -191,6 +191,42 @@ export class AdminImportedReviewConnection {
 
   @Field(() => PaginationMeta)
   pagination!: PaginationMeta;
+}
+
+@ObjectType()
+export class BatchApproveReviewFailureType {
+  @Field()
+  reviewId!: string;
+
+  @Field()
+  code!: string;
+
+  @Field()
+  message!: string;
+}
+
+@ObjectType()
+export class BatchApproveReviewsResultType {
+  @Field(() => Int)
+  approvedCount!: number;
+
+  @Field(() => Int)
+  failedCount!: number;
+
+  @Field(() => [String])
+  approvedIds!: string[];
+
+  @Field(() => [BatchApproveReviewFailureType])
+  failures!: BatchApproveReviewFailureType[];
+}
+
+@ObjectType()
+export class PendingImportedReviewIdsType {
+  @Field(() => [String])
+  ids!: string[];
+
+  @Field(() => Int)
+  total!: number;
 }
 
 function mapReplyToType(reply: Review['reply']): ReviewReplyType | null {
@@ -424,6 +460,14 @@ export class ReviewsResolver {
     };
   }
 
+  /** IDs-only list for select-all — avoids hydrating review bodies for hundreds of rows. */
+  @Query(() => PendingImportedReviewIdsType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async pendingImportedReviewIds(): Promise<PendingImportedReviewIdsType> {
+    return this.reviewsService.findPendingImportedReviewIds();
+  }
+
   @Mutation(() => ReviewType)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
@@ -445,6 +489,39 @@ export class ReviewsResolver {
       ...getAuditRequestContext(context?.req),
     });
     return mapReviewToType(review);
+  }
+
+  @Mutation(() => BatchApproveReviewsResultType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async approveReviews(
+    @CurrentUser('id') adminUserId: string,
+    @CurrentUser('email') adminEmail: string | undefined,
+    @Args('ids', { type: () => [String] }) ids: string[],
+    @Context() context?: GraphqlContext,
+  ): Promise<BatchApproveReviewsResultType> {
+    const result = await this.reviewsService.approveMany(ids, adminUserId);
+    const auditContext = getAuditRequestContext(context?.req);
+    await Promise.all(
+      result.newlyApprovedIds.map((reviewId) =>
+        this.auditLogsService.log({
+          actorType: AuditActorType.ADMIN,
+          actorId: adminUserId,
+          actorLabel: adminEmail ?? null,
+          action: AuditAction.REVIEW_APPROVED,
+          resourceType: AuditResourceType.REVIEW,
+          resourceId: reviewId,
+          metadata: { status: ReviewStatus.APPROVED },
+          ...auditContext,
+        }),
+      ),
+    );
+    return {
+      approvedCount: result.approvedCount,
+      failedCount: result.failedCount,
+      approvedIds: result.approvedIds,
+      failures: result.failures,
+    };
   }
 
   @Mutation(() => ReviewType)
