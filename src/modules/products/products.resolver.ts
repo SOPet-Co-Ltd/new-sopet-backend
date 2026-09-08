@@ -37,6 +37,7 @@ import {
   ProductType,
   ProductVariantSyncImpactType,
   ProductVariantType,
+  BatchPublishProductsResultType,
 } from '../../graphql/models/types';
 import { mapImage, mapProduct, mapVariant } from '../../graphql/models/mappers';
 import { CurrentUser, Public, Roles } from '../../common/decorators';
@@ -459,6 +460,31 @@ export class ProductsResolver {
     };
   }
 
+  @Query(() => ProductConnection)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('vendor')
+  async vendorPublishableProducts(
+    @CurrentUser('id') userId: string,
+    @CurrentUser('storeId') storeId: string,
+    @Args('search', { nullable: true }) search?: string,
+    @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page?: number,
+    @Args('limit', { type: () => Int, nullable: true, defaultValue: 20 }) limit?: number,
+  ): Promise<ProductConnection> {
+    const activeStoreId = await this.productsService.resolveActiveStoreId(userId, storeId);
+    const cappedLimit = clampPublicProductsLimit(limit);
+
+    const result = await this.productsService.findPublishableForVendor(activeStoreId, {
+      search,
+      page,
+      limit: cappedLimit,
+    });
+
+    return {
+      items: result.items.map(mapProduct),
+      pagination: result.pagination,
+    };
+  }
+
   @Mutation(() => ProductType)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('vendor')
@@ -494,6 +520,16 @@ export class ProductsResolver {
   ): Promise<ProductType> {
     const product = await this.productsService.publish(id, userId);
     return mapProduct(product);
+  }
+
+  @Mutation(() => BatchPublishProductsResultType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('vendor')
+  async publishProducts(
+    @CurrentUser('id') userId: string,
+    @Args('ids', { type: () => [String] }) ids: string[],
+  ): Promise<BatchPublishProductsResultType> {
+    return this.productsService.publishMany(ids, userId);
   }
 
   @Mutation(() => ProductType)
