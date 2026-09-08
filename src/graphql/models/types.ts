@@ -290,6 +290,33 @@ export class ProductPublishChecklistType {
 }
 
 @ObjectType()
+export class BatchPublishProductFailureType {
+  @Field()
+  productId!: string;
+
+  @Field()
+  code!: string;
+
+  @Field()
+  message!: string;
+}
+
+@ObjectType()
+export class BatchPublishProductsResultType {
+  @Field(() => Int)
+  publishedCount!: number;
+
+  @Field(() => Int)
+  failedCount!: number;
+
+  @Field(() => [String])
+  publishedIds!: string[];
+
+  @Field(() => [BatchPublishProductFailureType])
+  failures!: BatchPublishProductFailureType[];
+}
+
+@ObjectType()
 export class CartItemType {
   @Field()
   id!: string;

@@ -6,7 +6,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, SelectQueryBuilder } from 'typeorm';
+import { Repository, In, ILike, SelectQueryBuilder } from 'typeorm';
 import { Product, ProductStatus } from '../../database/entities/product.entity';
 import { StoreStatus } from '../../database/entities/store.entity';
 import { ProductVariant } from '../../database/entities/product-variant.entity';
@@ -50,6 +50,19 @@ type SyncVariantItem = {
   priceModifier?: number;
   compareAtPrice?: number | null;
   attributes: Record<string, string>;
+};
+
+export type BatchPublishProductFailure = {
+  productId: string;
+  code: string;
+  message: string;
+};
+
+export type BatchPublishProductsResult = {
+  publishedCount: number;
+  failedCount: number;
+  publishedIds: string[];
+  failures: BatchPublishProductFailure[];
 };
 
 @Injectable()
@@ -881,6 +894,137 @@ export class ProductsService {
     const saved = await this.productRepository.save(product);
     await this.enqueueEmbeddingIfPublished(saved);
     return saved;
+  }
+
+  static readonly BATCH_PUBLISH_MAX_IDS = 50;
+
+  async publishMany(ids: string[], userId: string): Promise<BatchPublishProductsResult> {
+    if (ids.length === 0) {
+      throw new BadRequestException({
+        code: 'BATCH_PUBLISH_EMPTY',
+        message: 'At least one product id is required',
+      });
+    }
+
+    if (ids.length > ProductsService.BATCH_PUBLISH_MAX_IDS) {
+      throw new BadRequestException({
+        code: 'BATCH_PUBLISH_TOO_MANY',
+        message: `Cannot publish more than ${ProductsService.BATCH_PUBLISH_MAX_IDS} products at once`,
+      });
+    }
+
+    const uniqueIds = [...new Set(ids)];
+    const products = await this.productRepository.find({
+      where: { id: In(uniqueIds) },
+      relations: ['images', 'variants'],
+    });
+    const byId = new Map(products.map((product) => [product.id, product]));
+
+    const storeIds = [...new Set(products.map((product) => product.storeId))];
+    for (const storeId of storeIds) {
+      await this.assertStoreAccess(userId, storeId, 'publish products');
+    }
+
+    const shippingByStore = new Map<string, boolean>();
+    for (const storeId of storeIds) {
+      shippingByStore.set(storeId, await this.shippingOptionsService.hasShippingOptions(storeId));
+    }
+
+    const publishedIds: string[] = [];
+    const failures: BatchPublishProductFailure[] = [];
+    const toSave: Product[] = [];
+
+    for (const id of uniqueIds) {
+      const product = byId.get(id);
+      if (!product) {
+        failures.push({
+          productId: id,
+          code: 'PRODUCT_NOT_FOUND',
+          message: 'Product not found',
+        });
+        continue;
+      }
+
+      if (product.status === ProductStatus.PUBLISHED) {
+        publishedIds.push(id);
+        continue;
+      }
+
+      const checklist = getProductPublishChecklist(product, {
+        hasShipping: shippingByStore.get(product.storeId) ?? false,
+      });
+      if (!checklist.canPublish) {
+        failures.push({
+          productId: id,
+          code: 'PRODUCT_NOT_PUBLISHABLE',
+          message: formatPublishChecklistMessage(checklist.missingKeys),
+        });
+        continue;
+      }
+
+      product.status = ProductStatus.PUBLISHED;
+      toSave.push(product);
+      publishedIds.push(id);
+    }
+
+    if (toSave.length > 0) {
+      await this.productRepository.save(toSave);
+      for (const product of toSave) {
+        await this.enqueueEmbeddingIfPublished(product);
+      }
+    }
+
+    return {
+      publishedCount: publishedIds.length,
+      failedCount: failures.length,
+      publishedIds,
+      failures,
+    };
+  }
+
+  async findPublishableForVendor(
+    storeId: string,
+    options: { search?: string; page?: number; limit?: number } = {},
+  ): Promise<PaginatedResponse<Product>> {
+    const page = Math.max(options.page ?? 1, 1);
+    const limit = Math.min(Math.max(options.limit ?? 20, 1), 100);
+
+    const hasShipping = await this.shippingOptionsService.hasShippingOptions(storeId);
+    if (!hasShipping) {
+      return this.emptyPaginatedResponse(page, limit);
+    }
+
+    const search = options.search?.trim();
+    const products = await this.productRepository.find({
+      where: search
+        ? [
+            { storeId, status: ProductStatus.DRAFT, name: ILike(`%${search}%`) },
+            { storeId, status: ProductStatus.ARCHIVED, name: ILike(`%${search}%`) },
+          ]
+        : [
+            { storeId, status: ProductStatus.DRAFT },
+            { storeId, status: ProductStatus.ARCHIVED },
+          ],
+      relations: ['images', 'variants', 'categoryRelation', 'petTypeRelation', 'brandRelation'],
+      order: { updatedAt: 'DESC', createdAt: 'DESC' },
+    });
+
+    const publishable = products.filter(
+      (product) => getProductPublishChecklist(product, { hasShipping }).canPublish,
+    );
+    const total = publishable.length;
+    const start = (page - 1) * limit;
+    const items = publishable.slice(start, start + limit);
+
+    return {
+      items,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: total === 0 ? 0 : Math.ceil(total / limit),
+      },
+    };
   }
 
   // Update product

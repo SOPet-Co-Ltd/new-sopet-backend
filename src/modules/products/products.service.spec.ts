@@ -377,6 +377,168 @@ describe('ProductsService', () => {
     expect(result.status).toBe(ProductStatus.PUBLISHED);
   });
 
+  describe('publishMany', () => {
+    const publishableProduct = {
+      ...product,
+      basePrice: 299,
+      categoryId: 'cat-1',
+      petTypeId: 'pet-1',
+      images: [{ id: 'img-1' }],
+      variants: [{ id: 'var-1', stockQuantity: 5, priceAdjustment: 0 }],
+    };
+
+    it('rejects an empty id list', async () => {
+      await expect(service.publishMany([], 'user-1')).rejects.toMatchObject({
+        response: { code: 'BATCH_PUBLISH_EMPTY' },
+      });
+    });
+
+    it('rejects more than 50 ids', async () => {
+      const ids = Array.from({ length: 51 }, (_, i) => `prod-${i}`);
+      await expect(service.publishMany(ids, 'user-1')).rejects.toMatchObject({
+        response: { code: 'BATCH_PUBLISH_TOO_MANY' },
+      });
+    });
+
+    it('publishes all eligible products', async () => {
+      productRepository.find.mockResolvedValue([
+        { ...publishableProduct, id: 'prod-1' },
+        { ...publishableProduct, id: 'prod-2', name: 'Cat Food', slug: 'cat-food' },
+      ]);
+      productRepository.save.mockImplementation((rows: Record<string, unknown>[]) =>
+        Promise.resolve(rows),
+      );
+
+      const result = await service.publishMany(['prod-1', 'prod-2'], 'user-1');
+
+      expect(result).toEqual({
+        publishedCount: 2,
+        failedCount: 0,
+        publishedIds: ['prod-1', 'prod-2'],
+        failures: [],
+      });
+    });
+
+    it('returns partial success when some products are not publishable', async () => {
+      productRepository.find.mockResolvedValue([
+        { ...publishableProduct, id: 'prod-1' },
+        {
+          ...product,
+          id: 'prod-2',
+          name: '',
+          images: [],
+          variants: [],
+          categoryId: null,
+          petTypeId: null,
+          basePrice: 0,
+        },
+      ]);
+      productRepository.save.mockImplementation((rows: Record<string, unknown>[]) =>
+        Promise.resolve(rows),
+      );
+
+      const result = await service.publishMany(['prod-1', 'prod-2'], 'user-1');
+
+      expect(result.publishedCount).toBe(1);
+      expect(result.publishedIds).toEqual(['prod-1']);
+      expect(result.failedCount).toBe(1);
+      expect(result.failures).toEqual([
+        expect.objectContaining({
+          productId: 'prod-2',
+          code: 'PRODUCT_NOT_PUBLISHABLE',
+        }),
+      ]);
+    });
+
+    it('treats already-published products as success (idempotent)', async () => {
+      productRepository.find.mockResolvedValue([
+        { ...publishableProduct, id: 'prod-1', status: ProductStatus.PUBLISHED },
+      ]);
+
+      const result = await service.publishMany(['prod-1'], 'user-1');
+
+      expect(result).toEqual({
+        publishedCount: 1,
+        failedCount: 0,
+        publishedIds: ['prod-1'],
+        failures: [],
+      });
+      expect(productRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('marks unknown ids as PRODUCT_NOT_FOUND without failing the batch', async () => {
+      productRepository.find.mockResolvedValue([{ ...publishableProduct, id: 'prod-1' }]);
+      productRepository.save.mockImplementation((rows: Record<string, unknown>[]) =>
+        Promise.resolve(rows),
+      );
+
+      const result = await service.publishMany(['prod-1', 'missing'], 'user-1');
+
+      expect(result.publishedIds).toEqual(['prod-1']);
+      expect(result.failures).toEqual([
+        expect.objectContaining({
+          productId: 'missing',
+          code: 'PRODUCT_NOT_FOUND',
+        }),
+      ]);
+    });
+
+    it('rejects the whole batch when the vendor lacks store access', async () => {
+      productRepository.find.mockResolvedValue([{ ...publishableProduct, id: 'prod-1' }]);
+      storesService.userHasStoreAccess.mockResolvedValue(false);
+
+      await expect(service.publishMany(['prod-1'], 'user-1')).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('findPublishableForVendor', () => {
+    const publishableProduct = {
+      ...product,
+      basePrice: 299,
+      categoryId: 'cat-1',
+      petTypeId: 'pet-1',
+      images: [{ id: 'img-1' }],
+      variants: [{ id: 'var-1', stockQuantity: 5, priceAdjustment: 0 }],
+    };
+
+    it('returns only unpublished products that pass the checklist', async () => {
+      productRepository.find.mockResolvedValue([
+        { ...publishableProduct, id: 'prod-ok' },
+        {
+          ...product,
+          id: 'prod-incomplete',
+          name: '',
+          images: [],
+          variants: [],
+          categoryId: null,
+          petTypeId: null,
+          basePrice: 0,
+        },
+      ]);
+
+      const result = await service.findPublishableForVendor('store-1', {
+        page: 1,
+        limit: 20,
+      });
+
+      expect(result.items.map((p) => p.id)).toEqual(['prod-ok']);
+      expect(result.pagination.total).toBe(1);
+    });
+
+    it('returns empty when the store has no shipping options', async () => {
+      shippingOptionsService.hasShippingOptions.mockResolvedValue(false);
+      productRepository.find.mockResolvedValue([{ ...publishableProduct, id: 'prod-ok' }]);
+
+      const result = await service.findPublishableForVendor('store-1', {
+        page: 1,
+        limit: 20,
+      });
+
+      expect(result.items).toEqual([]);
+      expect(result.pagination.total).toBe(0);
+    });
+  });
+
   it('rejects duplicate SKU when adding variant', async () => {
     productRepository.findOne.mockResolvedValue(product);
     variantRepository.findOne.mockResolvedValue({ id: 'existing', sku: 'SKU-1' });
