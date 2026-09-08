@@ -14,21 +14,35 @@ export class SearchEmbeddingQueueService {
   ) {}
 
   async enqueueProductEmbedding(productId: string): Promise<void> {
-    if (!this.queue) {
-      this.logger.debug(`Embedding queue unavailable — skipped product ${productId}`);
+    await this.enqueueProductEmbeddings([productId]);
+  }
+
+  /** Enqueue many product embedding jobs in one Redis pipeline. */
+  async enqueueProductEmbeddings(productIds: string[]): Promise<void> {
+    const uniqueIds = [...new Set(productIds.filter(Boolean))];
+    if (uniqueIds.length === 0) {
       return;
     }
 
-    await this.queue.add(
-      'embed-product',
-      { productId },
-      {
-        jobId: `embed-product:${productId}`,
-        removeOnComplete: true,
-        removeOnFail: false,
-        attempts: 3,
-        backoff: { type: 'exponential', delay: 5000 },
-      },
+    if (!this.queue) {
+      this.logger.debug(
+        `Embedding queue unavailable — skipped ${uniqueIds.length} product embedding(s)`,
+      );
+      return;
+    }
+
+    await this.queue.addBulk(
+      uniqueIds.map((productId) => ({
+        name: 'embed-product',
+        data: { productId },
+        opts: {
+          jobId: `embed-product:${productId}`,
+          removeOnComplete: true,
+          removeOnFail: false,
+          attempts: 3,
+          backoff: { type: 'exponential' as const, delay: 5000 },
+        },
+      })),
     );
   }
 }

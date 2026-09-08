@@ -3,10 +3,11 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  Logger,
   Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, ILike, SelectQueryBuilder } from 'typeorm';
+import { Repository, In, SelectQueryBuilder } from 'typeorm';
 import { Product, ProductStatus } from '../../database/entities/product.entity';
 import { StoreStatus } from '../../database/entities/store.entity';
 import { ProductVariant } from '../../database/entities/product-variant.entity';
@@ -67,6 +68,8 @@ export type BatchPublishProductsResult = {
 
 @Injectable()
 export class ProductsService {
+  private readonly logger = new Logger(ProductsService.name);
+
   constructor(
     @InjectRepository(Product)
     private productRepository: Repository<Product>,
@@ -92,6 +95,13 @@ export class ProductsService {
     }
 
     await this.searchEmbeddingQueueService?.enqueueProductEmbedding(product.id);
+  }
+
+  private async enqueueEmbeddingsForPublished(productIds: string[]): Promise<void> {
+    if (productIds.length === 0) {
+      return;
+    }
+    await this.searchEmbeddingQueueService?.enqueueProductEmbeddings(productIds);
   }
 
   private shouldReembedAfterUpdate(
@@ -899,6 +909,8 @@ export class ProductsService {
   static readonly BATCH_PUBLISH_MAX_IDS = 50;
 
   async publishMany(ids: string[], userId: string): Promise<BatchPublishProductsResult> {
+    const startedAt = Date.now();
+
     if (ids.length === 0) {
       throw new BadRequestException({
         code: 'BATCH_PUBLISH_EMPTY',
@@ -914,11 +926,15 @@ export class ProductsService {
     }
 
     const uniqueIds = [...new Set(ids)];
+    // Scalars only — checklist media/price/stock validated via SQL below (no cascade save).
     const products = await this.productRepository.find({
       where: { id: In(uniqueIds) },
-      relations: ['images', 'variants'],
+      select: ['id', 'storeId', 'status', 'name'],
     });
     const byId = new Map(products.map((product) => [product.id, product]));
+    this.logger.debug(
+      `publishMany find: ${products.length}/${uniqueIds.length} products in ${Date.now() - startedAt}ms`,
+    );
 
     const storeIds = [...new Set(products.map((product) => product.storeId))];
     for (const storeId of storeIds) {
@@ -932,7 +948,7 @@ export class ProductsService {
 
     const publishedIds: string[] = [];
     const failures: BatchPublishProductFailure[] = [];
-    const toSave: Product[] = [];
+    const candidatesByStore = new Map<string, string[]>();
 
     for (const id of uniqueIds) {
       const product = byId.get(id);
@@ -950,35 +966,130 @@ export class ProductsService {
         continue;
       }
 
-      const checklist = getProductPublishChecklist(product, {
-        hasShipping: shippingByStore.get(product.storeId) ?? false,
-      });
-      if (!checklist.canPublish) {
+      if (!(shippingByStore.get(product.storeId) ?? false)) {
         failures.push({
           productId: id,
           code: 'PRODUCT_NOT_PUBLISHABLE',
-          message: formatPublishChecklistMessage(checklist.missingKeys),
+          message: formatPublishChecklistMessage(['shipping']),
         });
         continue;
       }
 
-      product.status = ProductStatus.PUBLISHED;
-      toSave.push(product);
-      publishedIds.push(id);
+      const list = candidatesByStore.get(product.storeId) ?? [];
+      list.push(id);
+      candidatesByStore.set(product.storeId, list);
     }
 
-    if (toSave.length > 0) {
-      await this.productRepository.save(toSave);
-      for (const product of toSave) {
-        await this.enqueueEmbeddingIfPublished(product);
+    const toPublish: string[] = [];
+    for (const [storeId, candidateIds] of candidatesByStore) {
+      const rows = await this.createPublishableForVendorQuery(storeId)
+        .andWhere('product.id IN (:...candidateIds)', { candidateIds })
+        .select('product.id', 'id')
+        .getRawMany<{ id: string }>();
+      const publishableIds = new Set(rows.map((row) => row.id));
+
+      const failedIds: string[] = [];
+      for (const id of candidateIds) {
+        if (publishableIds.has(id)) {
+          toPublish.push(id);
+          publishedIds.push(id);
+        } else {
+          failedIds.push(id);
+        }
+      }
+
+      if (failedIds.length > 0) {
+        const failedProducts = await this.productRepository.find({
+          where: { id: In(failedIds) },
+          relations: ['images', 'variants'],
+        });
+        const failedById = new Map(failedProducts.map((product) => [product.id, product]));
+        for (const id of failedIds) {
+          const product = failedById.get(id);
+          const checklist = product
+            ? getProductPublishChecklist(product, { hasShipping: true })
+            : null;
+          failures.push({
+            productId: id,
+            code: 'PRODUCT_NOT_PUBLISHABLE',
+            message: checklist
+              ? formatPublishChecklistMessage(checklist.missingKeys)
+              : 'Product is not publishable',
+          });
+        }
       }
     }
+
+    if (toPublish.length > 0) {
+      const updateStartedAt = Date.now();
+      await this.productRepository
+        .createQueryBuilder()
+        .update(Product)
+        .set({
+          status: ProductStatus.PUBLISHED,
+          updatedAt: () => 'CURRENT_TIMESTAMP',
+        })
+        .where('id IN (:...ids)', { ids: toPublish })
+        .execute();
+      this.logger.debug(
+        `publishMany update: ${toPublish.length} products in ${Date.now() - updateStartedAt}ms`,
+      );
+
+      // Never block the HTTP response on Redis — a hung queue caused CF 524s.
+      void this.enqueueEmbeddingsForPublished(toPublish).catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `publishMany embedding enqueue failed for ${toPublish.length} products: ${message}`,
+        );
+      });
+    }
+
+    this.logger.debug(
+      `publishMany done: published=${publishedIds.length} failed=${failures.length} total=${Date.now() - startedAt}ms`,
+    );
 
     return {
       publishedCount: publishedIds.length,
       failedCount: failures.length,
       publishedIds,
       failures,
+    };
+  }
+
+  static readonly PUBLISHABLE_IDS_MAX = 2000;
+
+  async findPublishableIdsForVendor(
+    storeId: string,
+    options: { search?: string } = {},
+  ): Promise<{ ids: string[]; total: number }> {
+    const hasShipping = await this.shippingOptionsService.hasShippingOptions(storeId);
+    if (!hasShipping) {
+      return { ids: [], total: 0 };
+    }
+
+    const search = options.search?.trim();
+    const baseQb = this.createPublishableForVendorQuery(storeId, search);
+
+    const countRow = await baseQb
+      .clone()
+      .select('COUNT(DISTINCT product.id)', 'cnt')
+      .getRawOne<{ cnt?: string | number }>();
+    const total = Number(countRow?.cnt ?? 0);
+    if (total === 0) {
+      return { ids: [], total: 0 };
+    }
+
+    const idRows = await baseQb
+      .clone()
+      .select('product.id', 'id')
+      .orderBy('product.updatedAt', 'DESC')
+      .addOrderBy('product.createdAt', 'DESC')
+      .limit(ProductsService.PUBLISHABLE_IDS_MAX)
+      .getRawMany<{ id: string }>();
+
+    return {
+      ids: idRows.map((row) => row.id),
+      total,
     };
   }
 
@@ -995,36 +1106,117 @@ export class ProductsService {
     }
 
     const search = options.search?.trim();
-    const products = await this.productRepository.find({
-      where: search
-        ? [
-            { storeId, status: ProductStatus.DRAFT, name: ILike(`%${search}%`) },
-            { storeId, status: ProductStatus.ARCHIVED, name: ILike(`%${search}%`) },
-          ]
-        : [
-            { storeId, status: ProductStatus.DRAFT },
-            { storeId, status: ProductStatus.ARCHIVED },
-          ],
-      relations: ['images', 'variants', 'categoryRelation', 'petTypeRelation', 'brandRelation'],
-      order: { updatedAt: 'DESC', createdAt: 'DESC' },
-    });
+    const baseQb = this.createPublishableForVendorQuery(storeId, search);
 
-    const publishable = products.filter(
-      (product) => getProductPublishChecklist(product, { hasShipping }).canPublish,
-    );
-    const total = publishable.length;
-    const start = (page - 1) * limit;
-    const items = publishable.slice(start, start + limit);
+    const countRow = await baseQb
+      .clone()
+      .select('COUNT(DISTINCT product.id)', 'cnt')
+      .getRawOne<{ cnt?: string | number }>();
+    const total = Number(countRow?.cnt ?? 0);
+    if (total === 0) {
+      return this.emptyPaginatedResponse(page, limit);
+    }
+
+    const idRows = await baseQb
+      .clone()
+      .select('product.id', 'id')
+      .orderBy('product.updatedAt', 'DESC')
+      .addOrderBy('product.createdAt', 'DESC')
+      .offset((page - 1) * limit)
+      .limit(limit)
+      .getRawMany<{ id: string }>();
+    const pageIds = idRows.map((row) => row.id);
+    if (pageIds.length === 0) {
+      return {
+        items: [],
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      };
+    }
+
+    const items = await this.productRepository.find({
+      where: { id: In(pageIds) },
+      relations: ['images', 'variants', 'categoryRelation', 'petTypeRelation', 'brandRelation'],
+    });
+    const byId = new Map(items.map((product) => [product.id, product]));
+    const orderedItems = pageIds
+      .map((id) => byId.get(id))
+      .filter((product): product is Product => Boolean(product));
 
     return {
-      items,
+      items: orderedItems,
       pagination: {
         page,
         limit,
         total,
-        totalPages: total === 0 ? 0 : Math.ceil(total / limit),
+        totalPages: Math.ceil(total / limit),
       },
     };
+  }
+
+  /**
+   * SQL checklist matching product-publish.validation.ts (shipping checked separately).
+   */
+  private createPublishableForVendorQuery(
+    storeId: string,
+    search?: string,
+  ): SelectQueryBuilder<Product> {
+    const qb = this.productRepository
+      .createQueryBuilder('product')
+      .where('product.store_id = :storeId', { storeId })
+      .andWhere('product.status IN (:...statuses)', {
+        statuses: [ProductStatus.DRAFT, ProductStatus.ARCHIVED],
+      })
+      .andWhere("NULLIF(BTRIM(product.name), '') IS NOT NULL")
+      .andWhere('product.category_id IS NOT NULL')
+      .andWhere('product.pet_type_id IS NOT NULL')
+      .andWhere(
+        `EXISTS (
+          SELECT 1 FROM product_images pi
+          WHERE pi.product_id = product.id
+        )`,
+      )
+      .andWhere(
+        `EXISTS (
+          SELECT 1 FROM product_variants pv
+          WHERE pv.product_id = product.id
+            AND pv.deleted_at IS NULL
+        )`,
+      )
+      .andWhere(
+        `EXISTS (
+          SELECT 1 FROM product_variants pv
+          WHERE pv.product_id = product.id
+            AND pv.deleted_at IS NULL
+            AND (product.base_price + pv.price_adjustment) > 0
+        )`,
+      )
+      .andWhere(
+        `EXISTS (
+          SELECT 1 FROM product_variants pv
+          WHERE pv.product_id = product.id
+            AND pv.deleted_at IS NULL
+            AND pv.stock_quantity > 0
+        )`,
+      )
+      .andWhere(
+        `NOT EXISTS (
+          SELECT 1 FROM product_variants pv
+          WHERE pv.product_id = product.id
+            AND pv.deleted_at IS NULL
+            AND (product.base_price + pv.price_adjustment) < 0
+        )`,
+      );
+
+    if (search) {
+      qb.andWhere('product.name ILIKE :search', { search: `%${search}%` });
+    }
+
+    return qb;
   }
 
   // Update product
