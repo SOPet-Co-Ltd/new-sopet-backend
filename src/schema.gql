@@ -312,6 +312,19 @@ type BankTransferSettingsType {
   enabled: Boolean!
 }
 
+type BatchApproveReviewFailureType {
+  code: String!
+  message: String!
+  reviewId: String!
+}
+
+type BatchApproveReviewsResultType {
+  approvedCount: Int!
+  approvedIds: [String!]!
+  failedCount: Int!
+  failures: [BatchApproveReviewFailureType!]!
+}
+
 type BatchPublishProductFailureType {
   code: String!
   message: String!
@@ -774,6 +787,7 @@ type Mutation {
   approveCategory(id: String!): CategoryType!
   approvePetType(id: String!): PetTypeType!
   approveReview(id: String!): ReviewType!
+  approveReviews(ids: [String!]!): BatchApproveReviewsResultType!
   approveStore(input: ApproveStoreInput!): StoreType!
   approveStoreReactivationRequest(id: String!): StoreReactivationRequestType!
   approveStoreRequest(id: String!): StoreRequestType!
@@ -1181,6 +1195,11 @@ type PayoutType {
   storeId: String!
 }
 
+type PendingImportedReviewIdsType {
+  ids: [String!]!
+  total: Int!
+}
+
 type PetTypeType {
   approvalStatus: String!
   createdAt: DateTime!
@@ -1447,6 +1466,7 @@ type Query {
   pendingBankTransferOrders(limit: Int = 20, page: Int = 1): OrderConnection!
   pendingBrands: [BrandType!]!
   pendingCategories: [CategoryType!]!
+  pendingImportedReviewIds: PendingImportedReviewIdsType!
   pendingImportedReviews(limit: Int = 20, page: Int = 1): AdminImportedReviewConnection!
   pendingManualPayouts(limit: Int = 20, page: Int = 1): AdminManualPayoutConnection!
   pendingPetTypes: [PetTypeType!]!
