@@ -317,6 +317,15 @@ export class BatchPublishProductsResultType {
 }
 
 @ObjectType()
+export class VendorPublishableProductIdsType {
+  @Field(() => [String])
+  ids!: string[];
+
+  @Field(() => Int)
+  total!: number;
+}
+
+@ObjectType()
 export class CartItemType {
   @Field()
   id!: string;
