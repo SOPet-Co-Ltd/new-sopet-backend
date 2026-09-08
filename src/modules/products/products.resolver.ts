@@ -38,6 +38,7 @@ import {
   ProductVariantSyncImpactType,
   ProductVariantType,
   BatchPublishProductsResultType,
+  VendorPublishableProductIdsType,
 } from '../../graphql/models/types';
 import { mapImage, mapProduct, mapVariant } from '../../graphql/models/mappers';
 import { CurrentUser, Public, Roles } from '../../common/decorators';
@@ -483,6 +484,19 @@ export class ProductsResolver {
       items: result.items.map(mapProduct),
       pagination: result.pagination,
     };
+  }
+
+  /** IDs-only list for select-all — avoids hydrating images/variants for hundreds of products. */
+  @Query(() => VendorPublishableProductIdsType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('vendor')
+  async vendorPublishableProductIds(
+    @CurrentUser('id') userId: string,
+    @CurrentUser('storeId') storeId: string,
+    @Args('search', { nullable: true }) search?: string,
+  ): Promise<VendorPublishableProductIdsType> {
+    const activeStoreId = await this.productsService.resolveActiveStoreId(userId, storeId);
+    return this.productsService.findPublishableIdsForVendor(activeStoreId, { search });
   }
 
   @Mutation(() => ProductType)

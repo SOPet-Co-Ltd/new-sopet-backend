@@ -387,6 +387,29 @@ describe('ProductsService', () => {
       variants: [{ id: 'var-1', stockQuantity: 5, priceAdjustment: 0 }],
     };
 
+    function mockPublishManyQueryBuilders(publishableIds: string[]) {
+      const checklistQb = {
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue(publishableIds.map((id) => ({ id }))),
+      };
+      const execute = jest.fn().mockResolvedValue({ affected: publishableIds.length });
+      const where = jest.fn().mockReturnValue({ execute });
+      const set = jest.fn().mockReturnValue({ where });
+      const update = jest.fn().mockReturnValue({ set });
+      const updateQb = { update };
+
+      productRepository.createQueryBuilder.mockImplementation((alias?: string) => {
+        if (alias === 'product') {
+          return checklistQb;
+        }
+        return updateQb;
+      });
+
+      return { checklistQb, update, set, where, execute };
+    }
+
     it('rejects an empty id list', async () => {
       await expect(service.publishMany([], 'user-1')).rejects.toMatchObject({
         response: { code: 'BATCH_PUBLISH_EMPTY' },
@@ -400,14 +423,12 @@ describe('ProductsService', () => {
       });
     });
 
-    it('publishes all eligible products', async () => {
+    it('publishes all eligible products via status-only UPDATE', async () => {
       productRepository.find.mockResolvedValue([
         { ...publishableProduct, id: 'prod-1' },
         { ...publishableProduct, id: 'prod-2', name: 'Cat Food', slug: 'cat-food' },
       ]);
-      productRepository.save.mockImplementation((rows: Record<string, unknown>[]) =>
-        Promise.resolve(rows),
-      );
+      const qb = mockPublishManyQueryBuilders(['prod-1', 'prod-2']);
 
       const result = await service.publishMany(['prod-1', 'prod-2'], 'user-1');
 
@@ -417,25 +438,33 @@ describe('ProductsService', () => {
         publishedIds: ['prod-1', 'prod-2'],
         failures: [],
       });
+      expect(productRepository.save).not.toHaveBeenCalled();
+      expect(qb.update).toHaveBeenCalledWith(expect.anything());
+      expect(qb.set).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: ProductStatus.PUBLISHED,
+        }),
+      );
+      expect(qb.where).toHaveBeenCalledWith('id IN (:...ids)', {
+        ids: ['prod-1', 'prod-2'],
+      });
     });
 
     it('returns partial success when some products are not publishable', async () => {
-      productRepository.find.mockResolvedValue([
-        { ...publishableProduct, id: 'prod-1' },
-        {
-          ...product,
-          id: 'prod-2',
-          name: '',
-          images: [],
-          variants: [],
-          categoryId: null,
-          petTypeId: null,
-          basePrice: 0,
-        },
-      ]);
-      productRepository.save.mockImplementation((rows: Record<string, unknown>[]) =>
-        Promise.resolve(rows),
-      );
+      const incomplete = {
+        ...product,
+        id: 'prod-2',
+        name: '',
+        images: [],
+        variants: [],
+        categoryId: null,
+        petTypeId: null,
+        basePrice: 0,
+      };
+      productRepository.find
+        .mockResolvedValueOnce([{ ...publishableProduct, id: 'prod-1' }, incomplete])
+        .mockResolvedValueOnce([incomplete]);
+      mockPublishManyQueryBuilders(['prod-1']);
 
       const result = await service.publishMany(['prod-1', 'prod-2'], 'user-1');
 
@@ -464,13 +493,12 @@ describe('ProductsService', () => {
         failures: [],
       });
       expect(productRepository.save).not.toHaveBeenCalled();
+      expect(productRepository.createQueryBuilder).not.toHaveBeenCalled();
     });
 
     it('marks unknown ids as PRODUCT_NOT_FOUND without failing the batch', async () => {
       productRepository.find.mockResolvedValue([{ ...publishableProduct, id: 'prod-1' }]);
-      productRepository.save.mockImplementation((rows: Record<string, unknown>[]) =>
-        Promise.resolve(rows),
-      );
+      mockPublishManyQueryBuilders(['prod-1']);
 
       const result = await service.publishMany(['prod-1', 'missing'], 'user-1');
 
@@ -489,6 +517,78 @@ describe('ProductsService', () => {
 
       await expect(service.publishMany(['prod-1'], 'user-1')).rejects.toThrow(ForbiddenException);
     });
+
+    it('bulk-enqueues embeddings after status update without awaiting Redis', async () => {
+      const enqueueProductEmbeddings = jest.fn().mockResolvedValue(undefined);
+      const serviceWithQueue = new ProductsService(
+        productRepository as never,
+        variantRepository as never,
+        imageRepository as never,
+        orderItemRepository as never,
+        cartItemRepository as never,
+        storesService as never,
+        taxonomyService as never,
+        shippingOptionsService as never,
+        storageService as never,
+        undefined,
+        { enqueueProductEmbeddings, enqueueProductEmbedding: jest.fn() } as never,
+      );
+
+      productRepository.find.mockResolvedValue([
+        { ...publishableProduct, id: 'prod-1' },
+        { ...publishableProduct, id: 'prod-2', name: 'Cat Food', slug: 'cat-food' },
+      ]);
+      mockPublishManyQueryBuilders(['prod-1', 'prod-2']);
+
+      await serviceWithQueue.publishMany(['prod-1', 'prod-2'], 'user-1');
+      await Promise.resolve();
+
+      expect(enqueueProductEmbeddings).toHaveBeenCalledWith(['prod-1', 'prod-2']);
+    });
+  });
+
+  describe('findPublishableIdsForVendor', () => {
+    function mockIdsQueryBuilders(opts: { count: number; idRows: Array<{ id: string }> }) {
+      const countQb = {
+        select: jest.fn().mockReturnThis(),
+        getRawOne: jest.fn().mockResolvedValue({ cnt: String(opts.count) }),
+      };
+      const idQb = {
+        select: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue(opts.idRows),
+      };
+      const baseQb = {
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        clone: jest.fn().mockReturnValueOnce(countQb).mockReturnValueOnce(idQb),
+      };
+      productRepository.createQueryBuilder.mockReturnValue(baseQb);
+      return { baseQb, idQb };
+    }
+
+    it('returns publishable ids without hydrating products', async () => {
+      mockIdsQueryBuilders({
+        count: 2,
+        idRows: [{ id: 'prod-1' }, { id: 'prod-2' }],
+      });
+
+      const result = await service.findPublishableIdsForVendor('store-1');
+
+      expect(result).toEqual({ ids: ['prod-1', 'prod-2'], total: 2 });
+      expect(productRepository.find).not.toHaveBeenCalled();
+    });
+
+    it('returns empty when the store has no shipping options', async () => {
+      shippingOptionsService.hasShippingOptions.mockResolvedValue(false);
+
+      const result = await service.findPublishableIdsForVendor('store-1');
+
+      expect(result).toEqual({ ids: [], total: 0 });
+      expect(productRepository.createQueryBuilder).not.toHaveBeenCalled();
+    });
   });
 
   describe('findPublishableForVendor', () => {
@@ -501,20 +601,39 @@ describe('ProductsService', () => {
       variants: [{ id: 'var-1', stockQuantity: 5, priceAdjustment: 0 }],
     };
 
-    it('returns only unpublished products that pass the checklist', async () => {
-      productRepository.find.mockResolvedValue([
-        { ...publishableProduct, id: 'prod-ok' },
-        {
-          ...product,
-          id: 'prod-incomplete',
-          name: '',
-          images: [],
-          variants: [],
-          categoryId: null,
-          petTypeId: null,
-          basePrice: 0,
-        },
-      ]);
+    function mockPublishableQueryBuilders(opts: {
+      count: number;
+      idRows: Array<{ id: string }>;
+      items: Record<string, unknown>[];
+    }) {
+      const countQb = {
+        select: jest.fn().mockReturnThis(),
+        getRawOne: jest.fn().mockResolvedValue({ cnt: String(opts.count) }),
+      };
+      const idQb = {
+        select: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        offset: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue(opts.idRows),
+      };
+      const baseQb = {
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        clone: jest.fn().mockReturnValueOnce(countQb).mockReturnValueOnce(idQb),
+      };
+      productRepository.createQueryBuilder.mockReturnValue(baseQb);
+      productRepository.find.mockResolvedValue(opts.items);
+      return { baseQb, countQb, idQb };
+    }
+
+    it('returns only unpublished products that pass the checklist via SQL pagination', async () => {
+      mockPublishableQueryBuilders({
+        count: 1,
+        idRows: [{ id: 'prod-ok' }],
+        items: [{ ...publishableProduct, id: 'prod-ok' }],
+      });
 
       const result = await service.findPublishableForVendor('store-1', {
         page: 1,
@@ -523,11 +642,52 @@ describe('ProductsService', () => {
 
       expect(result.items.map((p) => p.id)).toEqual(['prod-ok']);
       expect(result.pagination.total).toBe(1);
+      expect(productRepository.createQueryBuilder).toHaveBeenCalledWith('product');
+    });
+
+    it('applies LIMIT/OFFSET in SQL and preserves id order', async () => {
+      const { idQb } = mockPublishableQueryBuilders({
+        count: 2,
+        idRows: [{ id: 'prod-2' }],
+        items: [
+          { ...publishableProduct, id: 'prod-1' },
+          { ...publishableProduct, id: 'prod-2', name: 'Second' },
+        ],
+      });
+
+      const result = await service.findPublishableForVendor('store-1', {
+        page: 2,
+        limit: 1,
+      });
+
+      expect(idQb.offset).toHaveBeenCalledWith(1);
+      expect(idQb.limit).toHaveBeenCalledWith(1);
+      expect(result.items.map((p) => p.id)).toEqual(['prod-2']);
+      expect(result.pagination.total).toBe(2);
+      expect(result.pagination.totalPages).toBe(2);
+    });
+
+    it('applies search filter on the publishable query', async () => {
+      const { baseQb } = mockPublishableQueryBuilders({
+        count: 1,
+        idRows: [{ id: 'prod-ok' }],
+        items: [{ ...publishableProduct, id: 'prod-ok' }],
+      });
+
+      await service.findPublishableForVendor('store-1', {
+        search: 'dog',
+        page: 1,
+        limit: 10,
+      });
+
+      expect(baseQb.andWhere).toHaveBeenCalledWith(
+        'product.name ILIKE :search',
+        expect.objectContaining({ search: '%dog%' }),
+      );
     });
 
     it('returns empty when the store has no shipping options', async () => {
       shippingOptionsService.hasShippingOptions.mockResolvedValue(false);
-      productRepository.find.mockResolvedValue([{ ...publishableProduct, id: 'prod-ok' }]);
 
       const result = await service.findPublishableForVendor('store-1', {
         page: 1,
@@ -536,6 +696,7 @@ describe('ProductsService', () => {
 
       expect(result.items).toEqual([]);
       expect(result.pagination.total).toBe(0);
+      expect(productRepository.createQueryBuilder).not.toHaveBeenCalled();
     });
   });
 
