@@ -28,6 +28,7 @@ describe('ReviewsService', () => {
     save: jest.fn((x: object) => Promise.resolve({ id: 'review-1', ...x })),
     find: jest.fn(),
     findOne: jest.fn(),
+    findAndCount: jest.fn(),
     createQueryBuilder: jest.fn(),
   };
 
@@ -750,6 +751,206 @@ describe('ReviewsService', () => {
         rating5Count: 0,
       });
       expect(reviewRepo.createQueryBuilder).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('approveMany', () => {
+    function mockApproveManyQueryBuilders() {
+      const execute = jest.fn().mockResolvedValue({ affected: 1 });
+      const where = jest.fn().mockReturnValue({ execute });
+      const set = jest.fn().mockReturnValue({ where });
+      const update = jest.fn().mockReturnValue({ set });
+      const updateQb = { update };
+
+      const statsQb = {
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getRawOne: jest.fn().mockResolvedValue({ averageRating: '4.5', reviewCount: '2' }),
+      };
+
+      reviewRepo.createQueryBuilder.mockImplementation((alias?: string) => {
+        if (alias === 'review') {
+          return statsQb;
+        }
+        return updateQb;
+      });
+
+      return { update, set, where, execute, statsQb };
+    }
+
+    it('rejects an empty id list', async () => {
+      await expect(service.approveMany([], 'admin-1')).rejects.toMatchObject({
+        response: { code: 'BATCH_APPROVE_EMPTY' },
+      });
+    });
+
+    it('rejects more than 50 ids', async () => {
+      const ids = Array.from({ length: 51 }, (_, i) => `review-${i}`);
+      await expect(service.approveMany(ids, 'admin-1')).rejects.toMatchObject({
+        response: { code: 'BATCH_APPROVE_TOO_MANY' },
+      });
+    });
+
+    it('approves pending reviews via bulk UPDATE and syncs stats once per product', async () => {
+      reviewRepo.find.mockResolvedValue([
+        {
+          id: 'review-1',
+          status: ReviewStatus.PENDING,
+          productId: 'prod-1',
+        },
+        {
+          id: 'review-2',
+          status: ReviewStatus.PENDING,
+          productId: 'prod-1',
+        },
+        {
+          id: 'review-3',
+          status: ReviewStatus.PENDING,
+          productId: 'prod-2',
+        },
+      ]);
+      const qb = mockApproveManyQueryBuilders();
+
+      const result = await service.approveMany(['review-1', 'review-2', 'review-3'], 'admin-1');
+
+      expect(result).toEqual({
+        approvedCount: 3,
+        failedCount: 0,
+        approvedIds: ['review-1', 'review-2', 'review-3'],
+        newlyApprovedIds: ['review-1', 'review-2', 'review-3'],
+        failures: [],
+      });
+      expect(reviewRepo.save).not.toHaveBeenCalled();
+      expect(qb.update).toHaveBeenCalledWith(Review);
+      expect(qb.set).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: ReviewStatus.APPROVED,
+          moderatedBy: 'admin-1',
+        }),
+      );
+      expect(qb.where).toHaveBeenCalledWith('id IN (:...ids)', {
+        ids: ['review-1', 'review-2', 'review-3'],
+      });
+      expect(productRepo.update).toHaveBeenCalledTimes(2);
+      expect(productRepo.update).toHaveBeenCalledWith(
+        'prod-1',
+        expect.objectContaining({ reviewCount: 2 }),
+      );
+      expect(productRepo.update).toHaveBeenCalledWith(
+        'prod-2',
+        expect.objectContaining({ reviewCount: 2 }),
+      );
+    });
+
+    it('returns partial success for missing and rejected ids', async () => {
+      reviewRepo.find.mockResolvedValue([
+        {
+          id: 'review-pending',
+          status: ReviewStatus.PENDING,
+          productId: 'prod-1',
+        },
+        {
+          id: 'review-rejected',
+          status: ReviewStatus.REJECTED,
+          productId: 'prod-2',
+        },
+      ]);
+      mockApproveManyQueryBuilders();
+
+      const result = await service.approveMany(
+        ['review-pending', 'review-missing', 'review-rejected'],
+        'admin-1',
+      );
+
+      expect(result.approvedCount).toBe(1);
+      expect(result.failedCount).toBe(2);
+      expect(result.approvedIds).toEqual(['review-pending']);
+      expect(result.newlyApprovedIds).toEqual(['review-pending']);
+      expect(result.failures).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            reviewId: 'review-missing',
+            code: 'REVIEW_NOT_FOUND',
+          }),
+          expect.objectContaining({
+            reviewId: 'review-rejected',
+            code: 'INVALID_REVIEW_STATUS',
+          }),
+        ]),
+      );
+    });
+
+    it('counts already-approved reviews as success without updating them', async () => {
+      reviewRepo.find.mockResolvedValue([
+        {
+          id: 'review-approved',
+          status: ReviewStatus.APPROVED,
+          productId: 'prod-1',
+        },
+        {
+          id: 'review-pending',
+          status: ReviewStatus.PENDING,
+          productId: 'prod-2',
+        },
+      ]);
+      const qb = mockApproveManyQueryBuilders();
+
+      const result = await service.approveMany(['review-approved', 'review-pending'], 'admin-1');
+
+      expect(result).toEqual({
+        approvedCount: 2,
+        failedCount: 0,
+        approvedIds: ['review-approved', 'review-pending'],
+        newlyApprovedIds: ['review-pending'],
+        failures: [],
+      });
+      expect(qb.where).toHaveBeenCalledWith('id IN (:...ids)', {
+        ids: ['review-pending'],
+      });
+      expect(productRepo.update).toHaveBeenCalledTimes(1);
+      expect(productRepo.update).toHaveBeenCalledWith(
+        'prod-2',
+        expect.objectContaining({ reviewCount: 2 }),
+      );
+    });
+
+    it('deduplicates ids before processing', async () => {
+      reviewRepo.find.mockResolvedValue([
+        {
+          id: 'review-1',
+          status: ReviewStatus.PENDING,
+          productId: 'prod-1',
+        },
+      ]);
+      mockApproveManyQueryBuilders();
+
+      const result = await service.approveMany(['review-1', 'review-1'], 'admin-1');
+
+      expect(result.approvedCount).toBe(1);
+      expect(result.approvedIds).toEqual(['review-1']);
+      expect(reviewRepo.find).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('findPendingImportedReviewIds', () => {
+    it('returns ids and total for pending imported reviews', async () => {
+      reviewRepo.findAndCount.mockResolvedValue([[{ id: 'review-1' }, { id: 'review-2' }], 2]);
+
+      const result = await service.findPendingImportedReviewIds();
+
+      expect(result).toEqual({ ids: ['review-1', 'review-2'], total: 2 });
+      expect(reviewRepo.findAndCount).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            source: ReviewSource.VENDOR_IMPORT,
+            status: ReviewStatus.PENDING,
+          },
+          select: ['id'],
+          order: { createdAt: 'ASC' },
+        }),
+      );
     });
   });
 });
