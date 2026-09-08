@@ -117,4 +117,38 @@ describe('Product publish (e2e)', () => {
 
     await expect(service.publish('prod-1', 'user-1')).rejects.toThrow(BadRequestException);
   });
+
+  it('batch-publishes eligible products and reports failures for incomplete ones', async () => {
+    productRepository.find = jest.fn().mockResolvedValue([
+      {
+        ...product,
+        id: 'prod-1',
+        categoryId: 'cat-1',
+        petTypeId: 'pet-1',
+        images: [{ id: 'img-1', url: 'https://example.com/a.jpg' }],
+        variants: [{ id: 'var-1', sku: 'SKU-1', stockQuantity: 10, priceAdjustment: 0 }],
+      },
+      {
+        ...product,
+        id: 'prod-2',
+        name: '',
+        images: [],
+        variants: [],
+        categoryId: null,
+        petTypeId: null,
+        basePrice: 0,
+      },
+    ]);
+
+    const result = await service.publishMany(['prod-1', 'prod-2'], 'user-1');
+
+    expect(result.publishedIds).toEqual(['prod-1']);
+    expect(result.failures).toEqual([
+      expect.objectContaining({
+        productId: 'prod-2',
+        code: 'PRODUCT_NOT_PUBLISHABLE',
+      }),
+    ]);
+    expect(productRepository.save).toHaveBeenCalled();
+  });
 });
