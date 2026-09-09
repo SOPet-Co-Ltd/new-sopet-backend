@@ -5,7 +5,7 @@ import { RedisService } from '../../redis/redis.service';
 
 describe('ApiKeyRateLimitGuard', () => {
   let guard: ApiKeyRateLimitGuard;
-  let redisService: { isAvailable: jest.Mock; get: jest.Mock; set: jest.Mock };
+  let redisService: { isAvailable: jest.Mock; get: jest.Mock; set: jest.Mock; incr: jest.Mock };
   let configService: { get: jest.Mock };
 
   function contextFor(keyId = 'key-1'): ExecutionContext {
@@ -25,6 +25,7 @@ describe('ApiKeyRateLimitGuard', () => {
       isAvailable: jest.fn().mockReturnValue(false),
       get: jest.fn(),
       set: jest.fn(),
+      incr: jest.fn(),
     };
     configService = {
       get: jest.fn((key: string) => {
@@ -55,10 +56,9 @@ describe('ApiKeyRateLimitGuard', () => {
 
   it('uses Redis counters when available', async () => {
     redisService.isAvailable.mockReturnValue(true);
-    redisService.get.mockResolvedValue('0');
-    redisService.set.mockResolvedValue(undefined);
+    redisService.incr.mockResolvedValue(1);
 
     await expect(guard.canActivate(contextFor())).resolves.toBe(true);
-    expect(redisService.set).toHaveBeenCalled();
+    expect(redisService.incr).toHaveBeenCalledWith('rate_limit:api_key:key-1', 60);
   });
 });

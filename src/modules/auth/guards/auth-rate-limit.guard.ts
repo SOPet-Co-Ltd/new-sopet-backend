@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   CanActivate,
   ExecutionContext,
@@ -7,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GqlExecutionContext } from '@nestjs/graphql';
+import { resolveClientIp } from '../../../common/utils/client-ip.util';
 import { RedisService } from '../../redis/redis.service';
 
 /** Tight per-process fallback when Redis is down/unset (SOPET-H-01). */
@@ -14,6 +16,53 @@ const IN_MEMORY_AUTH_LIMIT = 5;
 const IN_MEMORY_AUTH_WINDOW_MS = 60_000;
 
 type InMemoryBucket = { count: number; resetAt: number };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+/** Stable hash for secrets used as auth rate-limit identities (tokens). */
+export function hashRateLimitIdentity(value: string): string {
+  return createHash('sha256').update(value).digest('hex').slice(0, 32);
+}
+
+export function resolveAuthRateLimitIdentity(
+  args: Record<string, unknown>,
+  req: unknown,
+): string | null {
+  const input = isRecord(args.input) ? args.input : undefined;
+
+  if (input && typeof input.phone === 'string' && input.phone.trim()) {
+    return `phone:${input.phone.trim()}`;
+  }
+
+  const email =
+    (input && typeof input.email === 'string' && input.email.trim()) ||
+    (input && typeof input.ownerEmail === 'string' && input.ownerEmail.trim()) ||
+    null;
+  if (email) {
+    return `email:${email.toLowerCase()}`;
+  }
+
+  const tokenCandidates = [
+    input && typeof input.refreshToken === 'string' ? input.refreshToken : null,
+    input && typeof input.token === 'string' ? input.token : null,
+    input && typeof input.reactivationToken === 'string' ? input.reactivationToken : null,
+    typeof args.token === 'string' ? args.token : null,
+  ];
+  for (const token of tokenCandidates) {
+    if (token && token.trim()) {
+      return `token:${hashRateLimitIdentity(token.trim())}`;
+    }
+  }
+
+  const clientIp = resolveClientIp(req);
+  if (clientIp) {
+    return `ip:${clientIp}`;
+  }
+
+  return null;
+}
 
 @Injectable()
 export class AuthRateLimitGuard implements CanActivate {
@@ -27,14 +76,18 @@ export class AuthRateLimitGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const gqlCtx = GqlExecutionContext.create(context);
-    const req = gqlCtx.getContext().req as {
-      ip?: string;
-      body?: { variables?: Record<string, unknown> };
-    };
-    const args = gqlCtx.getArgs();
+    const req = gqlCtx.getContext<{ req?: unknown }>().req;
+    const args: Record<string, unknown> = gqlCtx.getArgs();
+    const operation = context.getHandler()?.name || 'unknown';
 
-    const identifier = args.input?.phone ?? args.input?.email ?? req.ip ?? 'unknown';
-    const key = `rate_limit:auth:${identifier}`;
+    const identity = resolveAuthRateLimitIdentity(args, req);
+    if (!identity) {
+      // No stable visitor identity — do not collapse all callers into one bucket.
+      // Fail closed for auth endpoints (tight abuse surface).
+      this.throwRateLimited();
+    }
+
+    const key = `rate_limit:auth:${operation}:${identity}`;
 
     if (this.redisService.isAvailable()) {
       return this.enforceRedisLimit(key);
@@ -48,14 +101,15 @@ export class AuthRateLimitGuard implements CanActivate {
     const ttlMs = this.configService.get<number>('app.rateLimit.ttl') ?? 60000;
     const ttlSeconds = Math.ceil(ttlMs / 1000);
 
-    const current = await this.redisService.get(key);
-    const count = current ? parseInt(current, 10) : 0;
+    const count = await this.redisService.incr(key, ttlSeconds);
+    if (count == null) {
+      return this.enforceInMemoryLimit(key);
+    }
 
-    if (count >= limit) {
+    if (count > limit) {
       this.throwRateLimited();
     }
 
-    await this.redisService.set(key, String(count + 1), ttlSeconds);
     return true;
   }
 
