@@ -216,6 +216,7 @@ export class AuthResolver {
 
   @Query(() => PasswordResetTokenStatusType)
   @Public()
+  @UseGuards(AuthRateLimitGuard)
   async getPasswordResetTokenStatus(
     @Args('token') token: string,
   ): Promise<PasswordResetTokenStatusType> {

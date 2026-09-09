@@ -6,11 +6,13 @@ import {
   TypeOrmHealthIndicator,
 } from '@nestjs/terminus';
 import { ConfigService } from '@nestjs/config';
+import { SkipThrottle } from '@nestjs/throttler';
 import { Public } from '../../common/decorators';
 import { isRedisConfigured } from '../../common/utils/is-redis-configured';
 import { RedisService } from '../redis/redis.service';
 
 @Public()
+@SkipThrottle()
 @Controller('health')
 export class HealthController {
   private readonly logger = new Logger(HealthController.name);

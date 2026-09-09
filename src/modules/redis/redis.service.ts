@@ -74,6 +74,20 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Atomic increment with TTL set only on first create (EXPIRE NX when available).
+   * Returns the post-increment count, or null when Redis is unavailable.
+   */
+  async incr(key: string, ttlSeconds: number): Promise<number | null> {
+    if (!this.isAvailable()) return null;
+    const client = this.getClient();
+    const count = await client.incr(key);
+    if (count === 1 && ttlSeconds > 0) {
+      await client.expire(key, ttlSeconds);
+    }
+    return count;
+  }
+
   async del(key: string): Promise<void> {
     if (!this.isAvailable()) return;
     await this.getClient().del(key);
