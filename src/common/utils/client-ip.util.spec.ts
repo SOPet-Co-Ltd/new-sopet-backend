@@ -35,9 +35,9 @@ describe('resolveClientIp', () => {
 
   it('falls back to req.ip then socket.remoteAddress', () => {
     expect(resolveClientIp({ headers: {}, ip: '198.51.100.7' })).toBe('198.51.100.7');
-    expect(
-      resolveClientIp({ headers: {}, socket: { remoteAddress: '198.51.100.8' } }),
-    ).toBe('198.51.100.8');
+    expect(resolveClientIp({ headers: {}, socket: { remoteAddress: '198.51.100.8' } })).toBe(
+      '198.51.100.8',
+    );
   });
 
   it('returns null when no IP is present', () => {
@@ -52,8 +52,8 @@ describe('resolveClientIp', () => {
 
 describe('readRequestHeader', () => {
   it('reads case-insensitive headers', () => {
-    expect(readRequestHeader({ headers: { 'X-Sopet-Session-Id': 'abc' } }, 'x-sopet-session-id')).toBe(
-      'abc',
-    );
+    expect(
+      readRequestHeader({ headers: { 'X-Sopet-Session-Id': 'abc' } }, 'x-sopet-session-id'),
+    ).toBe('abc');
   });
 });

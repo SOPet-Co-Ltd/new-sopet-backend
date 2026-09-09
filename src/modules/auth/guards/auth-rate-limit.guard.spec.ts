@@ -19,9 +19,7 @@ describe('resolveAuthRateLimitIdentity', () => {
     expect(resolveAuthRateLimitIdentity({ input: { phone: '0812345678' } }, {})).toBe(
       'phone:0812345678',
     );
-    expect(resolveAuthRateLimitIdentity({ input: { email: 'A@B.com' } }, {})).toBe(
-      'email:a@b.com',
-    );
+    expect(resolveAuthRateLimitIdentity({ input: { email: 'A@B.com' } }, {})).toBe('email:a@b.com');
     expect(resolveAuthRateLimitIdentity({ input: { ownerEmail: 'Owner@B.com' } }, {})).toBe(
       'email:owner@b.com',
     );
