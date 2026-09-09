@@ -49,14 +49,15 @@ export class ApiKeyRateLimitGuard implements CanActivate {
     const ttlMs = this.configService.get<number>('app.rateLimit.ttl') ?? 60000;
     const ttlSeconds = Math.ceil(ttlMs / 1000);
 
-    const current = await this.redisService.get(key);
-    const count = current ? parseInt(current, 10) : 0;
+    const count = await this.redisService.incr(key, ttlSeconds);
+    if (count == null) {
+      return this.enforceInMemoryLimit(key);
+    }
 
-    if (count >= limit) {
+    if (count > limit) {
       this.throwRateLimited();
     }
 
-    await this.redisService.set(key, String(count + 1), ttlSeconds);
     return true;
   }
 
