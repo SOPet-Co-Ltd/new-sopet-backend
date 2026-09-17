@@ -472,6 +472,21 @@ describe('PayoutsService', () => {
     );
   });
 
+  it('excludes vendor_import orders from payout eligibility', async () => {
+    const qb = createQueryBuilderMock({ total: '1000' });
+    orderItemRepo.createQueryBuilder.mockReturnValue(qb);
+    payoutRepo.createQueryBuilder
+      .mockImplementationOnce(() => createQueryBuilderMock({ total: '0' }))
+      .mockImplementationOnce(() => createQueryBuilderMock({ total: '0' }));
+
+    await service.getPayoutSummary('store-1');
+
+    expect(qb.andWhere).toHaveBeenCalledWith(
+      expect.stringMatching(/order\.source/i),
+      expect.objectContaining({ vendorImportSource: 'vendor_import' }),
+    );
+  });
+
   it('includes restored non-held lines in gross revenue after leave-hold', async () => {
     const qb = createQueryBuilderMock({ total: '4500' });
     orderItemRepo.createQueryBuilder.mockReturnValue(qb);

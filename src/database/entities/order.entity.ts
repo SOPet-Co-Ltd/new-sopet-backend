@@ -21,8 +21,10 @@ import { Review } from './review.entity';
 import { OrderStoreShipping } from './order-store-shipping.entity';
 import { OrderShippingAddress } from './order-shipping-address.entity';
 import { OrderStatus, PaymentMethod } from './enums/order.enums';
+import { DataSource } from './enums/data-source.enums';
 
 export { OrderStatus, PaymentMethod } from './enums/order.enums';
+export { DataSource } from './enums/data-source.enums';
 
 @Entity('orders')
 @Index(['orderNumber'], { unique: true })
@@ -122,6 +124,18 @@ export class Order {
 
   @Column({ name: 'source_dispute_id', type: 'uuid', nullable: true })
   sourceDisputeId!: string | null;
+
+  /**
+   * vendor_import = old-store seed via Vendor API. Excluded from payouts; no stock/webhook/Omise.
+   */
+  @Column({
+    name: 'source',
+    type: 'enum',
+    enum: DataSource,
+    default: DataSource.PLATFORM,
+  })
+  @IsEnum(DataSource)
+  source!: DataSource;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
   createdAt!: Date;

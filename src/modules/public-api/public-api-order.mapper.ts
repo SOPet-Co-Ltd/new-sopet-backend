@@ -15,6 +15,7 @@ export function mapPublicApiOrder(order: Order, storeId: string) {
     orderId: order.id,
     orderNumber: order.orderNumber,
     status: order.status,
+    source: order.source ?? 'platform',
     paymentMethod: order.paymentMethod,
     paidAt: order.paidAt ? new Date(order.paidAt).toISOString() : null,
     currency: 'THB' as const,

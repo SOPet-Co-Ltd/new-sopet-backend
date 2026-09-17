@@ -410,6 +410,88 @@ export class ReviewsService {
     return withRelations ?? saved;
   }
 
+  async listForPublicApi(
+    storeId: string,
+    userId: string,
+    params: {
+      page?: number;
+      limit?: number;
+      productId?: string;
+      status?: ReviewStatus;
+      source?: ReviewSource;
+    },
+  ): Promise<PaginatedResponse<Review>> {
+    await this.storesService.assertStoreAccess(userId, storeId);
+    const safePage = Math.max(1, params.page ?? 1);
+    const safeLimit = Math.min(100, Math.max(1, params.limit ?? 20));
+
+    const qb = this.reviewRepository
+      .createQueryBuilder('review')
+      .innerJoinAndSelect('review.product', 'product', 'product.store_id = :storeId', { storeId })
+      .leftJoinAndSelect('review.images', 'images')
+      .leftJoinAndSelect('review.customer', 'customer')
+      .orderBy('review.createdAt', 'DESC')
+      .skip((safePage - 1) * safeLimit)
+      .take(safeLimit);
+
+    if (params.productId) {
+      qb.andWhere('review.product_id = :productId', { productId: params.productId });
+    }
+    if (params.status) {
+      qb.andWhere('review.status = :status', { status: params.status });
+    }
+    if (params.source) {
+      qb.andWhere('review.source = :source', { source: params.source });
+    }
+
+    const [items, total] = await qb.getManyAndCount();
+    return {
+      items,
+      pagination: {
+        page: safePage,
+        limit: safeLimit,
+        total,
+        totalPages: Math.ceil(total / safeLimit) || 1,
+      },
+    };
+  }
+
+  async softDeleteImportedForPublicApi(
+    storeId: string,
+    userId: string,
+    reviewId: string,
+  ): Promise<void> {
+    await this.storesService.assertStoreAccess(userId, storeId);
+
+    const review = await this.reviewRepository
+      .createQueryBuilder('review')
+      .innerJoin('review.product', 'product', 'product.store_id = :storeId', { storeId })
+      .where('review.id = :reviewId', { reviewId })
+      .getOne();
+
+    if (!review) {
+      throw new NotFoundException({
+        code: 'REVIEW_NOT_FOUND',
+        message: 'Review not found',
+      });
+    }
+
+    if (review.source !== ReviewSource.VENDOR_IMPORT) {
+      throw new ForbiddenException({
+        code: 'REVIEW_NOT_DELETABLE',
+        message: 'Only vendor_import reviews can be deleted via the Vendor API',
+      });
+    }
+
+    const wasApproved = review.status === ReviewStatus.APPROVED;
+    const productId = review.productId;
+    await this.reviewRepository.softDelete(review.id);
+
+    if (wasApproved) {
+      await this.syncProductReviewStats(productId);
+    }
+  }
+
   async findPendingImportedReviews(page = 1, limit = 20): Promise<PaginatedResponse<Review>> {
     const safePage = Math.max(1, page);
     const safeLimit = Math.min(100, Math.max(1, limit));

@@ -8,6 +8,7 @@ export { ProductImage } from './product-image.entity';
 export { ProductVariant } from './product-variant.entity';
 export { InventoryTransaction, InventoryTransactionType } from './inventory-transaction.entity';
 export { Order, OrderStatus, PaymentMethod } from './order.entity';
+export { DataSource } from './enums/data-source.enums';
 export { Payment } from './payment.entity';
 export { OrderItem, FulfillmentStatus } from './order-item.entity';
 export { OrderStatusHistory } from './order-status-history.entity';
