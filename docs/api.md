@@ -117,24 +117,32 @@ Unknown, malformed, or whitespace-only `orderNumber` all throw the identical `No
 
 ## REST endpoints (limited)
 
-| Method   | Path                                                              | Auth                          | Module                                                                      |
-| -------- | ----------------------------------------------------------------- | ----------------------------- | --------------------------------------------------------------------------- |
-| `POST`   | `/webhooks/omise`                                                 | HMAC (`OMISE_WEBHOOK_SECRET`) | `payments-webhook.controller.ts`                                            |
-| `POST`   | `/api/v1/stores/:storeId/products`                                | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (create draft; optional `images` URLs → storage) |
-| `GET`    | `/api/v1/stores/:storeId/products`                                | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (paginated list; all statuses)                   |
-| `GET`    | `/api/v1/stores/:storeId/products/:productId`                     | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (detail; store-scoped)                           |
-| `PATCH`  | `/api/v1/stores/:storeId/products/:productId`                     | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (info + optional `images` replace)               |
-| `DELETE` | `/api/v1/stores/:storeId/products/:productId`                     | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (soft delete)                                    |
-| `PATCH`  | `/api/v1/stores/:storeId/products/:productId/variants/:variantId` | API key                       | `public-api.controller.ts` (stock / absolute price)                         |
-| `PATCH`  | `/api/v1/stores/:storeId/variants/by-sku/:sku`                    | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (stock / absolute price by SKU)                  |
-| `PUT`    | `/api/v1/stores/:storeId/webhook`                                 | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (upsert outbound order webhook)                  |
-| `GET`    | `/api/v1/stores/:storeId/webhook`                                 | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (get webhook config)                             |
-| `DELETE` | `/api/v1/stores/:storeId/webhook`                                 | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (remove webhook)                                 |
-| `GET`    | `/api/v1/stores/:storeId/orders`                                  | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (paginated store-scoped order list / catch-up)   |
-| `PATCH`  | `/api/v1/stores/:storeId/orders/:orderId/tracking`                | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (tracking / ship)                                |
-| `POST`   | `/api/v1/stores/:storeId/products/:productId/reviews`             | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (import review → pending / unknown customer)     |
-| `GET`    | `/health`, `/health/ready`                                        | `@Public()`                   | `health.controller.ts` (Terminus: Postgres ping + Redis when configured)    |
-| `GET`    | `/health/live`                                                    | `@Public()`                   | `health.controller.ts` (static liveness, no dependency checks)              |
+| Method   | Path                                                              | Auth                          | Module                                                                        |
+| -------- | ----------------------------------------------------------------- | ----------------------------- | ----------------------------------------------------------------------------- |
+| `POST`   | `/webhooks/omise`                                                 | HMAC (`OMISE_WEBHOOK_SECRET`) | `payments-webhook.controller.ts`                                              |
+| `POST`   | `/api/v1/stores/:storeId/products`                                | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (create draft; optional `images` URLs → storage)   |
+| `GET`    | `/api/v1/stores/:storeId/products`                                | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (paginated list; all statuses)                     |
+| `GET`    | `/api/v1/stores/:storeId/products/:productId`                     | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (detail; store-scoped)                             |
+| `PATCH`  | `/api/v1/stores/:storeId/products/:productId`                     | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (info + optional `images` replace)                 |
+| `DELETE` | `/api/v1/stores/:storeId/products/:productId`                     | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (soft delete)                                      |
+| `PATCH`  | `/api/v1/stores/:storeId/products/:productId/variants/:variantId` | API key                       | `public-api.controller.ts` (stock / absolute price)                           |
+| `PATCH`  | `/api/v1/stores/:storeId/variants/by-sku/:sku`                    | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (stock / absolute price by SKU)                    |
+| `PUT`    | `/api/v1/stores/:storeId/webhook`                                 | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (upsert outbound order webhook)                    |
+| `GET`    | `/api/v1/stores/:storeId/webhook`                                 | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (get webhook config)                               |
+| `DELETE` | `/api/v1/stores/:storeId/webhook`                                 | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (remove webhook)                                   |
+| `GET`    | `/api/v1/stores/:storeId/orders`                                  | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (paginated store-scoped order list / catch-up)     |
+| `PATCH`  | `/api/v1/stores/:storeId/orders/:orderId/tracking`                | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (tracking / ship)                                  |
+| `POST`   | `/api/v1/stores/:storeId/products/:productId/reviews`             | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (import review → pending / unknown customer)       |
+| `GET`    | `/api/v1/stores/:storeId/reviews`                                 | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (list store reviews; filter product/status/source) |
+| `DELETE` | `/api/v1/stores/:storeId/reviews/:reviewId`                       | API key (`ApiKeyGuard`)       | `public-api.controller.ts` (soft-delete `vendor_import` only)                 |
+| `POST`   | `/api/v1/stores/:storeId/imported-customers`                      | API key (`ApiKeyGuard`)       | upsert `customers` with `source=vendor_import` (payout-safe)                  |
+| `GET`    | `/api/v1/stores/:storeId/imported-customers`                      | API key (`ApiKeyGuard`)       | list imported customers for store                                             |
+| `POST`   | `/api/v1/stores/:storeId/imported-customers/:id/addresses`        | API key (`ApiKeyGuard`)       | create `saved_addresses`                                                      |
+| `GET`    | `/api/v1/stores/:storeId/imported-customers/:id/addresses`        | API key (`ApiKeyGuard`)       | list addresses                                                                |
+| `POST`   | `/api/v1/stores/:storeId/imported-orders`                         | API key (`ApiKeyGuard`)       | seed historical `orders`/`order_items` (`source=vendor_import`)               |
+| `GET`    | `/api/v1/stores/:storeId/imported-orders`                         | API key (`ApiKeyGuard`)       | list imported orders                                                          |
+| `GET`    | `/health`, `/health/ready`                                        | `@Public()`                   | `health.controller.ts` (Terminus: Postgres ping + Redis when configured)      |
+| `GET`    | `/health/live`                                                    | `@Public()`                   | `health.controller.ts` (static liveness, no dependency checks)                |
 
 There are **no** `/v1/*` REST routes for application features. Admin and storefront use GraphQL exclusively.
 

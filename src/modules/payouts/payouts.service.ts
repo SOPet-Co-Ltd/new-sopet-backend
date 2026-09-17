@@ -5,6 +5,7 @@ import { DataSource, EntityManager, In, IsNull, Repository } from 'typeorm';
 import { Payout, PayoutSettlementRail, PayoutStatus } from '../../database/entities/payout.entity';
 import { FulfillmentStatus, OrderItem } from '../../database/entities/order-item.entity';
 import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
+import { DataSource as OrderDataSource } from '../../database/entities/enums/data-source.enums';
 import { Store, OmiseRecipientStatus } from '../../database/entities/store.entity';
 import { Promotion, PromotionScope } from '../../database/entities/promotion.entity';
 import { PromotionUsage } from '../../database/entities/promotion-usage.entity';
@@ -958,6 +959,10 @@ export class PayoutsService {
         .andWhere('order.status <> :heldOrderStatus', {
           heldOrderStatus: OrderStatus.ON_HOLD,
         })
+        // Vendor API historical imports never affect payout balances.
+        .andWhere('order.source <> :vendorImportSource', {
+          vendorImportSource: OrderDataSource.VENDOR_IMPORT,
+        })
     );
   }
 
@@ -1015,7 +1020,10 @@ export class PayoutsService {
         statuses: [OrderStatus.PAID, OrderStatus.DELIVERED],
       })
       .andWhere('order.payment_method IN (:...paymentMethods)', { paymentMethods })
-      .andWhere('order.status <> :heldOrderStatus', { heldOrderStatus: OrderStatus.ON_HOLD });
+      .andWhere('order.status <> :heldOrderStatus', { heldOrderStatus: OrderStatus.ON_HOLD })
+      .andWhere('order.source <> :vendorImportSource', {
+        vendorImportSource: OrderDataSource.VENDOR_IMPORT,
+      });
   }
 
   private async calculateStorePromotionDiscounts(
@@ -1067,6 +1075,9 @@ export class PayoutsService {
       })
       .andWhere('order.payment_method IN (:...paymentMethods)', { paymentMethods })
       .andWhere('order.status <> :heldOrderStatus', { heldOrderStatus: OrderStatus.ON_HOLD })
+      .andWhere('order.source <> :vendorImportSource', {
+        vendorImportSource: OrderDataSource.VENDOR_IMPORT,
+      })
       .select('COALESCE(SUM(item.subtotal), 0)', 'product')
       .addSelect(
         `GREATEST(0, LEAST(
