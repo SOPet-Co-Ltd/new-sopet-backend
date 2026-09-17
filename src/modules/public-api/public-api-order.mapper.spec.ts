@@ -72,5 +72,6 @@ describe('mapPublicApiOrder', () => {
     expect(mapped.items).toHaveLength(1);
     expect(mapped.items[0].sku).toBe('CAT-1');
     expect(mapped.itemsSubtotal).toBe(200);
+    expect(mapped.source).toBe('platform');
   });
 });

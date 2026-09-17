@@ -29,7 +29,20 @@ describe('PublicApiController', () => {
     upsertForStore: jest.Mock;
     deleteForStore: jest.Mock;
   };
-  let reviewsService: { createImportedForPublicApi: jest.Mock };
+  let reviewsService: {
+    createImportedForPublicApi: jest.Mock;
+    listForPublicApi: jest.Mock;
+    softDeleteImportedForPublicApi: jest.Mock;
+  };
+  let importDataService: {
+    createImportedCustomer: jest.Mock;
+    listImportedCustomers: jest.Mock;
+    createImportedAddress: jest.Mock;
+    listImportedAddresses: jest.Mock;
+    createImportedOrder: jest.Mock;
+    listImportedOrders: jest.Mock;
+  };
+  let analyticsService: { getProductSoldCounts: jest.Mock };
 
   const apiKeyAuth = {
     storeId: 'store-1',
@@ -224,6 +237,22 @@ describe('PublicApiController', () => {
         images: [],
         createdAt: new Date('2026-08-05T00:00:00Z'),
       }),
+      listForPublicApi: jest.fn().mockResolvedValue({
+        items: [],
+        pagination: { page: 1, limit: 20, total: 0, totalPages: 1 },
+      }),
+      softDeleteImportedForPublicApi: jest.fn().mockResolvedValue(undefined),
+    };
+    importDataService = {
+      createImportedCustomer: jest.fn(),
+      listImportedCustomers: jest.fn(),
+      createImportedAddress: jest.fn(),
+      listImportedAddresses: jest.fn(),
+      createImportedOrder: jest.fn(),
+      listImportedOrders: jest.fn(),
+    };
+    analyticsService = {
+      getProductSoldCounts: jest.fn().mockResolvedValue([7]),
     };
     controller = new PublicApiController(
       productsService as unknown as ProductsService,
@@ -231,10 +260,12 @@ describe('PublicApiController', () => {
       orderFulfillmentService as unknown as OrderFulfillmentService,
       vendorWebhooksService as unknown as VendorWebhooksService,
       reviewsService as unknown as ReviewsService,
+      importDataService as never,
+      analyticsService as never,
     );
   });
 
-  it('delegates product list and maps items', async () => {
+  it('delegates product list and maps items with soldCount', async () => {
     const result = await controller.listProducts('store-1', { page: 1, limit: 20 });
 
     expect(productsService.findAllForPublicApi).toHaveBeenCalledWith('store-1', {
@@ -243,8 +274,10 @@ describe('PublicApiController', () => {
       status: undefined,
       search: undefined,
     });
+    expect(analyticsService.getProductSoldCounts).toHaveBeenCalledWith(['prod-1']);
     expect(result.items).toHaveLength(1);
     expect(result.items[0].id).toBe('prod-1');
+    expect(result.items[0].soldCount).toBe(7);
     expect(result.pagination.total).toBe(1);
   });
 
@@ -264,11 +297,12 @@ describe('PublicApiController', () => {
     });
   });
 
-  it('delegates product detail by id', async () => {
+  it('delegates product detail by id with soldCount', async () => {
     const result = await controller.getProduct('store-1', 'prod-1');
 
     expect(productsService.findOneInStore).toHaveBeenCalledWith('prod-1', 'store-1');
     expect(result.id).toBe('prod-1');
+    expect(result.soldCount).toBe(7);
   });
 
   it('propagates PRODUCT_NOT_FOUND from findOneInStore', async () => {
@@ -393,5 +427,126 @@ describe('PublicApiController', () => {
     expect(result.status).toBe(ReviewStatus.PENDING);
     expect(result.source).toBe(ReviewSource.VENDOR_IMPORT);
     expect(result.customerName).toBe('ลูกค้าไม่ระบุชื่อ');
+  });
+
+  it('delegates review list with filters', async () => {
+    reviewsService.listForPublicApi.mockResolvedValueOnce({
+      items: [
+        {
+          id: 'rev-1',
+          productId: 'prod-1',
+          rating: 5,
+          comment: 'ok',
+          status: ReviewStatus.PENDING,
+          source: ReviewSource.VENDOR_IMPORT,
+          customerId: null,
+          images: [],
+          createdAt: new Date(),
+        },
+      ],
+      pagination: { page: 1, limit: 20, total: 1, totalPages: 1 },
+    });
+
+    const result = await controller.listReviews(
+      'store-1',
+      { page: 1, limit: 20, source: 'vendor_import', status: 'pending' },
+      apiKeyAuth,
+    );
+
+    expect(reviewsService.listForPublicApi).toHaveBeenCalledWith(
+      'store-1',
+      'user-1',
+      expect.objectContaining({ source: 'vendor_import', status: 'pending' }),
+    );
+    expect(result.items[0].source).toBe(ReviewSource.VENDOR_IMPORT);
+  });
+
+  it('delegates review soft-delete', async () => {
+    await controller.deleteReview('store-1', 'rev-1', apiKeyAuth);
+    expect(reviewsService.softDeleteImportedForPublicApi).toHaveBeenCalledWith(
+      'store-1',
+      'user-1',
+      'rev-1',
+    );
+  });
+
+  it('delegates imported customer create', async () => {
+    importDataService.createImportedCustomer.mockResolvedValueOnce({
+      id: 'cust-1',
+      phone: '0812345678',
+      fullName: 'Somchai',
+      email: null,
+      externalId: 'ERP-1',
+      createdAt: new Date(),
+    });
+
+    const result = await controller.createImportedCustomer(
+      'store-1',
+      { phone: '+66812345678', fullName: 'Somchai', externalId: 'ERP-1' },
+      apiKeyAuth,
+    );
+
+    expect(importDataService.createImportedCustomer).toHaveBeenCalled();
+    expect(result.source).toBe('vendor_import');
+    expect(result.id).toBe('cust-1');
+  });
+
+  it('delegates imported address and order creates', async () => {
+    importDataService.createImportedAddress.mockResolvedValueOnce({
+      id: 'addr-1',
+      customerId: 'cust-1',
+      fullName: 'A',
+      phone: '0812345678',
+      addressLine1: '1',
+      addressLine2: null,
+      tumbon: null,
+      amphoe: 'a',
+      district: 'd',
+      province: 'p',
+      postalCode: '10110',
+      label: null,
+      createdAt: new Date(),
+    });
+    importDataService.createImportedOrder.mockResolvedValueOnce({
+      id: 'ord-imp-1',
+      orderNumber: 'VI-test',
+      status: OrderStatus.DELIVERED,
+      customerId: 'cust-1',
+      paidAt: new Date(),
+      createdAt: new Date(),
+      shippingFee: 0,
+      subtotal: 100,
+      total: 100,
+      notes: null,
+      items: [],
+    });
+
+    const address = await controller.createImportedAddress(
+      'store-1',
+      'cust-1',
+      {
+        fullName: 'A',
+        phone: '+66812345678',
+        addressLine1: '1',
+        amphoe: 'a',
+        district: 'd',
+        province: 'p',
+        postalCode: '10110',
+      },
+      apiKeyAuth,
+    );
+    const order = await controller.createImportedOrder(
+      'store-1',
+      {
+        externalOrderNumber: 'OLD-1',
+        placedAt: '2024-01-01T00:00:00.000Z',
+        customerId: 'cust-1',
+        items: [{ productName: 'Food', quantity: 1, unitPrice: 100, productId: 'prod-1' }],
+      },
+      apiKeyAuth,
+    );
+
+    expect(address.source).toBe('vendor_import');
+    expect(order.source).toBe('vendor_import');
   });
 });

@@ -17,9 +17,11 @@ import { SavedPaymentMethod } from './saved-payment-method.entity';
 import { Cart } from './cart.entity';
 import { Notification } from './notification.entity';
 import { Favorite } from './favorite.entity';
+import { DataSource } from './enums/data-source.enums';
 
 @Entity('customers')
 @Index(['phone'], { unique: true, where: 'deleted_at IS NULL' })
+@Index(['importStoreId'], { where: 'import_store_id IS NOT NULL AND deleted_at IS NULL' })
 export class Customer {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -63,6 +65,25 @@ export class Customer {
 
   @Column({ name: 'omise_customer_id', type: 'varchar', length: 255, nullable: true })
   omiseCustomerId!: string | null;
+
+  /**
+   * vendor_import = seeded via Vendor API (may later verify via OTP without changing source).
+   */
+  @Column({
+    name: 'source',
+    type: 'enum',
+    enum: DataSource,
+    default: DataSource.PLATFORM,
+  })
+  source!: DataSource;
+
+  /** Store that last imported this customer via Vendor API (list scope). */
+  @Column({ name: 'import_store_id', type: 'uuid', nullable: true })
+  importStoreId!: string | null;
+
+  /** Partner ERP customer id (optional, not unique). */
+  @Column({ name: 'external_id', type: 'varchar', length: 100, nullable: true })
+  externalId!: string | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
   createdAt!: Date;

@@ -19,6 +19,8 @@ import { OrdersService } from '../src/modules/orders/orders.service';
 import { OrderFulfillmentService } from '../src/modules/orders/order-fulfillment.service';
 import { VendorWebhooksService } from '../src/modules/vendor-webhooks/vendor-webhooks.service';
 import { ReviewsService } from '../src/modules/reviews/reviews.service';
+import { ImportDataService } from '../src/modules/public-api/import-data.service';
+import { AnalyticsService } from '../src/modules/analytics/analytics.service';
 import { ValidationPipe } from '../src/common/pipes/validation.pipe';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { ProductStatus } from '../src/database/entities/product.entity';
@@ -44,7 +46,20 @@ describe('Public API products (e2e)', () => {
     upsertForStore: jest.Mock;
     deleteForStore: jest.Mock;
   };
-  let reviewsService: { createImportedForPublicApi: jest.Mock };
+  let reviewsService: {
+    createImportedForPublicApi: jest.Mock;
+    listForPublicApi: jest.Mock;
+    softDeleteImportedForPublicApi: jest.Mock;
+  };
+  let importDataService: {
+    createImportedCustomer: jest.Mock;
+    listImportedCustomers: jest.Mock;
+    createImportedAddress: jest.Mock;
+    listImportedAddresses: jest.Mock;
+    createImportedOrder: jest.Mock;
+    listImportedOrders: jest.Mock;
+  };
+  let analyticsService: { getProductSoldCounts: jest.Mock };
 
   const storeId = 'store-1';
   const validBody = {
@@ -237,6 +252,88 @@ describe('Public API products (e2e)', () => {
         images: [],
         createdAt: new Date('2026-08-05T00:00:00Z'),
       }),
+      listForPublicApi: jest.fn().mockResolvedValue({
+        items: [
+          {
+            id: 'rev-1',
+            productId: 'prod-1',
+            rating: 5,
+            comment: 'ดีมาก',
+            status: ReviewStatus.PENDING,
+            source: ReviewSource.VENDOR_IMPORT,
+            customerId: null,
+            images: [],
+            createdAt: new Date('2026-08-05T00:00:00Z'),
+          },
+        ],
+        pagination: { page: 1, limit: 20, total: 1, totalPages: 1 },
+      }),
+      softDeleteImportedForPublicApi: jest.fn().mockResolvedValue(undefined),
+    };
+    importDataService = {
+      createImportedCustomer: jest.fn().mockResolvedValue({
+        id: 'cust-1',
+        phone: '0812345678',
+        fullName: 'Somchai',
+        email: null,
+        externalId: 'ERP-1',
+        createdAt: new Date(),
+      }),
+      listImportedCustomers: jest.fn().mockResolvedValue({
+        items: [],
+        pagination: { page: 1, limit: 20, total: 0, totalPages: 1 },
+      }),
+      createImportedAddress: jest.fn().mockResolvedValue({
+        id: 'addr-1',
+        customerId: 'cust-1',
+        fullName: 'Somchai',
+        phone: '0812345678',
+        addressLine1: '1 Road',
+        addressLine2: null,
+        tumbon: null,
+        amphoe: 'Bang Rak',
+        district: 'Bangkok',
+        province: 'Bangkok',
+        postalCode: '10500',
+        label: null,
+        createdAt: new Date(),
+      }),
+      listImportedAddresses: jest.fn().mockResolvedValue({
+        items: [],
+        pagination: { page: 1, limit: 20, total: 0, totalPages: 1 },
+      }),
+      createImportedOrder: jest.fn().mockResolvedValue({
+        id: 'ord-imp-1',
+        orderNumber: 'VI-store1-OLD-1',
+        status: OrderStatus.DELIVERED,
+        customerId: 'cust-1',
+        paidAt: new Date('2024-06-01T00:00:00Z'),
+        createdAt: new Date('2024-06-01T00:00:00Z'),
+        shippingFee: 0,
+        subtotal: 998,
+        total: 998,
+        notes: null,
+        items: [
+          {
+            id: 'item-imp-1',
+            productName: 'อาหารแมว',
+            variantId: 'var-1',
+            quantity: 2,
+            unitPrice: 499,
+            subtotal: 998,
+            productVariant: { sku: 'TEST-CHK-001' },
+          },
+        ],
+      }),
+      listImportedOrders: jest.fn().mockResolvedValue({
+        items: [],
+        pagination: { page: 1, limit: 20, total: 0, totalPages: 1 },
+      }),
+    };
+    analyticsService = {
+      getProductSoldCounts: jest
+        .fn()
+        .mockImplementation(async (ids: string[]) => ids.map(() => 12)),
     };
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -264,6 +361,8 @@ describe('Public API products (e2e)', () => {
         { provide: OrderFulfillmentService, useValue: orderFulfillmentService },
         { provide: VendorWebhooksService, useValue: vendorWebhooksService },
         { provide: ReviewsService, useValue: reviewsService },
+        { provide: ImportDataService, useValue: importDataService },
+        { provide: AnalyticsService, useValue: analyticsService },
         { provide: APP_PIPE, useClass: ValidationPipe },
         { provide: APP_FILTER, useClass: HttpExceptionFilter },
       ],
@@ -726,5 +825,106 @@ describe('Public API products (e2e)', () => {
       'prod-1',
       { rating: 5, comment: 'ดีมาก', imageUrls: undefined },
     );
+  });
+
+  it('GET /reviews lists store reviews', async () => {
+    const res = await request(app.getHttpServer())
+      .get(`/api/v1/stores/${storeId}/reviews`)
+      .query({ source: 'vendor_import', page: 1 })
+      .set('Authorization', 'Bearer sopet_sk_valid_key')
+      .expect(200);
+
+    expect(res.body.items).toHaveLength(1);
+    expect(res.body.items[0].source).toBe(ReviewSource.VENDOR_IMPORT);
+    expect(reviewsService.listForPublicApi).toHaveBeenCalledWith(
+      storeId,
+      'user-1',
+      expect.objectContaining({ source: 'vendor_import', page: 1 }),
+    );
+  });
+
+  it('DELETE /reviews/:reviewId soft-deletes import review', async () => {
+    await request(app.getHttpServer())
+      .delete(`/api/v1/stores/${storeId}/reviews/rev-1`)
+      .set('Authorization', 'Bearer sopet_sk_valid_key')
+      .expect(204);
+
+    expect(reviewsService.softDeleteImportedForPublicApi).toHaveBeenCalledWith(
+      storeId,
+      'user-1',
+      'rev-1',
+    );
+  });
+
+  it('POST /imported-customers creates import customer', async () => {
+    const res = await request(app.getHttpServer())
+      .post(`/api/v1/stores/${storeId}/imported-customers`)
+      .set('Authorization', 'Bearer sopet_sk_valid_key')
+      .send({ phone: '+66812345678', fullName: 'Somchai', externalId: 'ERP-1' })
+      .expect(201);
+
+    expect(res.body.id).toBe('cust-1');
+    expect(res.body.source).toBe('vendor_import');
+  });
+
+  it('import flow: address + order + product soldCount', async () => {
+    const addressRes = await request(app.getHttpServer())
+      .post(`/api/v1/stores/${storeId}/imported-customers/cust-1/addresses`)
+      .set('Authorization', 'Bearer sopet_sk_valid_key')
+      .send({
+        fullName: 'Somchai',
+        phone: '+66812345678',
+        addressLine1: '1 Road',
+        amphoe: 'Bang Rak',
+        district: 'Bangkok',
+        province: 'Bangkok',
+        postalCode: '10500',
+      })
+      .expect(201);
+
+    expect(addressRes.body.source).toBe('vendor_import');
+    expect(importDataService.createImportedAddress).toHaveBeenCalledWith(
+      storeId,
+      'user-1',
+      'cust-1',
+      expect.objectContaining({ addressLine1: '1 Road' }),
+    );
+
+    const orderRes = await request(app.getHttpServer())
+      .post(`/api/v1/stores/${storeId}/imported-orders`)
+      .set('Authorization', 'Bearer sopet_sk_valid_key')
+      .send({
+        externalOrderNumber: 'OLD-1',
+        placedAt: '2024-06-01T00:00:00.000Z',
+        customerId: '11111111-1111-4111-8111-111111111111',
+        items: [
+          {
+            productId: '22222222-2222-4222-8222-222222222222',
+            productName: 'อาหารแมว',
+            quantity: 2,
+            unitPrice: 499,
+          },
+        ],
+      })
+      .expect(201);
+
+    expect(orderRes.body.source).toBe('vendor_import');
+    expect(orderRes.body.status).toBe(OrderStatus.DELIVERED);
+    expect(importDataService.createImportedOrder).toHaveBeenCalledWith(
+      storeId,
+      'user-1',
+      expect.objectContaining({
+        externalOrderNumber: 'OLD-1',
+        customerId: '11111111-1111-4111-8111-111111111111',
+      }),
+    );
+
+    const productRes = await request(app.getHttpServer())
+      .get(`/api/v1/stores/${storeId}/products/prod-1`)
+      .set('Authorization', 'Bearer sopet_sk_valid_key')
+      .expect(200);
+
+    expect(productRes.body.soldCount).toBe(12);
+    expect(analyticsService.getProductSoldCounts).toHaveBeenCalledWith(['prod-1']);
   });
 });

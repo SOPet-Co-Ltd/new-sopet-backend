@@ -34,6 +34,20 @@ import { mapProduct, mapVariant } from '../../graphql/models/mappers';
 import { ProductType, ProductVariantType } from '../../graphql/models/types';
 import { mapPublicApiOrder } from './public-api-order.mapper';
 import { PaginatedResponse } from '../../common/interfaces';
+import {
+  ImportDataService,
+  mapImportedAddress,
+  mapImportedCustomer,
+  mapImportedOrder,
+} from './import-data.service';
+import { AnalyticsService } from '../analytics/analytics.service';
+import {
+  CreateImportedAddressDto,
+  CreateImportedCustomerDto,
+} from './dto/create-imported-customer.dto';
+import { CreateImportedOrderDto } from './dto/create-imported-order.dto';
+import { ListImportedQueryDto, ListPublicReviewsQueryDto } from './dto/list-imported-query.dto';
+import { ReviewSource, ReviewStatus } from '../../database/entities/review.entity';
 
 @Controller('api/v1/stores/:storeId')
 @Public()
@@ -45,21 +59,41 @@ export class PublicApiController {
     private readonly orderFulfillmentService: OrderFulfillmentService,
     private readonly vendorWebhooksService: VendorWebhooksService,
     private readonly reviewsService: ReviewsService,
+    private readonly importDataService: ImportDataService,
+    private readonly analyticsService: AnalyticsService,
   ) {}
+
+  private async withSoldCount<T extends { id: string }>(
+    product: T,
+  ): Promise<T & { soldCount: number }> {
+    const [soldCount] = await this.analyticsService.getProductSoldCounts([product.id]);
+    return { ...product, soldCount };
+  }
+
+  private async withSoldCounts<T extends { id: string }>(
+    products: T[],
+  ): Promise<Array<T & { soldCount: number }>> {
+    if (products.length === 0) {
+      return [];
+    }
+    const counts = await this.analyticsService.getProductSoldCounts(products.map((p) => p.id));
+    return products.map((product, index) => ({ ...product, soldCount: counts[index] ?? 0 }));
+  }
 
   @Get('products')
   async listProducts(
     @Param('storeId') storeId: string,
     @Query() query: ListPublicProductsQueryDto,
-  ): Promise<PaginatedResponse<ProductType>> {
+  ): Promise<PaginatedResponse<ProductType & { soldCount: number }>> {
     const result = await this.productsService.findAllForPublicApi(storeId, {
       page: query.page,
       limit: query.limit,
       status: query.status,
       search: query.search,
     });
+    const items = await this.withSoldCounts(result.items.map(mapProduct));
     return {
-      items: result.items.map(mapProduct),
+      items,
       pagination: result.pagination,
     };
   }
@@ -68,9 +102,9 @@ export class PublicApiController {
   async getProduct(
     @Param('storeId') storeId: string,
     @Param('productId') productId: string,
-  ): Promise<ProductType> {
+  ): Promise<ProductType & { soldCount: number }> {
     const product = await this.productsService.findOneInStore(productId, storeId);
-    return mapProduct(product);
+    return this.withSoldCount(mapProduct(product));
   }
 
   @Post('products')
@@ -79,7 +113,7 @@ export class PublicApiController {
     @Param('storeId') storeId: string,
     @Body() dto: CreatePublicProductDto,
     @ApiKeyAuth() apiKeyAuth: ApiKeyAuthContext,
-  ): Promise<ProductType> {
+  ): Promise<ProductType & { soldCount: number }> {
     const product = await this.productsService.createWithVariants(apiKeyAuth.createdBy, storeId, {
       name: dto.name,
       description: dto.description,
@@ -101,7 +135,7 @@ export class PublicApiController {
         options: item.options,
       })),
     });
-    return mapProduct(product);
+    return this.withSoldCount(mapProduct(product));
   }
 
   @Patch('products/:productId')
@@ -110,7 +144,7 @@ export class PublicApiController {
     @Param('productId') productId: string,
     @Body() dto: UpdatePublicProductDto,
     @ApiKeyAuth() apiKeyAuth: ApiKeyAuthContext,
-  ): Promise<ProductType> {
+  ): Promise<ProductType & { soldCount: number }> {
     const product = await this.productsService.updateProductForPublicApi(
       productId,
       storeId,
@@ -127,7 +161,7 @@ export class PublicApiController {
         images: dto.images,
       },
     );
-    return mapProduct(product);
+    return this.withSoldCount(mapProduct(product));
   }
 
   @Delete('products/:productId')
@@ -275,5 +309,151 @@ export class PublicApiController {
       dto.trackingUrl,
     );
     return mapPublicApiOrder(order, storeId);
+  }
+
+  @Post('imported-customers')
+  @HttpCode(201)
+  async createImportedCustomer(
+    @Param('storeId') storeId: string,
+    @Body() dto: CreateImportedCustomerDto,
+    @ApiKeyAuth() apiKeyAuth: ApiKeyAuthContext,
+  ) {
+    const customer = await this.importDataService.createImportedCustomer(
+      storeId,
+      apiKeyAuth.createdBy,
+      dto,
+    );
+    return mapImportedCustomer(customer);
+  }
+
+  @Get('imported-customers')
+  async listImportedCustomers(
+    @Param('storeId') storeId: string,
+    @Query() query: ListImportedQueryDto,
+    @ApiKeyAuth() apiKeyAuth: ApiKeyAuthContext,
+  ) {
+    const result = await this.importDataService.listImportedCustomers(
+      storeId,
+      apiKeyAuth.createdBy,
+      query.page,
+      query.limit,
+    );
+    return {
+      items: result.items.map(mapImportedCustomer),
+      pagination: result.pagination,
+    };
+  }
+
+  @Post('imported-customers/:customerId/addresses')
+  @HttpCode(201)
+  async createImportedAddress(
+    @Param('storeId') storeId: string,
+    @Param('customerId') customerId: string,
+    @Body() dto: CreateImportedAddressDto,
+    @ApiKeyAuth() apiKeyAuth: ApiKeyAuthContext,
+  ) {
+    const address = await this.importDataService.createImportedAddress(
+      storeId,
+      apiKeyAuth.createdBy,
+      customerId,
+      dto,
+    );
+    return mapImportedAddress(address);
+  }
+
+  @Get('imported-customers/:customerId/addresses')
+  async listImportedAddresses(
+    @Param('storeId') storeId: string,
+    @Param('customerId') customerId: string,
+    @Query() query: ListImportedQueryDto,
+    @ApiKeyAuth() apiKeyAuth: ApiKeyAuthContext,
+  ) {
+    const result = await this.importDataService.listImportedAddresses(
+      storeId,
+      apiKeyAuth.createdBy,
+      customerId,
+      query.page,
+      query.limit,
+    );
+    return {
+      items: result.items.map(mapImportedAddress),
+      pagination: result.pagination,
+    };
+  }
+
+  @Post('imported-orders')
+  @HttpCode(201)
+  async createImportedOrder(
+    @Param('storeId') storeId: string,
+    @Body() dto: CreateImportedOrderDto,
+    @ApiKeyAuth() apiKeyAuth: ApiKeyAuthContext,
+  ) {
+    const order = await this.importDataService.createImportedOrder(
+      storeId,
+      apiKeyAuth.createdBy,
+      dto,
+    );
+    return mapImportedOrder(order, storeId);
+  }
+
+  @Get('imported-orders')
+  async listImportedOrders(
+    @Param('storeId') storeId: string,
+    @Query() query: ListImportedQueryDto,
+    @ApiKeyAuth() apiKeyAuth: ApiKeyAuthContext,
+  ) {
+    const result = await this.importDataService.listImportedOrders(
+      storeId,
+      apiKeyAuth.createdBy,
+      query.page,
+      query.limit,
+    );
+    return {
+      items: result.items.map((order) => mapImportedOrder(order, storeId)),
+      pagination: result.pagination,
+    };
+  }
+
+  @Get('reviews')
+  async listReviews(
+    @Param('storeId') storeId: string,
+    @Query() query: ListPublicReviewsQueryDto,
+    @ApiKeyAuth() apiKeyAuth: ApiKeyAuthContext,
+  ) {
+    const result = await this.reviewsService.listForPublicApi(storeId, apiKeyAuth.createdBy, {
+      page: query.page,
+      limit: query.limit,
+      productId: query.productId,
+      status: query.status as ReviewStatus | undefined,
+      source: query.source as ReviewSource | undefined,
+    });
+    return {
+      items: result.items.map((review) => ({
+        id: review.id,
+        productId: review.productId,
+        rating: review.rating,
+        comment: review.comment,
+        status: review.status,
+        source: review.source,
+        customerName: resolveReviewCustomerName(review),
+        images: (review.images ?? []).map((image) => ({ id: image.id, url: image.url })),
+        createdAt: review.createdAt,
+      })),
+      pagination: result.pagination,
+    };
+  }
+
+  @Delete('reviews/:reviewId')
+  @HttpCode(204)
+  async deleteReview(
+    @Param('storeId') storeId: string,
+    @Param('reviewId') reviewId: string,
+    @ApiKeyAuth() apiKeyAuth: ApiKeyAuthContext,
+  ): Promise<void> {
+    await this.reviewsService.softDeleteImportedForPublicApi(
+      storeId,
+      apiKeyAuth.createdBy,
+      reviewId,
+    );
   }
 }

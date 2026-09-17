@@ -30,6 +30,7 @@ describe('ReviewsService', () => {
     findOne: jest.fn(),
     findAndCount: jest.fn(),
     createQueryBuilder: jest.fn(),
+    softDelete: jest.fn().mockResolvedValue(undefined),
   };
 
   const orderRepo = {
@@ -55,6 +56,7 @@ describe('ReviewsService', () => {
 
   const storesService = {
     userHasStoreAccess: jest.fn(),
+    assertStoreAccess: jest.fn().mockResolvedValue(undefined),
   };
 
   const approvedReview = {
@@ -951,6 +953,84 @@ describe('ReviewsService', () => {
           order: { createdAt: 'ASC' },
         }),
       );
+    });
+  });
+
+  describe('softDeleteImportedForPublicApi', () => {
+    it('soft-deletes vendor_import reviews', async () => {
+      const qb = {
+        innerJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue({
+          id: 'review-1',
+          source: ReviewSource.VENDOR_IMPORT,
+          status: ReviewStatus.PENDING,
+          productId: 'prod-1',
+        }),
+      };
+      reviewRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.softDeleteImportedForPublicApi('store-1', 'user-1', 'review-1');
+
+      expect(storesService.assertStoreAccess).toHaveBeenCalledWith('user-1', 'store-1');
+      expect(reviewRepo.softDelete).toHaveBeenCalledWith('review-1');
+    });
+
+    it('refuses deleting customer reviews', async () => {
+      const qb = {
+        innerJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue({
+          id: 'review-1',
+          source: ReviewSource.CUSTOMER,
+          status: ReviewStatus.APPROVED,
+          productId: 'prod-1',
+        }),
+      };
+      reviewRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await expect(
+        service.softDeleteImportedForPublicApi('store-1', 'user-1', 'review-1'),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(reviewRepo.softDelete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('listForPublicApi', () => {
+    it('lists store reviews with optional filters', async () => {
+      const qb = {
+        innerJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getManyAndCount: jest
+          .fn()
+          .mockResolvedValue([[{ id: 'review-1', source: ReviewSource.VENDOR_IMPORT }], 1]),
+      };
+      reviewRepo.createQueryBuilder.mockReturnValue(qb);
+
+      const result = await service.listForPublicApi('store-1', 'user-1', {
+        page: 1,
+        limit: 20,
+        productId: 'prod-1',
+        status: ReviewStatus.PENDING,
+        source: ReviewSource.VENDOR_IMPORT,
+      });
+
+      expect(storesService.assertStoreAccess).toHaveBeenCalledWith('user-1', 'store-1');
+      expect(qb.andWhere).toHaveBeenCalledWith('review.product_id = :productId', {
+        productId: 'prod-1',
+      });
+      expect(qb.andWhere).toHaveBeenCalledWith('review.status = :status', {
+        status: ReviewStatus.PENDING,
+      });
+      expect(qb.andWhere).toHaveBeenCalledWith('review.source = :source', {
+        source: ReviewSource.VENDOR_IMPORT,
+      });
+      expect(result.items).toHaveLength(1);
+      expect(result.pagination.total).toBe(1);
     });
   });
 });
