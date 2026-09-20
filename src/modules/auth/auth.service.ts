@@ -83,6 +83,11 @@ export class AuthService {
     return randomInt(100000, 1000000).toString();
   }
 
+  /** Non-secret 6-digit reference shown in SMS + UI (independent of the OTP). */
+  private generateOtpReference(): string {
+    return randomInt(100000, 1000000).toString();
+  }
+
   /** SHA-256 hex digest for password-reset / email-verify tokens at rest (SOPET-H-02). */
   private hashAuthToken(token: string): string {
     return createHash('sha256').update(token).digest('hex');
@@ -117,7 +122,7 @@ export class AuthService {
     return Number.isNaN(expiresMs) || expiresMs <= Date.now();
   }
 
-  async sendOtp(sendOtpDto: SendOtpDto): Promise<{ message: string }> {
+  async sendOtp(sendOtpDto: SendOtpDto): Promise<{ message: string; referenceCode: string }> {
     const phone = normalizeThaiPhoneToLocal(sendOtpDto.phone);
 
     // Rate limit: max 3 attempts per 5 minutes
@@ -136,6 +141,7 @@ export class AuthService {
     }
 
     const code = this.generateOtp();
+    const referenceCode = this.generateOtpReference();
     const expiresAt = new Date(Date.now() + OTP_TTL_MS);
 
     // Only the newest OTP should work; mark prior unused codes as used.
@@ -144,15 +150,17 @@ export class AuthService {
     const otp = this.otpRepository.create({
       phone,
       code: this.hashOtp(code),
+      referenceCode,
       purpose: OtpPurpose.LOGIN,
       expiresAt,
     });
     await this.otpRepository.save(otp);
 
-    await this.smsService.sendOtp(phone, code);
+    await this.smsService.sendOtp(phone, code, referenceCode);
 
     return {
       message: 'OTP sent successfully',
+      referenceCode,
     };
   }
 
