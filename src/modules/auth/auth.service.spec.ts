@@ -124,10 +124,12 @@ describe('AuthService', () => {
     const result = await service.sendOtp({ phone: '+66812345678' });
 
     expect(result.message).toBe('OTP sent successfully');
+    expect(result.referenceCode).toMatch(/^\d{6}$/);
     expect(otpRepo.create).toHaveBeenCalledWith(
       expect.objectContaining({
         phone: '0812345678',
         code: expect.stringMatching(/^[a-f0-9]{64}$/),
+        referenceCode: result.referenceCode,
         purpose: OtpPurpose.LOGIN,
       }),
     );
@@ -136,11 +138,16 @@ describe('AuthService', () => {
       { isUsed: true },
     );
     expect(otpRepo.save).toHaveBeenCalled();
-    expect(smsService.sendOtp).toHaveBeenCalledWith('0812345678', expect.stringMatching(/^\d{6}$/));
+    expect(smsService.sendOtp).toHaveBeenCalledWith(
+      '0812345678',
+      expect.stringMatching(/^\d{6}$/),
+      result.referenceCode,
+    );
     const savedCode = otpRepo.create.mock.calls[0][0].code as string;
     const smsCode = smsService.sendOtp.mock.calls[0][1] as string;
     expect(savedCode).toBe(hashOtpForTest(smsCode));
     expect(savedCode).not.toBe(smsCode);
+    expect(result.referenceCode).not.toBe(smsCode);
   });
 
   it('invalidates previous unused OTPs before issuing a new one', async () => {

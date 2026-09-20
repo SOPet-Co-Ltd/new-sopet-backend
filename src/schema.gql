@@ -882,7 +882,7 @@ type Mutation {
   revokeAdminInvitation(invitationId: String!): AdminInvitationType!
   revokeStoreApiKey(id: String!, storeId: String!): Boolean!
   revokeStoreInvitation(invitationId: String!): StoreMemberInvitationType!
-  sendCustomerOtp(input: SendCustomerOtpInput!): MessagePayload!
+  sendCustomerOtp(input: SendCustomerOtpInput!): SendCustomerOtpPayload!
   sendTestEmailContentTemplate(input: SendTestEmailContentTemplateInput!): Boolean!
   setAdminActive(isActive: Boolean!, userId: String!): AdminTeamMemberType!
   setCategoryImage(input: SetCategoryImageInput!): CategoryType!
@@ -1758,6 +1758,11 @@ type SearchSynonymType {
 
 input SendCustomerOtpInput {
   phone: String!
+}
+
+type SendCustomerOtpPayload {
+  message: String!
+  referenceCode: String!
 }
 
 input SendTestEmailContentTemplateInput {
