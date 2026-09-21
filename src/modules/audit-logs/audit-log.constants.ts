@@ -61,6 +61,7 @@ export const AuditAction = {
   SETTINGS_LOGIN_PAGE_IMAGES_CLEARED_DESKTOP: 'settings.login_page_images.cleared_desktop',
   SETTINGS_LOGIN_PAGE_IMAGES_CLEARED_MOBILE: 'settings.login_page_images.cleared_mobile',
   SETTINGS_BANK_TRANSFER_UPDATED: 'settings.bank_transfer.updated',
+  SETTINGS_STOREFRONT_MAINTENANCE_UPDATED: 'settings.storefront_maintenance.updated',
   SEARCH_RANKING_WEIGHTS_UPDATED: 'search.ranking_weights.updated',
   SEARCH_SYNONYM_CREATED: 'search.synonym.created',
   SEARCH_SYNONYM_UPDATED: 'search.synonym.updated',

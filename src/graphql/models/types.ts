@@ -727,6 +727,21 @@ export class BankTransferSettingsType {
 }
 
 @ObjectType()
+export class StorefrontMaintenanceType {
+  @Field()
+  enabled!: boolean;
+
+  @Field(() => String, { nullable: true })
+  reason?: string | null;
+
+  @Field(() => String, { nullable: true })
+  customMessage?: string | null;
+
+  @Field(() => String, { nullable: true })
+  untilAt?: string | null;
+}
+
+@ObjectType()
 export class FavoriteType {
   @Field()
   id!: string;

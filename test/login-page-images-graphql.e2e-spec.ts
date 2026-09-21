@@ -36,6 +36,7 @@ import { JwtAuthGuard } from '../src/modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../src/modules/auth/guards/roles.guard';
 import { LoginPageImagesSettingsService } from '../src/modules/platform/login-page-images-settings.service';
 import { BankTransferSettingsService } from '../src/modules/platform/bank-transfer-settings.service';
+import { StorefrontMaintenanceSettingsService } from '../src/modules/platform/storefront-maintenance-settings.service';
 import { PlatformResolver } from '../src/modules/platform/platform.resolver';
 import { PlatformService } from '../src/modules/platform/platform.service';
 import { AuditLogsService } from '../src/modules/audit-logs/audit-logs.service';
@@ -180,6 +181,18 @@ describe('Login page images GraphQL HTTP (e2e)', () => {
           useValue: {
             getConfigured: jest.fn().mockResolvedValue(null),
             get: jest.fn(),
+            update: jest.fn(),
+          },
+        },
+        {
+          provide: StorefrontMaintenanceSettingsService,
+          useValue: {
+            get: jest.fn().mockResolvedValue({
+              enabled: false,
+              reason: null,
+              customMessage: null,
+              untilAt: null,
+            }),
             update: jest.fn(),
           },
         },
