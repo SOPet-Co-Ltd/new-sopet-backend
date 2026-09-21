@@ -27,6 +27,10 @@ export class OtpCode {
   @Column({ name: 'code', type: 'varchar', length: 64 })
   code!: string;
 
+  /** Display-only SMS reference (not the OTP). Shown in UI so users can match the message. */
+  @Column({ name: 'reference_code', type: 'varchar', length: 6, nullable: true })
+  referenceCode!: string | null;
+
   @Column({
     name: 'purpose',
     type: 'enum',

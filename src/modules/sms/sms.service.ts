@@ -25,11 +25,12 @@ export class SmsService {
     this.otpLogOnly = this.configService.get<boolean>('thaibulksms.otpLogOnly') ?? false;
   }
 
-  async sendOtp(phone: string, code: string): Promise<void> {
-    const message = `Your SOPet verification code is ${code}. Valid for 5 minutes.`;
+  async sendOtp(phone: string, code: string, referenceCode?: string): Promise<void> {
+    const refSuffix = referenceCode ? ` (อ้างอิง: ${referenceCode})` : '';
+    const message = `SOPet รหัส OTP: ${code}${refSuffix} ใช้ได้ 5 นาที ห้ามแจ้งผู้อื่น`;
 
     if (this.isDev || this.otpLogOnly) {
-      this.logDevSms(phone, code, message);
+      this.logDevSms(phone, code, message, referenceCode);
       return;
     }
 
@@ -60,7 +61,7 @@ export class SmsService {
     });
   }
 
-  private logDevSms(phone: string, code: string, message: string): void {
+  private logDevSms(phone: string, code: string, message: string, referenceCode?: string): void {
     const mode = this.isDev ? 'development mode' : 'SMS_OTP_LOG_ONLY';
     this.logger.log(
       '\n' +
@@ -68,6 +69,7 @@ export class SmsService {
         `[DEV SMS] not sent (${mode})\n` +
         `  To:      ${phone}\n` +
         `  Code:    ${code}\n` +
+        (referenceCode ? `  Ref:     ${referenceCode}\n` : '') +
         `  Message: ${message}\n` +
         '========================================',
     );

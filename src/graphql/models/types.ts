@@ -110,6 +110,16 @@ export class MessagePayload {
 }
 
 @ObjectType()
+export class SendCustomerOtpPayload {
+  @Field()
+  message!: string;
+
+  /** Display-only SMS reference code (not the OTP itself). */
+  @Field()
+  referenceCode!: string;
+}
+
+@ObjectType()
 export class PasswordResetTokenStatusType {
   @Field()
   valid!: boolean;
@@ -714,6 +724,21 @@ export class BankTransferSettingsType {
 
   @Field(() => String, { nullable: true })
   branchName?: string | null;
+}
+
+@ObjectType()
+export class StorefrontMaintenanceType {
+  @Field()
+  enabled!: boolean;
+
+  @Field(() => String, { nullable: true })
+  reason?: string | null;
+
+  @Field(() => String, { nullable: true })
+  customMessage?: string | null;
+
+  @Field(() => String, { nullable: true })
+  untilAt?: string | null;
 }
 
 @ObjectType()

@@ -13,6 +13,7 @@ import {
   MeResult,
   MessagePayload,
   PasswordResetTokenStatusType,
+  SendCustomerOtpPayload,
   UserProfile,
 } from '../../graphql/models/types';
 import { mapCustomerProfile, mapUserProfile } from '../../graphql/models/mappers';
@@ -61,10 +62,12 @@ export class AuthResolver {
     return {};
   }
 
-  @Mutation(() => MessagePayload)
+  @Mutation(() => SendCustomerOtpPayload)
   @Public()
   @UseGuards(AuthRateLimitGuard)
-  async sendCustomerOtp(@Args('input') input: SendCustomerOtpInput): Promise<MessagePayload> {
+  async sendCustomerOtp(
+    @Args('input') input: SendCustomerOtpInput,
+  ): Promise<SendCustomerOtpPayload> {
     return this.authService.sendOtp({ phone: input.phone });
   }
 

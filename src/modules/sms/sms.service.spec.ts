@@ -83,7 +83,7 @@ describe('SmsService', () => {
     });
     global.fetch = fetchMock;
 
-    await service.sendOtp('0812345678', '123456');
+    await service.sendOtp('0812345678', '123456', '526547');
 
     expect(fetchMock).toHaveBeenCalledWith(
       'https://api-v2.thaibulksms.com/sms',
@@ -92,7 +92,37 @@ describe('SmsService', () => {
         headers: expect.objectContaining({
           'Content-Type': 'application/x-www-form-urlencoded',
         }),
-        body: 'msisdn=0812345678&message=Your+SOPet+verification+code+is+123456.+Valid+for+5+minutes.&sender=SOPet&force=corporate&shorten_url=false',
+        body: 'msisdn=0812345678&message=SOPet+%E0%B8%A3%E0%B8%AB%E0%B8%B1%E0%B8%AA+OTP%3A+123456+%28%E0%B8%AD%E0%B9%89%E0%B8%B2%E0%B8%87%E0%B8%AD%E0%B8%B4%E0%B8%87%3A+526547%29+%E0%B9%83%E0%B8%8A%E0%B9%89%E0%B9%84%E0%B8%94%E0%B9%89+5+%E0%B8%99%E0%B8%B2%E0%B8%97%E0%B8%B5+%E0%B8%AB%E0%B9%89%E0%B8%B2%E0%B8%A1%E0%B9%81%E0%B8%88%E0%B9%89%E0%B8%87%E0%B8%9C%E0%B8%B9%E0%B9%89%E0%B8%AD%E0%B8%B7%E0%B9%88%E0%B8%99&sender=SOPet&force=corporate&shorten_url=false',
+      }),
+    );
+  });
+
+  it('omits Ref from SMS when referenceCode is not provided', async () => {
+    const service = createService({
+      'app.environment': 'production',
+      'thaibulksms.otpLogOnly': false,
+      'thaibulksms.apiKey': 'api-key',
+      'thaibulksms.apiSecret': 'api-secret',
+      'thaibulksms.sender': 'SOPet',
+      'thaibulksms.force': 'corporate',
+      'thaibulksms.shortenUrl': false,
+    });
+
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          phone_number_list: [{ number: '66812345678', message_id: 'msg-1', used_credit: 1 }],
+        }),
+    });
+    global.fetch = fetchMock;
+
+    await service.sendOtp('0812345678', '123456');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api-v2.thaibulksms.com/sms',
+      expect.objectContaining({
+        body: 'msisdn=0812345678&message=SOPet+%E0%B8%A3%E0%B8%AB%E0%B8%B1%E0%B8%AA+OTP%3A+123456+%E0%B9%83%E0%B8%8A%E0%B9%89%E0%B9%84%E0%B8%94%E0%B9%89+5+%E0%B8%99%E0%B8%B2%E0%B8%97%E0%B8%B5+%E0%B8%AB%E0%B9%89%E0%B8%B2%E0%B8%A1%E0%B9%81%E0%B8%88%E0%B9%89%E0%B8%87%E0%B8%9C%E0%B8%B9%E0%B9%89%E0%B8%AD%E0%B8%B7%E0%B9%88%E0%B8%99&sender=SOPet&force=corporate&shorten_url=false',
       }),
     );
   });

@@ -27,6 +27,7 @@ import {
   PlatformSettingsType,
   PlatformSponsorType,
   PlatformAdType,
+  StorefrontMaintenanceType,
 } from '../../graphql/models/types';
 import { Public, Roles, CurrentUser } from '../../common/decorators';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -38,6 +39,8 @@ import { LoginPageImagesSettingsService } from './login-page-images-settings.ser
 import { UpdateLoginPageImagesInput } from './login-page-images.inputs';
 import { BankTransferSettingsService } from './bank-transfer-settings.service';
 import { UpdateBankTransferDetailsInput } from './bank-transfer.inputs';
+import { StorefrontMaintenanceSettingsService } from './storefront-maintenance-settings.service';
+import { UpdateStorefrontMaintenanceInput } from './storefront-maintenance.inputs';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constants';
 import { getAuditRequestContext } from '../audit-logs/audit-request-context';
@@ -284,6 +287,7 @@ export class PlatformResolver {
     private readonly platformService: PlatformService,
     private readonly loginPageImagesSettingsService: LoginPageImagesSettingsService,
     private readonly bankTransferSettingsService: BankTransferSettingsService,
+    private readonly storefrontMaintenanceSettingsService: StorefrontMaintenanceSettingsService,
     private readonly auditLogsService: AuditLogsService,
   ) {}
 
@@ -450,6 +454,38 @@ export class PlatformResolver {
       action: AuditAction.SETTINGS_BANK_TRANSFER_UPDATED,
       resourceId: null,
       metadata: { settingsKey: 'payment.bank_transfer' },
+      req: context?.req,
+    });
+    return result;
+  }
+
+  @Query(() => StorefrontMaintenanceType)
+  @Public()
+  async storefrontMaintenance(): Promise<StorefrontMaintenanceType> {
+    return this.storefrontMaintenanceSettingsService.get();
+  }
+
+  @Mutation(() => StorefrontMaintenanceType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async updateStorefrontMaintenance(
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail: string | undefined,
+    @Args('input') input: UpdateStorefrontMaintenanceInput,
+    @Context() context?: GraphqlContext,
+  ): Promise<StorefrontMaintenanceType> {
+    const result = await this.storefrontMaintenanceSettingsService.update(input);
+    await this.logSettingsAudit({
+      adminId,
+      adminEmail,
+      action: AuditAction.SETTINGS_STOREFRONT_MAINTENANCE_UPDATED,
+      resourceId: null,
+      metadata: {
+        settingsKey: 'platform.storefront_maintenance',
+        enabled: result.enabled,
+        reason: result.reason,
+        untilAt: result.untilAt,
+      },
       req: context?.req,
     });
     return result;

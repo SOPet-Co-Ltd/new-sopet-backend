@@ -8,6 +8,7 @@ import { RedisModule } from '../redis/redis.module';
 import { StorageModule } from '../storage/storage.module';
 import { LoginPageImagesSettingsService } from './login-page-images-settings.service';
 import { BankTransferSettingsService } from './bank-transfer-settings.service';
+import { StorefrontMaintenanceSettingsService } from './storefront-maintenance-settings.service';
 import { PlatformService } from './platform.service';
 import { PlatformResolver } from './platform.resolver';
 
@@ -22,7 +23,13 @@ import { PlatformResolver } from './platform.resolver';
     PlatformResolver,
     LoginPageImagesSettingsService,
     BankTransferSettingsService,
+    StorefrontMaintenanceSettingsService,
   ],
-  exports: [PlatformService, LoginPageImagesSettingsService, BankTransferSettingsService],
+  exports: [
+    PlatformService,
+    LoginPageImagesSettingsService,
+    BankTransferSettingsService,
+    StorefrontMaintenanceSettingsService,
+  ],
 })
 export class PlatformModule {}
