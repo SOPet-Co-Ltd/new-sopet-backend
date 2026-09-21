@@ -930,6 +930,7 @@ type Mutation {
   updateStoreAsAdmin(input: UpdateStoreAsAdminInput!): AdminStoreType!
   updateStoreMemberRole(input: UpdateStoreMemberRoleInput!): StoreMemberType!
   updateStorePayout(input: UpdateStorePayoutInput!): MyStoreType!
+  updateStorefrontMaintenance(input: UpdateStorefrontMaintenanceInput!): StorefrontMaintenanceType!
   updateTag(input: UpdateTagInput!): TagType!
   updateUserProfile(input: UpdateUserProfileInput!): UserProfile!
   updateVendorAsAdmin(input: UpdateVendorAsAdminInput!): AdminVendorType!
@@ -1522,6 +1523,7 @@ type Query {
   storeReviews(storeId: String!): [StoreProductReviewType!]!
   storeSaleCampaigns(storeId: String!): [SaleCampaignType!]!
   storeShippingOptions(storeId: String!): [StoreShippingOptionType!]!
+  storefrontMaintenance: StorefrontMaintenanceType!
   stores: [StoreType!]!
   tagDeleteImpact(tagId: String!): TaxonomyDeleteImpactType!
   topProducts(limit: Int, storeId: String!): [TopProductType!]!
@@ -1956,6 +1958,21 @@ type StoreType {
   status: String!
 }
 
+"""Why the storefront is closed for visitors"""
+enum StorefrontMaintenanceReason {
+  MAINTENANCE
+  NOT_READY
+  OTHER
+  SYSTEM_UPDATE
+}
+
+type StorefrontMaintenanceType {
+  customMessage: String
+  enabled: Boolean!
+  reason: String
+  untilAt: String
+}
+
 input SubmitStoreReactivationRequestInput {
   content: String!
   mediaUrls: [String!]
@@ -2282,6 +2299,13 @@ input UpdateStoreSettingsInput {
   description: String
   logoUrl: String
   name: String
+}
+
+input UpdateStorefrontMaintenanceInput {
+  customMessage: String
+  enabled: Boolean!
+  reason: StorefrontMaintenanceReason
+  untilAt: String
 }
 
 input UpdateTagInput {

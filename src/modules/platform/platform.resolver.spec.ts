@@ -3,6 +3,7 @@ import { PlatformResolver } from './platform.resolver';
 import { PlatformService } from './platform.service';
 import { LoginPageImagesSettingsService } from './login-page-images-settings.service';
 import { BankTransferSettingsService } from './bank-transfer-settings.service';
+import { StorefrontMaintenanceSettingsService } from './storefront-maintenance-settings.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constants';
 import { AuditActorType } from '../../database/entities/audit-log.entity';
@@ -72,6 +73,9 @@ describe('PlatformResolver login page images', () => {
   let bankTransferSettingsService: jest.Mocked<
     Pick<BankTransferSettingsService, 'get' | 'getConfigured' | 'update'>
   >;
+  let storefrontMaintenanceSettingsService: jest.Mocked<
+    Pick<StorefrontMaintenanceSettingsService, 'get' | 'update'>
+  >;
   let resolver: PlatformResolver;
 
   beforeEach(() => {
@@ -89,12 +93,33 @@ describe('PlatformResolver login page images', () => {
       getConfigured: jest.fn(),
       update: jest.fn(),
     };
+    storefrontMaintenanceSettingsService = {
+      get: jest.fn(),
+      update: jest.fn(),
+    };
     resolver = new PlatformResolver(
       platformService as unknown as PlatformService,
       loginPageImagesSettingsService as unknown as LoginPageImagesSettingsService,
       bankTransferSettingsService as unknown as BankTransferSettingsService,
+      storefrontMaintenanceSettingsService as unknown as StorefrontMaintenanceSettingsService,
       { log: jest.fn() } as unknown as AuditLogsService,
     );
+  });
+
+  describe('storefrontMaintenance', () => {
+    it('is decorated with @Public()', () => {
+      const method = Object.getOwnPropertyDescriptor(
+        PlatformResolver.prototype,
+        'storefrontMaintenance',
+      )?.value as (...args: unknown[]) => unknown;
+      const isPublic = Reflect.getMetadata(IS_PUBLIC_KEY, method) as boolean | undefined;
+      expect(isPublic).toBe(true);
+    });
+
+    it('returns maintenance enabled flag', async () => {
+      storefrontMaintenanceSettingsService.get.mockResolvedValue({ enabled: true });
+      await expect(resolver.storefrontMaintenance()).resolves.toEqual({ enabled: true });
+    });
   });
 
   describe('loginPageImages', () => {
@@ -290,6 +315,7 @@ describe('PlatformResolver audit logging (AC-B-003 / D011)', () => {
     clearMobile: jest.Mock;
   };
   let bankTransferSettingsService: { update: jest.Mock };
+  let storefrontMaintenanceSettingsService: { update: jest.Mock };
   let auditLogsService: { log: jest.Mock };
   let resolver: PlatformResolver;
 
@@ -313,11 +339,13 @@ describe('PlatformResolver audit logging (AC-B-003 / D011)', () => {
       clearMobile: jest.fn(),
     };
     bankTransferSettingsService = { update: jest.fn() };
+    storefrontMaintenanceSettingsService = { update: jest.fn() };
     auditLogsService = { log: jest.fn().mockResolvedValue(undefined) };
     resolver = new PlatformResolver(
       platformService as unknown as PlatformService,
       loginPageImagesSettingsService as unknown as LoginPageImagesSettingsService,
       bankTransferSettingsService as unknown as BankTransferSettingsService,
+      storefrontMaintenanceSettingsService as unknown as StorefrontMaintenanceSettingsService,
       auditLogsService as unknown as AuditLogsService,
     );
   });
@@ -542,6 +570,38 @@ describe('PlatformResolver audit logging (AC-B-003 / D011)', () => {
         resourceType: AuditResourceType.SETTINGS,
         resourceId: null,
         metadata: { settingsKey: 'payment.bank_transfer' },
+        requestId: 'req-platform-1',
+      }),
+    );
+  });
+
+  it('logs storefront-maintenance update with settingsKey platform.storefront_maintenance', async () => {
+    storefrontMaintenanceSettingsService.update.mockResolvedValue({
+      enabled: true,
+      reason: 'MAINTENANCE',
+      customMessage: null,
+      untilAt: null,
+    });
+
+    await resolver.updateStorefrontMaintenance(
+      ADMIN_ID,
+      ADMIN_EMAIL,
+      { enabled: true, reason: 'MAINTENANCE' } as never,
+      graphqlContext,
+    );
+
+    expect(auditLogsService.log).toHaveBeenCalledTimes(1);
+    expect(auditLogsService.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: AuditAction.SETTINGS_STOREFRONT_MAINTENANCE_UPDATED,
+        resourceType: AuditResourceType.SETTINGS,
+        resourceId: null,
+        metadata: {
+          settingsKey: 'platform.storefront_maintenance',
+          enabled: true,
+          reason: 'MAINTENANCE',
+          untilAt: null,
+        },
         requestId: 'req-platform-1',
       }),
     );
