@@ -37,7 +37,12 @@ const PAID_OUT_STATUSES = [PayoutStatus.PENDING, PayoutStatus.PROCESSING, Payout
 const PENDING_STATUSES = [PayoutStatus.PENDING, PayoutStatus.PROCESSING];
 
 /** Omise-collected customer payments — settle via Omise transfer. */
-const OMISE_PAYMENT_METHODS = [PaymentMethod.PROMPTPAY, PaymentMethod.CREDIT_CARD];
+const OMISE_PAYMENT_METHODS = [
+  PaymentMethod.PROMPTPAY,
+  PaymentMethod.CREDIT_CARD,
+  PaymentMethod.TRUEMONEY,
+  PaymentMethod.SHOPEEPAY,
+];
 
 /** Platform bank-collected — settle via admin manual bank transfer to vendor. */
 const MANUAL_PAYMENT_METHODS = [PaymentMethod.BANK_TRANSFER];

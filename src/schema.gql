@@ -449,6 +449,7 @@ input CreatePaymentInput {
   omiseToken: String
   orderId: String!
   paymentMethod: String!
+  platformType: String
   savedPaymentMethodId: String
 }
 
