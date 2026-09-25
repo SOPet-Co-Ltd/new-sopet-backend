@@ -24,7 +24,9 @@ import { buildOmiseReturnUri } from './build-omise-return-uri';
 import {
   CheckoutPaymentMethod,
   isNonOmiseCheckoutPaymentMethod,
+  isOmiseWalletPaymentMethod,
   normalizeCheckoutPaymentMethod,
+  resolveOmiseWalletSource,
 } from '../../common/utils/checkout-payment.util';
 import { orderHasHeldItems } from '../orders/order-totals.util';
 import { deriveOrderStatusFromFulfillment } from '../orders/order-fulfillment.util';
@@ -514,7 +516,27 @@ export class PaymentsService {
     if (method === 'promptpay') return PaymentMethod.PROMPTPAY;
     if (method === 'credit_card') return PaymentMethod.CREDIT_CARD;
     if (method === 'bank_transfer') return PaymentMethod.BANK_TRANSFER;
+    if (method === 'truemoney') return PaymentMethod.TRUEMONEY;
+    if (method === 'shopeepay') return PaymentMethod.SHOPEEPAY;
     return PaymentMethod.COD;
+  }
+
+  private applyOmiseReturnUri(chargeBody: Record<string, unknown>, paymentId: string): void {
+    const storefrontUrl = this.configService.get<string>('app.storefrontUrl');
+    if (!storefrontUrl?.trim()) {
+      throw new BadRequestException({
+        code: 'STOREFRONT_URL_NOT_CONFIGURED',
+        message: 'Storefront URL is not configured',
+      });
+    }
+    try {
+      chargeBody.return_uri = buildOmiseReturnUri(storefrontUrl, paymentId);
+    } catch {
+      throw new BadRequestException({
+        code: 'STOREFRONT_URL_NOT_CONFIGURED',
+        message: 'Storefront URL is not configured',
+      });
+    }
   }
 
   async getBankTransferDetails(): Promise<{
@@ -925,6 +947,7 @@ export class PaymentsService {
       savedPaymentMethodId,
       customerId,
       guestPayToken,
+      platformType,
     } = createChargeDto;
     const paymentMethod = normalizeCheckoutPaymentMethod(rawPaymentMethod);
 
@@ -1088,21 +1111,13 @@ export class PaymentsService {
             });
           }
 
-          const storefrontUrl = this.configService.get<string>('app.storefrontUrl');
-          if (!storefrontUrl?.trim()) {
-            throw new BadRequestException({
-              code: 'STOREFRONT_URL_NOT_CONFIGURED',
-              message: 'Storefront URL is not configured',
-            });
-          }
-          try {
-            chargeBody.return_uri = buildOmiseReturnUri(storefrontUrl, payment.id);
-          } catch {
-            throw new BadRequestException({
-              code: 'STOREFRONT_URL_NOT_CONFIGURED',
-              message: 'Storefront URL is not configured',
-            });
-          }
+          this.applyOmiseReturnUri(chargeBody, payment.id);
+        } else if (isOmiseWalletPaymentMethod(paymentMethod)) {
+          chargeBody.source = resolveOmiseWalletSource({
+            paymentMethod,
+            platformType,
+          });
+          this.applyOmiseReturnUri(chargeBody, payment.id);
         }
 
         const charge = await this.omiseRequest<OmiseCharge>('/charges', chargeBody);

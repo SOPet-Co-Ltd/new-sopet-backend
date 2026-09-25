@@ -734,6 +734,73 @@ describe('PaymentsService createCharge return_uri', () => {
     ).rejects.toMatchObject({ response: { code: 'STOREFRONT_URL_NOT_CONFIGURED' } });
     expect(global.fetch).not.toHaveBeenCalled();
   });
+
+  it('creates TrueMoney jumpapp source with return_uri', async () => {
+    service = await compileService(STOREFRONT_ORIGIN);
+
+    await service.createCharge({
+      orderId: 'ord-1',
+      amount: 300,
+      currency: 'THB',
+      paymentMethod: 'truemoney',
+      platformType: 'IOS',
+      customerId: 'cust-1',
+    });
+
+    const body = parseChargeBody();
+    expect(body.source).toEqual({ type: 'truemoney_jumpapp', platform_type: 'IOS' });
+    expect(body.return_uri).toBe(`${STOREFRONT_ORIGIN}/payment/${PAYMENT_ID}`);
+  });
+
+  it('creates TrueMoney jumpapp source on desktop (WEB) without phone', async () => {
+    service = await compileService(STOREFRONT_ORIGIN);
+
+    await service.createCharge({
+      orderId: 'ord-1',
+      amount: 300,
+      currency: 'THB',
+      paymentMethod: 'truemoney',
+      platformType: 'WEB',
+      customerId: 'cust-1',
+    });
+
+    const body = parseChargeBody();
+    expect(body.source).toEqual({ type: 'truemoney_jumpapp' });
+    expect(body.return_uri).toBe(`${STOREFRONT_ORIGIN}/payment/${PAYMENT_ID}`);
+  });
+
+  it('creates ShopeePay jumpapp source on mobile', async () => {
+    service = await compileService(STOREFRONT_ORIGIN);
+
+    await service.createCharge({
+      orderId: 'ord-1',
+      amount: 300,
+      currency: 'THB',
+      paymentMethod: 'shopeepay',
+      platformType: 'ANDROID',
+      customerId: 'cust-1',
+    });
+
+    const body = parseChargeBody();
+    expect(body.source).toEqual({ type: 'shopeepay_jumpapp', platform_type: 'ANDROID' });
+    expect(body.return_uri).toBe(`${STOREFRONT_ORIGIN}/payment/${PAYMENT_ID}`);
+  });
+
+  it('creates ShopeePay jumpapp source on desktop', async () => {
+    service = await compileService(STOREFRONT_ORIGIN);
+
+    await service.createCharge({
+      orderId: 'ord-1',
+      amount: 300,
+      currency: 'THB',
+      paymentMethod: 'shopeepay',
+      customerId: 'cust-1',
+    });
+
+    const body = parseChargeBody();
+    expect(body.source).toEqual({ type: 'shopeepay_jumpapp' });
+    expect(body.return_uri).toBe(`${STOREFRONT_ORIGIN}/payment/${PAYMENT_ID}`);
+  });
 });
 
 describe('PaymentsService handleWebhook UD-001 fail', () => {

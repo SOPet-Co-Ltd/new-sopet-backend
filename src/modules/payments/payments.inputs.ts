@@ -1,5 +1,5 @@
 import { Field, Float, InputType } from '@nestjs/graphql';
-import { IsNotEmpty, IsNumber, IsOptional, IsString, IsUUID, Min } from 'class-validator';
+import { IsIn, IsNotEmpty, IsNumber, IsOptional, IsString, IsUUID, Min } from 'class-validator';
 
 @InputType()
 export class CreatePaymentInput {
@@ -35,4 +35,9 @@ export class CreatePaymentInput {
   @IsOptional()
   @IsString()
   guestPayToken?: string;
+
+  @Field({ nullable: true })
+  @IsOptional()
+  @IsIn(['IOS', 'ANDROID', 'WEB'])
+  platformType?: 'IOS' | 'ANDROID' | 'WEB';
 }

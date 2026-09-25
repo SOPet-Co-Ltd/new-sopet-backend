@@ -201,12 +201,12 @@ export class CreateOrderDto {
 
   @ApiProperty({
     description: 'Payment method for the order',
-    enum: ['promptpay', 'credit_card', 'cod', 'bank_transfer'],
+    enum: ['promptpay', 'credit_card', 'cod', 'bank_transfer', 'truemoney', 'shopeepay'],
     example: 'promptpay',
   })
   @IsNotEmpty()
   @IsString()
-  paymentMethod!: 'promptpay' | 'credit_card' | 'cod' | 'bank_transfer';
+  paymentMethod!: 'promptpay' | 'credit_card' | 'cod' | 'bank_transfer' | 'truemoney' | 'shopeepay';
 
   @ApiPropertyOptional({
     description: 'Cart line item IDs to remove after the order is created',

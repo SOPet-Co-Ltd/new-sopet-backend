@@ -1,5 +1,23 @@
-import { IsNotEmpty, IsString, IsNumber, IsEnum, Min, IsOptional, IsUUID } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import {
+  IsNotEmpty,
+  IsString,
+  IsNumber,
+  IsEnum,
+  Min,
+  IsOptional,
+  IsUUID,
+  IsIn,
+} from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
+const PAYMENT_METHODS = [
+  'promptpay',
+  'credit_card',
+  'cod',
+  'bank_transfer',
+  'truemoney',
+  'shopeepay',
+] as const;
 
 export class CreateChargeDto {
   @ApiProperty({
@@ -22,12 +40,12 @@ export class CreateChargeDto {
 
   @ApiProperty({
     description: 'Payment method used for the charge',
-    enum: ['promptpay', 'credit_card', 'cod', 'bank_transfer'],
+    enum: PAYMENT_METHODS,
     example: 'credit_card',
   })
   @IsNotEmpty()
-  @IsEnum(['promptpay', 'credit_card', 'cod', 'bank_transfer'])
-  paymentMethod!: 'promptpay' | 'credit_card' | 'cod' | 'bank_transfer';
+  @IsEnum(PAYMENT_METHODS)
+  paymentMethod!: (typeof PAYMENT_METHODS)[number];
 
   @ApiProperty({
     description: 'ISO 4217 currency code',
@@ -57,4 +75,12 @@ export class CreateChargeDto {
   @IsOptional()
   @IsString()
   guestPayToken?: string;
+
+  @ApiPropertyOptional({
+    description: 'Omise jumpapp platform_type hint (IOS / ANDROID / WEB)',
+    enum: ['IOS', 'ANDROID', 'WEB'],
+  })
+  @IsOptional()
+  @IsIn(['IOS', 'ANDROID', 'WEB'])
+  platformType?: 'IOS' | 'ANDROID' | 'WEB';
 }

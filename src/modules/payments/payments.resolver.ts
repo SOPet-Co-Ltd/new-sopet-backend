@@ -139,6 +139,7 @@ export class PaymentsResolver {
       savedPaymentMethodId: input.savedPaymentMethodId,
       customerId: effectiveCustomerId,
       guestPayToken: input.guestPayToken,
+      platformType: input.platformType,
     });
 
     const payment = await this.paymentsService.findById(
