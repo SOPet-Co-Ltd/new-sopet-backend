@@ -54,4 +54,25 @@ describe('priceModifier @Min(0) consistency across variant inputs', () => {
     });
     expect(result).toBeDefined();
   });
+
+  it('accepts an absolute price on SyncProductVariantItemInput', async () => {
+    const result = await validate(SyncProductVariantItemInput, {
+      sku: 'SKU-1',
+      stockQuantity: 10,
+      price: 400,
+      attributes: '{}',
+    });
+    expect(result).toBeDefined();
+  });
+
+  it('rejects a negative absolute price on SyncProductVariantItemInput', async () => {
+    await expect(
+      validate(SyncProductVariantItemInput, {
+        sku: 'SKU-1',
+        stockQuantity: 10,
+        price: -1,
+        attributes: '{}',
+      }),
+    ).rejects.toThrow(BadRequestException);
+  });
 });
