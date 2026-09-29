@@ -173,6 +173,28 @@ export class StorageService {
     }
   }
 
+  /**
+   * True when `url` is already served from our configured public storage prefix
+   * under the given folder (e.g. `reviews/…`). Stricter than assertFolderImageUrl
+   * fallback path matching — used to skip re-ingest on backfill.
+   */
+  isOurPublicFolderUrl(url: string, folder: UploadFolder): boolean {
+    const trimmed = url?.trim();
+    if (!trimmed) {
+      return false;
+    }
+
+    for (const prefix of this.getPublicUrlPrefixes()) {
+      if (!trimmed.startsWith(`${prefix}/`)) {
+        continue;
+      }
+      const key = decodeURIComponent(trimmed.slice(prefix.length + 1));
+      return key.startsWith(`${folder}/`);
+    }
+
+    return false;
+  }
+
   private invalidCategoryImageUrlError(): BadRequestException {
     return new BadRequestException({
       code: 'INVALID_CATEGORY_IMAGE_URL',

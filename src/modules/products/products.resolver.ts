@@ -646,6 +646,7 @@ export class ProductsResolver {
         id: variant.id,
         sku: variant.sku,
         stockQuantity: variant.stockQuantity,
+        price: variant.price,
         priceModifier: variant.priceModifier,
         compareAtPrice: variant.compareAtPrice,
         attributes: parseVariantAttributes(variant.attributes) ?? {},
@@ -663,7 +664,6 @@ export class ProductsResolver {
     @Args('variants', { type: () => [SyncProductVariantItemInput] })
     variants: SyncProductVariantItemInput[],
   ): Promise<ProductVariantType[]> {
-    const product = await this.productsService.findOne(productId);
     const saved = await this.productsService.syncVariants(
       productId,
       userId,
@@ -671,11 +671,13 @@ export class ProductsResolver {
         id: variant.id,
         sku: variant.sku,
         stockQuantity: variant.stockQuantity,
+        price: variant.price,
         priceModifier: variant.priceModifier,
         compareAtPrice: variant.compareAtPrice,
         attributes: parseVariantAttributes(variant.attributes) ?? {},
       })),
     );
+    const product = await this.productsService.findOne(productId);
     return saved.map((variant) => mapVariant(variant, product.basePrice));
   }
 

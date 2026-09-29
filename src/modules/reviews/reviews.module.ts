@@ -8,11 +8,13 @@ import { Product } from '../../database/entities/product.entity';
 import { ReviewsService } from './reviews.service';
 import { ReviewsResolver } from './reviews.resolver';
 import { StoresModule } from '../stores/stores.module';
+import { StorageModule } from '../storage/storage.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Review, ReviewReply, ReviewImage, Order, Product]),
     StoresModule,
+    StorageModule,
   ],
   providers: [ReviewsService, ReviewsResolver],
   exports: [ReviewsService],

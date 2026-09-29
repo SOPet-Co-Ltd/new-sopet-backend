@@ -37,6 +37,7 @@
     "schema:drop": "yarn typeorm schema:drop -d ormconfig.ts",
     "graphql:schema": "node scripts/ensure-graphql-schema.mjs",
     "email:previews": "ts-node -r tsconfig-paths/register scripts/generate-email-previews.ts",
+    "backfill:review-images": "ts-node -r tsconfig-paths/register scripts/backfill-review-images-to-storage.ts",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f",

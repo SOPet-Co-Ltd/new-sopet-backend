@@ -2003,6 +2003,7 @@ input SyncProductVariantItemInput {
   attributes: String!
   compareAtPrice: Float
   id: String
+  price: Float
   priceModifier: Float
   sku: String!
   stockQuantity: Int!

@@ -18,6 +18,7 @@ import { Order } from '../../database/entities/order.entity';
 import { Product } from '../../database/entities/product.entity';
 import { OrderStatus } from '../../database/entities/enums/order.enums';
 import { StoresService } from '../stores/stores.service';
+import { StorageService } from '../storage/storage.service';
 
 describe('ReviewsService', () => {
   let service: ReviewsService;
@@ -40,6 +41,7 @@ describe('ReviewsService', () => {
 
   const productRepo = {
     find: jest.fn(),
+    findOne: jest.fn(),
     update: jest.fn(),
   };
 
@@ -52,11 +54,17 @@ describe('ReviewsService', () => {
   const reviewImageRepo = {
     create: jest.fn(<T extends object>(x: T): T => x),
     save: jest.fn((images: object[]) => Promise.resolve(images)),
+    find: jest.fn(),
   };
 
   const storesService = {
     userHasStoreAccess: jest.fn(),
     assertStoreAccess: jest.fn().mockResolvedValue(undefined),
+  };
+
+  const storageService = {
+    importImageFromUrl: jest.fn(),
+    isOurPublicFolderUrl: jest.fn().mockReturnValue(false),
   };
 
   const approvedReview = {
@@ -68,6 +76,8 @@ describe('ReviewsService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    storageService.importImageFromUrl.mockReset();
+    storageService.isOurPublicFolderUrl.mockReset().mockReturnValue(false);
     delete process.env.REVIEW_WINDOW_DAYS;
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -78,6 +88,7 @@ describe('ReviewsService', () => {
         { provide: getRepositoryToken(Order), useValue: orderRepo },
         { provide: getRepositoryToken(Product), useValue: productRepo },
         { provide: StoresService, useValue: storesService },
+        { provide: StorageService, useValue: storageService },
       ],
     }).compile();
 
@@ -953,6 +964,205 @@ describe('ReviewsService', () => {
           order: { createdAt: 'ASC' },
         }),
       );
+    });
+  });
+
+  describe('backfillRemoteReviewImagesToStorage', () => {
+    it('skips URLs already on our reviews storage prefix', async () => {
+      reviewImageRepo.find.mockResolvedValue([
+        { id: 'img-1', url: 'https://cdn.sopet.org/reviews/a.webp' },
+      ]);
+      storageService.isOurPublicFolderUrl.mockReturnValue(true);
+
+      const result = await service.backfillRemoteReviewImagesToStorage();
+
+      expect(result).toEqual({
+        scanned: 1,
+        skippedAlreadyStored: 1,
+        updated: 0,
+        failed: 0,
+        failures: [],
+      });
+      expect(storageService.importImageFromUrl).not.toHaveBeenCalled();
+      expect(reviewImageRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('downloads remote URLs and persists storage URLs sequentially', async () => {
+      reviewImageRepo.find.mockResolvedValue([
+        { id: 'img-1', url: 'https://cdn.example.com/old-1.jpg' },
+        { id: 'img-2', url: 'https://cdn.example.com/old-2.jpg' },
+      ]);
+      storageService.importImageFromUrl
+        .mockResolvedValueOnce({
+          url: 'https://cdn.sopet.org/reviews/new-1.webp',
+          key: 'reviews/new-1.webp',
+        })
+        .mockResolvedValueOnce({
+          url: 'https://cdn.sopet.org/reviews/new-2.webp',
+          key: 'reviews/new-2.webp',
+        });
+
+      const result = await service.backfillRemoteReviewImagesToStorage();
+
+      expect(storageService.importImageFromUrl).toHaveBeenNthCalledWith(
+        1,
+        'https://cdn.example.com/old-1.jpg',
+        'reviews',
+      );
+      expect(storageService.importImageFromUrl).toHaveBeenNthCalledWith(
+        2,
+        'https://cdn.example.com/old-2.jpg',
+        'reviews',
+      );
+      expect(reviewImageRepo.save).toHaveBeenCalledWith({
+        id: 'img-1',
+        url: 'https://cdn.sopet.org/reviews/new-1.webp',
+      });
+      expect(reviewImageRepo.save).toHaveBeenCalledWith({
+        id: 'img-2',
+        url: 'https://cdn.sopet.org/reviews/new-2.webp',
+      });
+      expect(result.updated).toBe(2);
+      expect(result.failed).toBe(0);
+    });
+
+    it('continues on ingest failure and leaves the row unchanged', async () => {
+      reviewImageRepo.find.mockResolvedValue([
+        { id: 'img-bad', url: 'https://cdn.example.com/gone.jpg' },
+        { id: 'img-ok', url: 'https://cdn.example.com/ok.jpg' },
+      ]);
+      storageService.importImageFromUrl
+        .mockRejectedValueOnce(
+          new BadRequestException({
+            code: 'INVALID_IMAGE_URL',
+            message: 'Failed to download',
+          }),
+        )
+        .mockResolvedValueOnce({
+          url: 'https://cdn.sopet.org/reviews/ok.webp',
+          key: 'reviews/ok.webp',
+        });
+
+      const result = await service.backfillRemoteReviewImagesToStorage();
+
+      expect(result.failed).toBe(1);
+      expect(result.updated).toBe(1);
+      expect(result.failures[0]).toMatchObject({
+        id: 'img-bad',
+        sourceUrl: 'https://cdn.example.com/gone.jpg',
+      });
+      expect(reviewImageRepo.save).toHaveBeenCalledTimes(1);
+      expect(reviewImageRepo.save).toHaveBeenCalledWith({
+        id: 'img-ok',
+        url: 'https://cdn.sopet.org/reviews/ok.webp',
+      });
+    });
+
+    it('dry-run counts candidates without calling storage or save', async () => {
+      reviewImageRepo.find.mockResolvedValue([
+        { id: 'img-1', url: 'https://cdn.example.com/old.jpg' },
+      ]);
+
+      const result = await service.backfillRemoteReviewImagesToStorage({ dryRun: true });
+
+      expect(result.updated).toBe(1);
+      expect(storageService.importImageFromUrl).not.toHaveBeenCalled();
+      expect(reviewImageRepo.save).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('createImportedForPublicApi', () => {
+    beforeEach(() => {
+      productRepo.findOne.mockResolvedValue({ id: 'prod-1', storeId: 'store-1' });
+      reviewRepo.findOne.mockResolvedValue({
+        id: 'review-1',
+        productId: 'prod-1',
+        status: ReviewStatus.PENDING,
+        source: ReviewSource.VENDOR_IMPORT,
+        images: [],
+      });
+    });
+
+    it('downloads source URLs into reviews folder and persists storage URLs only', async () => {
+      storageService.importImageFromUrl
+        .mockResolvedValueOnce({
+          url: 'https://cdn.sopet.org/reviews/a.webp',
+          key: 'reviews/a.webp',
+        })
+        .mockResolvedValueOnce({
+          url: 'https://cdn.sopet.org/reviews/b.webp',
+          key: 'reviews/b.webp',
+        });
+      reviewRepo.findOne.mockResolvedValue({
+        id: 'review-1',
+        productId: 'prod-1',
+        status: ReviewStatus.PENDING,
+        source: ReviewSource.VENDOR_IMPORT,
+        images: [
+          { id: 'img-1', url: 'https://cdn.sopet.org/reviews/a.webp' },
+          { id: 'img-2', url: 'https://cdn.sopet.org/reviews/b.webp' },
+        ],
+      });
+
+      await service.createImportedForPublicApi('store-1', 'user-1', 'prod-1', {
+        rating: 5,
+        comment: 'ดีมาก',
+        imageUrls: ['https://cdn.example.com/1.jpg', 'https://cdn.example.com/2.jpg'],
+      });
+
+      expect(storageService.importImageFromUrl).toHaveBeenNthCalledWith(
+        1,
+        'https://cdn.example.com/1.jpg',
+        'reviews',
+      );
+      expect(storageService.importImageFromUrl).toHaveBeenNthCalledWith(
+        2,
+        'https://cdn.example.com/2.jpg',
+        'reviews',
+      );
+      expect(reviewImageRepo.create).toHaveBeenCalledWith({
+        reviewId: 'review-1',
+        url: 'https://cdn.sopet.org/reviews/a.webp',
+      });
+      expect(reviewImageRepo.create).toHaveBeenCalledWith({
+        reviewId: 'review-1',
+        url: 'https://cdn.sopet.org/reviews/b.webp',
+      });
+      expect(reviewImageRepo.create).not.toHaveBeenCalledWith(
+        expect.objectContaining({ url: 'https://cdn.example.com/1.jpg' }),
+      );
+    });
+
+    it('rejects create when image ingest fails and does not save review images', async () => {
+      storageService.importImageFromUrl.mockRejectedValue(
+        new BadRequestException({
+          code: 'INVALID_IMAGE_URL',
+          message: 'Failed to download image from URL: https://cdn.example.com/bad.jpg',
+        }),
+      );
+
+      await expect(
+        service.createImportedForPublicApi('store-1', 'user-1', 'prod-1', {
+          rating: 4,
+          imageUrls: ['https://cdn.example.com/bad.jpg'],
+        }),
+      ).rejects.toMatchObject({
+        response: { code: 'INVALID_IMAGE_URL' },
+      });
+
+      expect(reviewRepo.save).not.toHaveBeenCalled();
+      expect(reviewImageRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('creates review without calling storage when no images provided', async () => {
+      await service.createImportedForPublicApi('store-1', 'user-1', 'prod-1', {
+        rating: 5,
+        comment: 'ไม่มีรูป',
+      });
+
+      expect(storageService.importImageFromUrl).not.toHaveBeenCalled();
+      expect(reviewRepo.save).toHaveBeenCalled();
+      expect(reviewImageRepo.save).not.toHaveBeenCalled();
     });
   });
 

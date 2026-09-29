@@ -1203,6 +1203,56 @@ describe('ProductsService', () => {
       expect(variantRepository.softDelete).toHaveBeenCalledTimes(1);
     });
 
+    it('syncVariants with absolute prices below old basePrice recomputes base and adjustments', async () => {
+      const cheapVariant = {
+        id: 'var-cheap',
+        sku: 'CHEAP-1',
+        stockQuantity: 5,
+        priceAdjustment: 0,
+        options: { Size: '30ml' },
+      };
+      const dearVariant = {
+        id: 'var-dear',
+        sku: 'DEAR-1',
+        stockQuantity: 3,
+        priceAdjustment: 100,
+        options: { Size: '60ml' },
+      };
+      productRepository.findOne.mockResolvedValue({
+        ...product,
+        basePrice: 490,
+        variants: [cheapVariant, dearVariant],
+      });
+      productRepository.save.mockImplementation((p: Record<string, unknown>) => Promise.resolve(p));
+
+      await service.syncVariants('prod-1', 'user-1', [
+        {
+          id: cheapVariant.id,
+          sku: cheapVariant.sku,
+          stockQuantity: 5,
+          price: 400,
+          attributes: { Size: '30ml' },
+        },
+        {
+          id: dearVariant.id,
+          sku: dearVariant.sku,
+          stockQuantity: 3,
+          price: 590,
+          attributes: { Size: '60ml' },
+        },
+      ]);
+
+      expect(productRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({ basePrice: 400 }),
+      );
+      expect(variantRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'var-cheap', priceAdjustment: 0 }),
+      );
+      expect(variantRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'var-dear', priceAdjustment: 190 }),
+      );
+    });
+
     it('blocks syncVariants when removal has order_items only', async () => {
       orderItemRepository.find.mockResolvedValue([{ variantId: 'var-remove' }]);
 

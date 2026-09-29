@@ -48,6 +48,8 @@ type SyncVariantItem = {
   id?: string;
   sku: string;
   stockQuantity: number;
+  /** Absolute THB sell price. When set, sync recomputes product.basePrice. */
+  price?: number;
   priceModifier?: number;
   compareAtPrice?: number | null;
   attributes: Record<string, string>;
@@ -1663,12 +1665,29 @@ export class ProductsService {
     const plan = this.classifySyncPlan(existingVariants, items);
     await this.assertRemovalsAllowed(plan.remove);
 
+    const absolutePrices = items
+      .map((item) => item.price)
+      .filter((price): price is number => price !== undefined && Number.isFinite(price));
+    const useAbsolutePrices = absolutePrices.length === items.length;
+    let syncBasePrice = Number(product.basePrice ?? 0);
+
+    if (useAbsolutePrices) {
+      syncBasePrice = Math.min(...absolutePrices);
+      if (Number(product.basePrice) !== syncBasePrice) {
+        product.basePrice = syncBasePrice;
+        await this.productRepository.save(product);
+      }
+    }
+
     const keepIds = new Set<string>();
     const savedVariants: ProductVariant[] = [];
 
     for (const item of items) {
       const options = this.buildVariantOptions(undefined, item.attributes);
       const optionKey = this.variantOptionKey(options);
+      const priceAdjustment = useAbsolutePrices
+        ? Number(item.price) - syncBasePrice
+        : (item.priceModifier ?? 0);
 
       const variant: ProductVariant | undefined = item.id
         ? existingVariants.find((existing) => existing.id === item.id)
@@ -1679,7 +1698,7 @@ export class ProductsService {
       if (variant) {
         variant.sku = item.sku;
         variant.stockQuantity = item.stockQuantity;
-        variant.priceAdjustment = item.priceModifier ?? 0;
+        variant.priceAdjustment = priceAdjustment;
         if (item.compareAtPrice !== undefined) {
           variant.compareAtPrice = item.compareAtPrice;
         }
@@ -1703,7 +1722,7 @@ export class ProductsService {
         productId,
         sku: item.sku,
         stockQuantity: item.stockQuantity,
-        priceAdjustment: item.priceModifier ?? 0,
+        priceAdjustment,
         compareAtPrice: item.compareAtPrice ?? null,
         options,
       });

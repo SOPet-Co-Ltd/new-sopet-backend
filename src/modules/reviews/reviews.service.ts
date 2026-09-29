@@ -17,6 +17,7 @@ import { OrderItem } from '../../database/entities/order-item.entity';
 import { OrderStatus } from '../../database/entities/enums/order.enums';
 import { PaginatedResponse } from '../../common/interfaces';
 import { StoresService } from '../stores/stores.service';
+import { StorageService } from '../storage/storage.service';
 
 export type StoreReviewReplyFilter = 'all' | 'unreplied' | 'replied';
 export type StoreReviewRatingFilter = 'all' | '1' | '2' | '3' | '4' | '5';
@@ -270,6 +271,7 @@ export class ReviewsService {
     @InjectRepository(Product)
     private readonly productRepository: Repository<Product>,
     private readonly storesService: StoresService,
+    private readonly storageService: StorageService,
   ) {}
 
   async create(input: {
@@ -384,7 +386,10 @@ export class ReviewsService {
     }
 
     const comment = input.comment?.trim() ? input.comment.trim().slice(0, 2000) : null;
-    const imageUrls = this.normalizeReviewImageUrls(input.imageUrls);
+    const sourceUrls = this.normalizeReviewImageUrls(input.imageUrls);
+    // Download into object storage before creating the review so a failed ingest
+    // never leaves a pending vendor_import row with remote source URLs.
+    const storageUrls = await this.importReviewImagesFromSourceUrls(sourceUrls);
 
     const review = this.reviewRepository.create({
       productId,
@@ -396,8 +401,8 @@ export class ReviewsService {
       source: ReviewSource.VENDOR_IMPORT,
     });
     const saved = await this.reviewRepository.save(review);
-    if (imageUrls.length > 0) {
-      const images = imageUrls.map((url) =>
+    if (storageUrls.length > 0) {
+      const images = storageUrls.map((url) =>
         this.reviewImageRepository.create({ reviewId: saved.id, url }),
       );
       await this.reviewImageRepository.save(images);
@@ -993,6 +998,68 @@ export class ReviewsService {
     return review;
   }
 
+  /**
+   * One-off / ops: re-ingest review_images that still point at remote (non-storage) URLs
+   * into the `reviews` folder. Sequential to limit load. Failures are logged and skipped.
+   */
+  async backfillRemoteReviewImagesToStorage(options?: {
+    dryRun?: boolean;
+    limit?: number;
+  }): Promise<{
+    scanned: number;
+    skippedAlreadyStored: number;
+    updated: number;
+    failed: number;
+    failures: Array<{ id: string; sourceUrl: string; message: string }>;
+  }> {
+    const dryRun = options?.dryRun === true;
+    const limit =
+      options?.limit !== undefined && Number.isFinite(options.limit) && options.limit > 0
+        ? Math.floor(options.limit)
+        : undefined;
+
+    const rows = await this.reviewImageRepository.find({
+      order: { createdAt: 'ASC' },
+      ...(limit ? { take: limit } : {}),
+    });
+
+    let skippedAlreadyStored = 0;
+    let updated = 0;
+    let failed = 0;
+    const failures: Array<{ id: string; sourceUrl: string; message: string }> = [];
+
+    for (const row of rows) {
+      if (this.storageService.isOurPublicFolderUrl(row.url, 'reviews')) {
+        skippedAlreadyStored += 1;
+        continue;
+      }
+
+      if (dryRun) {
+        updated += 1;
+        continue;
+      }
+
+      try {
+        const uploaded = await this.storageService.importImageFromUrl(row.url, 'reviews');
+        row.url = uploaded.url;
+        await this.reviewImageRepository.save(row);
+        updated += 1;
+      } catch (error) {
+        failed += 1;
+        const message = error instanceof Error ? error.message : String(error);
+        failures.push({ id: row.id, sourceUrl: row.url, message });
+      }
+    }
+
+    return {
+      scanned: rows.length,
+      skippedAlreadyStored,
+      updated,
+      failed,
+      failures,
+    };
+  }
+
   private validateReplyBody(body: string): string {
     const normalized = body.replace(/\0/g, '').trim();
     if (!normalized) {
@@ -1031,6 +1098,23 @@ export class ReviewsService {
     }
 
     return normalized;
+  }
+
+  /**
+   * Download each source URL into the reviews folder and return storage URLs only.
+   * Source URLs are never persisted. Empty/undefined → [].
+   */
+  private async importReviewImagesFromSourceUrls(sourceUrls?: string[]): Promise<string[]> {
+    if (!sourceUrls?.length) {
+      return [];
+    }
+
+    const storageUrls: string[] = [];
+    for (const sourceUrl of sourceUrls) {
+      const uploaded = await this.storageService.importImageFromUrl(sourceUrl, 'reviews');
+      storageUrls.push(uploaded.url);
+    }
+    return storageUrls;
   }
 
   private isReviewReplyUniqueViolation(error: unknown): boolean {
