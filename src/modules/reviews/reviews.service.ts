@@ -998,6 +998,68 @@ export class ReviewsService {
     return review;
   }
 
+  /**
+   * One-off / ops: re-ingest review_images that still point at remote (non-storage) URLs
+   * into the `reviews` folder. Sequential to limit load. Failures are logged and skipped.
+   */
+  async backfillRemoteReviewImagesToStorage(options?: {
+    dryRun?: boolean;
+    limit?: number;
+  }): Promise<{
+    scanned: number;
+    skippedAlreadyStored: number;
+    updated: number;
+    failed: number;
+    failures: Array<{ id: string; sourceUrl: string; message: string }>;
+  }> {
+    const dryRun = options?.dryRun === true;
+    const limit =
+      options?.limit !== undefined && Number.isFinite(options.limit) && options.limit > 0
+        ? Math.floor(options.limit)
+        : undefined;
+
+    const rows = await this.reviewImageRepository.find({
+      order: { createdAt: 'ASC' },
+      ...(limit ? { take: limit } : {}),
+    });
+
+    let skippedAlreadyStored = 0;
+    let updated = 0;
+    let failed = 0;
+    const failures: Array<{ id: string; sourceUrl: string; message: string }> = [];
+
+    for (const row of rows) {
+      if (this.storageService.isOurPublicFolderUrl(row.url, 'reviews')) {
+        skippedAlreadyStored += 1;
+        continue;
+      }
+
+      if (dryRun) {
+        updated += 1;
+        continue;
+      }
+
+      try {
+        const uploaded = await this.storageService.importImageFromUrl(row.url, 'reviews');
+        row.url = uploaded.url;
+        await this.reviewImageRepository.save(row);
+        updated += 1;
+      } catch (error) {
+        failed += 1;
+        const message = error instanceof Error ? error.message : String(error);
+        failures.push({ id: row.id, sourceUrl: row.url, message });
+      }
+    }
+
+    return {
+      scanned: rows.length,
+      skippedAlreadyStored,
+      updated,
+      failed,
+      failures,
+    };
+  }
+
   private validateReplyBody(body: string): string {
     const normalized = body.replace(/\0/g, '').trim();
     if (!normalized) {
