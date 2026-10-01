@@ -96,6 +96,27 @@ describe('SubmitStoreRequestInput contactPhone validation', () => {
     const result = await validate({ storeName: 'My Shop' });
     expect(result).toBeDefined();
   });
+
+  it('accepts empty-string contactPhone/contactEmail as omitted optionals', async () => {
+    const result = (await validate({
+      storeName: 'My Shop',
+      contactPhone: '',
+      contactEmail: '',
+    })) as SubmitStoreRequestInput;
+    expect(result).toBeDefined();
+    expect(result.contactPhone).toBeUndefined();
+    expect(result.contactEmail).toBeUndefined();
+  });
+
+  it('accepts whitespace-only contactPhone/contactEmail as omitted optionals', async () => {
+    const result = (await validate({
+      storeName: 'My Shop',
+      contactPhone: '   ',
+      contactEmail: '  ',
+    })) as SubmitStoreRequestInput;
+    expect(result.contactPhone).toBeUndefined();
+    expect(result.contactEmail).toBeUndefined();
+  });
 });
 
 describe('CreateStoreAsAdminInput name validation (row 46 regression)', () => {

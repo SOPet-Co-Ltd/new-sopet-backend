@@ -1,4 +1,5 @@
 import { Field, InputType, Int } from '@nestjs/graphql';
+import { Transform } from 'class-transformer';
 import {
   IsBoolean,
   IsEmail,
@@ -19,6 +20,10 @@ import {
 // `Length`/`IsNotEmpty` alone let whitespace-only input (e.g. "   ") through,
 // since neither trims before checking. Require at least one non-whitespace char.
 const NOT_BLANK_MESSAGE = 'This field cannot be blank or whitespace-only';
+
+/** Forms often send "" for blank optional fields; @IsOptional only skips null/undefined. */
+const emptyStringToUndefined = ({ value }: { value: unknown }) =>
+  typeof value === 'string' && value.trim() === '' ? undefined : value;
 
 @InputType()
 export class RegisterVendorInput {
@@ -54,11 +59,13 @@ export class SubmitStoreRequestInput {
   description?: string;
 
   @Field({ nullable: true })
+  @Transform(emptyStringToUndefined)
   @IsOptional()
   @IsPhoneNumber('TH')
   contactPhone?: string;
 
   @Field({ nullable: true })
+  @Transform(emptyStringToUndefined)
   @IsOptional()
   @IsEmail()
   contactEmail?: string;
