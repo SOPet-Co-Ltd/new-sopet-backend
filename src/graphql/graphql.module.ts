@@ -1,8 +1,9 @@
-import { HttpException, Logger, Module } from '@nestjs/common';
+import { HttpException, Module } from '@nestjs/common';
 import { GraphQLModule } from '@nestjs/graphql';
 import { ApolloDriver, ApolloDriverConfig } from '@nestjs/apollo';
 import { unwrapResolverError } from '@apollo/server/errors';
-import type { GraphQLFormattedError } from 'graphql';
+import { GraphQLError, type GraphQLFormattedError } from 'graphql';
+import depthLimit from 'graphql-depth-limit';
 import { join } from 'node:path';
 import {
   mapException,
@@ -10,6 +11,8 @@ import {
   responseFromHttpException,
   toClientError,
 } from '../common/utils/exception-response.util';
+import { reportServerError } from '../common/utils/report-server-error.util';
+import { createGraphqlComplexityPlugin } from './graphql-complexity.plugin';
 import { AppGraphqlResolver } from './app.resolver';
 import { AuthModule } from '../modules/auth/auth.module';
 import { CartModule } from '../modules/cart/cart.module';
@@ -36,7 +39,8 @@ import { OrderAuditLogsModule } from '../modules/order-audit-logs/order-audit-lo
 import { GraphqlLoadersModule } from './loaders/graphql-loaders.module';
 import { GraphqlContextFactory } from './loaders/graphql-context.factory';
 
-const graphqlErrorLogger = new Logger('GraphQLFormatError');
+const GRAPHQL_MAX_DEPTH = 10;
+const GRAPHQL_MAX_COMPLEXITY = 1000;
 
 @Module({
   imports: [
@@ -51,6 +55,10 @@ const graphqlErrorLogger = new Logger('GraphQLFormatError');
         playground: process.env.NODE_ENV !== 'production',
         // SOPET-M-06: disable introspection in production
         introspection: process.env.NODE_ENV !== 'production',
+        // Depth does not need variables. Complexity must run as a plugin so it
+        // receives request.variables (createComplexityRule in validationRules cannot).
+        validationRules: [depthLimit(GRAPHQL_MAX_DEPTH)],
+        plugins: [createGraphqlComplexityPlugin(GRAPHQL_MAX_COMPLEXITY)],
         subscriptions: {
           'graphql-ws': {
             // SOPET-M-05: wire JWT / guestPayToken from connectionParams onto the
@@ -106,16 +114,43 @@ const graphqlErrorLogger = new Logger('GraphQLFormatError');
         ): GraphQLFormattedError => {
           const originalError = unwrapResolverError(error);
 
+          // Apollo validation / complexity client errors — keep as GraphQL client errors.
+          if (
+            originalError instanceof GraphQLError &&
+            !(originalError.originalError instanceof HttpException)
+          ) {
+            const code =
+              (typeof originalError.extensions?.code === 'string' &&
+                originalError.extensions.code) ||
+              (typeof formattedError.extensions?.code === 'string' &&
+                formattedError.extensions.code) ||
+              'BAD_USER_INPUT';
+            if (code !== 'INTERNAL_SERVER_ERROR') {
+              return {
+                ...formattedError,
+                message: originalError.message,
+                extensions: {
+                  ...formattedError.extensions,
+                  code,
+                },
+              };
+            }
+          }
+
           const mapped =
             originalError instanceof HttpException
               ? responseFromHttpException(originalError)
               : (mapUnknownException(originalError) ?? mapException(originalError));
 
           if (mapped.code === 'INTERNAL_SERVER_ERROR') {
-            graphqlErrorLogger.error(
-              originalError instanceof Error ? originalError.message : String(originalError),
-              originalError instanceof Error ? originalError.stack : undefined,
-            );
+            reportServerError({
+              code: mapped.code,
+              message:
+                originalError instanceof Error ? originalError.message : String(originalError),
+              stack: originalError instanceof Error ? originalError.stack : undefined,
+              operationName:
+                typeof formattedError.path?.[0] === 'string' ? formattedError.path[0] : undefined,
+            });
           }
 
           const client = toClientError(mapped);

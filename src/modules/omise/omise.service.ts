@@ -64,6 +64,7 @@ export class OmiseService {
         'Content-Type': 'application/json',
       },
       body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(15_000),
     });
 
     const data = (await response.json()) as T & { message?: string };

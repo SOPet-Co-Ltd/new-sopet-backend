@@ -2,7 +2,6 @@
 # Lite (format + lint): PRs whose base is NOT deploy/production or deploy/uat
 # Full (format + build + unit + e2e): PRs targeting deploy/production or deploy/uat
 # Security (yarn audit): all PRs; advisory (continue-on-error) while known highs remain
-# E2E tests use mocked repositories/services — no PostgreSQL, Redis, or MinIO required.
 
 name: CI
 
@@ -27,8 +26,8 @@ jobs:
         run: yarn install --frozen-lockfile
 
       # Yarn classic: --level high fails when high/critical exist (exit bitmask).
-      # Transitive highs (e.g. typeorm → brace-expansion) currently block a hard gate;
-      # keep advisory (continue-on-error) until the dependency tree clears.
+      # Known highs blocking a hard gate (2026-10-03): axios (direct), braces via
+      # @nestjs/graphql → fast-glob → micromatch. Keep advisory until the tree clears.
       - name: Dependency audit (high+)
         continue-on-error: true
         run: yarn audit --level high --groups dependencies
@@ -62,12 +61,33 @@ jobs:
     if: github.base_ref == 'deploy/production' || github.base_ref == 'deploy/uat'
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sopet_ecommerce
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sopet_ecommerce"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     env:
       NODE_ENV: test
       JWT_SECRET: ci-dummy-jwt-secret-not-for-production
       OMISE_SECRET_KEY: skey_test_ci_dummy
       OMISE_PUBLIC_KEY: pkey_test_ci_dummy
       OMISE_WEBHOOK_SECRET: whsec_ci_dummy
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: sopet_ecommerce
+      DB_SSL: 'false'
 
     steps:
       - name: Checkout
@@ -90,6 +110,9 @@ jobs:
 
       - name: Unit tests
         run: yarn test
+
+      - name: Run migrations
+        run: yarn migration:run
 
       - name: E2E tests
         run: yarn test:e2e

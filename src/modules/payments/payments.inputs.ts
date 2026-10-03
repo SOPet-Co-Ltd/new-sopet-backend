@@ -7,10 +7,12 @@ export class CreatePaymentInput {
   @IsUUID()
   orderId!: string;
 
-  @Field(() => Float)
+  /** Ignored by the service — charges use the locked order total. */
+  @Field(() => Float, { nullable: true })
+  @IsOptional()
   @IsNumber()
   @Min(0)
-  amount!: number;
+  amount?: number;
 
   @Field({ defaultValue: 'THB' })
   @IsString()
