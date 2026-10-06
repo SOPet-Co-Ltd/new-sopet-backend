@@ -153,4 +153,26 @@ describe('AppThrottlerGuard', () => {
     ).getTracker({ headers: {} });
     expect(tracker).toBe('');
   });
+
+  it('handleRequest fails closed when tracker is empty', async () => {
+    const { ThrottlerException } = await import('@nestjs/throttler');
+    const guard = Object.create(AppThrottlerGuard.prototype) as AppThrottlerGuard & {
+      getRequestResponse: (ctx: ExecutionContext) => { req: unknown; res: unknown };
+      handleRequest: (props: {
+        context: ExecutionContext;
+        getTracker: () => Promise<string>;
+      }) => Promise<boolean>;
+    };
+    guard.getRequestResponse = () => ({ req: { headers: {} }, res: { header: () => undefined } });
+    const context = {
+      getType: () => 'http',
+    } as unknown as ExecutionContext;
+
+    await expect(
+      guard.handleRequest({
+        context,
+        getTracker: async () => '',
+      }),
+    ).rejects.toBeInstanceOf(ThrottlerException);
+  });
 });

@@ -443,7 +443,7 @@ input CreateOrderInput {
 }
 
 input CreatePaymentInput {
-  amount: Float!
+  amount: Float
   currency: String! = "THB"
   guestPayToken: String
   omiseToken: String

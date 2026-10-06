@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { BadRequestException, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -18,6 +19,14 @@ import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.servic
 import { BankTransferSettingsService } from '../platform/bank-transfer-settings.service';
 import { OrderAuditLogsService } from '../order-audit-logs/order-audit-logs.service';
 import { OrderAuditLog } from '../../database/entities/order-audit-log.entity';
+
+function guestPayFixture(plaintext = 'a'.repeat(64)) {
+  return {
+    plaintext,
+    hash: createHash('sha256').update(plaintext).digest('hex'),
+    expiresAt: new Date('2099-01-01T00:00:00.000Z'),
+  };
+}
 
 const paymentEventsServiceMock = {
   publishPaymentStatusUpdated: jest.fn(),
@@ -161,7 +170,7 @@ describe('PaymentsService guest access', () => {
     service = module.get(PaymentsService);
   });
 
-  it('allows payment for guest orders without customerId', async () => {
+  it('rejects payment for guest orders without a guest pay token hash', async () => {
     orderRepository.findOne.mockResolvedValue({
       id: 'ord-1',
       customerId: null,
@@ -169,8 +178,7 @@ describe('PaymentsService guest access', () => {
       guestPayTokenHash: null,
     });
 
-    const order = await service.assertCanPayForOrder('ord-1');
-    expect(order.id).toBe('ord-1');
+    await expect(service.assertCanPayForOrder('ord-1')).rejects.toThrow(ForbiddenException);
   });
 
   it('rejects payment when customer does not own the order', async () => {
@@ -198,7 +206,7 @@ describe('PaymentsService guest access', () => {
     await expect(service.assertCanPayForOrder('missing')).rejects.toThrow(BadRequestException);
   });
 
-  it('allows unauthenticated access to a guest order linked to a member (legacy null hash)', async () => {
+  it('rejects unauthenticated access to a guest order linked to a member when hash is null', async () => {
     orderRepository.findOne.mockResolvedValue({
       id: 'ord-1',
       customerId: 'member-1',
@@ -206,8 +214,7 @@ describe('PaymentsService guest access', () => {
       guestPayTokenHash: null,
     });
 
-    const order = await service.assertCanPayForOrder('ord-1');
-    expect(order.id).toBe('ord-1');
+    await expect(service.assertCanPayForOrder('ord-1')).rejects.toThrow(ForbiddenException);
   });
 
   it('rejects a different authenticated customer for a linked guest order', async () => {
@@ -273,11 +280,14 @@ describe('PaymentsService payment read queries', () => {
     },
   };
 
+  const guestPay = guestPayFixture();
+  const guestPayPlaintext = guestPay.plaintext;
   const guestOrder = {
     id: 'ord-1',
     customerId: null,
     guestPhone: '0812345678',
-    guestPayTokenHash: null,
+    guestPayTokenHash: guestPay.hash,
+    guestPayTokenExpiresAt: guestPay.expiresAt,
   };
   const ownedOrder = { id: 'ord-2', customerId: 'cust-1' };
   const basePayment = {
@@ -356,7 +366,7 @@ describe('PaymentsService payment read queries', () => {
       paymentRepository.findOne.mockResolvedValue(basePayment);
       orderRepository.findOne.mockResolvedValue(guestOrder);
 
-      const payment = await service.findById('pay-1');
+      const payment = await service.findById('pay-1', undefined, guestPayPlaintext);
 
       expect(payment).toEqual(basePayment);
       expect(paymentRepository.findOne).toHaveBeenCalledWith({
@@ -394,7 +404,7 @@ describe('PaymentsService payment read queries', () => {
       const latestPayment = { ...basePayment, id: 'pay-latest', status: 'paid' };
       paymentRepository.findOne.mockResolvedValue(latestPayment);
 
-      const payment = await service.findLatestByOrderId('ord-1');
+      const payment = await service.findLatestByOrderId('ord-1', undefined, guestPayPlaintext);
 
       expect(payment).toEqual(latestPayment);
       expect(paymentRepository.findOne).toHaveBeenCalledWith({
@@ -425,7 +435,9 @@ describe('PaymentsService payment read queries', () => {
       orderRepository.findOne.mockResolvedValue(guestOrder);
       paymentRepository.findOne.mockResolvedValue(null);
 
-      await expect(service.findLatestByOrderId('ord-1')).rejects.toThrow(NotFoundException);
+      await expect(
+        service.findLatestByOrderId('ord-1', undefined, guestPayPlaintext),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 });
@@ -2024,10 +2036,53 @@ describe('PaymentsService cancelStaleUnpaidOrders (AC-019–021)', () => {
 
     expect(cancelled).toBe(0);
     const findCall = orderRepository.find.mock.calls[0] as
-      [{ where: { createdAt: unknown; status: unknown } }] | undefined;
-    expect(findCall?.[0].where.createdAt).toBeDefined();
-    expect(findCall?.[0].where.status).toBe(OrderStatus.PENDING_PAYMENT);
+      | [{ where: Array<{ createdAt?: unknown; status: unknown; guestPayTokenHash?: unknown }> }]
+      | undefined;
+    expect(findCall?.[0].where).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          status: OrderStatus.PENDING_PAYMENT,
+          createdAt: expect.anything(),
+        }),
+        expect.objectContaining({
+          status: OrderStatus.PENDING_PAYMENT,
+          guestPayTokenHash: expect.anything(),
+        }),
+      ]),
+    );
     expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
+  });
+
+  it('cancels unpaid legacy guest orders with null guestPayTokenHash regardless of age', async () => {
+    const legacyGuestOrder = {
+      id: 'ord-legacy-guest',
+      status: OrderStatus.PENDING_PAYMENT,
+      createdAt: new Date(NOW.getTime() - 60_000),
+      guestPhone: '0812345678',
+      guestPayTokenHash: null,
+      paymentReference: null,
+      items: [{ id: 'i1', fulfillmentStatus: 'pending' }],
+    };
+    const pendingPayment = {
+      id: 'pay-legacy-1',
+      orderId: 'ord-legacy-guest',
+      status: 'pending',
+      paymentMethod: 'promptpay',
+    } as Payment;
+
+    orderRepository.find.mockResolvedValue([legacyGuestOrder]);
+    paymentRepository.findOne.mockResolvedValue(null);
+    paymentRepository.find.mockResolvedValue([pendingPayment]);
+
+    const cancelled = await service.cancelStaleUnpaidOrders();
+
+    expect(cancelled).toBe(1);
+    expect(legacyGuestOrder.status).toBe(OrderStatus.CANCELLED);
+    expect(inventoryService.restoreOrderStock).toHaveBeenCalledWith(
+      'ord-legacy-guest',
+      expect.anything(),
+      'Unpaid order expired',
+    );
   });
 
   it('skips orders that already have a paid payment', async () => {
@@ -2346,12 +2401,14 @@ describe('PaymentsService payment held gate + Decision #16 recompute (AC-026–0
   });
 
   it('blocks createCharge when all items on_hold with PAYMENT_HELD_PORTION_BLOCKED', async () => {
+    const guestPay = guestPayFixture();
     const order = {
       id: 'ord-held-all',
       status: OrderStatus.PENDING_PAYMENT,
       customerId: null,
       guestPhone: '0812345678',
-      guestPayTokenHash: null,
+      guestPayTokenHash: guestPay.hash,
+      guestPayTokenExpiresAt: guestPay.expiresAt,
       items: [
         { id: 'i1', fulfillmentStatus: FulfillmentStatus.ON_HOLD },
         { id: 'i2', fulfillmentStatus: FulfillmentStatus.ON_HOLD },
@@ -2365,17 +2422,20 @@ describe('PaymentsService payment held gate + Decision #16 recompute (AC-026–0
         amount: 100,
         currency: 'THB',
         paymentMethod: 'promptpay',
+        guestPayToken: guestPay.plaintext,
       }),
     ).rejects.toMatchObject({ response: { code: 'PAYMENT_HELD_PORTION_BLOCKED' } });
   });
 
   it('blocks createCharge when mixed unpaid has any on_hold item', async () => {
+    const guestPay = guestPayFixture();
     const order = {
       id: 'ord-held-mixed',
       status: OrderStatus.PENDING_PAYMENT,
       customerId: null,
       guestPhone: '0812345678',
-      guestPayTokenHash: null,
+      guestPayTokenHash: guestPay.hash,
+      guestPayTokenExpiresAt: guestPay.expiresAt,
       items: [
         { id: 'i1', fulfillmentStatus: FulfillmentStatus.ON_HOLD },
         { id: 'i2', fulfillmentStatus: FulfillmentStatus.PENDING },
@@ -2389,18 +2449,21 @@ describe('PaymentsService payment held gate + Decision #16 recompute (AC-026–0
         amount: 100,
         currency: 'THB',
         paymentMethod: 'cod',
+        guestPayToken: guestPay.plaintext,
       }),
     ).rejects.toMatchObject({ response: { code: 'PAYMENT_HELD_PORTION_BLOCKED' } });
   });
 
   it('allows createCharge after held lines cancelled and totals recomputed (Decision #16)', async () => {
     const { recomputeOrderPayableTotals } = await import('../orders/order-totals.util');
+    const guestPay = guestPayFixture();
     const order = {
       id: 'ord-after-sla',
       status: OrderStatus.PENDING_PAYMENT,
       customerId: null,
       guestPhone: '0812345678',
-      guestPayTokenHash: null,
+      guestPayTokenHash: guestPay.hash,
+      guestPayTokenExpiresAt: guestPay.expiresAt,
       subtotal: 300,
       shippingFee: 50,
       discountAmount: 0,
@@ -2441,6 +2504,7 @@ describe('PaymentsService payment held gate + Decision #16 recompute (AC-026–0
       amount: 120,
       currency: 'THB',
       paymentMethod: 'cod',
+      guestPayToken: guestPay.plaintext,
     });
 
     expect(result.paymentMethod).toBe('cod');

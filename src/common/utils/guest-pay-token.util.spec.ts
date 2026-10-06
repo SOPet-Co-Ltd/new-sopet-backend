@@ -20,10 +20,10 @@ describe('guest-pay-token.util', () => {
     expect(guestPayTokensMatch(issued.hash, '0'.repeat(64))).toBe(false);
   });
 
-  it('allows legacy orders with null hash without a token', () => {
+  it('rejects legacy orders with null hash', () => {
     expect(() =>
       assertGuestPayTokenAccess({ guestPayTokenHash: null, guestPayTokenExpiresAt: null }),
-    ).not.toThrow();
+    ).toThrow(ForbiddenException);
   });
 
   it('requires a valid non-expired token when a hash is stored', () => {

@@ -1,19 +1,11 @@
-import {
-  ExceptionFilter,
-  Catch,
-  ArgumentsHost,
-  HttpException,
-  HttpStatus,
-  Logger,
-} from '@nestjs/common';
+import { ExceptionFilter, Catch, ArgumentsHost, HttpException } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { codeFromStatus, getHttpErrorStatus } from '../utils/http-error.util';
 import { mapException, toClientError } from '../utils/exception-response.util';
+import { reportServerError } from '../utils/report-server-error.util';
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
-  private readonly logger = new Logger(HttpExceptionFilter.name);
-
   catch(exception: unknown, host: ArgumentsHost) {
     if (host.getType<string>() === 'graphql') {
       throw exception;
@@ -21,7 +13,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
-    const request = ctx.getRequest<Request>();
+    const request = ctx.getRequest<Request & { requestId?: string }>();
 
     let mapped = mapException(exception);
 
@@ -30,9 +22,6 @@ export class HttpExceptionFilter implements ExceptionFilter {
     } else if (getHttpErrorStatus(exception) !== undefined) {
       const status = getHttpErrorStatus(exception)!;
       const internalMessage = (exception as Error).message || 'Internal server error';
-      if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
-        this.logger.error(`Unhandled exception: ${internalMessage}`, (exception as Error).stack);
-      }
       mapped = {
         status,
         code: codeFromStatus(status),
@@ -40,12 +29,20 @@ export class HttpExceptionFilter implements ExceptionFilter {
       };
     } else {
       mapped = mapException(exception);
-      if (mapped.status >= HttpStatus.INTERNAL_SERVER_ERROR) {
-        this.logger.error(
-          `Unhandled exception: ${(exception as Error).message ?? 'unknown'}`,
-          (exception as Error).stack,
-        );
-      }
+    }
+
+    if (mapped.status >= 500) {
+      reportServerError({
+        code: mapped.code,
+        message:
+          exception instanceof Error
+            ? exception.message
+            : typeof mapped.message === 'string'
+              ? mapped.message
+              : 'Internal server error',
+        stack: exception instanceof Error ? exception.stack : undefined,
+        requestId: request?.requestId,
+      });
     }
 
     const client = toClientError(mapped);

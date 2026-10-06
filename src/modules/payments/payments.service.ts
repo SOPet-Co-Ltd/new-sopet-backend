@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, LessThanOrEqual, Repository } from 'typeorm';
+import { EntityManager, IsNull, LessThanOrEqual, Not, Repository } from 'typeorm';
 import { Payment } from '../../database/entities/payment.entity';
 import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
 import { OrderItem } from '../../database/entities/order-item.entity';
@@ -225,15 +225,23 @@ export class PaymentsService {
 
   /**
    * Cancel PENDING_PAYMENT orders older than unpaidOrderCancelAfterMs with no paid payment.
+   * Also cancels unpaid legacy guest orders (null guestPayTokenHash) with no age cutoff.
    * This is the order-level 24h hygiene path (distinct from QR ~15m payment expiry).
    */
   async cancelStaleUnpaidOrders(now: Date = new Date()): Promise<number> {
     const cutoff = new Date(now.getTime() - this.getUnpaidOrderCancelAfterMs());
     const candidates = await this.orderRepository.find({
-      where: {
-        status: OrderStatus.PENDING_PAYMENT,
-        createdAt: LessThanOrEqual(cutoff),
-      },
+      where: [
+        {
+          status: OrderStatus.PENDING_PAYMENT,
+          createdAt: LessThanOrEqual(cutoff),
+        },
+        {
+          status: OrderStatus.PENDING_PAYMENT,
+          guestPhone: Not(IsNull()),
+          guestPayTokenHash: IsNull(),
+        },
+      ],
       relations: ['items'],
     });
 
@@ -861,7 +869,7 @@ export class PaymentsService {
       });
     }
 
-    // Unauthenticated: guest-originated orders only (legacy null hash or matching token).
+    // Unauthenticated: guest-originated orders only (matching guest pay token required).
     if (!order.guestPhone) {
       throw new ForbiddenException({
         code: 'FORBIDDEN',

@@ -28,15 +28,16 @@ export class CreateChargeDto {
   @IsString()
   orderId!: string;
 
-  @ApiProperty({
-    description: 'Amount to charge in the smallest currency unit expected by the provider',
+  @ApiPropertyOptional({
+    description:
+      'Ignored — the service always charges the locked order total. Kept for client compatibility.',
     example: 700,
     minimum: 0,
   })
-  @IsNotEmpty()
+  @IsOptional()
   @IsNumber()
   @Min(0)
-  amount!: number;
+  amount?: number;
 
   @ApiProperty({
     description: 'Payment method used for the charge',

@@ -390,7 +390,10 @@ export class OrderFulfillmentService {
           message: 'You do not have access to this order',
         });
       }
-      assertGuestPayTokenAccess(order, guestPayToken);
+      // Paid legacy guest orders may lack a guest pay token hash; phone match is enough.
+      if (order.guestPayTokenHash) {
+        assertGuestPayTokenAccess(order, guestPayToken);
+      }
     } else {
       throw new ForbiddenException({
         code: 'FORBIDDEN',

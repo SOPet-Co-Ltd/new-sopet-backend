@@ -61,6 +61,7 @@ export class EmbeddingService {
           model: EMBEDDING_MODEL,
           input: text,
         }),
+        signal: AbortSignal.timeout(15_000),
       });
 
       if (!response.ok) {
