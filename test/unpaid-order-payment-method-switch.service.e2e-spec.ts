@@ -56,6 +56,7 @@ import {
   isPostgresAvailable,
 } from './helpers';
 import { createTypeOrmTestOptions } from './helpers/typeorm-test.config';
+import { issueGuestPayToken } from '../src/common/utils/guest-pay-token.util';
 
 const CREATE_PAYMENT_MUTATION = `
   mutation CreatePayment($input: CreatePaymentInput!) {
@@ -347,9 +348,10 @@ describe('Unpaid order payment method switch (service-integration-e2e)', () => {
     variant: ProductVariant;
     quantity?: number;
     reserveStock?: boolean;
-  }): Promise<{ order: Order; item: OrderItem }> {
+  }): Promise<{ order: Order; item: OrderItem; guestPayToken: string }> {
     const quantity = input.quantity ?? 2;
     const orderNumber = `E2E-USW-${input.label}-${seedContext.runId}`.slice(0, 50);
+    const guestPay = issueGuestPayToken();
 
     const order = await orderRepo.save(
       orderRepo.create({
@@ -357,6 +359,8 @@ describe('Unpaid order payment method switch (service-integration-e2e)', () => {
         customerId: null,
         guestPhone: '+66812345678',
         guestName: `Guest ${input.label}`,
+        guestPayTokenHash: guestPay.hash,
+        guestPayTokenExpiresAt: guestPay.expiresAt,
         status: input.status,
         subtotal: AMOUNT,
         discountAmount: 0,
@@ -397,7 +401,7 @@ describe('Unpaid order payment method switch (service-integration-e2e)', () => {
       }),
     );
 
-    return { order, item };
+    return { order, item, guestPayToken: guestPay.plaintext };
   }
 
   async function seedPayment(input: {
@@ -446,7 +450,7 @@ describe('Unpaid order payment method switch (service-integration-e2e)', () => {
       stubOmiseFetch({ expireOk: true, newChargeId: NEW_CHARGE_ID });
 
       const catalog = await seedCatalog('j1');
-      const { order } = await seedGuestOrder({
+      const { order, guestPayToken } = await seedGuestOrder({
         label: 'j1-supersede',
         status: OrderStatus.PENDING_PAYMENT,
         paymentMethod: PaymentMethod.PROMPTPAY,
@@ -473,6 +477,7 @@ describe('Unpaid order payment method switch (service-integration-e2e)', () => {
               amount: AMOUNT,
               currency: 'THB',
               paymentMethod: 'promptpay',
+              guestPayToken,
             },
           },
         })
