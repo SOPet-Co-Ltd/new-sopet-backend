@@ -177,6 +177,7 @@ export interface StoreProductReviewResult {
   createdAt: Date;
   images: ReviewImageResult[];
   reply: ReviewReplyResult | null;
+  variantOptions: string | null;
 }
 
 export interface StoreReviewSummaryResult {
@@ -219,6 +220,7 @@ export interface CustomerReviewResult {
   status: string;
   createdAt: Date;
   images: ReviewImageResult[];
+  variantOptions: string | null;
 }
 
 function mapReply(reply: ReviewReply | null | undefined): ReviewReplyResult | null {
@@ -254,6 +256,7 @@ function mapReviewToStoreProductReview(review: Review): StoreProductReviewResult
     createdAt: review.createdAt,
     images: mapReviewImages(review.images),
     reply: mapReply(review.reply),
+    variantOptions: review.variantOptions,
   };
 }
 
@@ -334,6 +337,21 @@ export class ReviewsService {
 
     const status = resolveInitialReviewStatus();
     const imageUrls = this.normalizeReviewImageUrls(input.imageUrls);
+
+    let variantOptionsText: string | null = null;
+    if (orderItem.variantOptions) {
+      if (typeof orderItem.variantOptions === 'object' && orderItem.variantOptions !== null) {
+        const values = Object.values(orderItem.variantOptions).filter(
+          (val) => typeof val === 'string',
+        );
+        if (values.length > 0) {
+          variantOptionsText = values.join(', ');
+        }
+      } else if (typeof orderItem.variantOptions === 'string') {
+        variantOptionsText = (orderItem.variantOptions as string).trim() || null;
+      }
+    }
+
     const review = this.reviewRepository.create({
       customerId: input.customerId,
       productId: input.productId,
@@ -342,6 +360,7 @@ export class ReviewsService {
       comment: input.comment,
       status,
       source: ReviewSource.CUSTOMER,
+      variantOptions: variantOptionsText,
     });
     const saved = await this.reviewRepository.save(review);
     if (imageUrls.length > 0) {
@@ -779,6 +798,7 @@ export class ReviewsService {
       status: review.status,
       createdAt: review.createdAt,
       images: mapReviewImages(review.images),
+      variantOptions: review.variantOptions,
     }));
   }
 

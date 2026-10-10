@@ -113,6 +113,9 @@ export class CustomerReviewType {
 
   @Field(() => [ReviewImageType])
   images!: ReviewImageType[];
+
+  @Field(() => String, { nullable: true })
+  variantOptions?: string | null;
 }
 
 @ObjectType()
@@ -146,6 +149,9 @@ export class ReviewType {
 
   @Field(() => ReviewReplyType, { nullable: true })
   reply?: ReviewReplyType | null;
+
+  @Field(() => String, { nullable: true })
+  variantOptions?: string | null;
 }
 
 @ObjectType()
@@ -252,6 +258,7 @@ function mapReviewToType(review: Review): ReviewType {
     status: review.status,
     createdAt: review.createdAt,
     customerName: resolveReviewCustomerName(review),
+    variantOptions: review.variantOptions,
     images: (review.images ?? []).map((image) => ({
       id: image.id,
       url: image.url,

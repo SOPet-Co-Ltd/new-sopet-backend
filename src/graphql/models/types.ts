@@ -1832,6 +1832,9 @@ export class StoreProductReviewType {
 
   @Field(() => ReviewReplyType, { nullable: true })
   reply?: ReviewReplyType | null;
+
+  @Field(() => String, { nullable: true })
+  variantOptions?: string | null;
 }
 
 @ObjectType()

@@ -636,6 +636,7 @@ type CustomerReviewType {
   productSlug: String
   rating: Int!
   status: String!
+  variantOptions: String
 }
 
 type CustomerReviewableItemType {
@@ -1627,6 +1628,7 @@ type ReviewType {
   reply: ReviewReplyType
   source: String!
   status: String!
+  variantOptions: String
 }
 
 input SaleCampaignItemInput {
@@ -1881,6 +1883,7 @@ type StoreProductReviewType {
   productSlug: String
   rating: Int!
   reply: ReviewReplyType
+  variantOptions: String
 }
 
 type StoreReactivationRequestImageType {
