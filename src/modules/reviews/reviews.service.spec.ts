@@ -199,6 +199,7 @@ describe('ReviewsService', () => {
         rating: input.rating,
         comment: input.comment,
         status: ReviewStatus.APPROVED,
+        variantOptions: null,
       });
       expect(reviewRepo.save).toHaveBeenCalled();
       expect(result.id).toBe('review-1');
