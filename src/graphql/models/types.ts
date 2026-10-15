@@ -238,6 +238,9 @@ export class ProductType {
   @Field(() => String, { nullable: true })
   brandId?: string | null;
 
+  @Field(() => String, { nullable: true })
+  brandName?: string | null;
+
   @Field(() => [String])
   tags!: string[];
 
