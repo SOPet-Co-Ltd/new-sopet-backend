@@ -1306,6 +1306,7 @@ type ProductType {
   averageRating: Float!
   basePrice: Float!
   brandId: String
+  brandName: String
   category: String
   categoryId: String
   compareAtPrice: Float

@@ -9,6 +9,7 @@ import { Category } from '../../database/entities/category.entity';
 import { Tag } from '../../database/entities/tag.entity';
 import { PetType } from '../../database/entities/pet-type.entity';
 import { Brand } from '../../database/entities/brand.entity';
+import { TaxonomyApprovalStatus } from '../../database/entities/enums/taxonomy.enums';
 import { Promotion } from '../../database/entities/promotion.entity';
 import { SaleCampaign } from '../../database/entities/sale-campaign.entity';
 import { SaleCampaignItem } from '../../database/entities/sale-campaign-item.entity';
@@ -37,6 +38,13 @@ import {
   CustomerProfile,
   UserProfile,
 } from './types';
+
+function resolveApprovedBrandName(brand: Brand | null | undefined): string | null {
+  if (!brand || brand.approvalStatus !== TaxonomyApprovalStatus.APPROVED) {
+    return null;
+  }
+  return brand.name;
+}
 
 export function mapCustomerProfile(
   customer: Pick<
@@ -380,6 +388,7 @@ export function mapProduct(product: Product): ProductType {
     categoryId: product.categoryId ?? product.categoryRelation?.id ?? null,
     petTypeId: product.petTypeId ?? product.petTypeRelation?.id ?? null,
     brandId: product.brandId ?? product.brandRelation?.id ?? null,
+    brandName: resolveApprovedBrandName(product.brandRelation),
     tags,
     tagIds,
     averageRating: Number(product.averageRating),
