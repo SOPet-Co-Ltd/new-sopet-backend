@@ -6,6 +6,7 @@ import {
   ReviewsService,
   maskCustomerName,
   resolveReviewCustomerName,
+  resolveReviewCustomerProfilePhotoUrl,
   UNKNOWN_CUSTOMER_DISPLAY_NAME,
   getReviewWindowDays,
   addDays,
@@ -464,6 +465,38 @@ describe('ReviewsService', () => {
           customer: { fullName: 'John Doe', phone: '0899999999' },
         }),
       ).toBe('John D.');
+    });
+  });
+
+  describe('resolveReviewCustomerProfilePhotoUrl', () => {
+    it('returns null for vendor imports', () => {
+      expect(
+        resolveReviewCustomerProfilePhotoUrl({
+          source: ReviewSource.VENDOR_IMPORT,
+          customerId: null,
+          customer: null,
+        }),
+      ).toBeNull();
+    });
+
+    it('returns null when customer has no profile photo', () => {
+      expect(
+        resolveReviewCustomerProfilePhotoUrl({
+          source: ReviewSource.CUSTOMER,
+          customerId: 'c1',
+          customer: { profilePhotoUrl: null },
+        }),
+      ).toBeNull();
+    });
+
+    it('returns profile photo url for real customer', () => {
+      expect(
+        resolveReviewCustomerProfilePhotoUrl({
+          source: ReviewSource.CUSTOMER,
+          customerId: 'c1',
+          customer: { profilePhotoUrl: 'https://example.com/avatar.jpg' },
+        }),
+      ).toBe('https://example.com/avatar.jpg');
     });
   });
 

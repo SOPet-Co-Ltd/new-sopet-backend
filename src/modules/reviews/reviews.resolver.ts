@@ -25,6 +25,7 @@ import {
 import {
   ReviewsService,
   resolveReviewCustomerName,
+  resolveReviewCustomerProfilePhotoUrl,
   REVIEW_MAX_IMAGES,
   normalizeStoreReviewRatingFilter,
   normalizeStoreReviewReplyFilter,
@@ -144,6 +145,9 @@ export class ReviewType {
   @Field()
   customerName!: string;
 
+  @Field(() => String, { nullable: true })
+  customerProfilePhotoUrl?: string | null;
+
   @Field(() => [ReviewImageType])
   images!: ReviewImageType[];
 
@@ -258,6 +262,7 @@ function mapReviewToType(review: Review): ReviewType {
     status: review.status,
     createdAt: review.createdAt,
     customerName: resolveReviewCustomerName(review),
+    customerProfilePhotoUrl: resolveReviewCustomerProfilePhotoUrl(review),
     variantOptions: review.variantOptions,
     images: (review.images ?? []).map((image) => ({
       id: image.id,

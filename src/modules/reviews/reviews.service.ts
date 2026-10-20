@@ -85,6 +85,17 @@ export function resolveReviewCustomerName(
   return maskCustomerName(review.customer);
 }
 
+export function resolveReviewCustomerProfilePhotoUrl(
+  review: Pick<Review, 'source' | 'customerId'> & {
+    customer?: Pick<Customer, 'profilePhotoUrl'> | null;
+  },
+): string | null {
+  if (review.source === ReviewSource.VENDOR_IMPORT || !review.customerId) {
+    return null;
+  }
+  return review.customer?.profilePhotoUrl ?? null;
+}
+
 export function getReviewWindowDays(): number {
   const raw = process.env.REVIEW_WINDOW_DAYS;
   if (raw === undefined || raw.trim() === '') {
@@ -174,6 +185,7 @@ export interface StoreProductReviewResult {
   rating: number;
   comment: string | null;
   customerName: string;
+  customerProfilePhotoUrl?: string | null;
   createdAt: Date;
   images: ReviewImageResult[];
   reply: ReviewReplyResult | null;
@@ -253,6 +265,7 @@ function mapReviewToStoreProductReview(review: Review): StoreProductReviewResult
     rating: review.rating,
     comment: review.comment,
     customerName: resolveReviewCustomerName(review),
+    customerProfilePhotoUrl: resolveReviewCustomerProfilePhotoUrl(review),
     createdAt: review.createdAt,
     images: mapReviewImages(review.images),
     reply: mapReply(review.reply),
