@@ -27,6 +27,7 @@ describe('OrdersService', () => {
   let guestOrderLinkService: { mergeGuestOrders: jest.Mock };
   let customerRepository: { findActiveByPhone: jest.Mock };
   let inventoryService: { restoreOrderStock: jest.Mock };
+  let cartService: { removeItems: jest.Mock; getCart: jest.Mock };
   let vendorWebhooksService: { dispatchOrderEvent: jest.Mock };
   let saleCampaignsService: { resolveEffectiveUnitPrices: jest.Mock };
   let orderAuditLogsService: {
@@ -79,6 +80,10 @@ describe('OrdersService', () => {
     guestOrderLinkService = { mergeGuestOrders: jest.fn() };
     customerRepository = { findActiveByPhone: jest.fn().mockResolvedValue(null) };
     inventoryService = { restoreOrderStock: jest.fn().mockResolvedValue(true) };
+    cartService = {
+      removeItems: jest.fn(),
+      getCart: jest.fn().mockResolvedValue({ items: [] }),
+    };
     vendorWebhooksService = {
       dispatchOrderEvent: jest.fn().mockResolvedValue(undefined),
     };
@@ -134,12 +139,52 @@ describe('OrdersService', () => {
       guestOrderLinkService as never,
       customerRepository as never,
       inventoryService as never,
-      { removeItems: jest.fn() } as never,
+      cartService as never,
       {} as never,
       vendorWebhooksService as never,
       saleCampaignsService as never,
       orderAuditLogsService as never,
     );
+  });
+
+  it('rejects create when cartItemIds are missing from cart (SF-CHK-112)', async () => {
+    cartService.getCart.mockResolvedValue({
+      items: [{ id: 'cart-other', variantId: 'var-1', quantity: 1 }],
+    });
+
+    await expect(
+      service.create(
+        {
+          items: [{ productId: 'p1', variantId: 'var-1', quantity: 1, price: 100 }],
+          paymentMethod: 'promptpay',
+          guestPhone: '+66812345678',
+          shippingAddress,
+          cartItemIds: ['cart-removed'],
+        },
+        'cust-1',
+      ),
+    ).rejects.toMatchObject({ response: { code: 'CART_ITEMS_STALE' } });
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects create when cart lines do not match order variants (SF-CHK-112)', async () => {
+    cartService.getCart.mockResolvedValue({
+      items: [{ id: 'cart-1', variantId: 'var-other', quantity: 1 }],
+    });
+
+    await expect(
+      service.create(
+        {
+          items: [{ productId: 'p1', variantId: 'var-1', quantity: 1, price: 100 }],
+          paymentMethod: 'promptpay',
+          guestPhone: '+66812345678',
+          shippingAddress,
+          cartItemIds: ['cart-1'],
+        },
+        'cust-1',
+      ),
+    ).rejects.toMatchObject({ response: { code: 'CART_ITEMS_MISMATCH' } });
+    expect(dataSource.transaction).not.toHaveBeenCalled();
   });
 
   it('requires guestPhone for guest checkout', async () => {
