@@ -198,6 +198,56 @@ export class OrdersService {
     return { fee, records };
   }
 
+  /**
+   * When checkout submits cartItemIds, require those lines still exist on the cart
+   * and cover the same variantIds as the order items (SF-CHK-112 concurrency).
+   */
+  private async assertCartLinesStillPresent(
+    createOrderDto: CreateOrderDto,
+    customerId?: string,
+  ): Promise<void> {
+    const cartItemIds = createOrderDto.cartItemIds;
+    if (!cartItemIds?.length) {
+      return;
+    }
+
+    const cart = await this.cartService.getCart(customerId, createOrderDto.sessionId);
+    const cartItems = cart.items ?? [];
+    const byId = new Map(cartItems.map((item) => [item.id, item]));
+
+    const missingIds = cartItemIds.filter((id) => !byId.has(id));
+    if (missingIds.length > 0) {
+      throw new BadRequestException({
+        code: 'CART_ITEMS_STALE',
+        message: 'One or more cart items are no longer in the cart',
+      });
+    }
+
+    const cartVariantIds = new Set(
+      cartItemIds.map((id) => byId.get(id)!.variantId).filter(Boolean),
+    );
+    const orderVariantIds = new Set(
+      createOrderDto.items.map((item) => item.variantId).filter(Boolean),
+    );
+
+    for (const variantId of orderVariantIds) {
+      if (!cartVariantIds.has(variantId as string)) {
+        throw new BadRequestException({
+          code: 'CART_ITEMS_MISMATCH',
+          message: 'Order items do not match the submitted cart lines',
+        });
+      }
+    }
+    for (const variantId of cartVariantIds) {
+      if (!orderVariantIds.has(variantId)) {
+        throw new BadRequestException({
+          code: 'CART_ITEMS_MISMATCH',
+          message: 'Order items do not match the submitted cart lines',
+        });
+      }
+    }
+  }
+
   async create(createOrderDto: CreateOrderDto, customerId?: string): Promise<Order> {
     const {
       items,
@@ -221,6 +271,8 @@ export class OrdersService {
         message: 'Guest checkout requires guestPhone',
       });
     }
+
+    await this.assertCartLinesStillPresent(createOrderDto, customerId);
 
     // Link guest checkouts to an existing member when the supplied phone already
     // belongs to an active customer, so the order shows in their history immediately
