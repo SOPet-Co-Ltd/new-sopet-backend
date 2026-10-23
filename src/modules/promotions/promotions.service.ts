@@ -356,12 +356,19 @@ export class PromotionsService {
       throw new BadRequestException({ code: 'PROMOTION_EXPIRED', message: 'Promotion expired' });
     }
     if (promotion.usageLimit && promotion.usageCount >= promotion.usageLimit) {
+      // Preview/batch: soft so list-time always carries ineligibilityReason (SF-CHK-088).
+      if (mode === 'preview') {
+        return this.resolveEligibilityFailure(promotion, 'PROMOTION_LIMIT', mode);
+      }
       throw new BadRequestException({
         code: 'PROMOTION_LIMIT',
         message: 'Promotion usage limit reached',
       });
     }
-    await this.assertCustomerUsageWithinLimit(promotion, customer);
+    const customerUsageReason = await this.evaluateCustomerUsageLimit(promotion, customer);
+    if (customerUsageReason) {
+      return this.resolveEligibilityFailure(promotion, customerUsageReason, mode);
+    }
     if (promotion.scope === PromotionScope.STORE && storeId && promotion.storeId !== storeId) {
       throw new BadRequestException({
         code: 'PROMOTION_STORE',
@@ -507,7 +514,11 @@ export class PromotionsService {
   }
 
   private toEligibilityItem(result: ValidateCodeResult): PromotionEligibilityItem {
-    const reason = result.ineligibilityReason;
+    // Contract: eligible=false ⇒ non-empty ineligibilityReason (Decision 6 / SF-CHK-088).
+    const reason =
+      typeof result.ineligibilityReason === 'string' && result.ineligibilityReason.trim().length > 0
+        ? result.ineligibilityReason.trim()
+        : null;
     if (reason) {
       return {
         id: result.promotion.id,
@@ -952,18 +963,23 @@ export class PromotionsService {
     });
   }
 
-  private async assertCustomerUsageWithinLimit(
+  /**
+   * Per-customer usage gate. Returns PROMOTION_CUSTOMER_LIMIT when exhausted;
+   * null when skipped or still within limit. Callers soft-preview via
+   * resolveEligibilityFailure so batch never returns eligible:false with a null reason.
+   */
+  private async evaluateCustomerUsageLimit(
     promotion: Promotion,
     customer?: PromotionCustomerIdentity,
-  ): Promise<void> {
+  ): Promise<'PROMOTION_CUSTOMER_LIMIT' | null> {
     if (!promotion.usagePerCustomer || promotion.usagePerCustomer <= 0) {
-      return;
+      return null;
     }
 
     const customerId = customer?.customerId;
     const guestPhone = customer?.guestPhone?.trim();
     if (!customerId && !guestPhone) {
-      return;
+      return null;
     }
 
     const qb = this.promotionUsageRepository
@@ -979,11 +995,9 @@ export class PromotionsService {
 
     const customerUsageCount = await qb.getCount();
     if (customerUsageCount >= promotion.usagePerCustomer) {
-      throw new BadRequestException({
-        code: 'PROMOTION_CUSTOMER_LIMIT',
-        message: 'You have reached the usage limit for this promotion',
-      });
+      return 'PROMOTION_CUSTOMER_LIMIT';
     }
+    return null;
   }
 
   private parseConditions(conditions?: string): Record<string, unknown> {
