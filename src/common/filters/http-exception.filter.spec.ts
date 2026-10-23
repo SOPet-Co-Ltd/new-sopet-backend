@@ -1,4 +1,4 @@
-import { ArgumentsHost, BadRequestException, HttpStatus } from '@nestjs/common';
+import { ArgumentsHost, BadRequestException, HttpStatus, Logger } from '@nestjs/common';
 import { HttpExceptionFilter } from './http-exception.filter';
 import { SAFE_SERVER_MESSAGE } from '../utils/exception-response.util';
 
@@ -69,7 +69,6 @@ describe('HttpExceptionFilter', () => {
     );
 
     const { host: host500, status: status500, json: json500 } = createHost();
-    const { Logger } = require('@nestjs/common') as typeof import('@nestjs/common');
     const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     filter.catch(new Error('database connection lost'), host500);
     errorSpy.mockRestore();
