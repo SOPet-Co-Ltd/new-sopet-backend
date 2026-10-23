@@ -463,6 +463,43 @@ export class OrdersService {
           });
         }
 
+        const product =
+          variant.product ??
+          (await manager.findOne(Product, {
+            where: { id: variant.productId },
+          }));
+
+        if (!product) {
+          throw new BadRequestException({
+            code: 'VARIANT_NOT_FOUND',
+            message: `Variant ${line.variant.id} not found`,
+          });
+        }
+
+        // Re-read catalog under the same lock so a vendor price change mid-checkout
+        // cannot persist a stale unitPrice (SF-CHK-114).
+        const liveCatalog = roundMoney(
+          Number(product.basePrice) + Number(variant.priceAdjustment ?? 0),
+        );
+        const liveResolved = await this.saleCampaignPricing.resolveEffectiveUnitPrices([
+          {
+            productId: product.id,
+            variantId: variant.id,
+            catalogUnit: liveCatalog,
+          },
+        ]);
+        const livePrice = liveResolved.get(variant.id);
+        const liveUnit = livePrice?.unitPrice ?? liveCatalog;
+        if (
+          Math.abs(liveCatalog - line.catalogUnit) > 0.009 ||
+          Math.abs(liveUnit - line.unitPrice) > 0.009
+        ) {
+          throw new BadRequestException({
+            code: 'PRICE_CHANGED',
+            message: 'Product price changed since checkout started',
+          });
+        }
+
         const newStock = variant.stockQuantity - line.item.quantity;
         if (newStock < 0) {
           throw new BadRequestException({
@@ -486,12 +523,6 @@ export class OrdersService {
             referenceType: 'order',
           }),
         );
-
-        const product =
-          variant.product ??
-          (await manager.findOne(Product, {
-            where: { id: variant.productId },
-          }));
 
         orderItems.push(
           manager.create(OrderItem, {

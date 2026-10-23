@@ -319,26 +319,80 @@ describe('OrdersService', () => {
     expect(result.guestPayToken).toBeUndefined();
   });
 
-  it('overwrites client price with campaign sale unit and snapshots catalog (AC-004/013)', async () => {
+  it('rejects create when locked catalog price changed mid-checkout (SF-CHK-114)', async () => {
     variantRepository.findOne.mockResolvedValue({
+      ...variant,
+      product: { ...variant.product, basePrice: 10 },
+    });
+    saleCampaignsService.resolveEffectiveUnitPrices
+      .mockResolvedValueOnce(
+        new Map([
+          [
+            'var-1',
+            {
+              catalogUnitPrice: 10,
+              unitPrice: 10,
+              saleCampaignId: null,
+              saleDiscountPercent: null,
+              compareAtPrice: null,
+            },
+          ],
+        ]),
+      )
+      .mockResolvedValueOnce(
+        new Map([
+          [
+            'var-1',
+            {
+              catalogUnitPrice: 12,
+              unitPrice: 12,
+              saleCampaignId: null,
+              saleDiscountPercent: null,
+              compareAtPrice: null,
+            },
+          ],
+        ]),
+      );
+    mockManager.findOne.mockResolvedValue({
+      ...variant,
+      product: { ...variant.product, basePrice: 12 },
+    });
+
+    await expect(
+      service.create(
+        {
+          items: [{ productId: 'p1', variantId: 'var-1', quantity: 1, price: 10 }],
+          paymentMethod: 'promptpay',
+          guestPhone: '+66812345678',
+          guestName: 'Guest',
+          shippingAddress,
+        },
+        undefined,
+      ),
+    ).rejects.toMatchObject({ response: { code: 'PRICE_CHANGED' } });
+  });
+
+  it('overwrites client price with campaign sale unit and snapshots catalog (AC-004/013)', async () => {
+    const saleVariant = {
       ...variant,
       priceAdjustment: 0,
       product: { ...variant.product, basePrice: 279 },
-    });
-    saleCampaignsService.resolveEffectiveUnitPrices.mockResolvedValue(
-      new Map([
-        [
-          'var-1',
-          {
-            catalogUnitPrice: 279,
-            unitPrice: 223.2,
-            saleCampaignId: 'camp-1',
-            saleDiscountPercent: 20,
-            compareAtPrice: null,
-          },
-        ],
-      ]),
-    );
+    };
+    variantRepository.findOne.mockResolvedValue(saleVariant);
+    mockManager.findOne.mockResolvedValue(saleVariant);
+    const salePriceMap = new Map([
+      [
+        'var-1',
+        {
+          catalogUnitPrice: 279,
+          unitPrice: 223.2,
+          saleCampaignId: 'camp-1',
+          saleDiscountPercent: 20,
+          compareAtPrice: null,
+        },
+      ],
+    ]);
+    saleCampaignsService.resolveEffectiveUnitPrices.mockResolvedValue(salePriceMap);
     promotionsService.applyStackedPromotions.mockResolvedValue({
       discountAmount: 22.32,
       promotions: [{ id: 'promo-1', type: 'percentage', discountValue: 10 }],
