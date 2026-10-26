@@ -1827,6 +1827,9 @@ export class StoreProductReviewType {
   @Field()
   customerName!: string;
 
+  @Field(() => String, { nullable: true })
+  customerProfilePhotoUrl?: string | null;
+
   @Field()
   createdAt!: Date;
 

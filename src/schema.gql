@@ -1622,6 +1622,7 @@ type ReviewType {
   comment: String
   createdAt: DateTime!
   customerName: String!
+  customerProfilePhotoUrl: String
   id: String!
   images: [ReviewImageType!]!
   productId: String!
@@ -1876,6 +1877,7 @@ type StoreProductReviewType {
   comment: String
   createdAt: DateTime!
   customerName: String!
+  customerProfilePhotoUrl: String
   id: String!
   images: [ReviewImageType!]!
   productId: String!

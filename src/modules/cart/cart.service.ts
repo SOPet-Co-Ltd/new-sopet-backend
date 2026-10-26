@@ -83,9 +83,36 @@ export class CartService {
     return Object.assign(cart, { warnings });
   }
 
+  /**
+   * Persist qty ≤ remaining stock when stock dropped below cart qty (stock > 0).
+   * Stock 0 lines are left for the client to flag as out of stock.
+   */
+  private async capQuantitiesToStock(cart: CartWithWarnings): Promise<CartWithWarnings> {
+    const warnings = [...(cart.warnings ?? [])];
+    const items = cart.items ?? [];
+
+    for (const item of items) {
+      const stock = item.productVariant?.stockQuantity;
+      if (stock == null || stock <= 0 || item.quantity <= stock) {
+        continue;
+      }
+
+      item.quantity = stock;
+      await this.cartItemRepository.save(item);
+      warnings.push({
+        code: 'QUANTITY_CAPPED',
+        message: `Quantity reduced to available stock (${stock})`,
+        variantId: item.variantId,
+      });
+    }
+
+    return Object.assign(cart, { warnings });
+  }
+
   async getCart(customerId?: string, sessionId?: string): Promise<CartWithWarnings> {
     const cart = await this.resolveCart(customerId, sessionId);
-    return this.purgeSuspendedStoreItems(cart);
+    const purged = await this.purgeSuspendedStoreItems(cart);
+    return this.capQuantitiesToStock(purged);
   }
 
   async addItem(
@@ -158,6 +185,7 @@ export class CartService {
     const cart = await this.resolveCart(customerId, sessionId);
     const item = await this.cartItemRepository.findOne({
       where: { id: itemId, cartId: cart.id },
+      relations: ['productVariant'],
     });
 
     if (!item) {
@@ -170,7 +198,9 @@ export class CartService {
     if (quantity <= 0) {
       await this.cartItemRepository.delete(item.id);
     } else {
-      item.quantity = quantity;
+      const stock = item.productVariant?.stockQuantity;
+      const capped = stock != null && stock > 0 && quantity > stock ? stock : quantity;
+      item.quantity = capped;
       await this.cartItemRepository.save(item);
     }
 

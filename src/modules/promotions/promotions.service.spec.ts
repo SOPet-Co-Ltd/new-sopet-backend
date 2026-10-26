@@ -1895,6 +1895,55 @@ describe('PromotionsService', () => {
       ).rejects.toMatchObject({ response: { code: 'PROMOTION_MIN_PURCHASE' } });
     });
 
+    it('SF-CHK-088: platform % with min spend met is eligible with null reason', async () => {
+      const platformSixteen = {
+        ...mockPromotion,
+        id: 'promo-16',
+        code: 'SAVE16',
+        name: '16% off',
+        type: PromotionType.PERCENTAGE,
+        discountValue: 16,
+        minPurchaseAmount: 200,
+        usagePerCustomer: 0,
+        conditions: {},
+      };
+      promotionRepository.findOne.mockResolvedValue(platformSixteen);
+
+      const batch = await service.validatePromotionsBatch(
+        [{ id: platformSixteen.id, code: 'SAVE16' }],
+        459,
+        undefined,
+        { customerId: 'cust-1' },
+      );
+
+      expect(batch.items[0].eligible).toBe(true);
+      expect(batch.items[0].ineligibilityReason).toBeNull();
+      expect(batch.items[0].discountAmount).toBeCloseTo(73.44, 2);
+    });
+
+    it('SF-CHK-088: exhausted usagePerCustomer soft-maps PROMOTION_CUSTOMER_LIMIT (never null reason)', async () => {
+      const oncePromo = {
+        ...mockPromotion,
+        id: 'promo-once',
+        code: 'ONCE16',
+        type: PromotionType.PERCENTAGE,
+        discountValue: 16,
+        minPurchaseAmount: 200,
+        usagePerCustomer: 1,
+        conditions: {},
+      };
+      promotionRepository.findOne.mockResolvedValue(oncePromo);
+      usageQueryBuilder.getCount.mockResolvedValue(1);
+
+      const batch = await service.validatePromotionsBatch([{ code: 'ONCE16' }], 459, undefined, {
+        customerId: 'cust-1',
+      });
+
+      expect(batch.items[0].eligible).toBe(false);
+      expect(batch.items[0].ineligibilityReason).toBe('PROMOTION_CUSTOMER_LIMIT');
+      expect(batch.items[0].discountAmount).toBe(0);
+    });
+
     it('unknown id → soft INVALID_PROMOTION; does not abort sibling', async () => {
       promotionRepository.findOne.mockImplementation(
         ({ where }: { where: { id?: string; code?: string } }) => {
