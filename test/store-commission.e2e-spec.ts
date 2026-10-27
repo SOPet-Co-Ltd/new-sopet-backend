@@ -6,7 +6,6 @@
 // Promoted from test/store-commission.int.test.ts
 //
 // Harness: Nest TestingModule + real GraphQLModule (ApolloDriver) + supertest POST; seeded PostgreSQL
-// Mock: Omise HTTP only (createTransfer still receives Math.round(netAmount * 100))
 // @real-dependency: payout-commission.calculator
 // @real-dependency: PostgreSQL
 //
@@ -27,7 +26,6 @@ import { StoresService } from '../src/modules/stores/stores.service';
 import { JwtAuthGuard } from '../src/modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../src/modules/auth/guards/roles.guard';
 import { AuditLogsService } from '../src/modules/audit-logs/audit-logs.service';
-import { OmiseService } from '../src/modules/omise/omise.service';
 import { NotificationsService } from '../src/modules/notifications/notifications.service';
 import { StorageService } from '../src/modules/storage/storage.service';
 import { StoreSuspensionHoldService } from '../src/modules/orders/store-suspension-hold.service';
@@ -138,8 +136,6 @@ describe('store commission — mixed-cutoff payout create [integration]', () => 
     promotionUsageIds: [] as string[],
   };
 
-  const omiseCreateTransfer = jest.fn();
-
   beforeAll(async () => {
     postgresAvailable = await isPostgresAvailable();
     if (!postgresAvailable) {
@@ -204,18 +200,6 @@ describe('store commission — mixed-cutoff payout create [integration]', () => 
           },
         },
         {
-          provide: OmiseService,
-          useValue: {
-            hasCredentials: jest.fn().mockReturnValue(true),
-            getRecipient: jest.fn().mockResolvedValue({
-              id: 'recp_int1',
-              verified: true,
-              active: true,
-            }),
-            createTransfer: omiseCreateTransfer,
-          },
-        },
-        {
           provide: NotificationsService,
           useValue: { notifyAdminsAboutManualPayoutRequest: jest.fn() },
         },
@@ -262,7 +246,6 @@ describe('store commission — mixed-cutoff payout create [integration]', () => 
   });
 
   afterEach(async () => {
-    omiseCreateTransfer.mockReset();
     if (dataSource?.isInitialized) {
       await cleanupTracked();
     }
@@ -485,7 +468,6 @@ describe('store commission — mixed-cutoff payout create [integration]', () => 
     const manualStore = await seedStore('int1-manual', 'manual');
     await seedMixedCutoffUnpaid(omiseStore, PaymentMethod.PROMPTPAY, 'omise');
     await seedMixedCutoffUnpaid(manualStore, PaymentMethod.BANK_TRANSFER, 'manual');
-    omiseCreateTransfer.mockResolvedValue({ id: 'trsf_int1', paid: false });
 
     const gqlRes = await request(app!.getHttpServer())
       .post('/graphql')
@@ -515,7 +497,6 @@ describe('store commission — mixed-cutoff payout create [integration]', () => 
     expect(Number(omiseRow.shippingFees)).toBe(80);
     expect(Number(omiseRow.commissionAmount)).toBe(70);
     expect(omiseRow.commissionRate).toBe(7);
-    expect(omiseCreateTransfer).toHaveBeenCalledWith(omiseStore.omiseRecipientId, 141000);
 
     const listRes = await request(app!.getHttpServer())
       .post('/graphql')
@@ -617,14 +598,6 @@ describe('store commission — admin rate edit and snapshot immutability [integr
               if (key === 'commission.goLiveAt') return GO_LIVE_AT;
               return undefined;
             },
-          },
-        },
-        {
-          provide: OmiseService,
-          useValue: {
-            hasCredentials: jest.fn().mockReturnValue(false),
-            createTransfer: jest.fn(),
-            getRecipient: jest.fn(),
           },
         },
         {
@@ -942,14 +915,6 @@ describe('store commission — hold exclusion [integration]', () => {
           },
         },
         {
-          provide: OmiseService,
-          useValue: {
-            hasCredentials: jest.fn().mockReturnValue(false),
-            createTransfer: jest.fn(),
-            getRecipient: jest.fn(),
-          },
-        },
-        {
           provide: NotificationsService,
           useValue: { notifyAdminsAboutManualPayoutRequest: jest.fn() },
         },
@@ -1169,9 +1134,9 @@ describe('store commission — hold exclusion [integration]', () => {
     expect(summary.commissionAmount).toBe(70);
     expect(summary.commissionRate).toBe(7);
     expect(summary.availableBalance).toBe(1010);
-    expect(summary.omise.productSold).toBe(1000);
-    expect(summary.omise.shippingFees).toBe(80);
-    expect(summary.omise.commissionAmount).toBe(70);
+    expect(summary.productSold).toBe(1000);
+    expect(summary.shippingFees).toBe(80);
+    expect(summary.commissionAmount).toBe(70);
     expect(summary.availableBalance).toBe(
       summary.productSold - summary.commissionAmount + summary.shippingFees,
     );

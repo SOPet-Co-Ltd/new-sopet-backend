@@ -57,10 +57,18 @@ export class CreateChargeDto {
   @IsNotEmpty()
   currency: string = 'THB';
 
-  @ApiProperty({ required: false, description: 'Omise card token from client' })
+  @ApiProperty({ required: false, description: 'Beam card token id from client tokenization' })
   @IsOptional()
   @IsString()
-  omiseToken?: string;
+  cardToken?: string;
+
+  @ApiProperty({
+    required: false,
+    description: 'Card CVV / security code — never persisted; required for card charges',
+  })
+  @IsOptional()
+  @IsString()
+  cardSecurityCode?: string;
 
   @ApiProperty({ required: false, description: 'Saved payment method ID' })
   @IsOptional()
@@ -78,7 +86,7 @@ export class CreateChargeDto {
   guestPayToken?: string;
 
   @ApiPropertyOptional({
-    description: 'Omise jumpapp platform_type hint (IOS / ANDROID / WEB)',
+    description: 'Optional client platform hint (IOS / ANDROID / WEB)',
     enum: ['IOS', 'ANDROID', 'WEB'],
   })
   @IsOptional()

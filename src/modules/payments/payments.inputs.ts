@@ -26,7 +26,12 @@ export class CreatePaymentInput {
   @Field({ nullable: true })
   @IsOptional()
   @IsString()
-  omiseToken?: string;
+  cardToken?: string;
+
+  @Field({ nullable: true })
+  @IsOptional()
+  @IsString()
+  cardSecurityCode?: string;
 
   @Field({ nullable: true })
   @IsOptional()

@@ -48,9 +48,22 @@ export class Payment {
   @Column({ name: 'qr_code_url', type: 'varchar', length: 2048, nullable: true })
   qrCodeUrl!: string | null;
 
+  /** Beam PromptPay base64 image payload (preferred over qrCodeUrl for new charges). */
+  @Column({ name: 'qr_code_image', type: 'text', nullable: true })
+  qrCodeImage!: string | null;
+
   @Column({ name: 'expires_at', type: 'timestamp', nullable: true })
   expiresAt!: Date | null;
 
+  /** Payment service provider for this charge (`omise` historical, `beam` new). */
+  @Column({ name: 'psp', type: 'varchar', length: 20, nullable: true })
+  psp!: string | null;
+
+  /** Provider charge id (Beam chargeId for new rows; may mirror omise_charge_id for history). */
+  @Column({ name: 'psp_charge_id', type: 'varchar', length: 255, nullable: true })
+  pspChargeId!: string | null;
+
+  /** Historical Omise charge id — keep for audit; do not write for new Beam rows. */
   @Column({ name: 'omise_charge_id', type: 'varchar', length: 255, nullable: true })
   omiseChargeId!: string | null;
 

@@ -692,6 +692,9 @@ export class PaymentType {
   @Field(() => String, { nullable: true })
   qrCodeUrl?: string | null;
 
+  @Field(() => String, { nullable: true })
+  qrCodeImage?: string | null;
+
   @Field(() => Date, { nullable: true })
   expiresAt?: Date | null;
 }
@@ -1633,6 +1636,12 @@ export class AdminStoreType {
   omiseRecipientFailureMessage?: string | null;
 
   @Field()
+  bankAccountVerificationStatus!: string;
+
+  @Field(() => String, { nullable: true })
+  bankAccountRejectionReason?: string | null;
+
+  @Field()
   payoutSchedule!: string;
 
   @Field()
@@ -1958,6 +1967,12 @@ export class MyStoreType {
 
   @Field(() => String, { nullable: true })
   omiseRecipientFailureMessage?: string | null;
+
+  @Field()
+  bankAccountVerificationStatus!: string;
+
+  @Field(() => String, { nullable: true })
+  bankAccountRejectionReason?: string | null;
 
   @Field()
   status!: string;

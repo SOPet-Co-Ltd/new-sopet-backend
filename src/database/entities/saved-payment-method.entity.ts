@@ -35,9 +35,17 @@ export class SavedPaymentMethod {
   @IsEnum(PaymentMethodType)
   type!: PaymentMethodType;
 
-  @Column({ name: 'omise_card_token', type: 'varchar', length: 255 })
-  @IsNotEmpty()
-  omiseCardToken!: string;
+  /** Historical Omise card token — keep for soft-deleted rows; stop writing for new. */
+  @Column({ name: 'omise_card_token', type: 'varchar', length: 255, nullable: true })
+  omiseCardToken!: string | null;
+
+  /** Payment service provider (`omise` historical, `beam` new). */
+  @Column({ name: 'psp', type: 'varchar', length: 20, nullable: true })
+  psp!: string | null;
+
+  /** Beam card token id (or mirrored Omise token for history). */
+  @Column({ name: 'psp_card_token', type: 'varchar', length: 255, nullable: true })
+  pspCardToken!: string | null;
 
   @Column({ name: 'card_fingerprint', type: 'varchar', length: 255, nullable: true })
   cardFingerprint!: string | null;

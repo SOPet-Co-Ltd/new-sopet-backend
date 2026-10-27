@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, Logger, NotFoundException } from '@nestjs/common';
 import { StoresService } from './stores.service';
-import { StoreStatus } from '../../database/entities/store.entity';
+import { BankAccountVerificationStatus, StoreStatus } from '../../database/entities/store.entity';
+import { AuditAction } from '../audit-logs/audit-log.constants';
 import { StoreMemberRole } from '../../database/entities/store-member.entity';
 import { UserRole } from '../../database/entities/user.entity';
 import { mapAdminStore } from '../../graphql/models/mappers';
@@ -92,12 +93,6 @@ describe('StoresService', () => {
       orderRepository as never,
       orderItemRepository as never,
       auditLogRepository as never,
-      {
-        hasCredentials: jest.fn().mockReturnValue(false),
-        createRecipient: jest.fn(),
-        updateRecipient: jest.fn(),
-        getRecipient: jest.fn(),
-      } as never,
       {
         notifyVendorAboutStoreStatus: jest.fn().mockResolvedValue(undefined),
       } as never,
@@ -809,7 +804,7 @@ describe('StoresService', () => {
     });
   });
 
-  describe('Omise payout bank change', () => {
+  describe('bank account verification', () => {
     const previousBankKey = process.env.BANK_DATA_ENCRYPTION_KEY;
 
     beforeAll(() => {
@@ -820,17 +815,22 @@ describe('StoresService', () => {
       process.env.BANK_DATA_ENCRYPTION_KEY = previousBankKey;
     });
 
-    it('resets Omise status when bank details change', async () => {
-      const { OmiseRecipientStatus } = await import('../../database/entities/store.entity');
+    const verifiedStore = () => ({
+      id: 'store-1',
+      name: 'Store',
+      bankAccountName: 'Old Name',
+      bankAccountNumber: '1111111111',
+      bankName: 'ธนาคารกสิกรไทย',
+      bankCode: 'kbank',
+      bankAccountVerificationStatus: BankAccountVerificationStatus.VERIFIED,
+      bankAccountRejectionReason: null,
+    });
+
+    it('sets pending_review and clears rejection reason when bank details change', async () => {
       storeRepository.findOne.mockResolvedValue({
-        id: 'store-1',
-        bankAccountName: 'Old Name',
-        bankAccountNumber: '1111111111',
-        bankName: 'ธนาคารกสิกรไทย',
-        bankCode: 'kbank',
-        omiseRecipientId: 'recp_old',
-        omiseRecipientStatus: OmiseRecipientStatus.ACTIVE,
-        omiseRecipientFailureMessage: null,
+        ...verifiedStore(),
+        bankAccountVerificationStatus: BankAccountVerificationStatus.REJECTED,
+        bankAccountRejectionReason: 'Name mismatch',
       });
 
       const saved = await service.updateStorePayout('store-1', {
@@ -840,30 +840,35 @@ describe('StoresService', () => {
         bankCode: 'bay',
       });
 
-      expect(saved.omiseRecipientStatus).toBe(OmiseRecipientStatus.NOT_CONNECTED);
+      expect(saved.bankAccountVerificationStatus).toBe(
+        BankAccountVerificationStatus.PENDING_REVIEW,
+      );
+      expect(saved.bankAccountRejectionReason).toBeNull();
       expect(storeRepository.save).toHaveBeenCalledWith(
         expect.objectContaining({
-          omiseRecipientStatus: OmiseRecipientStatus.NOT_CONNECTED,
+          bankAccountVerificationStatus: BankAccountVerificationStatus.PENDING_REVIEW,
           bankAccountNumber: expect.stringMatching(/^enc:v1:/),
         }),
       );
+    });
+
+    it('keeps verified status when submitted bank details are unchanged', async () => {
+      storeRepository.findOne.mockResolvedValue(verifiedStore());
+
+      const saved = await service.updateStorePayout('store-1', {
+        bankAccountName: 'Old Name',
+        bankName: 'ธนาคารกสิกรไทย',
+        bankCode: 'kbank',
+      });
+
+      expect(saved.bankAccountVerificationStatus).toBe(BankAccountVerificationStatus.VERIFIED);
     });
 
     it('persists plaintext bank number when encryption key is missing', async () => {
       const key = process.env.BANK_DATA_ENCRYPTION_KEY;
       delete process.env.BANK_DATA_ENCRYPTION_KEY;
       try {
-        const { OmiseRecipientStatus } = await import('../../database/entities/store.entity');
-        storeRepository.findOne.mockResolvedValue({
-          id: 'store-1',
-          bankAccountName: 'Old Name',
-          bankAccountNumber: '1111111111',
-          bankName: 'ธนาคารกสิกรไทย',
-          bankCode: 'kbank',
-          omiseRecipientId: 'recp_old',
-          omiseRecipientStatus: OmiseRecipientStatus.ACTIVE,
-          omiseRecipientFailureMessage: null,
-        });
+        storeRepository.findOne.mockResolvedValue(verifiedStore());
 
         await service.updateStorePayout('store-1', {
           bankAccountName: 'New Name',
@@ -882,45 +887,51 @@ describe('StoresService', () => {
       }
     });
 
-    it('does not refresh Omise status while NOT_CONNECTED after bank change', async () => {
-      const { OmiseRecipientStatus } = await import('../../database/entities/store.entity');
-      const getRecipient = jest.fn().mockResolvedValue({ verified: true, active: true });
-      const omiseService = {
-        hasCredentials: jest.fn().mockReturnValue(true),
-        createRecipient: jest.fn(),
-        updateRecipient: jest.fn(),
-        getRecipient,
-      };
-
-      service = new StoresService(
-        storeRepository as never,
-        userRepository as never,
-        storeMemberRepository as never,
-        orderRepository as never,
-        orderItemRepository as never,
-        auditLogRepository as never,
-        omiseService as never,
-        {
-          notifyVendorAboutStoreStatus: jest.fn().mockResolvedValue(undefined),
-        } as never,
-        {
-          deleteObject: jest.fn(),
-        } as never,
-        auditLogsService as never,
-        storeSuspensionHoldService as never,
-        emailDeliveryService as never,
-      );
-
+    it('verifyStoreBankAccount marks verified, clears reason and writes audit log', async () => {
+      userRepository.findOne.mockResolvedValue({ id: 'admin-1', email: 'admin@sopet.org' });
       storeRepository.findOne.mockResolvedValue({
-        id: 'store-1',
-        omiseRecipientId: 'recp_old',
-        omiseRecipientStatus: OmiseRecipientStatus.NOT_CONNECTED,
+        ...verifiedStore(),
+        bankAccountVerificationStatus: BankAccountVerificationStatus.PENDING_REVIEW,
+        bankAccountRejectionReason: 'old',
       });
 
-      const result = await service.refreshOmiseRecipientStatus('store-1');
+      const saved = await service.verifyStoreBankAccount('store-1', 'admin-1');
 
-      expect(getRecipient).not.toHaveBeenCalled();
-      expect(result.omiseRecipientStatus).toBe(OmiseRecipientStatus.NOT_CONNECTED);
+      expect(saved.bankAccountVerificationStatus).toBe(BankAccountVerificationStatus.VERIFIED);
+      expect(saved.bankAccountRejectionReason).toBeNull();
+      expect(auditLogsService.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: AuditAction.STORE_BANK_VERIFIED,
+          resourceId: 'store-1',
+        }),
+      );
+    });
+
+    it('rejectStoreBankAccount marks rejected with reason and writes audit log', async () => {
+      userRepository.findOne.mockResolvedValue({ id: 'admin-1', email: 'admin@sopet.org' });
+      storeRepository.findOne.mockResolvedValue({
+        ...verifiedStore(),
+        bankAccountVerificationStatus: BankAccountVerificationStatus.PENDING_REVIEW,
+      });
+
+      const saved = await service.rejectStoreBankAccount('store-1', ' Name mismatch ', 'admin-1');
+
+      expect(saved.bankAccountVerificationStatus).toBe(BankAccountVerificationStatus.REJECTED);
+      expect(saved.bankAccountRejectionReason).toBe('Name mismatch');
+      expect(auditLogsService.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: AuditAction.STORE_BANK_REJECTED,
+          metadata: expect.objectContaining({ reason: 'Name mismatch' }),
+        }),
+      );
+    });
+
+    it('rejectStoreBankAccount requires a reason', async () => {
+      storeRepository.findOne.mockResolvedValue(verifiedStore());
+
+      await expect(service.rejectStoreBankAccount('store-1', '  ', 'admin-1')).rejects.toThrow(
+        BadRequestException,
+      );
       expect(storeRepository.save).not.toHaveBeenCalled();
     });
   });

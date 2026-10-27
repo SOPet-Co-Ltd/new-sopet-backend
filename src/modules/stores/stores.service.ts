@@ -10,7 +10,11 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository, ILike } from 'typeorm';
-import { Store, StoreStatus, OmiseRecipientStatus } from '../../database/entities/store.entity';
+import {
+  Store,
+  StoreStatus,
+  BankAccountVerificationStatus,
+} from '../../database/entities/store.entity';
 import { User, UserRole } from '../../database/entities/user.entity';
 import { StoreMember, StoreMemberRole } from '../../database/entities/store-member.entity';
 import { Order } from '../../database/entities/order.entity';
@@ -20,7 +24,6 @@ import { OrderStatus } from '../../database/entities/enums/order.enums';
 import { CreateStoreDto, UpdateStoreDto, ApproveStoreDto, RejectStoreDto } from './dto';
 import * as bcrypt from 'bcrypt';
 import { generateUniqueStoreSlug } from '../../common/utils/slug.util';
-import { OmiseService } from '../omise/omise.service';
 import { pickDefaultAccessibleStoreId } from './store-selection.util';
 import { NotificationsService } from '../notifications/notifications.service';
 import { StorageService } from '../storage/storage.service';
@@ -107,7 +110,6 @@ export class StoresService {
     private readonly orderItemRepository: Repository<OrderItem>,
     @InjectRepository(AuditLog)
     private readonly auditLogRepository: Repository<AuditLog>,
-    private readonly omiseService: OmiseService,
     private readonly notificationsService: NotificationsService,
     private readonly storageService: StorageService,
     private readonly auditLogsService: AuditLogsService,
@@ -523,161 +525,62 @@ export class StoresService {
     if (data.bankName !== undefined) store.bankName = data.bankName;
     if (data.bankCode !== undefined) store.bankCode = data.bankCode;
 
-    // Persist bank details only. Omise recipient linking is a separate explicit step
-    // (linkStoreOmiseRecipient) so vendors can save account info without waiting on Omise.
     if (bankDetailsChanged) {
-      // Saved bank no longer matches Omise recipient until vendor re-links.
-      store.omiseRecipientStatus = OmiseRecipientStatus.NOT_CONNECTED;
-      store.omiseRecipientFailureMessage = null;
+      // Any bank change requires admin re-verification before payouts can be requested.
+      store.bankAccountVerificationStatus = BankAccountVerificationStatus.PENDING_REVIEW;
+      store.bankAccountRejectionReason = null;
     }
 
     return this.storeRepository.save(store);
   }
 
-  /**
-   * Explicitly create/update the Omise recipient from the store's saved bank details.
-   */
-  async linkStoreOmiseRecipient(storeId: string): Promise<Store> {
+  async verifyStoreBankAccount(
+    storeId: string,
+    adminUserId?: string,
+    req?: unknown,
+  ): Promise<Store> {
     const store = await this.findOne(storeId);
-    await this.syncOmiseRecipient(store);
-    return this.storeRepository.save(store);
+    store.bankAccountVerificationStatus = BankAccountVerificationStatus.VERIFIED;
+    store.bankAccountRejectionReason = null;
+    const saved = await this.storeRepository.save(store);
+
+    if (adminUserId) {
+      await this.logAdminStoreAction(adminUserId, AuditAction.STORE_BANK_VERIFIED, saved, {}, req);
+    }
+
+    return saved;
   }
 
-  /**
-   * Re-fetches the Omise recipient and updates local verification status.
-   * Called when vendors open payout settings so Omise dashboard activations
-   * are reflected without requiring a bank-detail re-save.
-   *
-   * Skips refresh when status is NOT_CONNECTED: that means local bank details
-   * changed (or were never linked) and must not be overwritten by a stale
-   * Omise recipient that still reports verified/active for the previous account.
-   */
-  async refreshOmiseRecipientStatus(storeId: string): Promise<Store> {
+  async rejectStoreBankAccount(
+    storeId: string,
+    reason: string,
+    adminUserId?: string,
+    req?: unknown,
+  ): Promise<Store> {
+    const trimmedReason = reason?.trim();
+    if (!trimmedReason) {
+      throw new BadRequestException({
+        code: 'BANK_REJECTION_REASON_REQUIRED',
+        message: 'A rejection reason is required',
+      });
+    }
+
     const store = await this.findOne(storeId);
-    if (store.omiseRecipientStatus === OmiseRecipientStatus.NOT_CONNECTED) {
-      return store;
-    }
-    await this.applyOmiseRecipientSnapshot(store);
-    return this.storeRepository.save(store);
-  }
+    store.bankAccountVerificationStatus = BankAccountVerificationStatus.REJECTED;
+    store.bankAccountRejectionReason = trimmedReason;
+    const saved = await this.storeRepository.save(store);
 
-  /**
-   * Handles Omise recipient.* webhooks by refreshing the matching store's
-   * recipient status from the live Omise API.
-   */
-  async handleOmiseRecipientWebhook(payload: {
-    key?: string;
-    data?: { object?: string; id?: string; verified?: boolean; active?: boolean };
-  }): Promise<void> {
-    const recipientId = payload.data?.id;
-    if (!recipientId || payload.data?.object !== 'recipient') {
-      return;
+    if (adminUserId) {
+      await this.logAdminStoreAction(
+        adminUserId,
+        AuditAction.STORE_BANK_REJECTED,
+        saved,
+        { reason: trimmedReason },
+        req,
+      );
     }
 
-    const store = await this.storeRepository.findOne({
-      where: { omiseRecipientId: recipientId },
-    });
-    if (!store) {
-      return;
-    }
-
-    await this.applyOmiseRecipientSnapshot(store, payload.data);
-    await this.storeRepository.save(store);
-  }
-
-  /**
-   * Applies Omise recipient verified/active flags onto the store. Prefers a
-   * live API fetch when credentials are available; falls back to webhook
-   * payload fields when present.
-   */
-  private async applyOmiseRecipientSnapshot(
-    store: Store,
-    fallback?: { verified?: boolean; active?: boolean },
-  ): Promise<void> {
-    // Bank was changed (or never linked). Keep NOT_CONNECTED until an explicit
-    // linkStoreOmiseRecipient / admin re-verify updates the recipient.
-    if (store.omiseRecipientStatus === OmiseRecipientStatus.NOT_CONNECTED) {
-      return;
-    }
-
-    if (!store.omiseRecipientId) {
-      return;
-    }
-
-    if (this.omiseService.hasCredentials()) {
-      try {
-        const recipient = await this.omiseService.getRecipient(store.omiseRecipientId);
-        this.applyRecipientFlags(store, recipient.verified, recipient.active);
-        return;
-      } catch {
-        // Fall through to webhook payload when API refresh fails.
-      }
-    }
-
-    if (fallback && fallback.verified !== undefined && fallback.active !== undefined) {
-      this.applyRecipientFlags(store, fallback.verified, fallback.active);
-    }
-  }
-
-  private applyRecipientFlags(store: Store, verified: boolean, active: boolean): void {
-    store.omiseRecipientStatus =
-      verified && active ? OmiseRecipientStatus.ACTIVE : OmiseRecipientStatus.PENDING;
-    if (store.omiseRecipientStatus === OmiseRecipientStatus.ACTIVE) {
-      store.omiseRecipientFailureMessage = null;
-    }
-  }
-
-  /**
-   * Binds the store's payout bank account to a real Omise recipient. Creates a
-   * new recipient (or updates the existing one) via the Omise API and persists
-   * the returned recipient id + verification status on the store. Mutates the
-   * given `store` in place; the caller is responsible for saving.
-   */
-  private async syncOmiseRecipient(store: Store): Promise<void> {
-    const hasCompleteBankDetails =
-      !!store.bankCode && !!store.bankAccountNumber && !!store.bankAccountName;
-
-    if (!hasCompleteBankDetails) {
-      store.omiseRecipientStatus = OmiseRecipientStatus.NOT_CONNECTED;
-      store.omiseRecipientFailureMessage = null;
-      return;
-    }
-
-    if (!this.omiseService.hasCredentials()) {
-      store.omiseRecipientStatus = OmiseRecipientStatus.NOT_CONNECTED;
-      store.omiseRecipientFailureMessage =
-        'Omise API keys are not configured on the server. The receiving account cannot be linked to Omise until OMISE_SECRET_KEY is set.';
-      return;
-    }
-
-    const params = {
-      name: store.bankAccountName as string,
-      email: store.contactEmail ?? undefined,
-      bankBrand: store.bankCode as string,
-      bankNumber: decryptBankAccountNumber(store.bankAccountNumber) as string,
-      bankName: store.bankAccountName as string,
-    };
-
-    try {
-      const recipient = store.omiseRecipientId
-        ? await this.omiseService.updateRecipient(store.omiseRecipientId, params)
-        : await this.omiseService.createRecipient(params);
-
-      store.omiseRecipientId = recipient.id;
-      store.omiseRecipientFailureMessage = null;
-      store.omiseRecipientStatus =
-        recipient.verified && recipient.active
-          ? OmiseRecipientStatus.ACTIVE
-          : OmiseRecipientStatus.PENDING;
-    } catch (error) {
-      const message =
-        error instanceof BadRequestException
-          ? ((error.getResponse() as { message?: string })?.message ??
-            'Failed to link the receiving account to Omise')
-          : 'Failed to link the receiving account to Omise';
-      store.omiseRecipientStatus = OmiseRecipientStatus.FAILED;
-      store.omiseRecipientFailureMessage = message;
-    }
+    return saved;
   }
 
   async findAllForAdmin(): Promise<Store[]> {

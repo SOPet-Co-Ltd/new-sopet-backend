@@ -17,9 +17,9 @@ export class PaymentsWebhookController {
   constructor(private readonly paymentsService: PaymentsService) {}
 
   @Public()
-  @Post('omise')
+  @Post('beam')
   @HttpCode(200)
-  async handleOmiseWebhook(
+  async handleBeamWebhook(
     @Req() req: RawBodyRequest<Request>,
     @Body() payload: Record<string, unknown>,
   ) {
@@ -28,19 +28,12 @@ export class PaymentsWebhookController {
       throw new BadRequestException('Missing raw request body');
     }
 
-    const signature = req.headers['omise-signature'] as string | undefined;
-    const timestamp = req.headers['omise-signature-timestamp'] as string | undefined;
-
-    const verified = this.paymentsService.verifyOmiseWebhookSignature(
-      rawBody,
-      signature,
-      timestamp,
-    );
-    if (!verified) {
-      throw new UnauthorizedException('Invalid Omise webhook signature');
+    const signature = req.headers['x-beam-signature'] as string | undefined;
+    if (!this.paymentsService.verifyBeamWebhookSignature(rawBody, signature)) {
+      throw new UnauthorizedException('Invalid Beam webhook signature');
     }
 
-    await this.paymentsService.handleWebhook(payload);
+    await this.paymentsService.handleBeamWebhook(payload);
     return { received: true };
   }
 }

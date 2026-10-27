@@ -33,79 +33,30 @@ describe('PayoutSchedulerService', () => {
     );
   });
 
-  it('skips manual payout schedule stores', async () => {
+  it('is a no-op: creates zero payouts or transfers for any schedule', async () => {
     storeRepo.find.mockResolvedValue([
       {
         id: 'store-1',
-        payoutSchedule: PayoutSchedule.MANUAL,
-        payoutSchedulePaused: false,
-      },
-    ]);
-
-    await service.runScheduledPayouts();
-
-    expect(payoutsService.createManualPayout).not.toHaveBeenCalled();
-  });
-
-  it('creates payout for daily schedule with positive balance', async () => {
-    storeRepo.find.mockResolvedValue([
-      {
-        id: 'store-2',
         status: StoreStatus.APPROVED,
         payoutSchedule: PayoutSchedule.DAILY,
         payoutSchedulePaused: false,
       },
-    ]);
-
-    payoutsService.getPayoutSummary.mockResolvedValue({
-      availableBalance: 2500,
-      pendingPayoutAmount: 0,
-    });
-    payoutsService.createManualPayout.mockResolvedValue({ id: 'payout-1' });
-
-    await service.runScheduledPayouts();
-
-    expect(payoutsService.createManualPayout).toHaveBeenCalledWith('store-2', 2500, {
-      notes: 'Scheduled payout',
-    });
-  });
-
-  it('skips stores with balance below minimum', async () => {
-    storeRepo.find.mockResolvedValue([
       {
-        id: 'store-3',
-        payoutSchedule: PayoutSchedule.DAILY,
+        id: 'store-2',
+        status: StoreStatus.APPROVED,
+        payoutSchedule: PayoutSchedule.MANUAL,
         payoutSchedulePaused: false,
       },
     ]);
-
     payoutsService.getPayoutSummary.mockResolvedValue({
-      availableBalance: 100,
+      availableBalance: 2500,
       pendingPayoutAmount: 0,
     });
 
     await service.runScheduledPayouts();
 
     expect(payoutsService.createManualPayout).not.toHaveBeenCalled();
-  });
-
-  it('skips stores with pending payouts', async () => {
-    storeRepo.find.mockResolvedValue([
-      {
-        id: 'store-4',
-        payoutSchedule: PayoutSchedule.DAILY,
-        payoutSchedulePaused: false,
-      },
-    ]);
-
-    payoutsService.getPayoutSummary.mockResolvedValue({
-      availableBalance: 2500,
-      pendingPayoutAmount: 500,
-    });
-
-    await service.runScheduledPayouts();
-
-    expect(payoutsService.createManualPayout).not.toHaveBeenCalled();
+    expect(payoutsService.getPayoutSummary).not.toHaveBeenCalled();
   });
 
   it('registers cron job on module init', async () => {

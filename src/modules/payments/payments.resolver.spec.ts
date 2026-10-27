@@ -60,6 +60,7 @@ describe('PaymentsResolver payment queries', () => {
         paymentMethod: 'promptpay',
         authorizeUri: 'https://example.com/authorize',
         qrCodeUrl: 'https://example.com/qr.png',
+        qrCodeImage: null,
         expiresAt: paymentEntity.expiresAt,
       });
     });

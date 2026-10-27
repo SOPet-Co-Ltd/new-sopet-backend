@@ -23,6 +23,7 @@ export class PaymentsResolver {
     paymentMethod: string;
     authorizeUri?: string | null;
     qrCodeUrl?: string | null;
+    qrCodeImage?: string | null;
     expiresAt?: Date | null;
     order?: { orderNumber?: string | null } | null;
   }): PaymentType {
@@ -36,6 +37,7 @@ export class PaymentsResolver {
       paymentMethod: payment.paymentMethod,
       authorizeUri: payment.authorizeUri ?? null,
       qrCodeUrl: payment.qrCodeUrl ?? null,
+      qrCodeImage: payment.qrCodeImage ?? null,
       expiresAt: payment.expiresAt ?? null,
     };
   }
@@ -135,7 +137,8 @@ export class PaymentsResolver {
       amount: input.amount,
       currency: input.currency,
       paymentMethod: normalizeCheckoutPaymentMethod(input.paymentMethod),
-      omiseToken: input.omiseToken,
+      cardToken: input.cardToken,
+      cardSecurityCode: input.cardSecurityCode,
       savedPaymentMethodId: input.savedPaymentMethodId,
       customerId: effectiveCustomerId,
       guestPayToken: input.guestPayToken,
