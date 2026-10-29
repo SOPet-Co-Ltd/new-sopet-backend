@@ -13,6 +13,7 @@ describe('OrdersService', () => {
     update: jest.Mock;
     createQueryBuilder: jest.Mock;
   };
+  let storeRepository: { find: jest.Mock };
   let savedAddressRepository: { findOne: jest.Mock };
   let variantRepository: { findOne: jest.Mock };
   let shippingOptionRepository: { findOne: jest.Mock };
@@ -67,6 +68,7 @@ describe('OrdersService', () => {
       update: jest.fn(),
       createQueryBuilder: jest.fn(),
     };
+    storeRepository = { find: jest.fn().mockResolvedValue([]) };
     savedAddressRepository = { findOne: jest.fn() };
     variantRepository = { findOne: jest.fn() };
     shippingOptionRepository = { findOne: jest.fn() };
@@ -140,7 +142,7 @@ describe('OrdersService', () => {
       customerRepository as never,
       inventoryService as never,
       cartService as never,
-      {} as never,
+      storeRepository as never,
       vendorWebhooksService as never,
       saleCampaignsService as never,
       orderAuditLogsService as never,
@@ -1106,6 +1108,178 @@ describe('OrdersService', () => {
       });
       expect(queryBuilder.skip).toHaveBeenCalledWith(50);
       expect(queryBuilder.take).toHaveBeenCalledWith(50);
+    });
+  });
+
+  describe('findForAdmin', () => {
+    function createAdminListQb(overrides: Record<string, jest.Mock> = {}) {
+      return {
+        andWhere: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        addGroupBy: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        offset: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        withDeleted: jest.fn().mockReturnThis(),
+        getRawOne: jest.fn().mockResolvedValue({ cnt: '0' }),
+        getRawMany: jest.fn().mockResolvedValue([]),
+        getMany: jest.fn().mockResolvedValue([]),
+        ...overrides,
+      };
+    }
+
+    it('returns empty page when no orders match', async () => {
+      const qb = createAdminListQb();
+      orderRepository.createQueryBuilder.mockReturnValue(qb);
+
+      const result = await service.findForAdmin({ page: 1, limit: 20 });
+
+      expect(result.items).toEqual([]);
+      expect(result.pagination).toEqual({ page: 1, limit: 20, total: 0, totalPages: 1 });
+    });
+
+    it('pages newest-first, applies search/status, and resolves multi-store names plus customer', async () => {
+      const countQb = createAdminListQb({
+        getRawOne: jest.fn().mockResolvedValue({ cnt: '2' }),
+      });
+      const idQb = createAdminListQb({
+        getRawMany: jest.fn().mockResolvedValue([{ id: 'ord-2' }, { id: 'ord-1' }]),
+      });
+      const loadQb = createAdminListQb({
+        getMany: jest.fn().mockResolvedValue([
+          {
+            id: 'ord-1',
+            orderNumber: 'ORD-1',
+            customerId: 'cust-1',
+            customer: {
+              id: 'cust-1',
+              fullName: 'Somchai',
+              phone: '0811111111',
+              email: 'a@example.com',
+            },
+            items: [
+              { storeId: 'store-1', productName: 'A' },
+              { storeId: 'store-2', productName: 'B' },
+            ],
+          },
+          {
+            id: 'ord-2',
+            orderNumber: 'ORD-2',
+            customerId: null,
+            customer: null,
+            guestName: 'Guest',
+            guestPhone: '0822222222',
+            items: [{ storeId: 'store-1', productName: 'C' }],
+          },
+        ]),
+      });
+
+      orderRepository.createQueryBuilder
+        .mockReturnValueOnce(countQb)
+        .mockReturnValueOnce(idQb)
+        .mockReturnValueOnce(loadQb);
+
+      storeRepository.find.mockResolvedValue([
+        { id: 'store-1', name: 'Pet Shop A' },
+        { id: 'store-2', name: 'Pet Shop B' },
+      ]);
+
+      const result = await service.findForAdmin({
+        page: 1,
+        limit: 20,
+        search: 'ORD',
+        status: OrderStatus.PAID,
+      });
+
+      expect(countQb.andWhere).toHaveBeenCalledWith('order.orderNumber ILIKE :search', {
+        search: '%ORD%',
+      });
+      expect(countQb.andWhere).toHaveBeenCalledWith('order.status = :status', {
+        status: OrderStatus.PAID,
+      });
+      expect(idQb.orderBy).toHaveBeenCalledWith('order.createdAt', 'DESC');
+      expect(idQb.offset).toHaveBeenCalledWith(0);
+      expect(idQb.limit).toHaveBeenCalledWith(20);
+      expect(result.items.map((row) => row.order.id)).toEqual(['ord-2', 'ord-1']);
+      expect(result.items[1].stores).toEqual([
+        { id: 'store-1', name: 'Pet Shop A' },
+        { id: 'store-2', name: 'Pet Shop B' },
+      ]);
+      expect(result.items[1].customer).toEqual({
+        id: 'cust-1',
+        fullName: 'Somchai',
+        phone: '0811111111',
+        email: 'a@example.com',
+      });
+      expect(result.items[0].customer).toBeNull();
+      expect(result.pagination.total).toBe(2);
+    });
+
+    it('uses empty store name when store row is missing', async () => {
+      const countQb = createAdminListQb({
+        getRawOne: jest.fn().mockResolvedValue({ cnt: '1' }),
+      });
+      const idQb = createAdminListQb({
+        getRawMany: jest.fn().mockResolvedValue([{ id: 'ord-1' }]),
+      });
+      const loadQb = createAdminListQb({
+        getMany: jest.fn().mockResolvedValue([
+          {
+            id: 'ord-1',
+            customerId: null,
+            customer: null,
+            items: [{ storeId: 'missing-store' }],
+          },
+        ]),
+      });
+
+      orderRepository.createQueryBuilder
+        .mockReturnValueOnce(countQb)
+        .mockReturnValueOnce(idQb)
+        .mockReturnValueOnce(loadQb);
+      storeRepository.find.mockResolvedValue([]);
+
+      const result = await service.findForAdmin();
+
+      expect(result.items[0].stores).toEqual([{ id: 'missing-store', name: '' }]);
+    });
+  });
+
+  describe('findOneForAdmin', () => {
+    it('returns stores and registered customer for one order', async () => {
+      orderRepository.findOne.mockResolvedValue({
+        id: 'ord-1',
+        customerId: 'cust-1',
+        customer: {
+          id: 'cust-1',
+          fullName: 'Somchai',
+          phone: '0811111111',
+          email: null,
+        },
+        items: [{ storeId: 'store-1' }, { storeId: 'store-1' }, { storeId: 'store-2' }],
+      });
+      storeRepository.find.mockResolvedValue([
+        { id: 'store-1', name: 'Alpha' },
+        { id: 'store-2', name: 'Beta' },
+      ]);
+
+      const result = await service.findOneForAdmin('ord-1');
+
+      expect(result.stores).toEqual([
+        { id: 'store-1', name: 'Alpha' },
+        { id: 'store-2', name: 'Beta' },
+      ]);
+      expect(result.customer?.id).toBe('cust-1');
+    });
+
+    it('throws ORDER_NOT_FOUND when missing', async () => {
+      orderRepository.findOne.mockResolvedValue(null);
+
+      await expect(service.findOneForAdmin('missing')).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 

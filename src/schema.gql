@@ -191,6 +191,29 @@ type AdminManualPayoutType {
   storeName: String!
 }
 
+type AdminOrder {
+  customer: AdminOrderCustomer
+  order: OrderType!
+  stores: [AdminOrderStore!]!
+}
+
+type AdminOrderConnection {
+  items: [AdminOrder!]!
+  pagination: PaginationMeta!
+}
+
+type AdminOrderCustomer {
+  email: String
+  fullName: String
+  id: String!
+  phone: String!
+}
+
+type AdminOrderStore {
+  id: String!
+  name: String!
+}
+
 type AdminStoreType {
   address: String
   bankAccountName: String
@@ -1407,6 +1430,8 @@ type Query {
   adminCustomer(id: String!): AdminCustomerType!
   adminCustomerDetail(id: String!): AdminCustomerDetailType!
   adminCustomers(limit: Int! = 20, page: Int! = 1, search: String): AdminCustomerConnection!
+  adminOrder(id: String!): AdminOrder!
+  adminOrders(limit: Int = 20, page: Int = 1, search: String, status: String): AdminOrderConnection!
   adminStore(id: String!): AdminStoreType!
   adminStorePayoutSummary(storeId: String!): PayoutSummaryType!
   adminStorePayouts(storeId: String!): [PayoutType!]!
