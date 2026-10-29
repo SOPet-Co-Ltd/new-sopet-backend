@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { OrdersResolver } from './orders.resolver';
 import { OrdersService } from './orders.service';
 import { OrderFulfillmentService } from './order-fulfillment.service';
@@ -7,6 +7,7 @@ import { PaymentsService } from '../payments/payments.service';
 import { ProductsService } from '../products/products.service';
 import { StoresService } from '../stores/stores.service';
 import { IS_PUBLIC_KEY } from '../../common/decorators/public.decorator';
+import { ROLES_KEY } from '../../common/decorators/roles.decorator';
 import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
 import { FulfillmentStatus } from '../../database/entities/order-item.entity';
 import * as OrderMapper from './order.mapper';
@@ -97,6 +98,8 @@ describe('OrdersResolver mapOrder extensions', () => {
       | 'findByCustomer'
       | 'findByCustomerPaginated'
       | 'findByStore'
+      | 'findForAdmin'
+      | 'findOneForAdmin'
       | 'findPendingBankTransferOrders'
       | 'findLatestPurchaseProductId'
       | 'findLatestPurchaseProductIds'
@@ -129,6 +132,8 @@ describe('OrdersResolver mapOrder extensions', () => {
       findByCustomer: jest.fn(),
       findByCustomerPaginated: jest.fn(),
       findByStore: jest.fn(),
+      findForAdmin: jest.fn(),
+      findOneForAdmin: jest.fn(),
       findPendingBankTransferOrders: jest.fn(),
       findLatestPurchaseProductId: jest.fn(),
       findLatestPurchaseProductIds: jest.fn(),
@@ -434,6 +439,85 @@ describe('OrdersResolver mapOrder extensions', () => {
 
       expect(storesService.assertStoreAccess).toHaveBeenCalledWith('staff-1', 'store-1');
       expect(ordersService.findByStore).toHaveBeenCalledWith('store-1');
+    });
+  });
+
+  describe('adminOrders / adminOrder', () => {
+    it('adminOrders is admin-only', () => {
+      const method = Object.getOwnPropertyDescriptor(OrdersResolver.prototype, 'adminOrders')
+        ?.value as ((...args: unknown[]) => unknown) | undefined;
+      expect(Reflect.getMetadata(ROLES_KEY, method!)).toEqual(['admin']);
+    });
+
+    it('adminOrder is admin-only', () => {
+      const method = Object.getOwnPropertyDescriptor(OrdersResolver.prototype, 'adminOrder')
+        ?.value as ((...args: unknown[]) => unknown) | undefined;
+      expect(Reflect.getMetadata(ROLES_KEY, method!)).toEqual(['admin']);
+    });
+
+    it('adminOrders maps list with stores and registered customer', async () => {
+      const order = buildOrderFixture({
+        guestPayToken: 'secret-token',
+      });
+      ordersService.findForAdmin.mockResolvedValue({
+        items: [
+          {
+            order,
+            stores: [
+              { id: 'store-1', name: 'Pet Shop A' },
+              { id: 'store-2', name: 'Pet Shop B' },
+            ],
+            customer: {
+              id: 'cust-1',
+              fullName: 'Somchai',
+              phone: '0811111111',
+              email: 'a@example.com',
+            },
+          },
+        ],
+        pagination: { page: 1, limit: 20, total: 1, totalPages: 1 },
+      });
+
+      const result = await resolver.adminOrders(1, 20, 'ORD', OrderStatus.PAID);
+
+      expect(ordersService.findForAdmin).toHaveBeenCalledWith({
+        page: 1,
+        limit: 20,
+        search: 'ORD',
+        status: OrderStatus.PAID,
+      });
+      expect(result.items[0].stores).toHaveLength(2);
+      expect(result.items[0].customer?.id).toBe('cust-1');
+      expect(result.items[0].order.guestPayToken).toBeNull();
+      expect(result.pagination.total).toBe(1);
+    });
+
+    it('adminOrders rejects invalid status', async () => {
+      await expect(resolver.adminOrders(1, 20, undefined, 'not-a-status')).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(ordersService.findForAdmin).not.toHaveBeenCalled();
+    });
+
+    it('adminOrder maps guest order with null customer', async () => {
+      const order = buildOrderFixture({
+        customerId: null,
+        guestName: 'Guest',
+        guestPhone: '0822222222',
+        guestEmail: 'g@example.com',
+      });
+      ordersService.findOneForAdmin.mockResolvedValue({
+        order,
+        stores: [{ id: 'store-1', name: 'Pet Shop A' }],
+        customer: null,
+      });
+
+      const result = await resolver.adminOrder('order-1');
+
+      expect(ordersService.findOneForAdmin).toHaveBeenCalledWith('order-1');
+      expect(result.customer).toBeNull();
+      expect(result.order.guestName).toBe('Guest');
+      expect(result.stores[0].name).toBe('Pet Shop A');
     });
   });
 });
