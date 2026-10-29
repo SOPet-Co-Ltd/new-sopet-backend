@@ -1,11 +1,18 @@
 import { Args, Int, Mutation, Query, Resolver } from '@nestjs/graphql';
-import { ForbiddenException, NotFoundException, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+  UseGuards,
+} from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { OrderFulfillmentService } from './order-fulfillment.service';
 import { PaymentsService } from '../payments/payments.service';
 import { ProductsService } from '../products/products.service';
 import { StoresService } from '../stores/stores.service';
 import {
+  AdminOrder,
+  AdminOrderConnection,
   OrderTrackingType,
   OrderType,
   ProductType,
@@ -25,6 +32,17 @@ import {
 import { OrderStatus } from '../../database/entities/order.entity';
 import { normalizeCheckoutPaymentMethod } from '../../common/utils/checkout-payment.util';
 import { CustomerOrderListFilter } from './order-list-filter.util';
+import type { AdminOrderRecord } from './orders.service';
+
+function mapAdminOrder(record: AdminOrderRecord): AdminOrder {
+  const order = mapOrder(record.order);
+  order.guestPayToken = null;
+  return {
+    order,
+    stores: record.stores,
+    customer: record.customer,
+  };
+}
 
 @Resolver()
 export class OrdersResolver {
@@ -129,6 +147,47 @@ export class OrdersResolver {
 
     const orders = await this.ordersService.findByStore(storeId);
     return orders.map((order) => mapOrder(order, storeId));
+  }
+
+  @Query(() => AdminOrderConnection)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async adminOrders(
+    @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page?: number,
+    @Args('limit', { type: () => Int, nullable: true, defaultValue: 20 }) limit?: number,
+    @Args('search', { type: () => String, nullable: true }) search?: string,
+    @Args('status', { type: () => String, nullable: true }) status?: string,
+  ): Promise<AdminOrderConnection> {
+    let parsedStatus: OrderStatus | undefined;
+    if (status) {
+      const allowed = Object.values(OrderStatus) as string[];
+      if (!allowed.includes(status)) {
+        throw new BadRequestException({
+          code: 'INVALID_ORDER_STATUS',
+          message: 'Invalid order status filter',
+        });
+      }
+      parsedStatus = status as OrderStatus;
+    }
+
+    const result = await this.ordersService.findForAdmin({
+      page,
+      limit,
+      search,
+      status: parsedStatus,
+    });
+    return {
+      items: result.items.map(mapAdminOrder),
+      pagination: result.pagination,
+    };
+  }
+
+  @Query(() => AdminOrder)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async adminOrder(@Args('id') id: string): Promise<AdminOrder> {
+    const record = await this.ordersService.findOneForAdmin(id);
+    return mapAdminOrder(record);
   }
 
   @Query(() => OrderConnection)

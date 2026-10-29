@@ -1,8 +1,9 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
 import { FulfillmentStatus, OrderItem } from '../../database/entities/order-item.entity';
+import { Customer } from '../../database/entities/customer.entity';
 import { OrderShippingAddress } from '../../database/entities/order-shipping-address.entity';
 import { OrderStoreShipping } from '../../database/entities/order-store-shipping.entity';
 import { OrderStatusHistory } from '../../database/entities/order-status-history.entity';
@@ -48,6 +49,24 @@ import {
 export interface StoreShippingSelection {
   storeId: string;
   shippingOptionId: string;
+}
+
+export interface AdminOrderStoreSummary {
+  id: string;
+  name: string;
+}
+
+export interface AdminOrderCustomerSummary {
+  id: string;
+  fullName: string | null;
+  phone: string;
+  email: string | null;
+}
+
+export interface AdminOrderRecord {
+  order: Order;
+  stores: AdminOrderStoreSummary[];
+  customer: AdminOrderCustomerSummary | null;
 }
 
 @Injectable()
@@ -877,6 +896,160 @@ export class OrdersService {
         totalPages: Math.max(1, Math.ceil(total / limit)),
       },
     };
+  }
+
+  private collectStoreIds(orders: Order[]): string[] {
+    const ids = new Set<string>();
+    for (const order of orders) {
+      for (const item of order.items ?? []) {
+        if (item.storeId) {
+          ids.add(item.storeId);
+        }
+      }
+    }
+    return [...ids];
+  }
+
+  private async loadStoreNameMap(storeIds: string[]): Promise<Map<string, string>> {
+    if (storeIds.length === 0) {
+      return new Map();
+    }
+
+    const stores = await this.storeRepository.find({
+      where: { id: In(storeIds) },
+      select: ['id', 'name'],
+    });
+
+    return new Map(stores.map((store) => [store.id, store.name]));
+  }
+
+  private mapCustomerSummary(
+    customer: Customer | null | undefined,
+  ): AdminOrderCustomerSummary | null {
+    if (!customer) {
+      return null;
+    }
+
+    return {
+      id: customer.id,
+      fullName: customer.fullName ?? null,
+      phone: customer.phone,
+      email: customer.email ?? null,
+    };
+  }
+
+  private toAdminOrderRecord(order: Order, storeNames: Map<string, string>): AdminOrderRecord {
+    const seen = new Set<string>();
+    const stores: AdminOrderStoreSummary[] = [];
+
+    for (const item of order.items ?? []) {
+      if (!item.storeId || seen.has(item.storeId)) {
+        continue;
+      }
+      seen.add(item.storeId);
+      stores.push({
+        id: item.storeId,
+        name: storeNames.get(item.storeId) ?? '',
+      });
+    }
+
+    return {
+      order,
+      stores,
+      customer: this.mapCustomerSummary(order.customer),
+    };
+  }
+
+  async findForAdmin(
+    options: {
+      page?: number;
+      limit?: number;
+      search?: string;
+      status?: OrderStatus;
+    } = {},
+  ): Promise<PaginatedResponse<AdminOrderRecord>> {
+    const page = normalizeCustomerOrdersPage(options.page);
+    const limit = normalizeCustomerOrdersLimit(options.limit);
+    const offset = (page - 1) * limit;
+    const search = options.search?.trim();
+
+    const applyFilters = (qb: ReturnType<Repository<Order>['createQueryBuilder']>) => {
+      if (search) {
+        qb.andWhere('order.orderNumber ILIKE :search', { search: `%${search}%` });
+      }
+      if (options.status) {
+        qb.andWhere('order.status = :status', { status: options.status });
+      }
+      return qb;
+    };
+
+    const countRow = await applyFilters(this.orderRepository.createQueryBuilder('order'))
+      .select('COUNT(DISTINCT order.id)', 'cnt')
+      .getRawOne<{ cnt: string }>();
+    const total = Number(countRow?.cnt ?? 0);
+
+    if (total === 0) {
+      return {
+        items: [],
+        pagination: { page, limit, total: 0, totalPages: 1 },
+      };
+    }
+
+    const idRows = await applyFilters(this.orderRepository.createQueryBuilder('order'))
+      .select('order.id', 'id')
+      .addSelect('order.createdAt', 'createdAt')
+      .groupBy('order.id')
+      .addGroupBy('order.createdAt')
+      .orderBy('order.createdAt', 'DESC')
+      .offset(offset)
+      .limit(limit)
+      .getRawMany<{ id: string }>();
+
+    const ids = idRows.map((row) => row.id);
+    if (ids.length === 0) {
+      return {
+        items: [],
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.max(1, Math.ceil(total / limit)),
+        },
+      };
+    }
+
+    const orders = await this.orderRepository
+      .createQueryBuilder('order')
+      .leftJoinAndSelect('order.items', 'items')
+      .leftJoinAndSelect('items.productVariant', 'productVariant')
+      .leftJoinAndSelect('productVariant.product', 'product')
+      .leftJoinAndSelect('product.images', 'productImages')
+      .leftJoinAndSelect('order.shippingAddress', 'shippingAddress')
+      .leftJoinAndSelect('order.customer', 'customer')
+      .leftJoinAndSelect('order.storeShippings', 'storeShippings')
+      .where('order.id IN (:...ids)', { ids })
+      .withDeleted()
+      .getMany();
+
+    const byId = new Map(orders.map((order) => [order.id, order]));
+    const ordered = ids.map((id) => byId.get(id)).filter((order): order is Order => Boolean(order));
+    const storeNames = await this.loadStoreNameMap(this.collectStoreIds(ordered));
+
+    return {
+      items: ordered.map((order) => this.toAdminOrderRecord(order, storeNames)),
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+    };
+  }
+
+  async findOneForAdmin(id: string): Promise<AdminOrderRecord> {
+    const order = await this.findOne(id);
+    const storeNames = await this.loadStoreNameMap(this.collectStoreIds([order]));
+    return this.toAdminOrderRecord(order, storeNames);
   }
 
   async findPendingBankTransferOrders(options?: {

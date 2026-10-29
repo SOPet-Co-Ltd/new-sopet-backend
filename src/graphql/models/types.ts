@@ -664,6 +664,51 @@ export class OrderConnection {
 }
 
 @ObjectType()
+export class AdminOrderStore {
+  @Field()
+  id!: string;
+
+  @Field()
+  name!: string;
+}
+
+@ObjectType()
+export class AdminOrderCustomer {
+  @Field()
+  id!: string;
+
+  @Field(() => String, { nullable: true })
+  fullName?: string | null;
+
+  @Field()
+  phone!: string;
+
+  @Field(() => String, { nullable: true })
+  email?: string | null;
+}
+
+@ObjectType()
+export class AdminOrder {
+  @Field(() => OrderType)
+  order!: OrderType;
+
+  @Field(() => [AdminOrderStore])
+  stores!: AdminOrderStore[];
+
+  @Field(() => AdminOrderCustomer, { nullable: true })
+  customer?: AdminOrderCustomer | null;
+}
+
+@ObjectType()
+export class AdminOrderConnection {
+  @Field(() => [AdminOrder])
+  items!: AdminOrder[];
+
+  @Field(() => PaginationMeta)
+  pagination!: PaginationMeta;
+}
+
+@ObjectType()
 export class PaymentType {
   @Field()
   id!: string;
