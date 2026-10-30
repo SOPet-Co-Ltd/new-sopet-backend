@@ -1111,6 +1111,75 @@ export class PlatformAnalyticsType {
 }
 
 @ObjectType()
+export class StoreCustomerSummaryType {
+  @Field(() => Int)
+  year!: number;
+
+  @Field(() => Int)
+  month!: number;
+
+  @Field(() => Float, { nullable: true })
+  lifetimeMonths?: number | null;
+
+  @Field(() => Float, { nullable: true })
+  repeatRate?: number | null;
+
+  @Field(() => Float, { nullable: true })
+  purchasesPerMonth?: number | null;
+
+  @Field(() => Float, { nullable: true })
+  averageOrderValue?: number | null;
+
+  @Field(() => Int)
+  newCustomerCount!: number;
+
+  @Field(() => Int)
+  oldCustomerCount!: number;
+
+  @Field(() => Float, { nullable: true })
+  oldCustomerPercent?: number | null;
+
+  @Field(() => Int)
+  orderCount!: number;
+
+  @Field(() => Int)
+  buyersInMonth!: number;
+
+  @Field(() => Int)
+  totalCustomers!: number;
+}
+
+@ObjectType()
+export class CustomerPurchaseSummaryType {
+  @Field(() => Int)
+  year!: number;
+
+  @Field(() => Int)
+  month!: number;
+
+  @Field(() => Int)
+  purchasesInMonth!: number;
+
+  @Field(() => Float, { nullable: true })
+  averageOrderValue?: number | null;
+
+  @Field()
+  cohortLabel!: string;
+
+  @Field()
+  cohortLabelTh!: string;
+
+  @Field(() => Date, { nullable: true })
+  lastOrderAt?: Date | null;
+
+  @Field(() => Int, { nullable: true })
+  monthsSinceLastOrder?: number | null;
+
+  @Field(() => Int, { nullable: true })
+  daysSinceLastOrder?: number | null;
+}
+
+@ObjectType()
 export class SalesTimePointType {
   @Field()
   date!: string;
