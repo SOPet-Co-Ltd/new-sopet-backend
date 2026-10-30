@@ -647,6 +647,18 @@ type CustomerProfile {
   profilePhotoUrl: String
 }
 
+type CustomerPurchaseSummaryType {
+  averageOrderValue: Float
+  cohortLabel: String!
+  cohortLabelTh: String!
+  daysSinceLastOrder: Int
+  lastOrderAt: DateTime
+  month: Int!
+  monthsSinceLastOrder: Int
+  purchasesInMonth: Int!
+  year: Int!
+}
+
 type CustomerReviewType {
   comment: String
   createdAt: DateTime!
@@ -1455,6 +1467,7 @@ type Query {
   brandDeleteImpact(brandId: String!): TaxonomyDeleteImpactType!
   cart(sessionId: String): CartType!
   categoryDeleteImpact(categoryId: String!): TaxonomyDeleteImpactType!
+  customerPurchaseSummary(customerId: String!, month: Int!, year: Int!): CustomerPurchaseSummaryType!
   customerReviewableItems: [CustomerReviewableItemType!]!
   emailContainer(id: ID!): EmailContainerType
   emailContainers: [EmailContainerType!]!
@@ -1540,6 +1553,7 @@ type Query {
   storeAnalytics(fromDate: String, storeId: String!, toDate: String): StoreAnalyticsType!
   storeApiKeys(storeId: String!): [StoreApiKeyType!]!
   storeBySlug(slug: String!): StoreType!
+  storeCustomerSummary(month: Int!, storeId: String!, year: Int!): StoreCustomerSummaryType!
   storeInvitations: [StoreMemberInvitationType!]!
   storeMembers: [StoreMemberType!]!
   storePayoutSummary: PayoutSummaryType!
@@ -1865,6 +1879,21 @@ type StoreApiKeyType {
   lastUsedAt: DateTime
   name: String!
   revokedAt: DateTime
+}
+
+type StoreCustomerSummaryType {
+  averageOrderValue: Float
+  buyersInMonth: Int!
+  lifetimeMonths: Float
+  month: Int!
+  newCustomerCount: Int!
+  oldCustomerCount: Int!
+  oldCustomerPercent: Float
+  orderCount: Int!
+  purchasesPerMonth: Float
+  repeatRate: Float
+  totalCustomers: Int!
+  year: Int!
 }
 
 type StoreInvitationPreviewType {
