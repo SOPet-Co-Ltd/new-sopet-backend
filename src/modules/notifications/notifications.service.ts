@@ -106,7 +106,7 @@ export class NotificationsService {
       }
     }
 
-    const email = customer?.email ?? orderWithItems.guestEmail;
+    const email = orderWithItems.guestEmail ?? customer?.email;
     if (!email) {
       this.logger.log(`No email for order ${orderWithItems.orderNumber} — skip paid email`);
       return;
@@ -155,7 +155,7 @@ export class NotificationsService {
       }
     }
 
-    const email = customer?.email ?? orderWithItems.guestEmail;
+    const email = orderWithItems.guestEmail ?? customer?.email;
     if (!email) {
       return;
     }
