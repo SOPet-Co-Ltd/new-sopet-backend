@@ -26,7 +26,7 @@ describe('OrdersService', () => {
   };
   let promotionsService: { applyStackedPromotions: jest.Mock };
   let guestOrderLinkService: { mergeGuestOrders: jest.Mock };
-  let customerRepository: { findActiveByPhone: jest.Mock };
+  let customerRepository: { findActiveByPhone: jest.Mock; setEmailIfMissing: jest.Mock };
   let inventoryService: { restoreOrderStock: jest.Mock };
   let cartService: { removeItems: jest.Mock; getCart: jest.Mock };
   let vendorWebhooksService: { dispatchOrderEvent: jest.Mock };
@@ -80,7 +80,10 @@ describe('OrdersService', () => {
     };
     promotionsService = { applyStackedPromotions: jest.fn() };
     guestOrderLinkService = { mergeGuestOrders: jest.fn() };
-    customerRepository = { findActiveByPhone: jest.fn().mockResolvedValue(null) };
+    customerRepository = {
+      findActiveByPhone: jest.fn().mockResolvedValue(null),
+      setEmailIfMissing: jest.fn().mockResolvedValue(false),
+    };
     inventoryService = { restoreOrderStock: jest.fn().mockResolvedValue(true) };
     cartService = {
       removeItems: jest.fn(),
@@ -491,6 +494,93 @@ describe('OrdersService', () => {
     const payload = orderCreatePayload();
     expect(payload.customerId).toBe('member-1');
     expect(payload.guestPhone).toBe('0812345678');
+  });
+
+  it('sets customer email from checkout when linked customer has none', async () => {
+    variantRepository.findOne.mockResolvedValue(variant);
+    customerRepository.findActiveByPhone.mockResolvedValue({ id: 'member-1', email: null });
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-1',
+      orderNumber: 'ORD-TEST',
+      status: OrderStatus.PENDING_PAYMENT,
+      items: [],
+      shippingAddress: {},
+      storeShippings: [],
+      statusHistory: [],
+    });
+
+    await service.create(
+      {
+        items: [{ productId: 'p1', variantId: 'var-1', quantity: 1, price: 100 }],
+        paymentMethod: 'promptpay',
+        guestPhone: '+66812345678',
+        guestName: 'Guest',
+        guestEmail: '  new@example.com  ',
+        shippingAddress,
+      },
+      undefined,
+    );
+
+    expect(customerRepository.setEmailIfMissing).toHaveBeenCalledWith(
+      'member-1',
+      'new@example.com',
+    );
+    const payload = orderCreatePayload();
+    expect(payload.guestEmail).toBe('new@example.com');
+  });
+
+  it('sets customer email from checkout for authenticated create when present', async () => {
+    variantRepository.findOne.mockResolvedValue(variant);
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-1',
+      orderNumber: 'ORD-TEST',
+      status: OrderStatus.PENDING_PAYMENT,
+      items: [],
+      shippingAddress: {},
+      storeShippings: [],
+      statusHistory: [],
+    });
+
+    await service.create(
+      {
+        items: [{ productId: 'p1', variantId: 'var-1', quantity: 1, price: 100 }],
+        paymentMethod: 'promptpay',
+        guestEmail: 'auth@example.com',
+        shippingAddress,
+      },
+      'cust-42',
+    );
+
+    expect(customerRepository.setEmailIfMissing).toHaveBeenCalledWith(
+      'cust-42',
+      'auth@example.com',
+    );
+    const payload = orderCreatePayload();
+    expect(payload.guestEmail).toBe('auth@example.com');
+  });
+
+  it('does not call setEmailIfMissing when checkout email is empty', async () => {
+    variantRepository.findOne.mockResolvedValue(variant);
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-1',
+      orderNumber: 'ORD-TEST',
+      status: OrderStatus.PENDING_PAYMENT,
+      items: [],
+      shippingAddress: {},
+      storeShippings: [],
+      statusHistory: [],
+    });
+
+    await service.create(
+      {
+        items: [{ productId: 'p1', variantId: 'var-1', quantity: 1, price: 100 }],
+        paymentMethod: 'promptpay',
+        shippingAddress,
+      },
+      'cust-42',
+    );
+
+    expect(customerRepository.setEmailIfMissing).not.toHaveBeenCalled();
   });
 
   it('keeps guest order unlinked when no member matches the phone', async () => {
