@@ -36,6 +36,7 @@ import { Order, OrderStatus } from '../src/database/entities/order.entity';
 import { Customer } from '../src/database/entities/customer.entity';
 import { SavedPaymentMethod } from '../src/database/entities/saved-payment-method.entity';
 import { NotificationsService } from '../src/modules/notifications/notifications.service';
+import { DashboardEventsService } from '../src/modules/dashboard-events/dashboard-events.service';
 import { PaymentEventsService } from '../src/modules/payments/payment-events.service';
 import { InventoryService } from '../src/modules/inventory/inventory.service';
 import { PayoutsService } from '../src/modules/payouts/payouts.service';
@@ -164,6 +165,10 @@ describe('unpaid-order-payment-method-switch integration', () => {
         {
           provide: NotificationsService,
           useValue: { notifyOrderPaid: jest.fn() },
+        },
+        {
+          provide: DashboardEventsService,
+          useValue: { publish: jest.fn().mockResolvedValue(undefined) },
         },
         {
           provide: PaymentEventsService,
