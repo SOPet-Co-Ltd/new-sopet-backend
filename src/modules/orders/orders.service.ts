@@ -305,6 +305,11 @@ export class OrdersService {
       linkedCustomerId = existingCustomer?.id ?? null;
     }
 
+    const normalizedGuestEmail = guestEmail?.trim() || null;
+    if (linkedCustomerId && normalizedGuestEmail) {
+      await this.customerRepository.setEmailIfMissing(linkedCustomerId, normalizedGuestEmail);
+    }
+
     const shippingSnapshot = await this.resolveShippingSnapshot(customerId, createOrderDto);
 
     const pricedLines: Array<{
@@ -436,7 +441,7 @@ export class OrdersService {
         customerId: linkedCustomerId,
         guestPhone: normalizedGuestPhone ?? null,
         guestName: guestName ?? null,
-        guestEmail: guestEmail ?? null,
+        guestEmail: normalizedGuestEmail,
         guestPayTokenHash: guestPayTokenIssue?.hash ?? null,
         guestPayTokenExpiresAt: guestPayTokenIssue?.expiresAt ?? null,
         status: OrderStatus.PENDING_PAYMENT,
