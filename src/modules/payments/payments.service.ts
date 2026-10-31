@@ -15,6 +15,8 @@ import { Customer } from '../../database/entities/customer.entity';
 import { SavedPaymentMethod } from '../../database/entities/saved-payment-method.entity';
 import { CreateChargeDto } from './dto';
 import { NotificationsService } from '../notifications/notifications.service';
+import { DashboardEventsService } from '../dashboard-events/dashboard-events.service';
+import { DashboardActivityKind } from '../dashboard-events/dashboard-activity.constants';
 import { PaymentEventsService } from './payment-events.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { PayoutsService } from '../payouts/payouts.service';
@@ -102,6 +104,7 @@ export class PaymentsService {
     private savedPaymentMethodRepository: Repository<SavedPaymentMethod>,
     private configService: ConfigService,
     private notificationsService: NotificationsService,
+    private dashboardEventsService: DashboardEventsService,
     private paymentEventsService: PaymentEventsService,
     private inventoryService: InventoryService,
     private payoutsService: PayoutsService,
@@ -1366,6 +1369,7 @@ export class PaymentsService {
     await this.paymentEventsService.publishPaymentStatusUpdated(payment);
     await this.notificationsService.notifyOrderPaid(order);
     this.vendorWebhooksService.dispatchOrderEvent(order.id, 'order.paid').catch(() => {});
+    this.publishOrderPaidActivity(order).catch(() => {});
   }
 
   private async appendPaymentMethodChangedIfNeeded(
@@ -1489,7 +1493,53 @@ export class PaymentsService {
     await this.paymentEventsService.publishPaymentStatusUpdated(payment);
     await this.notificationsService.notifyOrderPaid(order);
     this.vendorWebhooksService.dispatchOrderEvent(order.id, 'order.paid').catch(() => {});
+    this.publishBankTransferActivity(order).catch(() => {});
 
     return order;
+  }
+
+  private async resolveOrderOwnerIds(
+    order: Order,
+  ): Promise<{ storeIds: string[]; ownerIds: string[] }> {
+    await this.loadOrderItemsIfNeeded(order);
+    const storeIds = [...new Set((order.items ?? []).map((item) => item.storeId).filter(Boolean))];
+    if (storeIds.length === 0) {
+      return { storeIds, ownerIds: [] };
+    }
+
+    const ownerIds: string[] = [];
+    for (const storeId of storeIds) {
+      try {
+        const store = await this.storesService.findOne(storeId);
+        if (store.ownerId) {
+          ownerIds.push(store.ownerId);
+        }
+      } catch {
+        // best-effort audience resolution
+      }
+    }
+    return { storeIds, ownerIds };
+  }
+
+  private async publishOrderPaidActivity(order: Order): Promise<void> {
+    const { storeIds, ownerIds } = await this.resolveOrderOwnerIds(order);
+    await this.dashboardEventsService.publish({
+      kind: DashboardActivityKind.ORDER,
+      entityId: order.id,
+      storeId: storeIds[0] ?? null,
+      userIds: ownerIds,
+      roles: ['admin'],
+    });
+  }
+
+  private async publishBankTransferActivity(order: Order): Promise<void> {
+    const { storeIds, ownerIds } = await this.resolveOrderOwnerIds(order);
+    await this.dashboardEventsService.publish({
+      kind: DashboardActivityKind.BANK_TRANSFER,
+      entityId: order.id,
+      storeId: storeIds[0] ?? null,
+      userIds: ownerIds,
+      roles: ['admin'],
+    });
   }
 }

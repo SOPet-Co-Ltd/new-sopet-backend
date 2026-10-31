@@ -19,6 +19,8 @@ import {
 } from '../../database/entities/inventory-transaction.entity';
 import { CreateOrderDto, ShippingAddressDto } from './dto';
 import { NotificationsService } from '../notifications/notifications.service';
+import { DashboardEventsService } from '../dashboard-events/dashboard-events.service';
+import { DashboardActivityKind } from '../dashboard-events/dashboard-activity.constants';
 import { PromotionsService, PromotionCartLine } from '../promotions/promotions.service';
 import { GuestOrderLinkService } from './guest-order-link.service';
 import { CustomerRepository } from '../../database/repositories/customer.repository';
@@ -86,6 +88,7 @@ export class OrdersService {
     private shippingOptionRepository: Repository<StoreShippingOption>,
     private dataSource: DataSource,
     private notificationsService: NotificationsService,
+    private dashboardEventsService: DashboardEventsService,
     private promotionsService: PromotionsService,
     private guestOrderLinkService: GuestOrderLinkService,
     private customerRepository: CustomerRepository,
@@ -605,6 +608,7 @@ export class OrdersService {
       savedOrder.items = orderItems;
       this.notificationsService.notifyVendorsAboutNewOrder(savedOrder).catch(() => {});
       this.vendorWebhooksService.dispatchOrderEvent(savedOrder.id, 'order.create').catch(() => {});
+      this.publishOrderActivity(savedOrder).catch(() => {});
 
       return savedOrder.id;
     });
@@ -1191,6 +1195,7 @@ export class OrdersService {
     const saved = await this.findOne(id);
     await this.notificationsService.notifyOrderStatusChanged(saved, status);
     this.notificationsService.notifyVendorsAboutOrderStatus(saved, status).catch(() => {});
+    this.publishOrderActivity(saved).catch(() => {});
     if (previousStatus !== status) {
       const webhookEvent = webhookEventForOrderStatus(status);
       if (webhookEvent) {
@@ -1199,5 +1204,25 @@ export class OrdersService {
     }
 
     return saved;
+  }
+
+  private async publishOrderActivity(order: Order): Promise<void> {
+    const storeIds = [...new Set((order.items ?? []).map((item) => item.storeId).filter(Boolean))];
+    let ownerIds: string[] = [];
+    if (storeIds.length > 0) {
+      const stores = await this.storeRepository.find({
+        where: { id: In(storeIds) },
+        select: ['ownerId'],
+      });
+      ownerIds = stores.map((store) => store.ownerId).filter(Boolean);
+    }
+
+    await this.dashboardEventsService.publish({
+      kind: DashboardActivityKind.ORDER,
+      entityId: order.id,
+      storeId: storeIds[0] ?? null,
+      userIds: ownerIds,
+      roles: ['admin'],
+    });
   }
 }

@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { DashboardEventsModule } from '../dashboard-events/dashboard-events.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { PayoutsModule } from '../payouts/payouts.module';
 import { StoresModule } from '../stores/stores.module';
@@ -22,6 +23,7 @@ import { VendorWebhooksModule } from '../vendor-webhooks/vendor-webhooks.module'
   imports: [
     AuthModule,
     NotificationsModule,
+    DashboardEventsModule,
     InventoryModule,
     VendorWebhooksModule,
     PlatformModule,

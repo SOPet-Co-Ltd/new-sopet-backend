@@ -101,6 +101,7 @@ describe('StoresService', () => {
       {
         notifyVendorAboutStoreStatus: jest.fn().mockResolvedValue(undefined),
       } as never,
+      { publish: jest.fn().mockResolvedValue(undefined) } as never,
       {
         deleteObject: jest.fn(),
       } as never,
@@ -979,6 +980,7 @@ describe('StoresService', () => {
         {
           notifyVendorAboutStoreStatus: jest.fn().mockResolvedValue(undefined),
         } as never,
+        { publish: jest.fn().mockResolvedValue(undefined) } as never,
         {
           deleteObject: jest.fn(),
         } as never,

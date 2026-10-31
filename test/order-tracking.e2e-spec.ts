@@ -35,6 +35,7 @@ import { Product } from '../src/database/entities/product.entity';
 import { StoreShippingOption } from '../src/database/entities/store-shipping-option.entity';
 import { Store } from '../src/database/entities/store.entity';
 import { NotificationsService } from '../src/modules/notifications/notifications.service';
+import { DashboardEventsService } from '../src/modules/dashboard-events/dashboard-events.service';
 import { PromotionsService } from '../src/modules/promotions/promotions.service';
 import { GuestOrderLinkService } from '../src/modules/orders/guest-order-link.service';
 import { CustomerRepository } from '../src/database/repositories/customer.repository';
@@ -288,6 +289,10 @@ describe('Order tracking (e2e)', () => {
             confirmBankTransferPaid: jest.fn(),
             getBankTransferDetails: jest.fn(),
           },
+        },
+        {
+          provide: DashboardEventsService,
+          useValue: { publish: jest.fn().mockResolvedValue(undefined) },
         },
         {
           provide: VendorWebhooksService,

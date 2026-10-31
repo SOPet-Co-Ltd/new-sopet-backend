@@ -14,6 +14,8 @@ import {
 import { StoreReactivationRequestImage } from '../../database/entities/store-reactivation-request-image.entity';
 import { Store, StoreStatus } from '../../database/entities/store.entity';
 import { StoresService } from './stores.service';
+import { DashboardEventsService } from '../dashboard-events/dashboard-events.service';
+import { DashboardActivityKind } from '../dashboard-events/dashboard-activity.constants';
 
 export interface SubmitStoreReactivationRequestData {
   storeId: string;
@@ -32,6 +34,7 @@ export class StoreReactivationRequestService {
     @InjectRepository(Store)
     private readonly storeRepository: Repository<Store>,
     private readonly storesService: StoresService,
+    private readonly dashboardEventsService: DashboardEventsService,
   ) {}
 
   async submit(
@@ -97,6 +100,14 @@ export class StoreReactivationRequestService {
       await this.imageRepository.save(images);
     }
 
+    void this.dashboardEventsService.publish({
+      kind: DashboardActivityKind.REACTIVATION,
+      entityId: saved.id,
+      storeId: data.storeId,
+      userIds: [userId, store.ownerId].filter(Boolean),
+      roles: ['admin'],
+    });
+
     return this.findOne(saved.id);
   }
 
@@ -148,7 +159,17 @@ export class StoreReactivationRequestService {
     request.reviewedBy = adminId;
     request.reviewedAt = new Date();
 
-    return this.requestRepository.save(request);
+    const saved = await this.requestRepository.save(request);
+    void this.dashboardEventsService.publish({
+      kind: DashboardActivityKind.REACTIVATION,
+      entityId: saved.id,
+      storeId: saved.storeId,
+      userIds: [saved.submittedByUserId, request.store?.ownerId].filter((id): id is string =>
+        Boolean(id),
+      ),
+      roles: ['admin'],
+    });
+    return saved;
   }
 
   async reject(
@@ -170,6 +191,16 @@ export class StoreReactivationRequestService {
     request.reviewedBy = adminId;
     request.reviewedAt = new Date();
 
-    return this.requestRepository.save(request);
+    const saved = await this.requestRepository.save(request);
+    void this.dashboardEventsService.publish({
+      kind: DashboardActivityKind.REACTIVATION,
+      entityId: saved.id,
+      storeId: saved.storeId,
+      userIds: [saved.submittedByUserId, request.store?.ownerId].filter((id): id is string =>
+        Boolean(id),
+      ),
+      roles: ['admin'],
+    });
+    return saved;
   }
 }
