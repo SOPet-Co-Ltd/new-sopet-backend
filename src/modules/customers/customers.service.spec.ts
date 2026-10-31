@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { CustomersService } from './customers.service';
 import { Customer } from '../../database/entities/customer.entity';
 import { Favorite } from '../../database/entities/favorite.entity';
@@ -43,6 +43,14 @@ describe('CustomersService', () => {
     createQueryBuilder: jest.fn(),
   };
 
+  const ordersService = {
+    mergeGuestOrders: jest.fn().mockResolvedValue(undefined),
+  };
+
+  const customCustomerRepo = {
+    findOtherActiveByPhone: jest.fn().mockResolvedValue(null),
+  };
+
   beforeEach(async () => {
     jest.clearAllMocks();
     const module: TestingModule = await Test.createTestingModule({
@@ -54,8 +62,8 @@ describe('CustomersService', () => {
         { provide: getRepositoryToken(SavedAddress), useValue: savedAddressRepo },
         { provide: getRepositoryToken(Favorite), useValue: favoriteRepo },
         { provide: getRepositoryToken(Review), useValue: reviewRepo },
-        { provide: OrdersService, useValue: {} },
-        { provide: CustomerRepository, useValue: {} },
+        { provide: OrdersService, useValue: ordersService },
+        { provide: CustomerRepository, useValue: customCustomerRepo },
       ],
     }).compile();
 
@@ -116,6 +124,73 @@ describe('CustomersService', () => {
       const result = await service.setActive('cust-1', false);
       expect(result.isActive).toBe(false);
       expect(customerRepo.save).toHaveBeenCalled();
+    });
+  });
+
+  describe('updateAsAdmin', () => {
+    it('clears optional fields when null is sent and leaves omitted fields unchanged', async () => {
+      const customer = {
+        id: 'cust-1',
+        phone: '0812345678',
+        fullName: 'Old Name',
+        email: 'old@example.com',
+        dateOfBirth: '1990-01-01',
+        isVerified: true,
+      };
+      customerRepo.findOne.mockResolvedValue(customer);
+
+      const result = await service.updateAsAdmin({
+        id: 'cust-1',
+        email: null,
+        dateOfBirth: null,
+      });
+
+      expect(result.email).toBeNull();
+      expect(result.dateOfBirth).toBeNull();
+      expect(result.fullName).toBe('Old Name');
+      expect(result.isVerified).toBe(true);
+    });
+
+    it('unverifies customer when phone changes and merges guest orders', async () => {
+      const customer = {
+        id: 'cust-1',
+        phone: '0812345678',
+        fullName: 'Test',
+        email: null,
+        dateOfBirth: null,
+        isVerified: true,
+      };
+      customerRepo.findOne.mockResolvedValue(customer);
+
+      const result = await service.updateAsAdmin({
+        id: 'cust-1',
+        phone: '0899999999',
+      });
+
+      expect(result.phone).toBe('0899999999');
+      expect(result.isVerified).toBe(false);
+      expect(ordersService.mergeGuestOrders).toHaveBeenCalledWith('cust-1', '0812345678');
+      expect(ordersService.mergeGuestOrders).toHaveBeenCalledWith('cust-1', '0899999999');
+    });
+  });
+
+  describe('verifyPhoneAsAdmin', () => {
+    it('marks unverified customer as verified', async () => {
+      const customer = { id: 'cust-1', phone: '0812345678', isVerified: false };
+      customerRepo.findOne.mockResolvedValue(customer);
+
+      const result = await service.verifyPhoneAsAdmin('cust-1');
+      expect(result.isVerified).toBe(true);
+    });
+
+    it('throws when phone is already verified', async () => {
+      customerRepo.findOne.mockResolvedValue({
+        id: 'cust-1',
+        phone: '0812345678',
+        isVerified: true,
+      });
+
+      await expect(service.verifyPhoneAsAdmin('cust-1')).rejects.toThrow(BadRequestException);
     });
   });
 

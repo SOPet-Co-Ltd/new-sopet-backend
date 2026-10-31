@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   NotFoundException,
   ForbiddenException,
@@ -205,18 +206,19 @@ export class CustomersService {
           });
         }
         customer.phone = normalizedPhone;
+        customer.isVerified = false;
         phoneChanged = true;
       }
     }
 
     if (input.fullName !== undefined) {
-      customer.fullName = input.fullName;
+      customer.fullName = input.fullName?.trim() || null;
     }
     if (input.email !== undefined) {
-      customer.email = input.email;
+      customer.email = input.email?.trim() || null;
     }
     if (input.dateOfBirth !== undefined) {
-      customer.dateOfBirth = input.dateOfBirth;
+      customer.dateOfBirth = input.dateOfBirth?.trim() || null;
     }
 
     const saved = await this.customerRepository.save(customer);
@@ -232,6 +234,18 @@ export class CustomersService {
   async setActive(id: string, isActive: boolean): Promise<Customer> {
     const customer = await this.findByIdForAdmin(id);
     customer.isActive = isActive;
+    return this.customerRepository.save(customer);
+  }
+
+  async verifyPhoneAsAdmin(id: string): Promise<Customer> {
+    const customer = await this.findByIdForAdmin(id);
+    if (customer.isVerified) {
+      throw new BadRequestException({
+        code: 'PHONE_ALREADY_VERIFIED',
+        message: 'Customer phone is already verified',
+      });
+    }
+    customer.isVerified = true;
     return this.customerRepository.save(customer);
   }
 
