@@ -18,6 +18,8 @@ import { OrderStatus } from '../../database/entities/enums/order.enums';
 import { PaginatedResponse } from '../../common/interfaces';
 import { StoresService } from '../stores/stores.service';
 import { StorageService } from '../storage/storage.service';
+import { DashboardEventsService } from '../dashboard-events/dashboard-events.service';
+import { DashboardActivityKind } from '../dashboard-events/dashboard-activity.constants';
 
 export type StoreReviewReplyFilter = 'all' | 'unreplied' | 'replied';
 export type StoreReviewRatingFilter = 'all' | '1' | '2' | '3' | '4' | '5';
@@ -288,7 +290,27 @@ export class ReviewsService {
     private readonly productRepository: Repository<Product>,
     private readonly storesService: StoresService,
     private readonly storageService: StorageService,
+    private readonly dashboardEventsService: DashboardEventsService,
   ) {}
+
+  private async publishReviewActivity(reviewId: string, storeId?: string | null): Promise<void> {
+    let ownerId: string | undefined;
+    if (storeId) {
+      try {
+        const store = await this.storesService.findOne(storeId);
+        ownerId = store.ownerId;
+      } catch {
+        // best-effort
+      }
+    }
+    await this.dashboardEventsService.publish({
+      kind: DashboardActivityKind.REVIEW,
+      entityId: reviewId,
+      storeId: storeId ?? null,
+      userIds: ownerId ? [ownerId] : undefined,
+      roles: ['admin'],
+    });
+  }
 
   async create(input: {
     customerId: string;
@@ -383,6 +405,11 @@ export class ReviewsService {
       await this.reviewImageRepository.save(images);
     }
     await this.syncProductReviewStats(input.productId);
+    const product = await this.productRepository.findOne({
+      where: { id: input.productId },
+      select: ['id', 'storeId'],
+    });
+    this.publishReviewActivity(saved.id, product?.storeId).catch(() => {});
     const withRelations = await this.reviewRepository.findOne({
       where: { id: saved.id },
       relations: ['customer', 'images'],
@@ -577,6 +604,7 @@ export class ReviewsService {
     review.moderatedAt = new Date();
     await this.reviewRepository.save(review);
     await this.syncProductReviewStats(review.productId);
+    this.publishReviewActivity(review.id, review.product?.storeId).catch(() => {});
 
     const withRelations = await this.reviewRepository.findOne({
       where: { id: review.id },
@@ -712,6 +740,7 @@ export class ReviewsService {
     review.moderatedBy = adminUserId;
     review.moderatedAt = new Date();
     await this.reviewRepository.save(review);
+    this.publishReviewActivity(review.id, review.product?.storeId).catch(() => {});
 
     const withRelations = await this.reviewRepository.findOne({
       where: { id: review.id },

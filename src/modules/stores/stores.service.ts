@@ -23,6 +23,8 @@ import { generateUniqueStoreSlug } from '../../common/utils/slug.util';
 import { OmiseService } from '../omise/omise.service';
 import { pickDefaultAccessibleStoreId } from './store-selection.util';
 import { NotificationsService } from '../notifications/notifications.service';
+import { DashboardEventsService } from '../dashboard-events/dashboard-events.service';
+import { DashboardActivityKind } from '../dashboard-events/dashboard-activity.constants';
 import { StorageService } from '../storage/storage.service';
 import {
   decryptBankAccountNumber,
@@ -109,6 +111,7 @@ export class StoresService {
     private readonly auditLogRepository: Repository<AuditLog>,
     private readonly omiseService: OmiseService,
     private readonly notificationsService: NotificationsService,
+    private readonly dashboardEventsService: DashboardEventsService,
     private readonly storageService: StorageService,
     private readonly auditLogsService: AuditLogsService,
     @Inject(forwardRef(() => StoreSuspensionHoldService))
@@ -252,6 +255,13 @@ export class StoresService {
     await this.notificationsService
       .notifyVendorAboutStoreStatus(store.ownerId, store, 'approved')
       .catch(() => {});
+    void this.dashboardEventsService.publish({
+      kind: DashboardActivityKind.STORE_STATUS,
+      entityId: store.id,
+      storeId: store.id,
+      userIds: [store.ownerId],
+      roles: ['admin'],
+    });
 
     await this.logAdminStoreAction(
       approveStoreDto.adminId,
@@ -288,6 +298,13 @@ export class StoresService {
         rejectStoreDto.rejectionReason,
       )
       .catch(() => {});
+    void this.dashboardEventsService.publish({
+      kind: DashboardActivityKind.STORE_STATUS,
+      entityId: store.id,
+      storeId: store.id,
+      userIds: [store.ownerId],
+      roles: ['admin'],
+    });
 
     await this.logAdminStoreAction(
       rejectStoreDto.adminId,
@@ -747,10 +764,10 @@ export class StoresService {
     ownerUserId?: string | null;
     name?: string;
     slug?: string;
-    description?: string;
-    contactPhone?: string;
-    contactEmail?: string;
-    address?: string;
+    description?: string | null;
+    contactPhone?: string | null;
+    contactEmail?: string | null;
+    address?: string | null;
     logoUrl?: string;
     bannerUrl?: string;
     status?: StoreStatus;
@@ -805,10 +822,18 @@ export class StoresService {
 
     if (input.name !== undefined) store.name = input.name.trim();
     if (input.slug !== undefined) store.slug = input.slug;
-    if (input.description !== undefined) store.description = input.description;
-    if (input.contactPhone !== undefined) store.contactPhone = input.contactPhone;
-    if (input.contactEmail !== undefined) store.contactEmail = input.contactEmail;
-    if (input.address !== undefined) store.address = input.address;
+    if (input.description !== undefined) {
+      store.description = input.description?.trim() || null;
+    }
+    if (input.contactPhone !== undefined) {
+      store.contactPhone = input.contactPhone || null;
+    }
+    if (input.contactEmail !== undefined) {
+      store.contactEmail = input.contactEmail?.trim() || null;
+    }
+    if (input.address !== undefined) {
+      store.address = input.address?.trim() || null;
+    }
     if (input.logoUrl !== undefined) store.logoUrl = input.logoUrl;
     if (input.bannerUrl !== undefined) store.bannerUrl = input.bannerUrl;
     if (input.commissionRate !== undefined) store.commissionRate = input.commissionRate;
@@ -949,7 +974,10 @@ export class StoresService {
           message: 'Email already in use',
         });
       }
-      user.email = input.email;
+      if (input.email !== user.email) {
+        user.email = input.email;
+        user.emailVerified = false;
+      }
     }
     if (input.fullName !== undefined) user.fullName = input.fullName;
     if (input.isActive !== undefined) user.isActive = input.isActive;

@@ -19,6 +19,8 @@ import {
 } from '../../database/entities/inventory-transaction.entity';
 import { CreateOrderDto, ShippingAddressDto } from './dto';
 import { NotificationsService } from '../notifications/notifications.service';
+import { DashboardEventsService } from '../dashboard-events/dashboard-events.service';
+import { DashboardActivityKind } from '../dashboard-events/dashboard-activity.constants';
 import { PromotionsService, PromotionCartLine } from '../promotions/promotions.service';
 import { GuestOrderLinkService } from './guest-order-link.service';
 import { CustomerRepository } from '../../database/repositories/customer.repository';
@@ -86,6 +88,7 @@ export class OrdersService {
     private shippingOptionRepository: Repository<StoreShippingOption>,
     private dataSource: DataSource,
     private notificationsService: NotificationsService,
+    private dashboardEventsService: DashboardEventsService,
     private promotionsService: PromotionsService,
     private guestOrderLinkService: GuestOrderLinkService,
     private customerRepository: CustomerRepository,
@@ -605,6 +608,7 @@ export class OrdersService {
       savedOrder.items = orderItems;
       this.notificationsService.notifyVendorsAboutNewOrder(savedOrder).catch(() => {});
       this.vendorWebhooksService.dispatchOrderEvent(savedOrder.id, 'order.create').catch(() => {});
+      this.publishOrderActivity(savedOrder).catch(() => {});
 
       return savedOrder.id;
     });
@@ -1086,6 +1090,41 @@ export class OrdersService {
     };
   }
 
+  async updateShippingAddressAsAdmin(
+    orderId: string,
+    input: {
+      fullName: string;
+      phone: string;
+      addressLine1: string;
+      addressLine2?: string | null;
+      tumbon?: string | null;
+      amphoe: string;
+      province: string;
+      postalCode: string;
+    },
+  ): Promise<Order> {
+    const order = await this.findOne(orderId);
+    if (!order.shippingAddress) {
+      throw new NotFoundException({
+        code: 'SHIPPING_ADDRESS_NOT_FOUND',
+        message: 'Order shipping address not found',
+      });
+    }
+
+    const address = order.shippingAddress;
+    address.fullName = input.fullName.trim();
+    address.phone = normalizeThaiPhoneToLocal(input.phone);
+    address.addressLine1 = input.addressLine1.trim();
+    address.addressLine2 = input.addressLine2?.trim() || null;
+    address.tumbon = input.tumbon?.trim() || null;
+    address.amphoe = input.amphoe.trim();
+    address.province = input.province.trim();
+    address.postalCode = input.postalCode.trim();
+
+    await this.dataSource.getRepository(OrderShippingAddress).save(address);
+    return this.findOne(orderId);
+  }
+
   async updateStatus(id: string, status: OrderStatus, userId?: string): Promise<Order> {
     const order = await this.findOne(id);
     const previousStatus = order.status;
@@ -1156,6 +1195,7 @@ export class OrdersService {
     const saved = await this.findOne(id);
     await this.notificationsService.notifyOrderStatusChanged(saved, status);
     this.notificationsService.notifyVendorsAboutOrderStatus(saved, status).catch(() => {});
+    this.publishOrderActivity(saved).catch(() => {});
     if (previousStatus !== status) {
       const webhookEvent = webhookEventForOrderStatus(status);
       if (webhookEvent) {
@@ -1164,5 +1204,25 @@ export class OrdersService {
     }
 
     return saved;
+  }
+
+  private async publishOrderActivity(order: Order): Promise<void> {
+    const storeIds = [...new Set((order.items ?? []).map((item) => item.storeId).filter(Boolean))];
+    let ownerIds: string[] = [];
+    if (storeIds.length > 0) {
+      const stores = await this.storeRepository.find({
+        where: { id: In(storeIds) },
+        select: ['ownerId'],
+      });
+      ownerIds = stores.map((store) => store.ownerId).filter(Boolean);
+    }
+
+    await this.dashboardEventsService.publish({
+      kind: DashboardActivityKind.ORDER,
+      entityId: order.id,
+      storeId: storeIds[0] ?? null,
+      userIds: ownerIds,
+      roles: ['admin'],
+    });
   }
 }

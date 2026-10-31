@@ -10,6 +10,7 @@ import { CustomersService } from './customers.service';
 import { CustomersResolver } from './customers.resolver';
 import { StoresModule } from '../stores/stores.module';
 import { OrdersModule } from '../orders/orders.module';
+import { UsersModule } from '../users/users.module';
 import { CustomerRepository } from '../../database/repositories/customer.repository';
 
 @Module({
@@ -17,6 +18,7 @@ import { CustomerRepository } from '../../database/repositories/customer.reposit
     TypeOrmModule.forFeature([Customer, Order, OrderItem, SavedAddress, Favorite, Review]),
     StoresModule,
     OrdersModule,
+    UsersModule,
   ],
   providers: [CustomersService, CustomersResolver, CustomerRepository],
   exports: [CustomersService],

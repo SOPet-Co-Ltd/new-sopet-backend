@@ -1,4 +1,4 @@
-import { Args, Int, Mutation, Query, Resolver } from '@nestjs/graphql';
+import { Args, Context, Int, Mutation, Query, Resolver } from '@nestjs/graphql';
 import {
   BadRequestException,
   ForbiddenException,
@@ -27,12 +27,18 @@ import {
   ConfirmOrderDeliveredInput,
   CreateOrderInput,
   ShipVendorOrderInput,
+  UpdateOrderShippingAddressAsAdminInput,
   UpdateOrderStatusInput,
 } from './orders.inputs';
 import { OrderStatus } from '../../database/entities/order.entity';
 import { normalizeCheckoutPaymentMethod } from '../../common/utils/checkout-payment.util';
 import { CustomerOrderListFilter } from './order-list-filter.util';
 import type { AdminOrderRecord } from './orders.service';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constants';
+import { getAuditRequestContext } from '../audit-logs/audit-request-context';
+import { AuditActorType } from '../../database/entities/audit-log.entity';
+import type { GraphqlContext } from '../../graphql/loaders/graphql-context.types';
 
 function mapAdminOrder(record: AdminOrderRecord): AdminOrder {
   const order = mapOrder(record.order);
@@ -48,6 +54,7 @@ function mapAdminOrder(record: AdminOrderRecord): AdminOrder {
 export class OrdersResolver {
   constructor(
     private readonly ordersService: OrdersService,
+    private readonly auditLogsService: AuditLogsService,
     private readonly orderFulfillmentService: OrderFulfillmentService,
     private readonly paymentsService: PaymentsService,
     private readonly productsService: ProductsService,
@@ -265,6 +272,8 @@ export class OrdersResolver {
   async updateOrderStatus(
     @Args('input') input: UpdateOrderStatusInput,
     @CurrentUser('id') userId: string,
+    @CurrentUser('email') adminEmail?: string,
+    @Context() context?: GraphqlContext,
   ): Promise<OrderType> {
     const order = await this.ordersService.findOne(input.orderId);
     if (!order) {
@@ -274,11 +283,58 @@ export class OrdersResolver {
       });
     }
 
+    const previousStatus = order.status;
     const updated = await this.ordersService.updateStatus(
       input.orderId,
       input.status as OrderStatus,
       userId,
     );
+
+    await this.auditLogsService.log({
+      actorType: AuditActorType.ADMIN,
+      actorId: userId,
+      actorLabel: adminEmail ?? null,
+      action: AuditAction.ORDER_STATUS_UPDATED,
+      resourceType: AuditResourceType.ORDER,
+      resourceId: updated.id,
+      metadata: { previousStatus, status: input.status },
+      ...getAuditRequestContext(context?.req),
+    });
+
+    return mapOrder(updated);
+  }
+
+  @Mutation(() => OrderType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async updateOrderShippingAddressAsAdmin(
+    @Args('input') input: UpdateOrderShippingAddressAsAdminInput,
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail?: string,
+    @Context() context?: GraphqlContext,
+  ): Promise<OrderType> {
+    const updated = await this.ordersService.updateShippingAddressAsAdmin(input.orderId, {
+      fullName: input.fullName,
+      phone: input.phone,
+      addressLine1: input.addressLine1,
+      addressLine2: input.addressLine2,
+      tumbon: input.tumbon,
+      amphoe: input.amphoe,
+      province: input.province,
+      postalCode: input.postalCode,
+    });
+
+    await this.auditLogsService.log({
+      actorType: AuditActorType.ADMIN,
+      actorId: adminId,
+      actorLabel: adminEmail ?? null,
+      action: AuditAction.ORDER_SHIPPING_UPDATED,
+      resourceType: AuditResourceType.ORDER,
+      resourceId: updated.id,
+      metadata: { operation: 'shipping_address_update' },
+      ...getAuditRequestContext(context?.req),
+    });
+
     return mapOrder(updated);
   }
 

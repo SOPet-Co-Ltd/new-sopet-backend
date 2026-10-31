@@ -13,6 +13,8 @@ import { StoreMember, StoreMemberRole } from '../../database/entities/store-memb
 import { User } from '../../database/entities/user.entity';
 import { generateUniqueStoreSlug } from '../../common/utils/slug.util';
 import { NotificationsService } from '../notifications/notifications.service';
+import { DashboardEventsService } from '../dashboard-events/dashboard-events.service';
+import { DashboardActivityKind } from '../dashboard-events/dashboard-activity.constants';
 import { StorageService } from '../storage/storage.service';
 
 export interface SubmitStoreRequestData {
@@ -36,6 +38,7 @@ export class StoreRequestService {
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly notificationsService: NotificationsService,
+    private readonly dashboardEventsService: DashboardEventsService,
     private readonly storageService: StorageService,
   ) {}
 
@@ -92,6 +95,12 @@ export class StoreRequestService {
 
     // Notify admins about the new request
     this.notificationsService.notifyAdminAboutNewRequest(saved).catch(() => {});
+    void this.dashboardEventsService.publish({
+      kind: DashboardActivityKind.STORE_REQUEST,
+      entityId: saved.id,
+      userIds: [vendorUserId],
+      roles: ['admin'],
+    });
 
     return saved;
   }
@@ -184,6 +193,13 @@ export class StoreRequestService {
       true,
       { requestId: request.id, storeId: savedStore.id },
     );
+    void this.dashboardEventsService.publish({
+      kind: DashboardActivityKind.STORE_REQUEST,
+      entityId: saved.id,
+      storeId: savedStore.id,
+      userIds: [request.vendorUserId],
+      roles: ['admin'],
+    });
 
     return saved;
   }
@@ -212,6 +228,12 @@ export class StoreRequestService {
       false,
       { requestId: request.id, reason: reason ?? null },
     );
+    void this.dashboardEventsService.publish({
+      kind: DashboardActivityKind.STORE_REQUEST,
+      entityId: saved.id,
+      userIds: [request.vendorUserId],
+      roles: ['admin'],
+    });
 
     return saved;
   }

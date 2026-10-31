@@ -20,6 +20,7 @@ import { Product } from '../../database/entities/product.entity';
 import { OrderStatus } from '../../database/entities/enums/order.enums';
 import { StoresService } from '../stores/stores.service';
 import { StorageService } from '../storage/storage.service';
+import { DashboardEventsService } from '../dashboard-events/dashboard-events.service';
 
 describe('ReviewsService', () => {
   let service: ReviewsService;
@@ -90,6 +91,10 @@ describe('ReviewsService', () => {
         { provide: getRepositoryToken(Product), useValue: productRepo },
         { provide: StoresService, useValue: storesService },
         { provide: StorageService, useValue: storageService },
+        {
+          provide: DashboardEventsService,
+          useValue: { publish: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile();
 
