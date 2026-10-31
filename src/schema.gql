@@ -686,6 +686,23 @@ type CustomerReviewableItemType {
   reviewDeadline: DateTime
 }
 
+enum DashboardActivityKind {
+  BANK_TRANSFER
+  ORDER
+  PAYOUT
+  REACTIVATION
+  REVIEW
+  STORE_REQUEST
+  STORE_STATUS
+  TAXONOMY
+}
+
+type DashboardActivityType {
+  entityId: String!
+  kind: DashboardActivityKind!
+  storeId: String
+}
+
 """
 A date-time string at UTC, such as 2019-12-03T09:54:33Z, compliant with the date-time format.
 """
@@ -2058,6 +2075,7 @@ input SubmitStoreRequestInput {
 }
 
 type Subscription {
+  dashboardActivity: DashboardActivityType!
   paymentStatusUpdated(guestPayToken: String, orderId: String, paymentId: String): PaymentType!
 }
 

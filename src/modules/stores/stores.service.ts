@@ -23,6 +23,8 @@ import { generateUniqueStoreSlug } from '../../common/utils/slug.util';
 import { OmiseService } from '../omise/omise.service';
 import { pickDefaultAccessibleStoreId } from './store-selection.util';
 import { NotificationsService } from '../notifications/notifications.service';
+import { DashboardEventsService } from '../dashboard-events/dashboard-events.service';
+import { DashboardActivityKind } from '../dashboard-events/dashboard-activity.constants';
 import { StorageService } from '../storage/storage.service';
 import {
   decryptBankAccountNumber,
@@ -109,6 +111,7 @@ export class StoresService {
     private readonly auditLogRepository: Repository<AuditLog>,
     private readonly omiseService: OmiseService,
     private readonly notificationsService: NotificationsService,
+    private readonly dashboardEventsService: DashboardEventsService,
     private readonly storageService: StorageService,
     private readonly auditLogsService: AuditLogsService,
     @Inject(forwardRef(() => StoreSuspensionHoldService))
@@ -252,6 +255,13 @@ export class StoresService {
     await this.notificationsService
       .notifyVendorAboutStoreStatus(store.ownerId, store, 'approved')
       .catch(() => {});
+    void this.dashboardEventsService.publish({
+      kind: DashboardActivityKind.STORE_STATUS,
+      entityId: store.id,
+      storeId: store.id,
+      userIds: [store.ownerId],
+      roles: ['admin'],
+    });
 
     await this.logAdminStoreAction(
       approveStoreDto.adminId,
@@ -288,6 +298,13 @@ export class StoresService {
         rejectStoreDto.rejectionReason,
       )
       .catch(() => {});
+    void this.dashboardEventsService.publish({
+      kind: DashboardActivityKind.STORE_STATUS,
+      entityId: store.id,
+      storeId: store.id,
+      userIds: [store.ownerId],
+      roles: ['admin'],
+    });
 
     await this.logAdminStoreAction(
       rejectStoreDto.adminId,

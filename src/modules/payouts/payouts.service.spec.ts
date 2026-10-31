@@ -10,6 +10,7 @@ import { Store, OmiseRecipientStatus } from '../../database/entities/store.entit
 import { OrderItem } from '../../database/entities/order-item.entity';
 import { OmiseService } from '../omise/omise.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { DashboardEventsService } from '../dashboard-events/dashboard-events.service';
 import * as payoutCommissionCalculator from './payout-commission.calculator';
 
 function createQueryBuilderMock(result: Record<string, string>) {
@@ -89,6 +90,9 @@ describe('PayoutsService', () => {
   };
   const notificationsService = {
     notifyAdminsAboutManualPayoutRequest: jest.fn().mockResolvedValue(null),
+  };
+  const dashboardEventsService = {
+    publish: jest.fn().mockResolvedValue(undefined),
   };
   const configService = {
     get: jest.fn((key: string): number | Date | undefined => {
@@ -260,10 +264,15 @@ describe('PayoutsService', () => {
         { provide: OmiseService, useValue: omiseService },
         { provide: ConfigService, useValue: configService },
         { provide: NotificationsService, useValue: notificationsService },
+        {
+          provide: DashboardEventsService,
+          useValue: dashboardEventsService,
+        },
       ],
     }).compile();
 
     service = module.get(PayoutsService);
+    dashboardEventsService.publish.mockClear();
   });
 
   it('creates manual payout for existing store', async () => {
@@ -742,6 +751,13 @@ describe('PayoutsService', () => {
         status: PayoutStatus.PENDING,
         processedBy: 'vendor-1',
         notes: 'Vendor requested manual payout',
+      }),
+    );
+    expect(dashboardEventsService.publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'PAYOUT',
+        storeId: 'store-1',
+        roles: ['admin'],
       }),
     );
     expect(requested.status).toBe(PayoutStatus.PENDING);

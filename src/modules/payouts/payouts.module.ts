@@ -6,6 +6,7 @@ import { isRedisConfigured } from '../../common/utils/is-redis-configured';
 import { OmiseModule } from '../omise/omise.module';
 import { StoresModule } from '../stores/stores.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { DashboardEventsModule } from '../dashboard-events/dashboard-events.module';
 import payoutConfig from '../../config/payout.config';
 import commissionConfig from '../../config/commission.config';
 import { Payout } from '../../database/entities/payout.entity';
@@ -40,6 +41,7 @@ const payoutQueueProviders = isRedisConfigured() ? [PayoutSchedulerProcessor] : 
     OmiseModule,
     StoresModule,
     NotificationsModule,
+    DashboardEventsModule,
     ConfigModule.forFeature(payoutConfig),
     ConfigModule.forFeature(commissionConfig),
     ...payoutQueueImports,

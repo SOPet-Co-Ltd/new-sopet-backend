@@ -143,6 +143,7 @@ describe('OrdersService', () => {
       shippingOptionRepository as never,
       dataSource as never,
       notificationsService as never,
+      { publish: jest.fn().mockResolvedValue(undefined) } as never,
       promotionsService as never,
       guestOrderLinkService as never,
       customerRepository as never,
