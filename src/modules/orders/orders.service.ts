@@ -1086,6 +1086,41 @@ export class OrdersService {
     };
   }
 
+  async updateShippingAddressAsAdmin(
+    orderId: string,
+    input: {
+      fullName: string;
+      phone: string;
+      addressLine1: string;
+      addressLine2?: string | null;
+      tumbon?: string | null;
+      amphoe: string;
+      province: string;
+      postalCode: string;
+    },
+  ): Promise<Order> {
+    const order = await this.findOne(orderId);
+    if (!order.shippingAddress) {
+      throw new NotFoundException({
+        code: 'SHIPPING_ADDRESS_NOT_FOUND',
+        message: 'Order shipping address not found',
+      });
+    }
+
+    const address = order.shippingAddress;
+    address.fullName = input.fullName.trim();
+    address.phone = normalizeThaiPhoneToLocal(input.phone);
+    address.addressLine1 = input.addressLine1.trim();
+    address.addressLine2 = input.addressLine2?.trim() || null;
+    address.tumbon = input.tumbon?.trim() || null;
+    address.amphoe = input.amphoe.trim();
+    address.province = input.province.trim();
+    address.postalCode = input.postalCode.trim();
+
+    await this.dataSource.getRepository(OrderShippingAddress).save(address);
+    return this.findOne(orderId);
+  }
+
   async updateStatus(id: string, status: OrderStatus, userId?: string): Promise<Order> {
     const order = await this.findOne(id);
     const previousStatus = order.status;

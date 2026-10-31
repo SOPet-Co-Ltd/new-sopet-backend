@@ -163,6 +163,7 @@ describe('OrdersResolver mapOrder extensions', () => {
     };
     resolver = new OrdersResolver(
       ordersService as unknown as OrdersService,
+      { log: jest.fn().mockResolvedValue(undefined) } as never,
       orderFulfillmentService as unknown as OrderFulfillmentService,
       paymentsService as unknown as PaymentsService,
       productsService as unknown as ProductsService,

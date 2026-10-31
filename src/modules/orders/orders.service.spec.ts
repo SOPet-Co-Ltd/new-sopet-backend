@@ -17,7 +17,7 @@ describe('OrdersService', () => {
   let savedAddressRepository: { findOne: jest.Mock };
   let variantRepository: { findOne: jest.Mock };
   let shippingOptionRepository: { findOne: jest.Mock };
-  let dataSource: { transaction: jest.Mock };
+  let dataSource: { transaction: jest.Mock; getRepository: jest.Mock };
   let notificationsService: {
     notifyOrderStatusChanged: jest.Mock;
     notifyVendorAboutNewOrder: jest.Mock;
@@ -129,6 +129,9 @@ describe('OrdersService', () => {
 
     dataSource = {
       transaction: jest.fn((cb: (manager: typeof mockManager) => unknown) => cb(mockManager)),
+      getRepository: jest.fn().mockReturnValue({
+        save: jest.fn(async (entity: unknown) => entity),
+      }),
     };
 
     service = new OrdersService(
@@ -796,6 +799,69 @@ describe('OrdersService', () => {
     expect(notificationsService.notifyOrderStatusChanged).toHaveBeenCalled();
     expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
     expect(updated).toBeDefined();
+  });
+
+  it('updates shipping address as admin without clearing savedAddressId', async () => {
+    const shipping = {
+      id: 'addr-1',
+      orderId: 'ord-1',
+      savedAddressId: 'saved-1',
+      fullName: 'Old Name',
+      phone: '0811111111',
+      addressLine1: 'Old Rd',
+      addressLine2: null,
+      tumbon: null,
+      amphoe: 'Old Amphoe',
+      province: 'Bangkok',
+      postalCode: '10110',
+    };
+    const order = {
+      id: 'ord-1',
+      status: OrderStatus.PAID,
+      items: [],
+      shippingAddress: shipping,
+      storeShippings: [],
+      statusHistory: [],
+    };
+    orderRepository.findOne.mockResolvedValue(order);
+
+    const updated = await service.updateShippingAddressAsAdmin('ord-1', {
+      fullName: 'New Name',
+      phone: '089-999-9999',
+      addressLine1: '9/47',
+      addressLine2: '',
+      tumbon: 'บ้านใหม่',
+      amphoe: 'ปากเกร็ด',
+      province: 'นนทบุรี',
+      postalCode: '11120',
+    });
+
+    expect(shipping.fullName).toBe('New Name');
+    expect(shipping.phone).toBe('0899999999');
+    expect(shipping.addressLine1).toBe('9/47');
+    expect(shipping.addressLine2).toBeNull();
+    expect(shipping.amphoe).toBe('ปากเกร็ด');
+    expect(shipping.savedAddressId).toBe('saved-1');
+    expect(dataSource.getRepository).toHaveBeenCalled();
+    expect(updated).toBeDefined();
+  });
+
+  it('throws when order has no shipping address', async () => {
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-1',
+      shippingAddress: null,
+    });
+
+    await expect(
+      service.updateShippingAddressAsAdmin('ord-1', {
+        fullName: 'Name',
+        phone: '0812345678',
+        addressLine1: 'Line',
+        amphoe: 'Amphoe',
+        province: 'Bangkok',
+        postalCode: '10110',
+      }),
+    ).rejects.toMatchObject({ response: { code: 'SHIPPING_ADDRESS_NOT_FOUND' } });
   });
 
   it('restores stock when order is cancelled', async () => {

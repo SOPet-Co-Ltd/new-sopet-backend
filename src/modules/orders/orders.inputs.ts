@@ -6,6 +6,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Length,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -174,6 +175,54 @@ export class UpdateOrderStatusInput {
   @Field()
   @IsString()
   status!: string;
+}
+
+@InputType()
+export class UpdateOrderShippingAddressAsAdminInput {
+  @Field()
+  @IsUUID()
+  orderId!: string;
+
+  @Field()
+  @IsNotEmpty()
+  @IsString()
+  @Length(1, 255)
+  fullName!: string;
+
+  @Field()
+  @IsNotEmpty()
+  @IsString()
+  phone!: string;
+
+  @Field()
+  @IsNotEmpty()
+  @IsString()
+  addressLine1!: string;
+
+  @Field({ nullable: true })
+  @IsOptional()
+  @IsString()
+  addressLine2?: string;
+
+  @Field({ nullable: true })
+  @IsOptional()
+  @IsString()
+  tumbon?: string;
+
+  @Field()
+  @IsNotEmpty()
+  @IsString()
+  amphoe!: string;
+
+  @Field()
+  @IsNotEmpty()
+  @IsString()
+  province!: string;
+
+  @Field()
+  @IsNotEmpty()
+  @IsString()
+  postalCode!: string;
 }
 
 @InputType()
