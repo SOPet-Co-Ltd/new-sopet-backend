@@ -1388,7 +1388,9 @@ type ProductType {
 }
 
 type ProductVariantSyncImpactRemovedType {
+  disposition: VariantRemovalDisposition!
   id: String!
+  openCartCount: Int!
   optionKey: String!
   optionsJson: String
   reasons: [VariantRemovalBlockReason!]!
@@ -2476,6 +2478,12 @@ input ValidatePromotionsTargetInput {
 enum VariantRemovalBlockReason {
   HAS_OPEN_CARTS
   HAS_ORDERS
+}
+
+enum VariantRemovalDisposition {
+  CLEAR_CART_AND_DELETE
+  DELETE
+  RETIRE
 }
 
 type VendorAuthPayload {

@@ -407,7 +407,9 @@ export function mapProduct(product: Product): ProductType {
           )
           .map(mapImage)
       : undefined,
-    variants: product.variants?.map((variant) => mapVariant(variant, basePrice)),
+    variants: product.variants
+      ?.filter((variant) => !variant.retiredAt)
+      .map((variant) => mapVariant(variant, basePrice)),
   };
 }
 

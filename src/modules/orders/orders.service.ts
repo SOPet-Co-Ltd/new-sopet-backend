@@ -336,7 +336,7 @@ export class OrdersService {
         where: { id: item.variantId },
         relations: ['product', 'product.store'],
       });
-      if (!variant?.product) {
+      if (!variant?.product || variant.retiredAt) {
         throw new BadRequestException({
           code: 'VARIANT_NOT_FOUND',
           message: `Variant ${item.variantId} not found`,
@@ -483,7 +483,7 @@ export class OrdersService {
           lock: { mode: 'pessimistic_write' },
         });
 
-        if (!variant) {
+        if (!variant || variant.retiredAt) {
           throw new BadRequestException({
             code: 'VARIANT_NOT_FOUND',
             message: `Variant ${line.variant.id} not found`,

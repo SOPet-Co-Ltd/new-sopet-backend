@@ -2,7 +2,7 @@ import { BadRequestException, ForbiddenException, NotFoundException } from '@nes
 import { ProductsService } from './products.service';
 import { ProductStatus } from '../../database/entities/product.entity';
 import { StoreStatus } from '../../database/entities/store.entity';
-import { VariantRemovalBlockReason } from './variant-removal.types';
+import { VariantRemovalDisposition } from './variant-removal.types';
 
 describe('ProductsService', () => {
   let service: ProductsService;
@@ -17,6 +17,7 @@ describe('ProductsService', () => {
   };
   let variantRepository: {
     findOne: jest.Mock;
+    find: jest.Mock;
     create: jest.Mock;
     save: jest.Mock;
     softDelete: jest.Mock;
@@ -42,6 +43,7 @@ describe('ProductsService', () => {
   };
   let cartItemRepository: {
     find: jest.Mock;
+    delete: jest.Mock;
   };
   let storesService: {
     userHasStoreAccess: jest.Mock;
@@ -87,6 +89,7 @@ describe('ProductsService', () => {
     };
     variantRepository = {
       findOne: jest.fn(),
+      find: jest.fn().mockResolvedValue([]),
       create: jest.fn((data: Record<string, unknown>) => data),
       save: jest.fn((data: Record<string, unknown>) => Promise.resolve({ ...data, id: 'var-1' })),
       softDelete: jest.fn(),
@@ -133,6 +136,7 @@ describe('ProductsService', () => {
     };
     cartItemRepository = {
       find: jest.fn().mockResolvedValue([]),
+      delete: jest.fn().mockResolvedValue({ affected: 0 }),
     };
     storesService = {
       userHasStoreAccess: jest.fn((userId: string, storeId: string) =>
@@ -1162,37 +1166,62 @@ describe('ProductsService', () => {
   });
 
   describe('variant removal safety', () => {
-    const keepVariant = {
-      id: 'var-keep',
-      sku: 'KEEP-1',
-      stockQuantity: 5,
-      priceAdjustment: 0,
-      options: { Size: '1kg' },
+    let keepVariant: {
+      id: string;
+      sku: string;
+      stockQuantity: number;
+      priceAdjustment: number;
+      options: Record<string, string>;
+      retiredAt: Date | null;
     };
-    const removeVariant = {
-      id: 'var-remove',
-      sku: 'REMOVE-1',
-      stockQuantity: 3,
-      priceAdjustment: 0,
-      options: { Size: '2kg' },
+    let removeVariant: {
+      id: string;
+      sku: string;
+      stockQuantity: number;
+      priceAdjustment: number;
+      options: Record<string, string>;
+      retiredAt: Date | null;
     };
-    const productWithVariants = {
-      ...product,
-      basePrice: 100,
-      variants: [keepVariant, removeVariant],
-    };
-
-    const keepOnlyPayload = [
-      {
-        id: keepVariant.id,
-        sku: keepVariant.sku,
-        stockQuantity: 5,
-        attributes: { Size: '1kg' },
-      },
-    ];
+    let productWithVariants: Record<string, unknown>;
+    let keepOnlyPayload: Array<{
+      id: string;
+      sku: string;
+      stockQuantity: number;
+      attributes: Record<string, string>;
+    }>;
 
     beforeEach(() => {
+      keepVariant = {
+        id: 'var-keep',
+        sku: 'KEEP-1',
+        stockQuantity: 5,
+        priceAdjustment: 0,
+        options: { Size: '1kg' },
+        retiredAt: null,
+      };
+      removeVariant = {
+        id: 'var-remove',
+        sku: 'REMOVE-1',
+        stockQuantity: 3,
+        priceAdjustment: 0,
+        options: { Size: '2kg' },
+        retiredAt: null,
+      };
+      productWithVariants = {
+        ...product,
+        basePrice: 100,
+        variants: [keepVariant, removeVariant],
+      };
+      keepOnlyPayload = [
+        {
+          id: keepVariant.id,
+          sku: keepVariant.sku,
+          stockQuantity: 5,
+          attributes: { Size: '1kg' },
+        },
+      ];
       productRepository.findOne.mockResolvedValue(productWithVariants);
+      variantRepository.find.mockResolvedValue([keepVariant, removeVariant]);
       variantRepository.save.mockImplementation((data) => Promise.resolve(data));
     });
 
@@ -1223,6 +1252,7 @@ describe('ProductsService', () => {
         basePrice: 490,
         variants: [cheapVariant, dearVariant],
       });
+      variantRepository.find.mockResolvedValue([cheapVariant, dearVariant]);
       productRepository.save.mockImplementation((p: Record<string, unknown>) => Promise.resolve(p));
 
       await service.syncVariants('prod-1', 'user-1', [
@@ -1253,68 +1283,46 @@ describe('ProductsService', () => {
       );
     });
 
-    it('blocks syncVariants when removal has order_items only', async () => {
+    it('retires syncVariants removal when order_items exist', async () => {
+      variantRepository.find.mockResolvedValue([keepVariant, removeVariant]);
       orderItemRepository.find.mockResolvedValue([{ variantId: 'var-remove' }]);
 
-      await expect(service.syncVariants('prod-1', 'user-1', keepOnlyPayload)).rejects.toMatchObject(
-        {
-          response: {
-            code: 'VARIANT_REMOVAL_BLOCKED',
-            blockedVariants: [
-              {
-                id: 'var-remove',
-                sku: 'REMOVE-1',
-                reasons: [VariantRemovalBlockReason.HAS_ORDERS],
-              },
-            ],
-          },
-        },
-      );
+      await service.syncVariants('prod-1', 'user-1', keepOnlyPayload);
+
       expect(variantRepository.softDelete).not.toHaveBeenCalled();
+      expect(variantRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'var-remove',
+          retiredAt: expect.any(Date),
+        }),
+      );
     });
 
-    it('blocks syncVariants when removal has cart_items only', async () => {
+    it('clears carts then soft-deletes when removal has cart_items only', async () => {
+      variantRepository.find.mockResolvedValue([keepVariant, removeVariant]);
       cartItemRepository.find.mockResolvedValue([{ variantId: 'var-remove' }]);
 
-      await expect(service.syncVariants('prod-1', 'user-1', keepOnlyPayload)).rejects.toMatchObject(
-        {
-          response: {
-            code: 'VARIANT_REMOVAL_BLOCKED',
-            blockedVariants: [
-              {
-                id: 'var-remove',
-                sku: 'REMOVE-1',
-                reasons: [VariantRemovalBlockReason.HAS_OPEN_CARTS],
-              },
-            ],
-          },
-        },
-      );
-      expect(variantRepository.softDelete).not.toHaveBeenCalled();
+      await service.syncVariants('prod-1', 'user-1', keepOnlyPayload);
+
+      expect(cartItemRepository.delete).toHaveBeenCalled();
+      expect(variantRepository.softDelete).toHaveBeenCalledWith('var-remove');
     });
 
-    it('blocks syncVariants when removal has orders and carts', async () => {
+    it('clears carts and retires when removal has orders and carts', async () => {
+      variantRepository.find.mockResolvedValue([keepVariant, removeVariant]);
       orderItemRepository.find.mockResolvedValue([{ variantId: 'var-remove' }]);
       cartItemRepository.find.mockResolvedValue([{ variantId: 'var-remove' }]);
 
-      await expect(service.syncVariants('prod-1', 'user-1', keepOnlyPayload)).rejects.toMatchObject(
-        {
-          response: {
-            code: 'VARIANT_REMOVAL_BLOCKED',
-            blockedVariants: [
-              {
-                id: 'var-remove',
-                sku: 'REMOVE-1',
-                reasons: [
-                  VariantRemovalBlockReason.HAS_ORDERS,
-                  VariantRemovalBlockReason.HAS_OPEN_CARTS,
-                ],
-              },
-            ],
-          },
-        },
-      );
+      await service.syncVariants('prod-1', 'user-1', keepOnlyPayload);
+
+      expect(cartItemRepository.delete).toHaveBeenCalled();
       expect(variantRepository.softDelete).not.toHaveBeenCalled();
+      expect(variantRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'var-remove',
+          retiredAt: expect.any(Date),
+        }),
+      );
     });
 
     it('soft-deletes unreferenced removeVariant', async () => {
@@ -1328,49 +1336,38 @@ describe('ProductsService', () => {
       expect(variantRepository.softDelete).toHaveBeenCalledWith('var-remove');
     });
 
-    it('blocks removeVariant when variant has order_items only', async () => {
+    it('retires removeVariant when variant has order_items only', async () => {
       variantRepository.findOne.mockResolvedValue({
         ...removeVariant,
         product: { storeId: 'store-1' },
       });
       orderItemRepository.find.mockResolvedValue([{ variantId: 'var-remove' }]);
 
-      await expect(service.removeVariant('var-remove', 'user-1')).rejects.toMatchObject({
-        response: {
-          code: 'VARIANT_REMOVAL_BLOCKED',
-          blockedVariants: [
-            expect.objectContaining({
-              id: 'var-remove',
-              reasons: [VariantRemovalBlockReason.HAS_ORDERS],
-            }),
-          ],
-        },
-      });
+      await service.removeVariant('var-remove', 'user-1');
+
       expect(variantRepository.softDelete).not.toHaveBeenCalled();
+      expect(variantRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'var-remove',
+          retiredAt: expect.any(Date),
+        }),
+      );
     });
 
-    it('blocks removeVariant when variant has cart_items only', async () => {
+    it('clears carts then soft-deletes removeVariant when cart_items only', async () => {
       variantRepository.findOne.mockResolvedValue({
         ...removeVariant,
         product: { storeId: 'store-1' },
       });
       cartItemRepository.find.mockResolvedValue([{ variantId: 'var-remove' }]);
 
-      await expect(service.removeVariant('var-remove', 'user-1')).rejects.toMatchObject({
-        response: {
-          code: 'VARIANT_REMOVAL_BLOCKED',
-          blockedVariants: [
-            expect.objectContaining({
-              id: 'var-remove',
-              reasons: [VariantRemovalBlockReason.HAS_OPEN_CARTS],
-            }),
-          ],
-        },
-      });
-      expect(variantRepository.softDelete).not.toHaveBeenCalled();
+      await service.removeVariant('var-remove', 'user-1');
+
+      expect(cartItemRepository.delete).toHaveBeenCalled();
+      expect(variantRepository.softDelete).toHaveBeenCalledWith('var-remove');
     });
 
-    it('blocks removeVariant when variant has orders and carts', async () => {
+    it('clears carts and retires removeVariant when orders and carts', async () => {
       variantRepository.findOne.mockResolvedValue({
         ...removeVariant,
         product: { storeId: 'store-1' },
@@ -1378,21 +1375,16 @@ describe('ProductsService', () => {
       orderItemRepository.find.mockResolvedValue([{ variantId: 'var-remove' }]);
       cartItemRepository.find.mockResolvedValue([{ variantId: 'var-remove' }]);
 
-      await expect(service.removeVariant('var-remove', 'user-1')).rejects.toMatchObject({
-        response: {
-          code: 'VARIANT_REMOVAL_BLOCKED',
-          blockedVariants: [
-            expect.objectContaining({
-              id: 'var-remove',
-              reasons: [
-                VariantRemovalBlockReason.HAS_ORDERS,
-                VariantRemovalBlockReason.HAS_OPEN_CARTS,
-              ],
-            }),
-          ],
-        },
-      });
+      await service.removeVariant('var-remove', 'user-1');
+
+      expect(cartItemRepository.delete).toHaveBeenCalled();
       expect(variantRepository.softDelete).not.toHaveBeenCalled();
+      expect(variantRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'var-remove',
+          retiredAt: expect.any(Date),
+        }),
+      );
     });
 
     it.each([
@@ -1400,31 +1392,32 @@ describe('ProductsService', () => {
         label: 'unreferenced',
         orderRefs: [] as Array<{ variantId: string }>,
         cartRefs: [] as Array<{ variantId: string }>,
-        expectBlocked: false,
+        disposition: VariantRemovalDisposition.DELETE,
       },
       {
         label: 'orders-only',
         orderRefs: [{ variantId: 'var-remove' }],
         cartRefs: [],
-        expectBlocked: true,
+        disposition: VariantRemovalDisposition.RETIRE,
       },
       {
         label: 'carts-only',
         orderRefs: [],
         cartRefs: [{ variantId: 'var-remove' }],
-        expectBlocked: true,
+        disposition: VariantRemovalDisposition.CLEAR_CART_AND_DELETE,
       },
       {
         label: 'both',
         orderRefs: [{ variantId: 'var-remove' }],
         cartRefs: [{ variantId: 'var-remove' }],
-        expectBlocked: true,
+        disposition: VariantRemovalDisposition.RETIRE,
       },
     ])(
-      'impact.blocked agrees with sync reject for $label fixtures',
-      async ({ orderRefs, cartRefs, expectBlocked }) => {
+      'impact reports disposition $disposition for $label fixtures and never blocks',
+      async ({ orderRefs, cartRefs, disposition }) => {
         orderItemRepository.find.mockResolvedValue(orderRefs);
         cartItemRepository.find.mockResolvedValue(cartRefs);
+        variantRepository.find.mockResolvedValue([keepVariant, removeVariant]);
 
         const impact = await service.getProductVariantSyncImpact(
           'prod-1',
@@ -1432,7 +1425,7 @@ describe('ProductsService', () => {
           keepOnlyPayload,
         );
 
-        expect(impact.blocked).toBe(expectBlocked);
+        expect(impact.blocked).toBe(false);
         expect(impact.kept).toBe(1);
         expect(impact.new).toBe(0);
         expect(impact.removed).toBe(1);
@@ -1441,18 +1434,16 @@ describe('ProductsService', () => {
             id: 'var-remove',
             sku: 'REMOVE-1',
             optionKey: 'Size:2kg',
+            disposition,
           }),
         );
 
-        if (expectBlocked) {
-          await expect(
-            service.syncVariants('prod-1', 'user-1', keepOnlyPayload),
-          ).rejects.toMatchObject({
-            response: { code: 'VARIANT_REMOVAL_BLOCKED' },
-          });
-          expect(variantRepository.softDelete).not.toHaveBeenCalled();
+        await service.syncVariants('prod-1', 'user-1', keepOnlyPayload);
+        if (disposition === VariantRemovalDisposition.RETIRE) {
+          expect(variantRepository.save).toHaveBeenCalledWith(
+            expect.objectContaining({ id: 'var-remove', retiredAt: expect.any(Date) }),
+          );
         } else {
-          await service.syncVariants('prod-1', 'user-1', keepOnlyPayload);
           expect(variantRepository.softDelete).toHaveBeenCalledWith('var-remove');
         }
       },
