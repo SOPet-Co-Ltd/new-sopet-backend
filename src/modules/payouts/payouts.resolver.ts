@@ -113,6 +113,15 @@ export class AdminManualPayoutType {
 }
 
 @ObjectType()
+export class PayoutConnection {
+  @Field(() => [PayoutType])
+  items!: PayoutType[];
+
+  @Field(() => PaginationMeta)
+  pagination!: PaginationMeta;
+}
+
+@ObjectType()
 export class AdminManualPayoutConnection {
   @Field(() => [AdminManualPayoutType])
   items!: AdminManualPayoutType[];
@@ -288,24 +297,36 @@ export class PayoutsResolver {
     return mapSummary(await this.payoutsService.getPayoutSummary(storeId));
   }
 
-  @Query(() => [PayoutType])
+  @Query(() => PayoutConnection)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('vendor')
   async storePayouts(
     @CurrentUser('id') userId: string,
     @CurrentUser('storeId') storeId: string,
-  ): Promise<PayoutType[]> {
+    @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page?: number,
+    @Args('limit', { type: () => Int, nullable: true, defaultValue: 20 }) limit?: number,
+  ): Promise<PayoutConnection> {
     await this.storesService.assertStoreOwner(userId, storeId);
-    const payouts = await this.payoutsService.findByStore(storeId);
-    return payouts.map(mapPayout);
+    const result = await this.payoutsService.findByStore(storeId, { page, limit });
+    return {
+      items: result.items.map(mapPayout),
+      pagination: result.pagination,
+    };
   }
 
-  @Query(() => [PayoutType])
+  @Query(() => PayoutConnection)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
-  async adminStorePayouts(@Args('storeId') storeId: string): Promise<PayoutType[]> {
-    const payouts = await this.payoutsService.findByStore(storeId);
-    return payouts.map(mapPayout);
+  async adminStorePayouts(
+    @Args('storeId') storeId: string,
+    @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page?: number,
+    @Args('limit', { type: () => Int, nullable: true, defaultValue: 20 }) limit?: number,
+  ): Promise<PayoutConnection> {
+    const result = await this.payoutsService.findByStore(storeId, { page, limit });
+    return {
+      items: result.items.map(mapPayout),
+      pagination: result.pagination,
+    };
   }
 
   @Query(() => AdminManualPayoutConnection)

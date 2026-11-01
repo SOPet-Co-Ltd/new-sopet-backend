@@ -356,8 +356,12 @@ export class ReviewsResolver {
 
   @Query(() => [ReviewType])
   @Public()
-  async productReviews(@Args('productId') productId: string): Promise<ReviewType[]> {
-    const reviews = await this.reviewsService.findByProduct(productId);
+  async productReviews(
+    @Args('productId') productId: string,
+    @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page = 1,
+    @Args('limit', { type: () => Int, nullable: true, defaultValue: 100 }) limit = 100,
+  ): Promise<ReviewType[]> {
+    const reviews = await this.reviewsService.findByProduct(productId, page, limit);
     return reviews.map(mapReviewToType);
   }
 
@@ -390,8 +394,12 @@ export class ReviewsResolver {
 
   @Query(() => [StoreProductReviewType])
   @Public()
-  async storeReviews(@Args('storeId') storeId: string): Promise<StoreProductReviewType[]> {
-    return this.reviewsService.findByStore(storeId);
+  async storeReviews(
+    @Args('storeId') storeId: string,
+    @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page = 1,
+    @Args('limit', { type: () => Int, nullable: true, defaultValue: 100 }) limit = 100,
+  ): Promise<StoreProductReviewType[]> {
+    return this.reviewsService.findByStore(storeId, page, limit);
   }
 
   @Query(() => StoreReviewSummaryType)
