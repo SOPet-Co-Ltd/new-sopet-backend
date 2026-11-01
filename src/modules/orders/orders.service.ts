@@ -690,15 +690,55 @@ export class OrdersService {
     const filter = options.filter ?? CustomerOrderListFilter.ALL;
     const offset = (page - 1) * limit;
 
-    const query = this.orderRepository
+    const applyScope = (qb: ReturnType<Repository<Order>['createQueryBuilder']>) => {
+      qb.where('order.customerId = :customerId', { customerId });
+      applyCustomerOrderListFilter(qb, filter);
+      return qb;
+    };
+
+    const countRow = await applyScope(this.orderRepository.createQueryBuilder('order'))
+      .select('COUNT(order.id)', 'cnt')
+      .getRawOne<{ cnt: string }>();
+    const total = Number(countRow?.cnt ?? 0);
+
+    if (total === 0) {
+      return {
+        items: [],
+        pagination: { page, limit, total: 0, totalPages: 1 },
+      };
+    }
+
+    const idRows = await applyScope(this.orderRepository.createQueryBuilder('order'))
+      .select('order.id', 'id')
+      .orderBy('order.createdAt', 'DESC')
+      .addOrderBy('order.id', 'DESC')
+      .offset(offset)
+      .limit(limit)
+      .getRawMany<{ id: string }>();
+
+    const ids = idRows.map((row) => row.id);
+    if (ids.length === 0) {
+      return {
+        items: [],
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.max(1, Math.ceil(total / limit)),
+        },
+      };
+    }
+
+    const orders = await this.orderRepository
       .createQueryBuilder('order')
       .leftJoinAndSelect('order.items', 'items')
-      .where('order.customerId = :customerId', { customerId })
-      .orderBy('order.createdAt', 'DESC');
+      .where('order.id IN (:...ids)', { ids })
+      .orderBy('order.createdAt', 'DESC')
+      .addOrderBy('order.id', 'DESC')
+      .getMany();
 
-    applyCustomerOrderListFilter(query, filter);
-
-    const [items, total] = await query.skip(offset).take(limit).getManyAndCount();
+    const byId = new Map(orders.map((order) => [order.id, order]));
+    const items = ids.map((id) => byId.get(id)).filter((order): order is Order => Boolean(order));
 
     return {
       items,
@@ -706,7 +746,7 @@ export class OrdersService {
         page,
         limit,
         total,
-        totalPages: Math.ceil(total / limit) || 1,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
       },
     };
   }
@@ -728,31 +768,35 @@ export class OrdersService {
   }
 
   async findLatestPurchaseProductIds(customerId: string, limit: number): Promise<string[]> {
-    const rows = await this.orderRepository
-      .createQueryBuilder('order')
-      .withDeleted()
-      .innerJoin('order.items', 'item')
-      .innerJoin('item.productVariant', 'variant')
-      .select('variant.productId', 'productId')
-      .where('order.customerId = :customerId', { customerId })
-      .orderBy('order.createdAt', 'DESC')
-      .addOrderBy('item.createdAt', 'ASC')
-      .getRawMany<{ productId: string }>();
-
-    const productIds: string[] = [];
-    const seen = new Set<string>();
-
-    for (const row of rows) {
-      if (row.productId && !seen.has(row.productId)) {
-        seen.add(row.productId);
-        productIds.push(row.productId);
-        if (productIds.length >= limit) {
-          break;
-        }
-      }
+    const safeLimit = Math.max(Math.trunc(limit) || 0, 0);
+    if (safeLimit === 0) {
+      return [];
     }
 
-    return productIds;
+    // Raw SQL matches the previous withDeleted() join: soft-deleted variants stay included.
+    // DISTINCT ON keeps the newest order line per product, then the outer query restores recency.
+    const rows: Array<{ productId: string | null }> = await this.orderRepository.query(
+      `
+      SELECT product_id AS "productId"
+      FROM (
+        SELECT DISTINCT ON (variant.product_id)
+          variant.product_id AS product_id,
+          "order".created_at AS order_created_at,
+          item.created_at AS item_created_at
+        FROM "orders" "order"
+        INNER JOIN "order_items" item ON item.order_id = "order".id
+        INNER JOIN "product_variants" variant ON variant.id = item.variant_id
+        WHERE "order".customer_id = $1
+          AND variant.product_id IS NOT NULL
+        ORDER BY variant.product_id ASC, "order".created_at DESC, item.created_at ASC
+      ) deduped
+      ORDER BY order_created_at DESC, item_created_at ASC
+      LIMIT $2
+      `,
+      [customerId, safeLimit],
+    );
+
+    return rows.flatMap((row) => (row.productId ? [row.productId] : []));
   }
 
   async findByOrderNumber(orderNumber: string): Promise<Order> {
@@ -816,7 +860,7 @@ export class OrdersService {
       qb.andWhere(
         `EXISTS (
           SELECT 1 FROM order_items store_item
-          WHERE store_item.order_id = order.id
+          WHERE store_item.order_id = "order"."id"
             AND store_item.store_id = :storeId
         )`,
         { storeId },
@@ -946,7 +990,7 @@ export class OrdersService {
       .andWhere(
         `EXISTS (
           SELECT 1 FROM order_items store_item
-          WHERE store_item.order_id = order.id
+          WHERE store_item.order_id = "order"."id"
             AND store_item.store_id = :storeId
         )`,
         { storeId },

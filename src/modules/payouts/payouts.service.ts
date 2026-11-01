@@ -2,6 +2,12 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from '@nes
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In, IsNull, Repository } from 'typeorm';
+import { PaginatedResponse } from '../../common/interfaces';
+import {
+  buildAdminListPagination,
+  normalizeAdminListLimit,
+  normalizeAdminListPage,
+} from '../../common/utils/admin-list-pagination.util';
 import { Payout, PayoutSettlementRail, PayoutStatus } from '../../database/entities/payout.entity';
 import { FulfillmentStatus, OrderItem } from '../../database/entities/order-item.entity';
 import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
@@ -67,11 +73,22 @@ export class PayoutsService {
     private readonly dashboardEventsService: DashboardEventsService,
   ) {}
 
-  async findByStore(storeId: string): Promise<Payout[]> {
-    return this.payoutRepository.find({
+  async findByStore(
+    storeId: string,
+    params: { page?: number; limit?: number } = {},
+  ): Promise<PaginatedResponse<Payout>> {
+    const page = normalizeAdminListPage(params.page);
+    const limit = normalizeAdminListLimit(params.limit);
+    const [items, total] = await this.payoutRepository.findAndCount({
       where: { storeId },
       order: { createdAt: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
     });
+    return {
+      items,
+      pagination: buildAdminListPagination(page, limit, total),
+    };
   }
 
   async findPendingManualPayouts(params: { page?: number; limit?: number }): Promise<{

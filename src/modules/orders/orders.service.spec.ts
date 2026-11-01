@@ -12,6 +12,7 @@ describe('OrdersService', () => {
     find: jest.Mock;
     update: jest.Mock;
     createQueryBuilder: jest.Mock;
+    query: jest.Mock;
   };
   let storeRepository: { find: jest.Mock };
   let savedAddressRepository: { findOne: jest.Mock };
@@ -67,6 +68,7 @@ describe('OrdersService', () => {
       find: jest.fn(),
       update: jest.fn(),
       createQueryBuilder: jest.fn(),
+      query: jest.fn(),
     };
     storeRepository = { find: jest.fn().mockResolvedValue([]) };
     savedAddressRepository = { findOne: jest.fn() };
@@ -1213,26 +1215,46 @@ describe('OrdersService', () => {
   });
 
   describe('findByCustomerPaginated', () => {
-    it('returns paginated orders with default page size', async () => {
-      const queryBuilder = {
+    function createCustomerListQb(overrides: Record<string, jest.Mock> = {}) {
+      return {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
-        skip: jest.fn().mockReturnThis(),
-        take: jest.fn().mockReturnThis(),
-        getManyAndCount: jest.fn().mockResolvedValue([[{ id: 'ord-1' }], 25]),
+        addOrderBy: jest.fn().mockReturnThis(),
+        offset: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        getRawOne: jest.fn().mockResolvedValue({ cnt: '0' }),
+        getRawMany: jest.fn().mockResolvedValue([]),
+        getMany: jest.fn().mockResolvedValue([]),
+        ...overrides,
       };
-      orderRepository.createQueryBuilder.mockReturnValue(queryBuilder);
+    }
+
+    it('returns paginated orders with default page size', async () => {
+      const countQb = createCustomerListQb({
+        getRawOne: jest.fn().mockResolvedValue({ cnt: '25' }),
+      });
+      const idQb = createCustomerListQb({
+        getRawMany: jest.fn().mockResolvedValue([{ id: 'ord-1' }]),
+      });
+      const hydrateQb = createCustomerListQb({
+        getMany: jest.fn().mockResolvedValue([{ id: 'ord-1' }]),
+      });
+      orderRepository.createQueryBuilder
+        .mockReturnValueOnce(countQb)
+        .mockReturnValueOnce(idQb)
+        .mockReturnValueOnce(hydrateQb);
 
       const result = await service.findByCustomerPaginated('cust-1');
 
       expect(orderRepository.createQueryBuilder).toHaveBeenCalledWith('order');
-      expect(queryBuilder.where).toHaveBeenCalledWith('order.customerId = :customerId', {
+      expect(countQb.where).toHaveBeenCalledWith('order.customerId = :customerId', {
         customerId: 'cust-1',
       });
-      expect(queryBuilder.skip).toHaveBeenCalledWith(0);
-      expect(queryBuilder.take).toHaveBeenCalledWith(10);
+      expect(idQb.offset).toHaveBeenCalledWith(0);
+      expect(idQb.limit).toHaveBeenCalledWith(10);
       expect(result.items).toHaveLength(1);
       expect(result.pagination).toEqual({
         page: 1,
@@ -1243,16 +1265,13 @@ describe('OrdersService', () => {
     });
 
     it('applies status filter and caps limit at 50', async () => {
-      const queryBuilder = {
-        leftJoinAndSelect: jest.fn().mockReturnThis(),
-        where: jest.fn().mockReturnThis(),
-        andWhere: jest.fn().mockReturnThis(),
-        orderBy: jest.fn().mockReturnThis(),
-        skip: jest.fn().mockReturnThis(),
-        take: jest.fn().mockReturnThis(),
-        getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
-      };
-      orderRepository.createQueryBuilder.mockReturnValue(queryBuilder);
+      const countQb = createCustomerListQb({
+        getRawOne: jest.fn().mockResolvedValue({ cnt: '100' }),
+      });
+      const idQb = createCustomerListQb({
+        getRawMany: jest.fn().mockResolvedValue([]),
+      });
+      orderRepository.createQueryBuilder.mockReturnValueOnce(countQb).mockReturnValueOnce(idQb);
 
       await service.findByCustomerPaginated('cust-1', {
         page: 2,
@@ -1260,11 +1279,11 @@ describe('OrdersService', () => {
         filter: CustomerOrderListFilter.PENDING_PAYMENT,
       });
 
-      expect(queryBuilder.andWhere).toHaveBeenCalledWith('order.status IN (:...statuses)', {
+      expect(countQb.andWhere).toHaveBeenCalledWith('order.status IN (:...statuses)', {
         statuses: ['pending_payment'],
       });
-      expect(queryBuilder.skip).toHaveBeenCalledWith(50);
-      expect(queryBuilder.take).toHaveBeenCalledWith(50);
+      expect(idQb.offset).toHaveBeenCalledWith(50);
+      expect(idQb.limit).toHaveBeenCalledWith(50);
     });
   });
 
@@ -1767,29 +1786,17 @@ describe('OrdersService', () => {
   });
 
   describe('findLatestPurchaseProductIds', () => {
-    it('returns unique product ids in recent order order', async () => {
-      const queryBuilder = {
-        withDeleted: jest.fn().mockReturnThis(),
-        innerJoin: jest.fn().mockReturnThis(),
-        select: jest.fn().mockReturnThis(),
-        where: jest.fn().mockReturnThis(),
-        orderBy: jest.fn().mockReturnThis(),
-        addOrderBy: jest.fn().mockReturnThis(),
-        getRawMany: jest
-          .fn()
-          .mockResolvedValue([
-            { productId: 'prod-1' },
-            { productId: 'prod-1' },
-            { productId: 'prod-2' },
-            { productId: 'prod-3' },
-          ]),
-      };
-      orderRepository.createQueryBuilder.mockReturnValue(queryBuilder);
+    it('asks SQL for distinct recent product ids with a limit', async () => {
+      orderRepository.query.mockResolvedValue([{ productId: 'prod-1' }, { productId: 'prod-2' }]);
 
       const productIds = await service.findLatestPurchaseProductIds('cust-1', 2);
 
       expect(productIds).toEqual(['prod-1', 'prod-2']);
-      expect(queryBuilder.withDeleted).toHaveBeenCalled();
+      const [sql, params] = orderRepository.query.mock.calls[0] as [string, unknown[]];
+      expect(sql).toContain('DISTINCT ON');
+      expect(sql).toContain('LIMIT');
+      expect(params).toEqual(['cust-1', 2]);
+      expect(orderRepository.createQueryBuilder).not.toHaveBeenCalled();
     });
   });
 });

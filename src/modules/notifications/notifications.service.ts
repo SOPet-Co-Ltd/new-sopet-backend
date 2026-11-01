@@ -229,17 +229,28 @@ export class NotificationsService {
     return qb.getOne();
   }
 
-  async findByUser(userId: string, unreadOnly?: boolean): Promise<UserNotification[]> {
+  async findByUser(
+    userId: string,
+    unreadOnly?: boolean,
+    page = 1,
+    limit = 50,
+  ): Promise<UserNotification[]> {
+    const safePage = Math.max(page, 1);
+    const safeLimit = Math.min(Math.max(limit, 1), 100);
     const qb = this.userNotificationRepository
       .createQueryBuilder('notification')
       .where('notification.user_id = :userId', { userId })
-      .orderBy('notification.created_at', 'DESC');
+      .orderBy('notification.created_at', 'DESC')
+      .addOrderBy('notification.id', 'DESC');
 
     if (unreadOnly) {
       qb.andWhere('notification.is_read = false');
     }
 
-    return qb.getMany();
+    return qb
+      .skip((safePage - 1) * safeLimit)
+      .take(safeLimit)
+      .getMany();
   }
 
   async markAsRead(id: string, userId: string): Promise<boolean> {
@@ -270,7 +281,7 @@ export class NotificationsService {
       .select('COUNT(*)', 'count')
       .where('notification.user_id = :userId', { userId })
       .andWhere('notification.is_read = false')
-      .getRawOne();
+      .getRawOne<{ count: string }>();
     return parseInt(result?.count ?? '0', 10);
   }
 

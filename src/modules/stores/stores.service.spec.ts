@@ -11,11 +11,13 @@ describe('StoresService', () => {
     findOne: jest.Mock;
     create: jest.Mock;
     save: jest.Mock;
+    createQueryBuilder: jest.Mock;
   };
   let userRepository: {
     findOne: jest.Mock;
     create: jest.Mock;
     save: jest.Mock;
+    createQueryBuilder: jest.Mock;
   };
   let storeMemberRepository: {
     findOne: jest.Mock;
@@ -48,11 +50,13 @@ describe('StoresService', () => {
       findOne: jest.fn().mockResolvedValue(null),
       create: jest.fn((data) => data),
       save: jest.fn(async (data) => ({ ...data, id: 'store-1' })),
+      createQueryBuilder: jest.fn(),
     };
     userRepository = {
       findOne: jest.fn(),
       create: jest.fn((data) => data),
       save: jest.fn(async (data) => ({ ...data, id: 'user-1' })),
+      createQueryBuilder: jest.fn(),
     };
     storeMemberRepository = {
       findOne: jest.fn().mockResolvedValue(null),
@@ -1000,6 +1004,76 @@ describe('StoresService', () => {
       expect(getRecipient).not.toHaveBeenCalled();
       expect(result.omiseRecipientStatus).toBe(OmiseRecipientStatus.NOT_CONNECTED);
       expect(storeRepository.save).not.toHaveBeenCalled();
+    });
+  });
+
+  it('paginates admin stores without loading products', async () => {
+    const qb = {
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      skip: jest.fn().mockReturnThis(),
+      take: jest.fn().mockReturnThis(),
+      getManyAndCount: jest.fn().mockResolvedValue([[{ id: 'store-1' }], 1]),
+    };
+    storeRepository.createQueryBuilder.mockReturnValue(qb);
+
+    const result = await service.findAllForAdmin({ page: 2, limit: 500, sort: 'name:asc' });
+
+    expect(qb.leftJoinAndSelect).toHaveBeenCalledTimes(1);
+    expect(qb.leftJoinAndSelect).toHaveBeenCalledWith('store.owner', 'owner');
+    expect(qb.skip).toHaveBeenCalledWith(100);
+    expect(qb.take).toHaveBeenCalledWith(100);
+    expect(result.pagination).toEqual({ page: 2, limit: 100, total: 1, totalPages: 1 });
+  });
+
+  it('rejects an unknown admin store status filter', async () => {
+    await expect(service.findAllForAdmin({ status: 'archived' })).rejects.toMatchObject({
+      response: { code: 'INVALID_STORE_STATUS' },
+    });
+    expect(storeRepository.createQueryBuilder).not.toHaveBeenCalled();
+  });
+
+  it('paginates admin vendors with a store count and no nested stores', async () => {
+    const countQb = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getCount: jest.fn().mockResolvedValue(3),
+    };
+    const listQb = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      skip: jest.fn().mockReturnThis(),
+      take: jest.fn().mockReturnThis(),
+      getRawAndEntities: jest.fn().mockResolvedValue({
+        entities: [{ id: 'vendor-1' }],
+        raw: [{ store_count: 4 }],
+      }),
+    };
+    userRepository.createQueryBuilder.mockReturnValueOnce(countQb).mockReturnValueOnce(listQb);
+
+    const result = await service.findVendors({ status: 'active', sort: 'storeCount:desc' });
+
+    expect(countQb.where).toHaveBeenCalled();
+    expect(listQb.addSelect).toHaveBeenCalled();
+    expect(listQb.orderBy).toHaveBeenCalledWith('store_count', 'DESC');
+    expect(result.items).toEqual([{ user: { id: 'vendor-1' }, storeCount: 4 }]);
+    expect(result.pagination).toEqual({ page: 1, limit: 20, total: 3, totalPages: 1 });
+  });
+
+  describe('assertStoreAccess', () => {
+    it('rejects empty or non-uuid store ids before querying', async () => {
+      await expect(service.assertStoreAccess('user-1', '')).rejects.toMatchObject({
+        response: { code: 'INVALID_STORE_ID' },
+      });
+      await expect(service.assertStoreAccess('user-1', 'not-a-uuid')).rejects.toMatchObject({
+        response: { code: 'INVALID_STORE_ID' },
+      });
+      expect(storeRepository.findOne).not.toHaveBeenCalled();
     });
   });
 });

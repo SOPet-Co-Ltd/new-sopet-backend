@@ -41,6 +41,7 @@ describe('PayoutsService', () => {
     save: jest.fn(async (x) => ({ ...x, id: 'payout-1', createdAt: new Date('2026-07-01') })),
     find: jest.fn(),
     findOne: jest.fn(),
+    findAndCount: jest.fn(),
     createQueryBuilder: jest.fn(),
   };
   const storeRepo = {
@@ -423,10 +424,25 @@ describe('PayoutsService', () => {
   });
 
   it('lists payouts by store', async () => {
-    payoutRepo.find.mockResolvedValue([{ id: 'payout-1' }]);
+    payoutRepo.findAndCount.mockResolvedValue([[{ id: 'payout-1' }], 1]);
 
     const payouts = await service.findByStore('store-1');
-    expect(payouts).toHaveLength(1);
+    expect(payouts.items).toHaveLength(1);
+    expect(payouts.pagination).toEqual({ page: 1, limit: 20, total: 1, totalPages: 1 });
+    expect(payoutRepo.findAndCount).toHaveBeenCalledWith(
+      expect.objectContaining({ skip: 0, take: 20 }),
+    );
+  });
+
+  it('caps store payout page size at 100', async () => {
+    payoutRepo.findAndCount.mockResolvedValue([[], 0]);
+
+    const payouts = await service.findByStore('store-1', { page: 0, limit: 500 });
+
+    expect(payouts.pagination).toEqual({ page: 1, limit: 100, total: 0, totalPages: 1 });
+    expect(payoutRepo.findAndCount).toHaveBeenCalledWith(
+      expect.objectContaining({ skip: 0, take: 100 }),
+    );
   });
 
   it('calculates payout summary with available balance', async () => {

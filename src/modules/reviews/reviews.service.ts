@@ -27,6 +27,25 @@ export type StoreReviewRatingFilter = 'all' | '1' | '2' | '3' | '4' | '5';
 export const STORE_PRODUCT_REVIEWS_DEFAULT_LIMIT = 20;
 export const STORE_PRODUCT_REVIEWS_MAX_LIMIT = 100;
 
+/**
+ * Public productReviews / storeReviews stay arrays. Clients that omit page/limit
+ * receive at most this many rows (PDP slices 4 then +10 locally; seller tab slices
+ * 10 per page). Truncating lists longer than the cap is intentional.
+ */
+export const PUBLIC_REVIEW_LIST_MAX_LIMIT = 100;
+
+export function clampPublicReviewList(
+  page?: number,
+  limit?: number,
+): { page: number; limit: number; skip: number } {
+  const safePage = Math.max(page ?? 1, 1);
+  const safeLimit = Math.min(
+    Math.max(limit ?? PUBLIC_REVIEW_LIST_MAX_LIMIT, 1),
+    PUBLIC_REVIEW_LIST_MAX_LIMIT,
+  );
+  return { page: safePage, limit: safeLimit, skip: (safePage - 1) * safeLimit };
+}
+
 export type BatchApproveReviewFailure = {
   reviewId: string;
   code: string;
@@ -221,6 +240,87 @@ export interface CustomerReviewableItemResult {
   deliveredAt: Date;
   reviewDeadline: Date;
 }
+
+interface ReviewableItemRow {
+  orderId: string;
+  orderNumber: string;
+  orderItemId: string;
+  productId: string;
+  productName: string;
+  productSlug: string | null;
+  productImageUrl: string | null;
+  deliveredAt: Date | string | null;
+}
+
+/**
+ * Same delivered-at rule as resolveItemDeliveredAt for orders already filtered to delivered:
+ * item.delivered_at, else latest delivered status history, else order.updated_at.
+ * Soft-deleted variants and reviews are excluded, matching TypeORM relation loads.
+ */
+const REVIEWABLE_ITEMS_SQL = `
+SELECT
+  candidate."orderId",
+  candidate."orderNumber",
+  candidate."orderItemId",
+  candidate."productId",
+  candidate."productName",
+  candidate."productSlug",
+  candidate."productImageUrl",
+  candidate."deliveredAt"
+FROM (
+  SELECT
+    "order".id AS "orderId",
+    "order".order_number AS "orderNumber",
+    item.id AS "orderItemId",
+    variant.product_id AS "productId",
+    COALESCE(product.name, item.product_name) AS "productName",
+    product.slug AS "productSlug",
+    thumb.url AS "productImageUrl",
+    COALESCE(
+      item.delivered_at,
+      (
+        SELECT history.created_at
+        FROM "order_status_history" history
+        WHERE history.order_id = "order".id
+          AND history.status = $2
+        ORDER BY history.created_at DESC
+        LIMIT 1
+      ),
+      "order".updated_at
+    ) AS "deliveredAt",
+    "order".created_at AS "orderCreatedAt",
+    item.created_at AS "itemCreatedAt"
+  FROM "orders" "order"
+  INNER JOIN "order_items" item ON item.order_id = "order".id
+  INNER JOIN "product_variants" variant
+    ON variant.id = item.variant_id
+   AND variant.deleted_at IS NULL
+  LEFT JOIN "products" product
+    ON product.id = variant.product_id
+   AND product.deleted_at IS NULL
+  LEFT JOIN LATERAL (
+    SELECT image.url
+    FROM "product_images" image
+    WHERE image.product_id = product.id
+    ORDER BY image.is_thumbnail DESC, image.sort_order ASC, image.created_at ASC, image.id ASC
+    LIMIT 1
+  ) thumb ON TRUE
+  WHERE "order".customer_id = $1
+    AND "order".status = $2
+    AND variant.product_id IS NOT NULL
+    AND NOT EXISTS (
+      SELECT 1
+      FROM "reviews" review
+      WHERE review.deleted_at IS NULL
+        AND review.customer_id = $1
+        AND review.order_id = "order".id
+        AND review.product_id = variant.product_id
+    )
+) candidate
+WHERE candidate."deliveredAt" IS NOT NULL
+  AND candidate."deliveredAt" + ($3 * INTERVAL '1 day') >= $4
+ORDER BY candidate."orderCreatedAt" DESC, candidate."itemCreatedAt" ASC, candidate."orderItemId" ASC
+`;
 
 export interface CustomerReviewResult {
   id: string;
@@ -752,68 +852,37 @@ export class ReviewsService {
   async findReviewableItemsForCustomer(
     customerId: string,
   ): Promise<CustomerReviewableItemResult[]> {
-    const orders = await this.orderRepository.find({
-      where: { customerId, status: OrderStatus.DELIVERED },
-      relations: [
-        'items',
-        'items.productVariant',
-        'items.productVariant.product',
-        'items.productVariant.product.images',
-        'statusHistory',
-      ],
-      order: { createdAt: 'DESC' },
-    });
-
-    const existingReviews = await this.reviewRepository.find({
-      where: { customerId },
-      select: ['orderId', 'productId'],
-    });
-    const reviewedKeys = new Set(
-      existingReviews.map((review) => `${review.orderId}:${review.productId}`),
-    );
-
     const windowDays = getReviewWindowDays();
-    const now = Date.now();
-    const results: CustomerReviewableItemResult[] = [];
+    const rows: ReviewableItemRow[] = await this.orderRepository.query(REVIEWABLE_ITEMS_SQL, [
+      customerId,
+      OrderStatus.DELIVERED,
+      windowDays,
+      new Date(),
+    ]);
 
-    for (const order of orders) {
-      for (const item of order.items ?? []) {
-        const productId = item.productVariant?.productId;
-        if (!productId) {
-          continue;
-        }
-
-        const reviewKey = `${order.id}:${productId}`;
-        if (reviewedKeys.has(reviewKey)) {
-          continue;
-        }
-
-        const deliveredAt = resolveItemDeliveredAt(item, order);
-        if (!deliveredAt) {
-          continue;
-        }
-
-        const reviewDeadline = addDays(deliveredAt, windowDays);
-        if (reviewDeadline.getTime() < now) {
-          continue;
-        }
-
-        const product = item.productVariant?.product;
-        results.push({
-          orderId: order.id,
-          orderNumber: order.orderNumber,
-          orderItemId: item.id,
-          productId,
-          productName: product?.name ?? item.productName,
-          productSlug: product?.slug ?? null,
-          productImageUrl: product ? resolveThumbnailUrl(product.images) : null,
-          deliveredAt,
-          reviewDeadline,
-        });
+    return rows.flatMap((row) => {
+      if (!row.deliveredAt) {
+        return [];
       }
-    }
-
-    return results;
+      const deliveredAt =
+        row.deliveredAt instanceof Date ? row.deliveredAt : new Date(row.deliveredAt);
+      if (Number.isNaN(deliveredAt.getTime())) {
+        return [];
+      }
+      return [
+        {
+          orderId: row.orderId,
+          orderNumber: row.orderNumber,
+          orderItemId: row.orderItemId,
+          productId: row.productId,
+          productName: row.productName,
+          productSlug: row.productSlug,
+          productImageUrl: row.productImageUrl,
+          deliveredAt,
+          reviewDeadline: addDays(deliveredAt, windowDays),
+        },
+      ];
+    });
   }
 
   async findMyReviews(customerId: string, limit = 50, offset = 0): Promise<CustomerReviewResult[]> {
@@ -844,24 +913,51 @@ export class ReviewsService {
     }));
   }
 
-  async findByProduct(productId: string): Promise<Review[]> {
+  async findByProduct(productId: string, page?: number, limit?: number): Promise<Review[]> {
+    const { skip, limit: take } = clampPublicReviewList(page, limit);
     return this.reviewRepository.find({
       where: { productId, status: ReviewStatus.APPROVED },
       relations: ['customer', 'images', 'reply'],
-      order: { createdAt: 'DESC' },
+      order: { createdAt: 'DESC', id: 'DESC' },
+      take,
+      skip,
     });
   }
 
-  async findByStore(storeId: string): Promise<StoreProductReviewResult[]> {
-    const reviews = await this.buildStoreReviewsQuery(storeId)
+  async findByStore(
+    storeId: string,
+    page?: number,
+    limit?: number,
+  ): Promise<StoreProductReviewResult[]> {
+    const { skip, limit: take } = clampPublicReviewList(page, limit);
+    const idRows = await this.buildStoreReviewsFilterQuery(storeId)
+      .select('review.id', 'id')
+      .orderBy('review.createdAt', 'DESC')
+      .addOrderBy('review.id', 'DESC')
+      .offset(skip)
+      .limit(take)
+      .getRawMany<{ id: string }>();
+
+    if (idRows.length === 0) {
+      return [];
+    }
+
+    const reviewIds = idRows.map((row) => row.id);
+    const loadedReviews = await this.reviewRepository
+      .createQueryBuilder('review')
+      .innerJoinAndSelect('review.product', 'product')
       .leftJoinAndSelect('product.images', 'images')
       .leftJoinAndSelect('review.customer', 'customer')
       .leftJoinAndSelect('review.reply', 'reply')
       .leftJoinAndSelect('review.images', 'reviewImages')
-      .orderBy('review.createdAt', 'DESC')
+      .where('review.id IN (:...reviewIds)', { reviewIds })
       .getMany();
 
-    return reviews.map(mapReviewToStoreProductReview);
+    const reviewsById = new Map(loadedReviews.map((review) => [review.id, review]));
+    return reviewIds
+      .map((id) => reviewsById.get(id))
+      .filter((review): review is Review => review !== undefined)
+      .map(mapReviewToStoreProductReview);
   }
 
   async findByStorePaginated(params: {
@@ -1187,59 +1283,63 @@ export class ReviewsService {
   }
 
   async getStoreReviewSummary(storeId: string): Promise<StoreReviewSummaryResult> {
-    const products = await this.productRepository.find({
-      where: { storeId },
-      select: ['id', 'name'],
+    const emptySummary = (): StoreReviewSummaryResult => ({
+      averageRating: 0,
+      totalCount: 0,
+      rating5Count: 0,
+      rating4Count: 0,
+      rating3Count: 0,
+      rating2Count: 0,
+      rating1Count: 0,
+      productBreakdown: [],
     });
 
-    const productIds = products.map((p) => p.id);
-    if (productIds.length === 0) {
-      return {
-        averageRating: 0,
-        totalCount: 0,
-        rating5Count: 0,
-        rating4Count: 0,
-        rating3Count: 0,
-        rating2Count: 0,
-        rating1Count: 0,
-        productBreakdown: [],
-      };
+    // Empty/invalid ids would throw QueryFailedError (invalid uuid) as INTERNAL_SERVER_ERROR.
+    if (!storeId?.trim()) {
+      return emptySummary();
     }
 
     const summaryRows = await this.reviewRepository
       .createQueryBuilder('review')
+      .innerJoin('review.product', 'product', 'product.store_id = :storeId', { storeId })
       .select('review.productId', 'productId')
+      .addSelect('product.name', 'productName')
       .addSelect('AVG(review.rating)', 'averageRating')
       .addSelect('COUNT(review.id)', 'reviewCount')
-      .where('review.productId IN (:...productIds)', { productIds })
-      .andWhere('review.status = :status', { status: ReviewStatus.APPROVED })
+      .where('review.status = :status', { status: ReviewStatus.APPROVED })
       .groupBy('review.productId')
+      .addGroupBy('product.name')
       .getRawMany<{
         productId: string;
+        productName: string | null;
         averageRating: string;
         reviewCount: string;
       }>();
 
-    const productNameById = new Map(products.map((p) => [p.id, p.name]));
+    if (summaryRows.length === 0) {
+      return emptySummary();
+    }
+
     const productBreakdown = summaryRows.map((row) => ({
       productId: row.productId,
-      productName: productNameById.get(row.productId) ?? 'Unknown',
+      productName: row.productName ?? 'Unknown',
       averageRating: Number(row.averageRating),
       reviewCount: Number(row.reviewCount),
     }));
 
     const totalCount = productBreakdown.reduce((sum, p) => sum + p.reviewCount, 0);
-    const averageRating =
-      totalCount > 0
-        ? productBreakdown.reduce((sum, p) => sum + p.averageRating * p.reviewCount, 0) / totalCount
-        : 0;
+    const weightedTotal = productBreakdown.reduce(
+      (sum, product) => sum + product.averageRating * product.reviewCount,
+      0,
+    );
+    const averageRating = totalCount > 0 ? weightedTotal / totalCount : 0;
 
     const ratingRows = await this.reviewRepository
       .createQueryBuilder('review')
+      .innerJoin('review.product', 'product', 'product.store_id = :storeId', { storeId })
       .select('review.rating', 'rating')
       .addSelect('COUNT(review.id)', 'count')
-      .where('review.productId IN (:...productIds)', { productIds })
-      .andWhere('review.status = :status', { status: ReviewStatus.APPROVED })
+      .where('review.status = :status', { status: ReviewStatus.APPROVED })
       .groupBy('review.rating')
       .getRawMany<{
         rating: string;

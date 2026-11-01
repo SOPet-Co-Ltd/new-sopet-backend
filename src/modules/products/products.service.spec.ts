@@ -768,21 +768,14 @@ describe('ProductsService', () => {
       select: jest.fn().mockReturnThis(),
       getRawOne: jest.fn().mockResolvedValue({ cnt: '1' }),
     };
-    const hydrateQb = {
-      leftJoinAndSelect: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      orderBy: jest.fn().mockReturnThis(),
-      getMany: jest.fn().mockResolvedValue([product]),
-    };
-    productRepository.createQueryBuilder
-      .mockReturnValueOnce(idQb)
-      .mockReturnValueOnce(countQb)
-      .mockReturnValueOnce(hydrateQb);
+    productRepository.createQueryBuilder.mockReturnValueOnce(idQb).mockReturnValueOnce(countQb);
+    productRepository.find.mockResolvedValue([product]);
 
     const result = await service.findAll({ page: 1, limit: 10 });
 
     expect(result.items).toHaveLength(1);
     expect(result.pagination.total).toBe(1);
+    expect(productRepository.find).toHaveBeenCalled();
   });
 
   it('preserves relevance sort select columns in phase A id query', async () => {
@@ -805,16 +798,8 @@ describe('ProductsService', () => {
       select: jest.fn().mockReturnThis(),
       getRawOne: jest.fn().mockResolvedValue({ cnt: '1' }),
     };
-    const hydrateQb = {
-      leftJoinAndSelect: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      orderBy: jest.fn().mockReturnThis(),
-      getMany: jest.fn().mockResolvedValue([product]),
-    };
-    productRepository.createQueryBuilder
-      .mockReturnValueOnce(idQb)
-      .mockReturnValueOnce(countQb)
-      .mockReturnValueOnce(hydrateQb);
+    productRepository.createQueryBuilder.mockReturnValueOnce(idQb).mockReturnValueOnce(countQb);
+    productRepository.find.mockResolvedValue([product]);
 
     await service.findAll({
       search: 'dog food',
