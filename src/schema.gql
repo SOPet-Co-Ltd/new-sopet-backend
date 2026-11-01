@@ -1085,6 +1085,18 @@ type OrderConnection {
   pagination: PaginationMeta!
 }
 
+type VendorOrderConnection {
+  actionableCount: Int!
+  items: [OrderType!]!
+  pagination: PaginationMeta!
+}
+
+"""Vendor order list queue filter"""
+enum VendorOrderQueueFilter {
+  ALL
+  ACTION
+}
+
 input OrderItemInput {
   price: Float!
   productId: String!
@@ -1601,7 +1613,8 @@ type Query {
   vendorCustomer(id: String!): VendorCustomerType!
   vendorCustomerDetail(id: String!): VendorCustomerDetailType!
   vendorCustomers(limit: Int! = 20, page: Int! = 1, search: String): VendorCustomerConnection!
-  vendorOrders(storeId: String!): [OrderType!]!
+  vendorOrder(id: String!, storeId: String!): OrderType!
+  vendorOrders(limit: Int = 20, page: Int = 1, paymentMethod: String, queue: VendorOrderQueueFilter = ALL, search: String, status: String, storeId: String!): VendorOrderConnection!
   vendorProduct(id: String!): ProductType!
   vendorProducts(brandIds: [String!], category: String, limit: Int = 20, maxPrice: Float, minPrice: Float, page: Int = 1, petTypeIds: [String!], search: String, status: String, tag: String): ProductConnection!
   vendorPublishableProductIds(search: String): VendorPublishableProductIdsType!

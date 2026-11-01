@@ -97,7 +97,8 @@ describe('OrdersResolver mapOrder extensions', () => {
       | 'findOne'
       | 'findByCustomer'
       | 'findByCustomerPaginated'
-      | 'findByStore'
+      | 'findByStorePage'
+      | 'findOneForVendor'
       | 'findForAdmin'
       | 'findOneForAdmin'
       | 'findPendingBankTransferOrders'
@@ -131,7 +132,8 @@ describe('OrdersResolver mapOrder extensions', () => {
       findOne: jest.fn(),
       findByCustomer: jest.fn(),
       findByCustomerPaginated: jest.fn(),
-      findByStore: jest.fn(),
+      findByStorePage: jest.fn(),
+      findOneForVendor: jest.fn(),
       findForAdmin: jest.fn(),
       findOneForAdmin: jest.fn(),
       findPendingBankTransferOrders: jest.fn(),
@@ -434,12 +436,32 @@ describe('OrdersResolver mapOrder extensions', () => {
     });
 
     it('vendorOrders allows any store member via assertStoreAccess', async () => {
-      ordersService.findByStore.mockResolvedValue([order]);
+      ordersService.findByStorePage.mockResolvedValue({
+        items: [order],
+        pagination: { page: 1, limit: 20, total: 1, totalPages: 1 },
+        actionableCount: 1,
+      });
 
       await resolver.vendorOrders('store-1', 'staff-1');
 
       expect(storesService.assertStoreAccess).toHaveBeenCalledWith('staff-1', 'store-1');
-      expect(ordersService.findByStore).toHaveBeenCalledWith('store-1');
+      expect(ordersService.findByStorePage).toHaveBeenCalledWith('store-1', {
+        page: undefined,
+        limit: undefined,
+        queue: undefined,
+        status: undefined,
+        paymentMethod: undefined,
+        search: undefined,
+      });
+    });
+
+    it('vendorOrder allows any store member via assertStoreAccess', async () => {
+      ordersService.findOneForVendor.mockResolvedValue(order);
+
+      await resolver.vendorOrder('store-1', 'order-1', 'staff-1');
+
+      expect(storesService.assertStoreAccess).toHaveBeenCalledWith('staff-1', 'store-1');
+      expect(ordersService.findOneForVendor).toHaveBeenCalledWith('store-1', 'order-1');
     });
   });
 

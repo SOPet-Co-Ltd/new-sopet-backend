@@ -1406,6 +1406,95 @@ describe('OrdersService', () => {
     });
   });
 
+  describe('findByStorePage', () => {
+    function createVendorListQb(overrides: Record<string, jest.Mock> = {}) {
+      return {
+        andWhere: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        addGroupBy: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        offset: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getRawOne: jest.fn().mockResolvedValue({ cnt: '0' }),
+        getRawMany: jest.fn().mockResolvedValue([]),
+        getMany: jest.fn().mockResolvedValue([]),
+        ...overrides,
+      };
+    }
+
+    it('returns empty page with actionableCount when no orders match', async () => {
+      const listCountQb = createVendorListQb({
+        getRawOne: jest.fn().mockResolvedValue({ cnt: '0' }),
+      });
+      const actionableQb = createVendorListQb({
+        getRawOne: jest.fn().mockResolvedValue({ cnt: '3' }),
+      });
+      orderRepository.createQueryBuilder
+        .mockReturnValueOnce(listCountQb)
+        .mockReturnValueOnce(actionableQb);
+
+      const result = await service.findByStorePage('store-1', { page: 1, limit: 20 });
+
+      expect(result.items).toEqual([]);
+      expect(result.pagination).toEqual({ page: 1, limit: 20, total: 0, totalPages: 1 });
+      expect(result.actionableCount).toBe(3);
+    });
+
+    it('pages newest-first and hydrates only the requested ids', async () => {
+      const listCountQb = createVendorListQb({
+        getRawOne: jest.fn().mockResolvedValue({ cnt: '2' }),
+      });
+      const actionableQb = createVendorListQb({
+        getRawOne: jest.fn().mockResolvedValue({ cnt: '1' }),
+      });
+      const idQb = createVendorListQb({
+        getRawMany: jest.fn().mockResolvedValue([{ id: 'ord-2' }, { id: 'ord-1' }]),
+      });
+      const loadQb = createVendorListQb({
+        getMany: jest.fn().mockResolvedValue([
+          { id: 'ord-1', orderNumber: 'ORD-1', items: [] },
+          { id: 'ord-2', orderNumber: 'ORD-2', items: [] },
+        ]),
+      });
+
+      orderRepository.createQueryBuilder
+        .mockReturnValueOnce(listCountQb)
+        .mockReturnValueOnce(actionableQb)
+        .mockReturnValueOnce(idQb)
+        .mockReturnValueOnce(loadQb);
+
+      const result = await service.findByStorePage('store-1', {
+        page: 1,
+        limit: 20,
+        search: 'ORD',
+        status: OrderStatus.PAID,
+      });
+
+      expect(listCountQb.andWhere).toHaveBeenCalledWith('order.order_number ILIKE :search', {
+        search: '%ORD%',
+      });
+      expect(listCountQb.andWhere).toHaveBeenCalledWith('order.status = :status', {
+        status: OrderStatus.PAID,
+      });
+      expect(idQb.orderBy).toHaveBeenCalledWith('order.createdAt', 'DESC');
+      expect(idQb.offset).toHaveBeenCalledWith(0);
+      expect(idQb.limit).toHaveBeenCalledWith(20);
+      expect(loadQb.leftJoinAndSelect).toHaveBeenCalledWith(
+        'order.items',
+        'items',
+        'items.storeId = :storeId',
+        { storeId: 'store-1' },
+      );
+      expect(result.items.map((order) => order.id)).toEqual(['ord-2', 'ord-1']);
+      expect(result.pagination.total).toBe(2);
+      expect(result.actionableCount).toBe(1);
+    });
+  });
+
   describe('findOneForAdmin', () => {
     it('returns stores and registered customer for one order', async () => {
       orderRepository.findOne.mockResolvedValue({

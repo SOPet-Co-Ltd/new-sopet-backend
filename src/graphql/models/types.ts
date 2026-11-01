@@ -667,6 +667,18 @@ export class OrderConnection {
 }
 
 @ObjectType()
+export class VendorOrderConnection {
+  @Field(() => [OrderType])
+  items!: OrderType[];
+
+  @Field(() => PaginationMeta)
+  pagination!: PaginationMeta;
+
+  @Field(() => Int)
+  actionableCount!: number;
+}
+
+@ObjectType()
 export class AdminOrderStore {
   @Field()
   id!: string;
