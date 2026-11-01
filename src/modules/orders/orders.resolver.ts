@@ -17,6 +17,7 @@ import {
   OrderType,
   ProductType,
   OrderConnection,
+  VendorOrderConnection,
 } from '../../graphql/models/types';
 import { mapProduct } from '../../graphql/models/mappers';
 import { mapOrder, mapOrderTracking } from './order.mapper';
@@ -30,9 +31,10 @@ import {
   UpdateOrderShippingAddressAsAdminInput,
   UpdateOrderStatusInput,
 } from './orders.inputs';
-import { OrderStatus } from '../../database/entities/order.entity';
+import { OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
 import { normalizeCheckoutPaymentMethod } from '../../common/utils/checkout-payment.util';
 import { CustomerOrderListFilter } from './order-list-filter.util';
+import { VendorOrderQueueFilter } from './vendor-order-action-queue.util';
 import type { AdminOrderRecord } from './orders.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constants';
@@ -143,17 +145,77 @@ export class OrdersResolver {
     return mapOrderTracking(order);
   }
 
-  @Query(() => [OrderType])
+  @Query(() => VendorOrderConnection)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('vendor')
   async vendorOrders(
     @Args('storeId') storeId: string,
     @CurrentUser('id') userId: string,
-  ): Promise<OrderType[]> {
+    @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page?: number,
+    @Args('limit', { type: () => Int, nullable: true, defaultValue: 20 }) limit?: number,
+    @Args('queue', {
+      type: () => VendorOrderQueueFilter,
+      nullable: true,
+      defaultValue: VendorOrderQueueFilter.ALL,
+    })
+    queue?: VendorOrderQueueFilter,
+    @Args('status', { type: () => String, nullable: true }) status?: string,
+    @Args('paymentMethod', { type: () => String, nullable: true }) paymentMethod?: string,
+    @Args('search', { type: () => String, nullable: true }) search?: string,
+  ): Promise<VendorOrderConnection> {
     await this.storesService.assertStoreAccess(userId, storeId);
 
-    const orders = await this.ordersService.findByStore(storeId);
-    return orders.map((order) => mapOrder(order, storeId));
+    let parsedStatus: OrderStatus | undefined;
+    if (status) {
+      const allowed = Object.values(OrderStatus) as string[];
+      if (!allowed.includes(status)) {
+        throw new BadRequestException({
+          code: 'INVALID_ORDER_STATUS',
+          message: 'Invalid order status filter',
+        });
+      }
+      parsedStatus = status as OrderStatus;
+    }
+
+    let parsedPayment: PaymentMethod | undefined;
+    if (paymentMethod) {
+      const allowed = Object.values(PaymentMethod) as string[];
+      if (!allowed.includes(paymentMethod)) {
+        throw new BadRequestException({
+          code: 'INVALID_PAYMENT_METHOD',
+          message: 'Invalid payment method filter',
+        });
+      }
+      parsedPayment = paymentMethod as PaymentMethod;
+    }
+
+    const result = await this.ordersService.findByStorePage(storeId, {
+      page,
+      limit,
+      queue,
+      status: parsedStatus,
+      paymentMethod: parsedPayment,
+      search,
+    });
+
+    return {
+      items: result.items.map((order) => mapOrder(order, storeId)),
+      pagination: result.pagination,
+      actionableCount: result.actionableCount,
+    };
+  }
+
+  @Query(() => OrderType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('vendor')
+  async vendorOrder(
+    @Args('storeId') storeId: string,
+    @Args('id') id: string,
+    @CurrentUser('id') userId: string,
+  ): Promise<OrderType> {
+    await this.storesService.assertStoreAccess(userId, storeId);
+    const order = await this.ordersService.findOneForVendor(storeId, id);
+    return mapOrder(order, storeId);
   }
 
   @Query(() => AdminOrderConnection)
