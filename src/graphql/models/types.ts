@@ -1,5 +1,8 @@
 import { Field, Float, Int, ObjectType } from '@nestjs/graphql';
-import { VariantRemovalBlockReason } from '../../modules/products/variant-removal.types';
+import {
+  VariantRemovalBlockReason,
+  VariantRemovalDisposition,
+} from '../../modules/products/variant-removal.types';
 
 @ObjectType()
 export class PaginationMeta {
@@ -1360,6 +1363,12 @@ export class ProductVariantSyncImpactRemovedType {
 
   @Field(() => [VariantRemovalBlockReason])
   reasons!: VariantRemovalBlockReason[];
+
+  @Field(() => VariantRemovalDisposition)
+  disposition!: VariantRemovalDisposition;
+
+  @Field(() => Int)
+  openCartCount!: number;
 }
 
 @ObjectType()
@@ -1373,6 +1382,7 @@ export class ProductVariantSyncImpactType {
   @Field(() => Int)
   removed!: number;
 
+  /** Kept for GraphQL compat; always false under retire-and-clear-carts. */
   @Field()
   blocked!: boolean;
 
