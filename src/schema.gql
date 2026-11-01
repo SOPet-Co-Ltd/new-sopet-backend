@@ -1085,18 +1085,6 @@ type OrderConnection {
   pagination: PaginationMeta!
 }
 
-type VendorOrderConnection {
-  actionableCount: Int!
-  items: [OrderType!]!
-  pagination: PaginationMeta!
-}
-
-"""Vendor order list queue filter"""
-enum VendorOrderQueueFilter {
-  ALL
-  ACTION
-}
-
 input OrderItemInput {
   price: Float!
   productId: String!
@@ -2566,6 +2554,17 @@ type VendorInvitationType {
 input VendorLoginInput {
   email: String!
   password: String!
+}
+
+type VendorOrderConnection {
+  actionableCount: Int!
+  items: [OrderType!]!
+  pagination: PaginationMeta!
+}
+
+enum VendorOrderQueueFilter {
+  ACTION
+  ALL
 }
 
 type VendorPublishableProductIdsType {
