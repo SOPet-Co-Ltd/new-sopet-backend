@@ -38,10 +38,10 @@ import { SearchEmbeddingQueueService } from '../search/embedding/search-embeddin
 import { StorageService } from '../storage/storage.service';
 import { PUBLIC_API_MAX_PRODUCT_IMAGES } from '../storage/upload.rules';
 import {
-  BlockedVariantPayload,
   ProductVariantSyncImpact,
   VariantRemovalBlockReason,
   VariantRemovalBlockerFlags,
+  VariantRemovalDisposition,
 } from './variant-removal.types';
 
 type SyncVariantItem = {
@@ -1585,14 +1585,14 @@ export class ProductsService {
     return variant;
   }
 
-  // Delete variant
+  // Delete / retire variant
   async removeVariant(variantId: string, userId: string): Promise<void> {
     const variant = await this.variantRepository.findOne({
       where: { id: variantId },
       relations: ['product'],
     });
 
-    if (!variant) {
+    if (!variant || variant.retiredAt) {
       throw new NotFoundException({
         code: 'VARIANT_NOT_FOUND',
         message: 'Variant not found',
@@ -1600,9 +1600,7 @@ export class ProductsService {
     }
 
     await this.assertStoreAccess(userId, variant.product.storeId, 'manage product variants');
-    await this.assertRemovalsAllowed([variant]);
-
-    await this.variantRepository.softDelete(variantId);
+    await this.applyRemovals([variant]);
   }
 
   async getProductVariantSyncImpact(
@@ -1620,19 +1618,24 @@ export class ProductsService {
       });
     }
 
-    const existingVariants = product.variants ?? [];
+    const existingVariants = this.activeVariants(product.variants ?? []);
     const plan = this.classifySyncPlan(existingVariants, items);
     const blockers = await this.evaluateRemovalBlockers(plan.remove.map((variant) => variant.id));
 
     const removedVariants = plan.remove.map((variant) => {
-      const flags = blockers.get(variant.id) ?? { hasOrders: false, hasOpenCarts: false };
-      const reasons = this.reasonsFromFlags(flags);
+      const flags = blockers.get(variant.id) ?? {
+        hasOrders: false,
+        hasOpenCarts: false,
+        openCartCount: 0,
+      };
       return {
         id: variant.id,
         sku: variant.sku,
         optionsJson: variant.options ? JSON.stringify(variant.options) : null,
         optionKey: this.variantOptionKey(variant.options ?? {}),
-        reasons,
+        reasons: this.reasonsFromFlags(flags),
+        disposition: this.dispositionFromFlags(flags),
+        openCartCount: flags.openCartCount,
       };
     });
 
@@ -1640,7 +1643,7 @@ export class ProductsService {
       kept: plan.kept,
       new: plan.createCount,
       removed: plan.remove.length,
-      blocked: removedVariants.some((entry) => entry.reasons.length > 0),
+      blocked: false,
       removedVariants,
     };
   }
@@ -1661,9 +1664,9 @@ export class ProductsService {
       });
     }
 
-    const existingVariants = product.variants ?? [];
-    const plan = this.classifySyncPlan(existingVariants, items);
-    await this.assertRemovalsAllowed(plan.remove);
+    const allVariants = await this.variantRepository.find({ where: { productId } });
+    const activeVariants = this.activeVariants(allVariants);
+    const plan = this.classifySyncPlan(activeVariants, items);
 
     const absolutePrices = items
       .map((item) => item.price)
@@ -1683,61 +1686,77 @@ export class ProductsService {
     const savedVariants: ProductVariant[] = [];
 
     for (const item of items) {
+      const sku = item.sku.trim();
+      if (!sku || sku.length > 100) {
+        throw new BadRequestException({
+          code: 'SKU_TOO_LONG',
+          message: 'SKU must be between 1 and 100 characters',
+        });
+      }
+
       const options = this.buildVariantOptions(undefined, item.attributes);
       const optionKey = this.variantOptionKey(options);
       const priceAdjustment = useAbsolutePrices
         ? Number(item.price) - syncBasePrice
         : (item.priceModifier ?? 0);
 
-      const variant: ProductVariant | undefined = item.id
-        ? existingVariants.find((existing) => existing.id === item.id)
-        : existingVariants.find(
-            (existing) => this.variantOptionKey(existing.options) === optionKey,
-          );
+      let variant: ProductVariant | undefined = item.id
+        ? allVariants.find((existing) => existing.id === item.id)
+        : activeVariants.find((existing) => this.variantOptionKey(existing.options) === optionKey);
+
+      if (!variant) {
+        variant = allVariants.find(
+          (existing) =>
+            !!existing.retiredAt && this.variantOptionKey(existing.options) === optionKey,
+        );
+      }
 
       if (variant) {
-        variant.sku = item.sku;
+        variant.sku = sku;
         variant.stockQuantity = item.stockQuantity;
         variant.priceAdjustment = priceAdjustment;
         if (item.compareAtPrice !== undefined) {
           variant.compareAtPrice = item.compareAtPrice;
         }
         variant.options = options;
+        variant.retiredAt = null;
         savedVariants.push(await this.variantRepository.save(variant));
         keepIds.add(variant.id);
         continue;
       }
 
       const duplicateSku = await this.variantRepository.findOne({
-        where: { sku: item.sku, productId },
+        where: { sku, productId },
       });
       if (duplicateSku) {
         throw new BadRequestException({
           code: 'SKU_EXISTS',
-          message: `SKU "${item.sku}" is already in use`,
+          message: `SKU "${sku}" is already in use`,
         });
       }
 
       const created = this.variantRepository.create({
         productId,
-        sku: item.sku,
+        sku,
         stockQuantity: item.stockQuantity,
         priceAdjustment,
         compareAtPrice: item.compareAtPrice ?? null,
         options,
+        retiredAt: null,
       });
       const saved = await this.variantRepository.save(created);
       savedVariants.push(saved);
       keepIds.add(saved.id);
     }
 
-    for (const existing of plan.remove) {
-      if (!keepIds.has(existing.id)) {
-        await this.variantRepository.softDelete(existing.id);
-      }
-    }
+    const toRemove = plan.remove.filter((existing) => !keepIds.has(existing.id));
+    await this.applyRemovals(toRemove);
 
     return savedVariants;
+  }
+
+  private activeVariants(variants: ProductVariant[]): ProductVariant[] {
+    return variants.filter((variant) => !variant.retiredAt);
   }
 
   private classifySyncPlan(
@@ -1778,7 +1797,7 @@ export class ProductsService {
   ): Promise<Map<string, VariantRemovalBlockerFlags>> {
     const blockers = new Map<string, VariantRemovalBlockerFlags>();
     for (const variantId of variantIds) {
-      blockers.set(variantId, { hasOrders: false, hasOpenCarts: false });
+      blockers.set(variantId, { hasOrders: false, hasOpenCarts: false, openCartCount: 0 });
     }
 
     if (!variantIds.length) {
@@ -1807,6 +1826,7 @@ export class ProductsService {
       const flags = blockers.get(row.variantId);
       if (flags) {
         flags.hasOpenCarts = true;
+        flags.openCartCount += 1;
       }
     }
 
@@ -1824,35 +1844,46 @@ export class ProductsService {
     return reasons;
   }
 
-  private async assertRemovalsAllowed(variants: ProductVariant[]): Promise<void> {
+  private dispositionFromFlags(flags: VariantRemovalBlockerFlags): VariantRemovalDisposition {
+    if (flags.hasOrders) {
+      return VariantRemovalDisposition.RETIRE;
+    }
+    if (flags.hasOpenCarts) {
+      return VariantRemovalDisposition.CLEAR_CART_AND_DELETE;
+    }
+    return VariantRemovalDisposition.DELETE;
+  }
+
+  /** Clear cart lines, then soft-delete unreferenced SKUs or retire sold ones. */
+  private async applyRemovals(variants: ProductVariant[]): Promise<void> {
     if (!variants.length) {
       return;
     }
 
-    const blockers = await this.evaluateRemovalBlockers(variants.map((variant) => variant.id));
-    const blockedVariants: BlockedVariantPayload[] = [];
+    const variantIds = variants.map((variant) => variant.id);
+    const blockers = await this.evaluateRemovalBlockers(variantIds);
 
+    const withCarts = variants.filter((variant) => blockers.get(variant.id)?.hasOpenCarts);
+    if (withCarts.length) {
+      await this.cartItemRepository.delete({
+        variantId: In(withCarts.map((variant) => variant.id)),
+      });
+    }
+
+    const now = new Date();
     for (const variant of variants) {
-      const flags = blockers.get(variant.id) ?? { hasOrders: false, hasOpenCarts: false };
-      const reasons = this.reasonsFromFlags(flags);
-      if (reasons.length) {
-        blockedVariants.push({
-          id: variant.id,
-          sku: variant.sku,
-          reasons,
-        });
+      const flags = blockers.get(variant.id) ?? {
+        hasOrders: false,
+        hasOpenCarts: false,
+        openCartCount: 0,
+      };
+      if (flags.hasOrders) {
+        variant.retiredAt = now;
+        await this.variantRepository.save(variant);
+      } else {
+        await this.variantRepository.softDelete(variant.id);
       }
     }
-
-    if (!blockedVariants.length) {
-      return;
-    }
-
-    throw new BadRequestException({
-      code: 'VARIANT_REMOVAL_BLOCKED',
-      message: 'One or more variants cannot be removed because they appear in orders or open carts',
-      blockedVariants,
-    });
   }
 
   private variantOptionKey(options: Record<string, string>): string {
