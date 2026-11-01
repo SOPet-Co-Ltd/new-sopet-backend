@@ -147,6 +147,7 @@ describe('ReviewsResolver', () => {
 
       const result = await resolver.productReviews('prod-1');
 
+      expect(reviewsService.findByProduct).toHaveBeenCalledWith('prod-1', 1, 100);
       expect(result).toHaveLength(1);
       expect(result[0]).toMatchObject({
         id: 'review-1',
@@ -293,6 +294,7 @@ describe('ReviewsResolver', () => {
           status: ReviewStatus.PENDING,
           createdAt: new Date('2026-06-01T10:00:00.000Z'),
           images: [{ id: 'img-1', url: 'https://example.com/review-1.jpg' }],
+          variantOptions: null,
         },
       ]);
 
@@ -325,12 +327,13 @@ describe('ReviewsResolver', () => {
           createdAt: new Date('2026-01-01T00:00:00.000Z'),
           images: [],
           reply: null,
+          variantOptions: null,
         },
       ]);
 
       const result = await resolver.storeReviews('store-1');
 
-      expect(reviewsService.findByStore).toHaveBeenCalledWith('store-1');
+      expect(reviewsService.findByStore).toHaveBeenCalledWith('store-1', 1, 100);
       expect(result[0].productName).toBe('Dog Food');
       expect(storesService.userHasStoreAccess).not.toHaveBeenCalled();
     });

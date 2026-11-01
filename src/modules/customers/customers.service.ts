@@ -25,6 +25,16 @@ const CUSTOMER_SPEND_EXCLUDED_STATUSES = [
   OrderStatus.REFUNDED,
   OrderStatus.PENDING_PAYMENT,
 ];
+const CUSTOMER_LIST_MAX_LIMIT = 100;
+
+function clampCustomerList(
+  page: number,
+  limit: number,
+): { page: number; limit: number; skip: number } {
+  const safeLimit = Math.min(Math.max(limit, 1), CUSTOMER_LIST_MAX_LIMIT);
+  const safePage = Math.max(page, 1);
+  return { page: safePage, limit: safeLimit, skip: (safePage - 1) * safeLimit };
+}
 
 export type AdminCustomerInsightsResult = {
   totalSpent: number;
@@ -93,7 +103,7 @@ export class CustomersService {
     limit: number,
     search?: string,
   ): Promise<PaginatedResponse<Customer>> {
-    const skip = (page - 1) * limit;
+    const clamped = clampCustomerList(page, limit);
     const qb = this.customerRepository
       .createQueryBuilder('customer')
       .where('customer.deleted_at IS NULL');
@@ -107,17 +117,17 @@ export class CustomersService {
 
     const [items, total] = await qb
       .orderBy('customer.created_at', 'DESC')
-      .skip(skip)
-      .take(limit)
+      .skip(clamped.skip)
+      .take(clamped.limit)
       .getManyAndCount();
 
     return {
       items,
       pagination: {
-        page,
-        limit,
+        page: clamped.page,
+        limit: clamped.limit,
         total,
-        totalPages: Math.ceil(total / limit) || 1,
+        totalPages: Math.ceil(total / clamped.limit) || 1,
       },
     };
   }
@@ -276,7 +286,7 @@ export class CustomersService {
     limit: number,
     search?: string,
   ): Promise<PaginatedResponse<Customer>> {
-    const skip = (page - 1) * limit;
+    const clamped = clampCustomerList(page, limit);
 
     const qb = this.customerRepository
       .createQueryBuilder('customer')
@@ -292,17 +302,17 @@ export class CustomersService {
 
     const [items, total] = await qb
       .orderBy('customer.created_at', 'DESC')
-      .skip(skip)
-      .take(limit)
+      .skip(clamped.skip)
+      .take(clamped.limit)
       .getManyAndCount();
 
     return {
       items,
       pagination: {
-        page,
-        limit,
+        page: clamped.page,
+        limit: clamped.limit,
         total,
-        totalPages: Math.ceil(total / limit) || 1,
+        totalPages: Math.ceil(total / clamped.limit) || 1,
       },
     };
   }

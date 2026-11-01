@@ -390,4 +390,52 @@ describe('CustomersService', () => {
       );
     });
   });
+
+  describe('list pagination caps', () => {
+    function mockListQuery(total: number) {
+      const qb = {
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([[{ id: 'cust-1' }], total]),
+      };
+      customerRepo.createQueryBuilder.mockReturnValue(qb);
+      return qb;
+    }
+
+    it('clamps admin customer limit to 100 and uses it in the page math', async () => {
+      const qb = mockListQuery(250);
+
+      const result = await service.findAllForAdmin(2, 500);
+
+      expect(qb.take).toHaveBeenCalledWith(100);
+      expect(qb.skip).toHaveBeenCalledWith(100);
+      expect(result.pagination).toEqual({
+        page: 2,
+        limit: 100,
+        total: 250,
+        totalPages: 3,
+      });
+    });
+
+    it('raises a non-positive admin limit to 1', async () => {
+      const qb = mockListQuery(0);
+
+      const result = await service.findAllForAdmin(1, 0);
+
+      expect(qb.take).toHaveBeenCalledWith(1);
+      expect(result.pagination.limit).toBe(1);
+    });
+
+    it('clamps vendor customer limit to 100', async () => {
+      const qb = mockListQuery(10);
+
+      const result = await service.findForVendorStore('store-1', 1, 1000, 'ann');
+
+      expect(qb.take).toHaveBeenCalledWith(100);
+      expect(result.pagination.limit).toBe(100);
+    });
+  });
 });

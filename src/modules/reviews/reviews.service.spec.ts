@@ -39,6 +39,7 @@ describe('ReviewsService', () => {
   const orderRepo = {
     findOne: jest.fn(),
     find: jest.fn(),
+    query: jest.fn(),
   };
 
   const productRepo = {
@@ -277,42 +278,19 @@ describe('ReviewsService', () => {
   describe('findReviewableItemsForCustomer', () => {
     const deliveredAt = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
 
-    it('returns only delivered orders without existing reviews and within window', async () => {
-      orderRepo.find.mockResolvedValue([
+    it('maps SQL rows and pushes delivered, window, and not-exists filters into SQL', async () => {
+      orderRepo.query.mockResolvedValue([
         {
-          id: 'order-1',
+          orderId: 'order-1',
           orderNumber: 'ORD-001',
-          status: OrderStatus.DELIVERED,
-          updatedAt: deliveredAt,
-          items: [
-            {
-              id: 'item-1',
-              productName: 'Cat Food',
-              deliveredAt,
-              productVariant: {
-                productId: 'prod-1',
-                product: {
-                  id: 'prod-1',
-                  name: 'Cat Food Premium',
-                  slug: 'cat-food',
-                  images: [
-                    { url: 'https://cdn.example.com/cat.jpg', sortOrder: 0, isThumbnail: true },
-                  ],
-                },
-              },
-            },
-          ],
-          statusHistory: [],
-        },
-        {
-          id: 'order-2',
-          orderNumber: 'ORD-002',
-          status: OrderStatus.SHIPPED,
-          items: [],
-          statusHistory: [],
+          orderItemId: 'item-1',
+          productId: 'prod-1',
+          productName: 'Cat Food Premium',
+          productSlug: 'cat-food',
+          productImageUrl: 'https://cdn.example.com/cat.jpg',
+          deliveredAt,
         },
       ]);
-      reviewRepo.find.mockResolvedValue([]);
 
       const results = await service.findReviewableItemsForCustomer('cust-1');
 
@@ -327,61 +305,26 @@ describe('ReviewsService', () => {
         productImageUrl: 'https://cdn.example.com/cat.jpg',
       });
       expect(results[0].reviewDeadline).toEqual(addDays(deliveredAt, 30));
+
+      const [sql, params] = orderRepo.query.mock.calls[0] as [string, unknown[]];
+      expect(sql).toContain('NOT EXISTS');
+      expect(sql).toContain('review.deleted_at IS NULL');
+      expect(sql).toContain('variant.deleted_at IS NULL');
+      expect(sql).toContain('order_status_history');
+      expect(sql).toContain("INTERVAL '1 day'");
+      expect(sql).toContain('"order".status = $2');
+      expect(params[0]).toBe('cust-1');
+      expect(params[1]).toBe(OrderStatus.DELIVERED);
+      expect(params[2]).toBe(30);
+      expect(params[3]).toBeInstanceOf(Date);
+      expect(orderRepo.find).not.toHaveBeenCalled();
+      expect(reviewRepo.find).not.toHaveBeenCalled();
     });
 
-    it('excludes already reviewed customer+order+product pairs', async () => {
-      orderRepo.find.mockResolvedValue([
-        {
-          id: 'order-1',
-          orderNumber: 'ORD-001',
-          status: OrderStatus.DELIVERED,
-          updatedAt: deliveredAt,
-          items: [
-            {
-              id: 'item-1',
-              deliveredAt,
-              productVariant: {
-                productId: 'prod-1',
-                product: { name: 'Cat Food', slug: 'cat-food', images: [] },
-              },
-            },
-          ],
-          statusHistory: [],
-        },
-      ]);
-      reviewRepo.find.mockResolvedValue([{ orderId: 'order-1', productId: 'prod-1' }]);
+    it('returns no items when the SQL filter matches nothing', async () => {
+      orderRepo.query.mockResolvedValue([]);
 
-      const results = await service.findReviewableItemsForCustomer('cust-1');
-
-      expect(results).toEqual([]);
-    });
-
-    it('excludes items past review window', async () => {
-      const expiredDeliveredAt = new Date('2020-01-01T10:00:00.000Z');
-      orderRepo.find.mockResolvedValue([
-        {
-          id: 'order-1',
-          orderNumber: 'ORD-001',
-          status: OrderStatus.DELIVERED,
-          updatedAt: expiredDeliveredAt,
-          items: [
-            {
-              id: 'item-1',
-              deliveredAt: expiredDeliveredAt,
-              productVariant: {
-                productId: 'prod-1',
-                product: { name: 'Cat Food', slug: 'cat-food', images: [] },
-              },
-            },
-          ],
-          statusHistory: [],
-        },
-      ]);
-      reviewRepo.find.mockResolvedValue([]);
-
-      const results = await service.findReviewableItemsForCustomer('cust-1');
-
-      expect(results).toEqual([]);
+      await expect(service.findReviewableItemsForCustomer('cust-1')).resolves.toEqual([]);
     });
   });
 
@@ -506,7 +449,7 @@ describe('ReviewsService', () => {
   });
 
   describe('findByProduct', () => {
-    it('loads customer and images relations for approved reviews', async () => {
+    it('loads the first page of approved reviews capped at 100', async () => {
       reviewRepo.find.mockResolvedValue([]);
 
       await service.findByProduct('prod-1');
@@ -514,8 +457,23 @@ describe('ReviewsService', () => {
       expect(reviewRepo.find).toHaveBeenCalledWith({
         where: { productId: 'prod-1', status: ReviewStatus.APPROVED },
         relations: ['customer', 'images', 'reply'],
-        order: { createdAt: 'DESC' },
+        order: { createdAt: 'DESC', id: 'DESC' },
+        take: 100,
+        skip: 0,
       });
+    });
+
+    it('clamps limit and applies skip for later pages', async () => {
+      reviewRepo.find.mockResolvedValue([]);
+
+      await service.findByProduct('prod-1', 2, 500);
+
+      expect(reviewRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          take: 100,
+          skip: 100,
+        }),
+      );
     });
   });
 
@@ -527,7 +485,8 @@ describe('ReviewsService', () => {
   });
 
   describe('findByStore', () => {
-    it('queries approved reviews scoped to store with reply relation', async () => {
+    it('pages approved reviews with a stable order and default cap of 100', async () => {
+      const getRawMany = jest.fn().mockResolvedValue([{ id: 'review-1' }]);
       const getMany = jest.fn().mockResolvedValue([
         {
           id: 'review-1',
@@ -540,19 +499,31 @@ describe('ReviewsService', () => {
           reply: null,
         },
       ]);
-      reviewRepo.createQueryBuilder = jest.fn(() => ({
+      const qb = {
+        innerJoin: jest.fn().mockReturnThis(),
         innerJoinAndSelect: jest.fn().mockReturnThis(),
         leftJoinAndSelect: jest.fn().mockReturnThis(),
         leftJoin: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        offset: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        getRawMany,
         getMany,
-      })) as never;
+      };
+      reviewRepo.createQueryBuilder = jest.fn(() => qb) as never;
 
       const results = await service.findByStore('store-1');
 
       expect(reviewRepo.createQueryBuilder).toHaveBeenCalledWith('review');
+      expect(qb.orderBy).toHaveBeenCalledWith('review.createdAt', 'DESC');
+      expect(qb.addOrderBy).toHaveBeenCalledWith('review.id', 'DESC');
+      expect(qb.offset).toHaveBeenCalledWith(0);
+      expect(qb.limit).toHaveBeenCalledWith(100);
+      expect(getRawMany).toHaveBeenCalled();
       expect(getMany).toHaveBeenCalled();
       expect(results[0]).toMatchObject({
         id: 'review-1',
@@ -560,6 +531,25 @@ describe('ReviewsService', () => {
         productSlug: 'dog-food',
         reply: null,
       });
+    });
+
+    it('clamps a requested limit to 100', async () => {
+      const qb = {
+        innerJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        offset: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([]),
+      };
+      reviewRepo.createQueryBuilder = jest.fn(() => qb) as never;
+
+      await service.findByStore('store-1', 3, 250);
+
+      expect(qb.offset).toHaveBeenCalledWith(200);
+      expect(qb.limit).toHaveBeenCalledWith(100);
     });
   });
 
@@ -787,8 +777,21 @@ describe('ReviewsService', () => {
   });
 
   describe('getStoreReviewSummary', () => {
-    it('returns empty summary when store has no products', async () => {
-      productRepo.find.mockResolvedValue([]);
+    function summaryQuery(rows: unknown[]) {
+      return {
+        innerJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        addGroupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue(rows),
+      };
+    }
+
+    it('returns an empty summary when the store join has no approved reviews', async () => {
+      const qb = summaryQuery([]);
+      reviewRepo.createQueryBuilder.mockReturnValue(qb);
 
       const result = await service.getStoreReviewSummary('store-1');
 
@@ -802,7 +805,39 @@ describe('ReviewsService', () => {
         rating4Count: 0,
         rating5Count: 0,
       });
-      expect(reviewRepo.createQueryBuilder).not.toHaveBeenCalled();
+      expect(productRepo.find).not.toHaveBeenCalled();
+      expect(qb.innerJoin).toHaveBeenCalledWith(
+        'review.product',
+        'product',
+        'product.store_id = :storeId',
+        { storeId: 'store-1' },
+      );
+      expect(reviewRepo.createQueryBuilder).toHaveBeenCalledTimes(1);
+    });
+
+    it('aggregates averages and rating counts from the store join', async () => {
+      const breakdownQb = summaryQuery([
+        { productId: 'p1', productName: 'Food', averageRating: '4', reviewCount: '2' },
+        { productId: 'p2', productName: 'Toy', averageRating: '5', reviewCount: '1' },
+      ]);
+      const ratingQb = summaryQuery([
+        { rating: '4', count: '2' },
+        { rating: '5', count: '1' },
+      ]);
+      reviewRepo.createQueryBuilder.mockReturnValueOnce(breakdownQb).mockReturnValueOnce(ratingQb);
+
+      const result = await service.getStoreReviewSummary('store-1');
+
+      expect(productRepo.find).not.toHaveBeenCalled();
+      expect(breakdownQb.groupBy).toHaveBeenCalledWith('review.productId');
+      expect(result.totalCount).toBe(3);
+      expect(result.averageRating).toBeCloseTo(13 / 3);
+      expect(result.rating4Count).toBe(2);
+      expect(result.rating5Count).toBe(1);
+      expect(result.productBreakdown).toEqual([
+        { productId: 'p1', productName: 'Food', averageRating: 4, reviewCount: 2 },
+        { productId: 'p2', productName: 'Toy', averageRating: 5, reviewCount: 1 },
+      ]);
     });
   });
 

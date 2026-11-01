@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Product } from '../../database/entities/product.entity';
 import { PaginatedResponse } from '../../common/interfaces';
 import { ProductQueryDto } from '../products/dto/product-query.dto';
@@ -290,18 +290,27 @@ export class SearchService {
   }
 
   private async hydrateProducts(ids: string[]): Promise<Product[]> {
-    return this.productRepository
-      .createQueryBuilder('product')
-      .leftJoinAndSelect('product.store', 'store')
-      .leftJoinAndSelect('product.images', 'images')
-      .leftJoinAndSelect('product.variants', 'variants')
-      .leftJoinAndSelect('product.categoryRelation', 'categoryRelation')
-      .leftJoinAndSelect('product.petTypeRelation', 'petTypeRelation')
-      .leftJoinAndSelect('product.brandRelation', 'brandRelation')
-      .leftJoinAndSelect('product.taxonomyTags', 'taxonomyTags')
-      .where('product.id IN (:...ids)', { ids })
-      .orderBy('array_position(ARRAY[:...ids]::uuid[], product.id)')
-      .getMany();
+    if (ids.length === 0) {
+      return [];
+    }
+
+    // Separate queries per relation avoid images×variants×tags cartesian joins.
+    const products = await this.productRepository.find({
+      where: { id: In(ids) },
+      relations: [
+        'store',
+        'images',
+        'variants',
+        'categoryRelation',
+        'petTypeRelation',
+        'brandRelation',
+        'taxonomyTags',
+      ],
+      relationLoadStrategy: 'query',
+    });
+
+    const byId = new Map(products.map((product) => [product.id, product]));
+    return ids.map((id) => byId.get(id)).filter((product): product is Product => Boolean(product));
   }
 
   private async buildSearchMatch(

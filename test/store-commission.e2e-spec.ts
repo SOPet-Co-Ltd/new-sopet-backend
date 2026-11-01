@@ -82,14 +82,19 @@ const TRIGGER_PAYOUT = `
 
 const ADMIN_STORE_PAYOUTS = `
   query AdminStorePayouts($storeId: String!) {
-    adminStorePayouts(storeId: $storeId) {
-      id
-      amount
-      netAmount
-      productSold
-      shippingFees
-      commissionAmount
-      commissionRate
+    adminStorePayouts(storeId: $storeId, page: 1, limit: 20) {
+      items {
+        id
+        amount
+        netAmount
+        productSold
+        shippingFees
+        commissionAmount
+        commissionRate
+      }
+      pagination {
+        total
+      }
     }
   }
 `;
@@ -526,7 +531,7 @@ describe('store commission — mixed-cutoff payout create [integration]', () => 
       .post('/graphql')
       .send({ query: ADMIN_STORE_PAYOUTS, variables: { storeId: omiseStore.id } })
       .expect(200);
-    expect(listRes.body.data.adminStorePayouts[0].amount).toBe(1410);
+    expect(listRes.body.data.adminStorePayouts.items[0].amount).toBe(1410);
 
     const manual = await payoutsService.requestManualPayout(
       manualStore.id,

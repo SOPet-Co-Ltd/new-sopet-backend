@@ -602,18 +602,7 @@ export class ProductsService {
       };
     }
 
-    const items = await this.productRepository
-      .createQueryBuilder('product')
-      .leftJoinAndSelect('product.store', 'store')
-      .leftJoinAndSelect('product.images', 'images')
-      .leftJoinAndSelect('product.variants', 'variants')
-      .leftJoinAndSelect('product.categoryRelation', 'categoryRelation')
-      .leftJoinAndSelect('product.petTypeRelation', 'petTypeRelation')
-      .leftJoinAndSelect('product.brandRelation', 'brandRelation')
-      .leftJoinAndSelect('product.taxonomyTags', 'taxonomyTags')
-      .where('product.id IN (:...ids)', { ids })
-      .orderBy('array_position(ARRAY[:...ids]::uuid[], product.id)')
-      .getMany();
+    const items = await this.hydrateProductsByIds(ids);
 
     return {
       items,
@@ -624,6 +613,33 @@ export class ProductsService {
         totalPages: Math.ceil(total / limit),
       },
     };
+  }
+
+  /**
+   * Load list/card relations without a images×variants×tags cartesian join.
+   * Uses TypeORM query-per-relation strategy, then restores caller id order.
+   */
+  async hydrateProductsByIds(ids: string[]): Promise<Product[]> {
+    if (ids.length === 0) {
+      return [];
+    }
+
+    const products = await this.productRepository.find({
+      where: { id: In(ids) },
+      relations: [
+        'store',
+        'images',
+        'variants',
+        'categoryRelation',
+        'petTypeRelation',
+        'brandRelation',
+        'taxonomyTags',
+      ],
+      relationLoadStrategy: 'query',
+    });
+
+    const byId = new Map(products.map((product) => [product.id, product]));
+    return ids.map((id) => byId.get(id)).filter((product): product is Product => Boolean(product));
   }
 
   private applyProductListFilters(
@@ -775,7 +791,6 @@ export class ProductsService {
         'store',
         'images',
         'variants',
-        'reviews',
         'categoryRelation',
         'petTypeRelation',
         'brandRelation',
@@ -816,12 +831,12 @@ export class ProductsService {
         'store',
         'images',
         'variants',
-        'reviews',
         'categoryRelation',
         'petTypeRelation',
         'brandRelation',
         'taxonomyTags',
       ],
+      relationLoadStrategy: 'query',
     });
 
     const byId = new Map(
@@ -840,7 +855,6 @@ export class ProductsService {
         'store',
         'images',
         'variants',
-        'reviews',
         'categoryRelation',
         'petTypeRelation',
         'brandRelation',

@@ -37,6 +37,12 @@ import {
   normalizeCustomerOrdersLimit,
   normalizeCustomerOrdersPage,
 } from './order-list-filter.util';
+import {
+  applyVendorActionQueueFilter,
+  normalizeVendorOrdersLimit,
+  normalizeVendorOrdersPage,
+  VendorOrderQueueFilter,
+} from './vendor-order-action-queue.util';
 import { assertNotManualHoldTransition } from './store-suspension-hold.service';
 import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.service';
 import { webhookEventForOrderStatus } from '../vendor-webhooks/vendor-webhook.events';
@@ -684,15 +690,55 @@ export class OrdersService {
     const filter = options.filter ?? CustomerOrderListFilter.ALL;
     const offset = (page - 1) * limit;
 
-    const query = this.orderRepository
+    const applyScope = (qb: ReturnType<Repository<Order>['createQueryBuilder']>) => {
+      qb.where('order.customerId = :customerId', { customerId });
+      applyCustomerOrderListFilter(qb, filter);
+      return qb;
+    };
+
+    const countRow = await applyScope(this.orderRepository.createQueryBuilder('order'))
+      .select('COUNT(order.id)', 'cnt')
+      .getRawOne<{ cnt: string }>();
+    const total = Number(countRow?.cnt ?? 0);
+
+    if (total === 0) {
+      return {
+        items: [],
+        pagination: { page, limit, total: 0, totalPages: 1 },
+      };
+    }
+
+    const idRows = await applyScope(this.orderRepository.createQueryBuilder('order'))
+      .select('order.id', 'id')
+      .orderBy('order.createdAt', 'DESC')
+      .addOrderBy('order.id', 'DESC')
+      .offset(offset)
+      .limit(limit)
+      .getRawMany<{ id: string }>();
+
+    const ids = idRows.map((row) => row.id);
+    if (ids.length === 0) {
+      return {
+        items: [],
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.max(1, Math.ceil(total / limit)),
+        },
+      };
+    }
+
+    const orders = await this.orderRepository
       .createQueryBuilder('order')
       .leftJoinAndSelect('order.items', 'items')
-      .where('order.customerId = :customerId', { customerId })
-      .orderBy('order.createdAt', 'DESC');
+      .where('order.id IN (:...ids)', { ids })
+      .orderBy('order.createdAt', 'DESC')
+      .addOrderBy('order.id', 'DESC')
+      .getMany();
 
-    applyCustomerOrderListFilter(query, filter);
-
-    const [items, total] = await query.skip(offset).take(limit).getManyAndCount();
+    const byId = new Map(orders.map((order) => [order.id, order]));
+    const items = ids.map((id) => byId.get(id)).filter((order): order is Order => Boolean(order));
 
     return {
       items,
@@ -700,7 +746,7 @@ export class OrdersService {
         page,
         limit,
         total,
-        totalPages: Math.ceil(total / limit) || 1,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
       },
     };
   }
@@ -722,31 +768,35 @@ export class OrdersService {
   }
 
   async findLatestPurchaseProductIds(customerId: string, limit: number): Promise<string[]> {
-    const rows = await this.orderRepository
-      .createQueryBuilder('order')
-      .withDeleted()
-      .innerJoin('order.items', 'item')
-      .innerJoin('item.productVariant', 'variant')
-      .select('variant.productId', 'productId')
-      .where('order.customerId = :customerId', { customerId })
-      .orderBy('order.createdAt', 'DESC')
-      .addOrderBy('item.createdAt', 'ASC')
-      .getRawMany<{ productId: string }>();
-
-    const productIds: string[] = [];
-    const seen = new Set<string>();
-
-    for (const row of rows) {
-      if (row.productId && !seen.has(row.productId)) {
-        seen.add(row.productId);
-        productIds.push(row.productId);
-        if (productIds.length >= limit) {
-          break;
-        }
-      }
+    const safeLimit = Math.max(Math.trunc(limit) || 0, 0);
+    if (safeLimit === 0) {
+      return [];
     }
 
-    return productIds;
+    // Raw SQL matches the previous withDeleted() join: soft-deleted variants stay included.
+    // DISTINCT ON keeps the newest order line per product, then the outer query restores recency.
+    const rows: Array<{ productId: string | null }> = await this.orderRepository.query(
+      `
+      SELECT product_id AS "productId"
+      FROM (
+        SELECT DISTINCT ON (variant.product_id)
+          variant.product_id AS product_id,
+          "order".created_at AS order_created_at,
+          item.created_at AS item_created_at
+        FROM "orders" "order"
+        INNER JOIN "order_items" item ON item.order_id = "order".id
+        INNER JOIN "product_variants" variant ON variant.id = item.variant_id
+        WHERE "order".customer_id = $1
+          AND variant.product_id IS NOT NULL
+        ORDER BY variant.product_id ASC, "order".created_at DESC, item.created_at ASC
+      ) deduped
+      ORDER BY order_created_at DESC, item_created_at ASC
+      LIMIT $2
+      `,
+      [customerId, safeLimit],
+    );
+
+    return rows.flatMap((row) => (row.productId ? [row.productId] : []));
   }
 
   async findByOrderNumber(orderNumber: string): Promise<Order> {
@@ -785,16 +835,177 @@ export class OrdersService {
     return this.guestOrderLinkService.mergeGuestOrders(customerId, phone);
   }
 
-  async findByStore(storeId: string): Promise<Order[]> {
-    return this.orderRepository
-      .createQueryBuilder('order')
-      .innerJoin('order.items', 'item', 'item.storeId = :storeId', { storeId })
-      .leftJoinAndSelect('order.items', 'items')
-      .leftJoinAndSelect('order.shippingAddress', 'shippingAddress')
-      .leftJoinAndSelect('order.customer', 'customer')
-      .leftJoinAndSelect('order.storeShippings', 'storeShippings')
+  /**
+   * Paginated store-scoped vendor orders. List hydration is slim (order scalars +
+   * this store's item fulfillment rows only) — detail uses {@link findOneForVendor}.
+   */
+  async findByStorePage(
+    storeId: string,
+    options: {
+      page?: number;
+      limit?: number;
+      queue?: VendorOrderQueueFilter;
+      status?: OrderStatus;
+      paymentMethod?: PaymentMethod;
+      search?: string;
+    } = {},
+  ): Promise<PaginatedResponse<Order> & { actionableCount: number }> {
+    const page = normalizeVendorOrdersPage(options.page);
+    const limit = normalizeVendorOrdersLimit(options.limit);
+    const offset = (page - 1) * limit;
+    const search = options.search?.trim();
+    const queue = options.queue ?? VendorOrderQueueFilter.ALL;
+
+    const applyStoreScope = (qb: ReturnType<Repository<Order>['createQueryBuilder']>) => {
+      qb.andWhere(
+        `EXISTS (
+          SELECT 1 FROM order_items store_item
+          WHERE store_item.order_id = "order"."id"
+            AND store_item.store_id = :storeId
+        )`,
+        { storeId },
+      );
+      return qb;
+    };
+
+    const applyListFilters = (qb: ReturnType<Repository<Order>['createQueryBuilder']>) => {
+      applyStoreScope(qb);
+      if (queue === VendorOrderQueueFilter.ACTION) {
+        applyVendorActionQueueFilter(qb, storeId);
+      }
+      if (options.status) {
+        qb.andWhere('order.status = :status', { status: options.status });
+      }
+      if (options.paymentMethod) {
+        qb.andWhere('order.payment_method = :paymentMethod', {
+          paymentMethod: options.paymentMethod,
+        });
+      }
+      if (search) {
+        qb.andWhere('order.order_number ILIKE :search', { search: `%${search}%` });
+      }
+      return qb;
+    };
+
+    const listCountQb = applyListFilters(this.orderRepository.createQueryBuilder('order')).select(
+      'COUNT(DISTINCT order.id)',
+      'cnt',
+    );
+    const actionableQb = applyStoreScope(this.orderRepository.createQueryBuilder('order'));
+    applyVendorActionQueueFilter(actionableQb, storeId);
+    actionableQb.select('COUNT(DISTINCT order.id)', 'cnt');
+
+    const [countRow, actionableCountRow] = await Promise.all([
+      listCountQb.getRawOne<{ cnt: string }>(),
+      actionableQb.getRawOne<{ cnt: string }>(),
+    ]);
+
+    const actionableCount = Number(actionableCountRow?.cnt ?? 0);
+    const total = Number(countRow?.cnt ?? 0);
+
+    if (total === 0) {
+      return {
+        items: [],
+        pagination: { page, limit, total: 0, totalPages: 1 },
+        actionableCount,
+      };
+    }
+
+    const idRows = await applyListFilters(this.orderRepository.createQueryBuilder('order'))
+      .select('order.id', 'id')
+      .addSelect('order.createdAt', 'createdAt')
+      .groupBy('order.id')
+      .addGroupBy('order.createdAt')
       .orderBy('order.createdAt', 'DESC')
+      .offset(offset)
+      .limit(limit)
+      .getRawMany<{ id: string }>();
+
+    const ids = idRows.map((row) => row.id);
+    if (ids.length === 0) {
+      return {
+        items: [],
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.max(1, Math.ceil(total / limit)),
+        },
+        actionableCount,
+      };
+    }
+
+    const orders = await this.orderRepository
+      .createQueryBuilder('order')
+      .leftJoinAndSelect('order.items', 'items', 'items.storeId = :storeId', { storeId })
+      .where('order.id IN (:...ids)', { ids })
+      .select([
+        'order.id',
+        'order.orderNumber',
+        'order.status',
+        'order.createdAt',
+        'order.subtotal',
+        'order.shippingFee',
+        'order.discountAmount',
+        'order.total',
+        'order.paymentMethod',
+        'order.guestPhone',
+        'order.guestName',
+        'order.guestEmail',
+        'items.id',
+        'items.storeId',
+        'items.fulfillmentStatus',
+        'items.trackingNumber',
+        'items.fulfillmentProvider',
+        'items.trackingUrl',
+      ])
       .getMany();
+
+    const byId = new Map(orders.map((order) => [order.id, order]));
+    const items = ids.map((id) => byId.get(id)).filter((order): order is Order => Boolean(order));
+
+    return {
+      items,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+      actionableCount,
+    };
+  }
+
+  /** Full order for vendor detail, scoped to a store that owns at least one line. */
+  async findOneForVendor(storeId: string, orderId: string): Promise<Order> {
+    const order = await this.orderRepository
+      .createQueryBuilder('order')
+      .leftJoinAndSelect('order.items', 'items')
+      .leftJoinAndSelect('items.productVariant', 'productVariant')
+      .leftJoinAndSelect('productVariant.product', 'product')
+      .leftJoinAndSelect('product.images', 'productImages')
+      .leftJoinAndSelect('order.shippingAddress', 'shippingAddress')
+      .leftJoinAndSelect('order.storeShippings', 'storeShippings')
+      .where('order.id = :orderId', { orderId })
+      .andWhere(
+        `EXISTS (
+          SELECT 1 FROM order_items store_item
+          WHERE store_item.order_id = "order"."id"
+            AND store_item.store_id = :storeId
+        )`,
+        { storeId },
+      )
+      .withDeleted()
+      .getOne();
+
+    if (!order) {
+      throw new NotFoundException({
+        code: 'ORDER_NOT_FOUND',
+        message: 'Order not found',
+      });
+    }
+
+    return order;
   }
 
   /**

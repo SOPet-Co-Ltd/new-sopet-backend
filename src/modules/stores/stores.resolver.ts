@@ -1,4 +1,4 @@
-import { Args, Context, Field, InputType, Mutation, Query, Resolver } from '@nestjs/graphql';
+import { Args, Context, Field, InputType, Int, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { BadRequestException, Inject, UseGuards, forwardRef } from '@nestjs/common';
 import { StoresService } from './stores.service';
 import { StoreTeamService } from './store-team.service';
@@ -30,7 +30,10 @@ import {
   StoreReactivationRequestType,
   VendorInvitationType,
   AdminStoreType,
+  AdminStoreConnection,
   AdminVendorType,
+  AdminVendorListItem,
+  AdminVendorConnection,
   AdminVendorDetailType,
 } from '../../graphql/models/types';
 import {
@@ -130,6 +133,20 @@ function mapMyPendingStoreInvitation(
     status: invitation.status,
     expiresAt: invitation.expiresAt.toISOString(),
     token: invitation.token,
+  };
+}
+
+function mapAdminVendorListItem(record: { user: User; storeCount: number }): AdminVendorListItem {
+  const vendor = record.user;
+  return {
+    id: vendor.id,
+    email: vendor.email,
+    fullName: vendor.fullName,
+    role: vendor.role,
+    isActive: vendor.isActive,
+    lastLoginAt: vendor.lastLoginAt,
+    createdAt: vendor.createdAt,
+    storeCount: record.storeCount,
   };
 }
 
@@ -467,12 +484,21 @@ export class StoresResolver {
     }));
   }
 
-  @Query(() => [AdminStoreType])
+  @Query(() => AdminStoreConnection)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
-  async adminStores(): Promise<AdminStoreType[]> {
-    const stores = await this.storesService.findAllForAdmin();
-    return stores.map(mapAdminStore);
+  async adminStores(
+    @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page?: number,
+    @Args('limit', { type: () => Int, nullable: true, defaultValue: 20 }) limit?: number,
+    @Args('search', { type: () => String, nullable: true }) search?: string,
+    @Args('status', { type: () => String, nullable: true }) status?: string,
+    @Args('sort', { type: () => String, nullable: true }) sort?: string,
+  ): Promise<AdminStoreConnection> {
+    const result = await this.storesService.findAllForAdmin({ page, limit, search, status, sort });
+    return {
+      items: result.items.map(mapAdminStore),
+      pagination: result.pagination,
+    };
   }
 
   @Query(() => AdminStoreType)
@@ -591,14 +617,21 @@ export class StoresResolver {
     return mapAdminStore(store);
   }
 
-  @Query(() => [AdminVendorType])
+  @Query(() => AdminVendorConnection)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   async adminVendors(
-    @Args('search', { nullable: true }) search?: string,
-  ): Promise<AdminVendorType[]> {
-    const vendors = await this.storesService.findVendors(search);
-    return vendors.map(mapAdminVendor);
+    @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page?: number,
+    @Args('limit', { type: () => Int, nullable: true, defaultValue: 20 }) limit?: number,
+    @Args('search', { type: () => String, nullable: true }) search?: string,
+    @Args('status', { type: () => String, nullable: true }) status?: string,
+    @Args('sort', { type: () => String, nullable: true }) sort?: string,
+  ): Promise<AdminVendorConnection> {
+    const result = await this.storesService.findVendors({ page, limit, search, status, sort });
+    return {
+      items: result.items.map(mapAdminVendorListItem),
+      pagination: result.pagination,
+    };
   }
 
   @Query(() => AdminVendorType)

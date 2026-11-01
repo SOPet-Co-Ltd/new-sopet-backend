@@ -667,6 +667,18 @@ export class OrderConnection {
 }
 
 @ObjectType()
+export class VendorOrderConnection {
+  @Field(() => [OrderType])
+  items!: OrderType[];
+
+  @Field(() => PaginationMeta)
+  pagination!: PaginationMeta;
+
+  @Field(() => Int)
+  actionableCount!: number;
+}
+
+@ObjectType()
 export class AdminOrderStore {
   @Field()
   id!: string;
@@ -1502,6 +1514,15 @@ export class PromotionType {
 }
 
 @ObjectType()
+export class PromotionConnection {
+  @Field(() => [PromotionType])
+  items!: PromotionType[];
+
+  @Field(() => PaginationMeta)
+  pagination!: PaginationMeta;
+}
+
+@ObjectType()
 export class PromotionValidationResult {
   @Field()
   code!: string;
@@ -1779,6 +1800,15 @@ export class AdminStoreType {
 }
 
 @ObjectType()
+export class AdminStoreConnection {
+  @Field(() => [AdminStoreType])
+  items!: AdminStoreType[];
+
+  @Field(() => PaginationMeta)
+  pagination!: PaginationMeta;
+}
+
+@ObjectType()
 export class AdminVendorStoreType {
   @Field()
   id!: string;
@@ -1818,6 +1848,42 @@ export class AdminVendorType {
 
   @Field(() => [AdminVendorStoreType])
   stores!: AdminVendorStoreType[];
+}
+
+@ObjectType()
+export class AdminVendorListItem {
+  @Field()
+  id!: string;
+
+  @Field()
+  email!: string;
+
+  @Field()
+  fullName!: string;
+
+  @Field()
+  role!: string;
+
+  @Field()
+  isActive!: boolean;
+
+  @Field(() => Date, { nullable: true })
+  lastLoginAt?: Date | null;
+
+  @Field()
+  createdAt!: Date;
+
+  @Field(() => Int)
+  storeCount!: number;
+}
+
+@ObjectType()
+export class AdminVendorConnection {
+  @Field(() => [AdminVendorListItem])
+  items!: AdminVendorListItem[];
+
+  @Field(() => PaginationMeta)
+  pagination!: PaginationMeta;
 }
 
 @ObjectType()

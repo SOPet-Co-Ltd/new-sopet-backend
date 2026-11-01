@@ -17,8 +17,10 @@ export class NotificationsResolver {
   async notifications(
     @CurrentUser('id') userId: string,
     @Args('unreadOnly', { nullable: true }) unreadOnly?: boolean,
+    @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page = 1,
+    @Args('limit', { type: () => Int, nullable: true, defaultValue: 50 }) limit = 50,
   ): Promise<NotificationType[]> {
-    const items = await this.notificationsService.findByUser(userId, unreadOnly);
+    const items = await this.notificationsService.findByUser(userId, unreadOnly, page, limit);
     return items.map(mapNotification);
   }
 

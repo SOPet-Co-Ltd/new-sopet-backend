@@ -214,6 +214,11 @@ type AdminOrderStore {
   name: String!
 }
 
+type AdminStoreConnection {
+  items: [AdminStoreType!]!
+  pagination: PaginationMeta!
+}
+
 type AdminStoreType {
   address: String
   bankAccountName: String
@@ -258,6 +263,11 @@ type AdminVendorActivityType {
   storeName: String
 }
 
+type AdminVendorConnection {
+  items: [AdminVendorListItem!]!
+  pagination: PaginationMeta!
+}
+
 type AdminVendorDetailType {
   createdAt: DateTime!
   email: String!
@@ -282,6 +292,17 @@ type AdminVendorInsightsType {
   recentOrders: [AdminCustomerRecentOrder!]!
   storeCount: Int!
   totalRevenue: Float!
+}
+
+type AdminVendorListItem {
+  createdAt: DateTime!
+  email: String!
+  fullName: String!
+  id: String!
+  isActive: Boolean!
+  lastLoginAt: DateTime
+  role: String!
+  storeCount: Int!
 }
 
 type AdminVendorMembershipType {
@@ -1214,6 +1235,11 @@ type PaymentType {
   status: String!
 }
 
+type PayoutConnection {
+  items: [PayoutType!]!
+  pagination: PaginationMeta!
+}
+
 type PayoutRailSummaryType {
   availableBalance: Float!
   canRequestPayout: Boolean!
@@ -1415,6 +1441,11 @@ type ProductVariantType {
   stockQuantity: Int!
 }
 
+type PromotionConnection {
+  items: [PromotionType!]!
+  pagination: PaginationMeta!
+}
+
 type PromotionEligibilityResult {
   code: String!
   discountAmount: Float
@@ -1472,15 +1503,15 @@ type Query {
   adminOrders(limit: Int = 20, page: Int = 1, search: String, status: String): AdminOrderConnection!
   adminStore(id: String!): AdminStoreType!
   adminStorePayoutSummary(storeId: String!): PayoutSummaryType!
-  adminStorePayouts(storeId: String!): [PayoutType!]!
+  adminStorePayouts(limit: Int = 20, page: Int = 1, storeId: String!): PayoutConnection!
   adminStoreReactivationRequests(status: String): [StoreReactivationRequestType!]!
   adminStoreRequests: [StoreRequestType!]!
   adminStoreShippingOptions(storeId: String!): [StoreShippingOptionType!]!
-  adminStores: [AdminStoreType!]!
+  adminStores(limit: Int = 20, page: Int = 1, search: String, sort: String, status: String): AdminStoreConnection!
   adminTeamMembers: [AdminTeamMemberType!]!
   adminVendor(id: String!): AdminVendorType!
   adminVendorDetail(id: String!): AdminVendorDetailType!
-  adminVendors(search: String): [AdminVendorType!]!
+  adminVendors(limit: Int = 20, page: Int = 1, search: String, sort: String, status: String): AdminVendorConnection!
   allPlatformAds: [PlatformAdType!]!
   allPlatformBanners: [PlatformBannerType!]!
   allPlatformSponsors: [PlatformSponsorType!]!
@@ -1501,7 +1532,7 @@ type Query {
   emailContentTemplateByKey(key: EmailTemplateKey!): EmailContentTemplateType
   emailContentTemplates: [EmailContentTemplateType!]!
   exportSearchAnalyticsCsv(fromDate: DateTime, toDate: DateTime): String!
-  favorites: [FavoriteType!]!
+  favorites(limit: Int = 24, page: Int = 1): [FavoriteType!]!
   getAdminInvitationByToken(token: String!): AdminInvitationType!
   getPasswordResetTokenStatus(token: String!): PasswordResetTokenStatusType!
   getStoreInvitationByToken(token: String!): StoreInvitationPreviewType!
@@ -1522,7 +1553,7 @@ type Query {
   myStoreShippingOptions: [StoreShippingOptionType!]!
   myStores: [VendorStoreType!]!
   myTagProposals: [TagType!]!
-  notifications(unreadOnly: Boolean): [NotificationType!]!
+  notifications(limit: Int = 50, page: Int = 1, unreadOnly: Boolean): [NotificationType!]!
   order(id: String!): OrderType!
   orderAuditLog(orderId: String!, storeId: String!): OrderAuditLogType!
   orderTracking(orderNumber: String!): OrderTrackingType!
@@ -1546,7 +1577,7 @@ type Query {
   platformAds: [PlatformAdType!]!
   platformAnalytics(fromDate: String, toDate: String): PlatformAnalyticsType!
   platformBanners: [PlatformBannerType!]!
-  platformPromotions: [PromotionType!]!
+  platformPromotions(limit: Int = 20, page: Int = 1): PromotionConnection!
   platformSalesByCategory(fromDate: String, limit: Int, toDate: String): [SalesBreakdownItemType!]!
   platformSalesByPaymentMethod(fromDate: String, toDate: String): [SalesBreakdownItemType!]!
   platformSalesOverTime(fromDate: String, toDate: String): [SalesTimePointType!]!
@@ -1557,9 +1588,10 @@ type Query {
   product(id: String!): ProductType!
   productBySlug(slug: String!, storeId: String!): ProductType!
   productPublishChecklist(productId: String!): ProductPublishChecklistType!
-  productReviews(productId: String!): [ReviewType!]!
+  productReviews(limit: Int = 100, page: Int = 1, productId: String!): [ReviewType!]!
   productVariantSyncImpact(productId: String!, variants: [SyncProductVariantItemInput!]!): ProductVariantSyncImpactType!
   products(brandIds: [String!], category: String, limit: Int = 20, maxPrice: Int, minPrice: Int, page: Int = 1, petTypeIds: [String!], search: String, searchContext: SearchContextInput, sessionId: String, sortBy: String, sortOrder: String, storeId: String, tag: String): ProductConnection!
+  promotion(id: String!): PromotionType!
   recommendedProducts(excludeProductIds: [String!], limit: Int = 50, searchContext: SearchContextInput, sessionId: String, shuffleSeed: String): [ProductType!]!
   rejectedBrands: [BrandType!]!
   rejectedCategories: [CategoryType!]!
@@ -1583,12 +1615,12 @@ type Query {
   storeInvitations: [StoreMemberInvitationType!]!
   storeMembers: [StoreMemberType!]!
   storePayoutSummary: PayoutSummaryType!
-  storePayouts: [PayoutType!]!
+  storePayouts(limit: Int = 20, page: Int = 1): PayoutConnection!
   storeProductReviews(limit: Int = 20, page: Int = 1, ratingFilter: String, replyFilter: String, storeId: String!): StoreProductReviewConnection!
-  storePromotions(storeId: String!): [PromotionType!]!
+  storePromotions(limit: Int = 20, page: Int = 1, storeId: String!): PromotionConnection!
   storeReactivationRequests(storeId: String!): [StoreReactivationRequestType!]!
   storeReviewSummary(storeId: String!): StoreReviewSummaryType!
-  storeReviews(storeId: String!): [StoreProductReviewType!]!
+  storeReviews(limit: Int = 100, page: Int = 1, storeId: String!): [StoreProductReviewType!]!
   storeSaleCampaigns(storeId: String!): [SaleCampaignType!]!
   storeShippingOptions(storeId: String!): [StoreShippingOptionType!]!
   storefrontMaintenance: StorefrontMaintenanceType!
@@ -1601,7 +1633,8 @@ type Query {
   vendorCustomer(id: String!): VendorCustomerType!
   vendorCustomerDetail(id: String!): VendorCustomerDetailType!
   vendorCustomers(limit: Int! = 20, page: Int! = 1, search: String): VendorCustomerConnection!
-  vendorOrders(storeId: String!): [OrderType!]!
+  vendorOrder(id: String!, storeId: String!): OrderType!
+  vendorOrders(limit: Int = 20, page: Int = 1, paymentMethod: String, queue: VendorOrderQueueFilter = ALL, search: String, status: String, storeId: String!): VendorOrderConnection!
   vendorProduct(id: String!): ProductType!
   vendorProducts(brandIds: [String!], category: String, limit: Int = 20, maxPrice: Float, minPrice: Float, page: Int = 1, petTypeIds: [String!], search: String, status: String, tag: String): ProductConnection!
   vendorPublishableProductIds(search: String): VendorPublishableProductIdsType!
@@ -2553,6 +2586,17 @@ type VendorInvitationType {
 input VendorLoginInput {
   email: String!
   password: String!
+}
+
+type VendorOrderConnection {
+  actionableCount: Int!
+  items: [OrderType!]!
+  pagination: PaginationMeta!
+}
+
+enum VendorOrderQueueFilter {
+  ACTION
+  ALL
 }
 
 type VendorPublishableProductIdsType {

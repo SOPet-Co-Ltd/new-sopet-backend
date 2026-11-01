@@ -373,7 +373,10 @@ describe('NotificationsService', () => {
       const qb = {
         where: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
         getMany: jest.fn().mockResolvedValue(notifications),
       };
       userNotificationRepo.createQueryBuilder.mockReturnValue(qb);
@@ -384,6 +387,8 @@ describe('NotificationsService', () => {
         userId: 'user-1',
       });
       expect(qb.andWhere).not.toHaveBeenCalled();
+      expect(qb.skip).toHaveBeenCalledWith(0);
+      expect(qb.take).toHaveBeenCalledWith(50);
       expect(result).toEqual(notifications);
     });
 
@@ -392,7 +397,10 @@ describe('NotificationsService', () => {
       const qb = {
         where: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
         getMany: jest.fn().mockResolvedValue(notifications),
       };
       userNotificationRepo.createQueryBuilder.mockReturnValue(qb);
@@ -401,6 +409,24 @@ describe('NotificationsService', () => {
 
       expect(qb.andWhere).toHaveBeenCalledWith('notification.is_read = false');
       expect(result).toEqual(notifications);
+    });
+
+    it('caps limit at 100', async () => {
+      const qb = {
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+      };
+      userNotificationRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.findByUser('user-1', false, 3, 500);
+
+      expect(qb.skip).toHaveBeenCalledWith(200);
+      expect(qb.take).toHaveBeenCalledWith(100);
     });
   });
 
