@@ -191,6 +191,34 @@ type AdminManualPayoutType {
   storeName: String!
 }
 
+type AdminOrder {
+  customer: AdminOrderCustomer
+  order: OrderType!
+  stores: [AdminOrderStore!]!
+}
+
+type AdminOrderConnection {
+  items: [AdminOrder!]!
+  pagination: PaginationMeta!
+}
+
+type AdminOrderCustomer {
+  email: String
+  fullName: String
+  id: String!
+  phone: String!
+}
+
+type AdminOrderStore {
+  id: String!
+  name: String!
+}
+
+type AdminStoreConnection {
+  items: [AdminStoreType!]!
+  pagination: PaginationMeta!
+}
+
 type AdminStoreType {
   address: String
   bankAccountName: String
@@ -237,6 +265,11 @@ type AdminVendorActivityType {
   storeName: String
 }
 
+type AdminVendorConnection {
+  items: [AdminVendorListItem!]!
+  pagination: PaginationMeta!
+}
+
 type AdminVendorDetailType {
   createdAt: DateTime!
   email: String!
@@ -261,6 +294,17 @@ type AdminVendorInsightsType {
   recentOrders: [AdminCustomerRecentOrder!]!
   storeCount: Int!
   totalRevenue: Float!
+}
+
+type AdminVendorListItem {
+  createdAt: DateTime!
+  email: String!
+  fullName: String!
+  id: String!
+  isActive: Boolean!
+  lastLoginAt: DateTime
+  role: String!
+  storeCount: Int!
 }
 
 type AdminVendorMembershipType {
@@ -627,6 +671,18 @@ type CustomerProfile {
   profilePhotoUrl: String
 }
 
+type CustomerPurchaseSummaryType {
+  averageOrderValue: Float
+  cohortLabel: String!
+  cohortLabelTh: String!
+  daysSinceLastOrder: Int
+  lastOrderAt: DateTime
+  month: Int!
+  monthsSinceLastOrder: Int
+  purchasesInMonth: Int!
+  year: Int!
+}
+
 type CustomerReviewType {
   comment: String
   createdAt: DateTime!
@@ -652,6 +708,23 @@ type CustomerReviewableItemType {
   productName: String!
   productSlug: String
   reviewDeadline: DateTime
+}
+
+enum DashboardActivityKind {
+  BANK_TRANSFER
+  ORDER
+  PAYOUT
+  REACTIVATION
+  REVIEW
+  STORE_REQUEST
+  STORE_STATUS
+  TAXONOMY
+}
+
+type DashboardActivityType {
+  entityId: String!
+  kind: DashboardActivityKind!
+  storeId: String
 }
 
 """
@@ -808,6 +881,7 @@ type Mutation {
   createAddress(input: CreateAddressInput!): SavedAddressType!
   createBrand(input: CreateBrandInput!): BrandType!
   createCategory(input: CreateCategoryInput!): CategoryType!
+  createCustomerAddressAsAdmin(customerId: String!, input: CreateAddressInput!): SavedAddressType!
   createEmailContainer(input: CreateEmailContainerInput!): EmailContainerType!
   createOrder(input: CreateOrderInput!): OrderType!
   createPayment(input: CreatePaymentInput!): PaymentType!
@@ -832,6 +906,7 @@ type Mutation {
   deleteAddress(id: String!): Boolean!
   deleteBrand(input: DeleteTaxonomyInput!): DeleteTaxonomyResultType!
   deleteCategory(input: DeleteTaxonomyInput!): DeleteTaxonomyResultType!
+  deleteCustomerAddressAsAdmin(customerId: String!, id: String!): Boolean!
   deletePaymentMethod(id: String!): Boolean!
   deletePetType(input: DeleteTaxonomyInput!): DeleteTaxonomyResultType!
   deletePlatformAd(id: String!): Boolean!
@@ -891,6 +966,7 @@ type Mutation {
   setAdminActive(isActive: Boolean!, userId: String!): AdminTeamMemberType!
   setCategoryImage(input: SetCategoryImageInput!): CategoryType!
   setCustomerActive(id: String!, isActive: Boolean!): AdminCustomerType!
+  setCustomerDefaultAddressAsAdmin(customerId: String!, id: String!): SavedAddressType!
   setDefaultAddress(id: String!): SavedAddressType!
   setDefaultEmailContainer(id: ID!): EmailContainerType!
   setDefaultPaymentMethod(id: String!): SavedPaymentMethodType!
@@ -910,10 +986,12 @@ type Mutation {
   updateBrand(input: UpdateBrandInput!): BrandType!
   updateCartItem(input: UpdateCartItemInput!): CartType!
   updateCategory(input: UpdateCategoryInput!): CategoryType!
+  updateCustomerAddressAsAdmin(customerId: String!, id: String!, input: UpdateAddressInput!): SavedAddressType!
   updateCustomerAsAdmin(input: UpdateCustomerAsAdminInput!): AdminCustomerType!
   updateEmailContainer(id: ID!, input: UpdateEmailContainerInput!): EmailContainerType!
   updateEmailContentTemplate(id: ID!, input: UpdateEmailContentTemplateInput!): EmailContentTemplateType!
   updateLoginPageImages(input: UpdateLoginPageImagesInput!): LoginPageImagesType!
+  updateOrderShippingAddressAsAdmin(input: UpdateOrderShippingAddressAsAdminInput!): OrderType!
   updateOrderStatus(input: UpdateOrderStatusInput!): OrderType!
   updatePetType(input: UpdatePetTypeInput!): PetTypeType!
   updatePlatformAd(input: UpdatePlatformAdInput!): PlatformAdType!
@@ -941,6 +1019,7 @@ type Mutation {
   uploadImage(base64: String!, folder: String): UploadResultType!
   vendorLogin(input: VendorLoginInput!): VendorAuthPayload!
   verifyCustomerOtp(input: VerifyCustomerOtpInput!): CustomerAuthPayload!
+  verifyCustomerPhoneAsAdmin(id: String!): AdminCustomerType!
   verifyEmail(input: VerifyEmailInput!): MessagePayload!
   verifyStoreBankAccount(storeId: String!): AdminStoreType!
 }
@@ -1162,6 +1241,11 @@ type PaymentType {
   status: String!
 }
 
+type PayoutConnection {
+  items: [PayoutType!]!
+  pagination: PaginationMeta!
+}
+
 type PayoutSummaryType {
   availableBalance: Float!
   canRequestPayout: Boolean!
@@ -1322,7 +1406,9 @@ type ProductType {
 }
 
 type ProductVariantSyncImpactRemovedType {
+  disposition: VariantRemovalDisposition!
   id: String!
+  openCartCount: Int!
   optionKey: String!
   optionsJson: String
   reasons: [VariantRemovalBlockReason!]!
@@ -1345,6 +1431,11 @@ type ProductVariantType {
   product: ProductType
   sku: String!
   stockQuantity: Int!
+}
+
+type PromotionConnection {
+  items: [PromotionType!]!
+  pagination: PaginationMeta!
 }
 
 type PromotionEligibilityResult {
@@ -1397,19 +1488,22 @@ type Query {
   addresses: [SavedAddressType!]!
   adminAuditLogs(filter: AdminAuditLogFilterInput, limit: Int! = 20, page: Int! = 1): AdminAuditLogConnection!
   adminCustomer(id: String!): AdminCustomerType!
+  adminCustomerAddresses(customerId: String!): [SavedAddressType!]!
   adminCustomerDetail(id: String!): AdminCustomerDetailType!
   adminCustomers(limit: Int! = 20, page: Int! = 1, search: String): AdminCustomerConnection!
+  adminOrder(id: String!): AdminOrder!
+  adminOrders(limit: Int = 20, page: Int = 1, search: String, status: String): AdminOrderConnection!
   adminStore(id: String!): AdminStoreType!
   adminStorePayoutSummary(storeId: String!): PayoutSummaryType!
-  adminStorePayouts(storeId: String!): [PayoutType!]!
+  adminStorePayouts(limit: Int = 20, page: Int = 1, storeId: String!): PayoutConnection!
   adminStoreReactivationRequests(status: String): [StoreReactivationRequestType!]!
   adminStoreRequests: [StoreRequestType!]!
   adminStoreShippingOptions(storeId: String!): [StoreShippingOptionType!]!
-  adminStores: [AdminStoreType!]!
+  adminStores(limit: Int = 20, page: Int = 1, search: String, sort: String, status: String): AdminStoreConnection!
   adminTeamMembers: [AdminTeamMemberType!]!
   adminVendor(id: String!): AdminVendorType!
   adminVendorDetail(id: String!): AdminVendorDetailType!
-  adminVendors(search: String): [AdminVendorType!]!
+  adminVendors(limit: Int = 20, page: Int = 1, search: String, sort: String, status: String): AdminVendorConnection!
   allPlatformAds: [PlatformAdType!]!
   allPlatformBanners: [PlatformBannerType!]!
   allPlatformSponsors: [PlatformSponsorType!]!
@@ -1422,6 +1516,7 @@ type Query {
   brandDeleteImpact(brandId: String!): TaxonomyDeleteImpactType!
   cart(sessionId: String): CartType!
   categoryDeleteImpact(categoryId: String!): TaxonomyDeleteImpactType!
+  customerPurchaseSummary(customerId: String!, month: Int!, year: Int!): CustomerPurchaseSummaryType!
   customerReviewableItems: [CustomerReviewableItemType!]!
   emailContainer(id: ID!): EmailContainerType
   emailContainers: [EmailContainerType!]!
@@ -1429,7 +1524,7 @@ type Query {
   emailContentTemplateByKey(key: EmailTemplateKey!): EmailContentTemplateType
   emailContentTemplates: [EmailContentTemplateType!]!
   exportSearchAnalyticsCsv(fromDate: DateTime, toDate: DateTime): String!
-  favorites: [FavoriteType!]!
+  favorites(limit: Int = 24, page: Int = 1): [FavoriteType!]!
   getAdminInvitationByToken(token: String!): AdminInvitationType!
   getPasswordResetTokenStatus(token: String!): PasswordResetTokenStatusType!
   getStoreInvitationByToken(token: String!): StoreInvitationPreviewType!
@@ -1450,7 +1545,7 @@ type Query {
   myStoreShippingOptions: [StoreShippingOptionType!]!
   myStores: [VendorStoreType!]!
   myTagProposals: [TagType!]!
-  notifications(unreadOnly: Boolean): [NotificationType!]!
+  notifications(limit: Int = 50, page: Int = 1, unreadOnly: Boolean): [NotificationType!]!
   order(id: String!): OrderType!
   orderAuditLog(orderId: String!, storeId: String!): OrderAuditLogType!
   orderTracking(orderNumber: String!): OrderTrackingType!
@@ -1474,7 +1569,7 @@ type Query {
   platformAds: [PlatformAdType!]!
   platformAnalytics(fromDate: String, toDate: String): PlatformAnalyticsType!
   platformBanners: [PlatformBannerType!]!
-  platformPromotions: [PromotionType!]!
+  platformPromotions(limit: Int = 20, page: Int = 1): PromotionConnection!
   platformSalesByCategory(fromDate: String, limit: Int, toDate: String): [SalesBreakdownItemType!]!
   platformSalesByPaymentMethod(fromDate: String, toDate: String): [SalesBreakdownItemType!]!
   platformSalesOverTime(fromDate: String, toDate: String): [SalesTimePointType!]!
@@ -1485,9 +1580,10 @@ type Query {
   product(id: String!): ProductType!
   productBySlug(slug: String!, storeId: String!): ProductType!
   productPublishChecklist(productId: String!): ProductPublishChecklistType!
-  productReviews(productId: String!): [ReviewType!]!
+  productReviews(limit: Int = 100, page: Int = 1, productId: String!): [ReviewType!]!
   productVariantSyncImpact(productId: String!, variants: [SyncProductVariantItemInput!]!): ProductVariantSyncImpactType!
   products(brandIds: [String!], category: String, limit: Int = 20, maxPrice: Int, minPrice: Int, page: Int = 1, petTypeIds: [String!], search: String, searchContext: SearchContextInput, sessionId: String, sortBy: String, sortOrder: String, storeId: String, tag: String): ProductConnection!
+  promotion(id: String!): PromotionType!
   recommendedProducts(excludeProductIds: [String!], limit: Int = 50, searchContext: SearchContextInput, sessionId: String, shuffleSeed: String): [ProductType!]!
   rejectedBrands: [BrandType!]!
   rejectedCategories: [CategoryType!]!
@@ -1507,15 +1603,16 @@ type Query {
   storeAnalytics(fromDate: String, storeId: String!, toDate: String): StoreAnalyticsType!
   storeApiKeys(storeId: String!): [StoreApiKeyType!]!
   storeBySlug(slug: String!): StoreType!
+  storeCustomerSummary(month: Int!, storeId: String!, year: Int!): StoreCustomerSummaryType!
   storeInvitations: [StoreMemberInvitationType!]!
   storeMembers: [StoreMemberType!]!
   storePayoutSummary: PayoutSummaryType!
-  storePayouts: [PayoutType!]!
+  storePayouts(limit: Int = 20, page: Int = 1): PayoutConnection!
   storeProductReviews(limit: Int = 20, page: Int = 1, ratingFilter: String, replyFilter: String, storeId: String!): StoreProductReviewConnection!
-  storePromotions(storeId: String!): [PromotionType!]!
+  storePromotions(limit: Int = 20, page: Int = 1, storeId: String!): PromotionConnection!
   storeReactivationRequests(storeId: String!): [StoreReactivationRequestType!]!
   storeReviewSummary(storeId: String!): StoreReviewSummaryType!
-  storeReviews(storeId: String!): [StoreProductReviewType!]!
+  storeReviews(limit: Int = 100, page: Int = 1, storeId: String!): [StoreProductReviewType!]!
   storeSaleCampaigns(storeId: String!): [SaleCampaignType!]!
   storeShippingOptions(storeId: String!): [StoreShippingOptionType!]!
   storefrontMaintenance: StorefrontMaintenanceType!
@@ -1528,7 +1625,8 @@ type Query {
   vendorCustomer(id: String!): VendorCustomerType!
   vendorCustomerDetail(id: String!): VendorCustomerDetailType!
   vendorCustomers(limit: Int! = 20, page: Int! = 1, search: String): VendorCustomerConnection!
-  vendorOrders(storeId: String!): [OrderType!]!
+  vendorOrder(id: String!, storeId: String!): OrderType!
+  vendorOrders(limit: Int = 20, page: Int = 1, paymentMethod: String, queue: VendorOrderQueueFilter = ALL, search: String, status: String, storeId: String!): VendorOrderConnection!
   vendorProduct(id: String!): ProductType!
   vendorProducts(brandIds: [String!], category: String, limit: Int = 20, maxPrice: Float, minPrice: Float, page: Int = 1, petTypeIds: [String!], search: String, status: String, tag: String): ProductConnection!
   vendorPublishableProductIds(search: String): VendorPublishableProductIdsType!
@@ -1834,6 +1932,21 @@ type StoreApiKeyType {
   revokedAt: DateTime
 }
 
+type StoreCustomerSummaryType {
+  averageOrderValue: Float
+  buyersInMonth: Int!
+  lifetimeMonths: Float
+  month: Int!
+  newCustomerCount: Int!
+  oldCustomerCount: Int!
+  oldCustomerPercent: Float
+  orderCount: Int!
+  purchasesPerMonth: Float
+  repeatRate: Float
+  totalCustomers: Int!
+  year: Int!
+}
+
 type StoreInvitationPreviewType {
   email: String!
   expiresAt: String!
@@ -1989,6 +2102,7 @@ input SubmitStoreRequestInput {
 }
 
 type Subscription {
+  dashboardActivity: DashboardActivityType!
   paymentStatusUpdated(guestPayToken: String, orderId: String, paymentId: String): PaymentType!
 }
 
@@ -2114,6 +2228,18 @@ input UpdateLoginPageImagesInput {
   altText: String
   desktopImageUrl: String!
   mobileImageUrl: String
+}
+
+input UpdateOrderShippingAddressAsAdminInput {
+  addressLine1: String!
+  addressLine2: String
+  amphoe: String!
+  fullName: String!
+  orderId: String!
+  phone: String!
+  postalCode: String!
+  province: String!
+  tumbon: String
 }
 
 input UpdateOrderStatusInput {
@@ -2379,6 +2505,12 @@ enum VariantRemovalBlockReason {
   HAS_ORDERS
 }
 
+enum VariantRemovalDisposition {
+  CLEAR_CART_AND_DELETE
+  DELETE
+  RETIRE
+}
+
 type VendorAuthPayload {
   tokens: AuthTokens!
   user: UserProfile!
@@ -2446,6 +2578,17 @@ type VendorInvitationType {
 input VendorLoginInput {
   email: String!
   password: String!
+}
+
+type VendorOrderConnection {
+  actionableCount: Int!
+  items: [OrderType!]!
+  pagination: PaginationMeta!
+}
+
+enum VendorOrderQueueFilter {
+  ACTION
+  ALL
 }
 
 type VendorPublishableProductIdsType {

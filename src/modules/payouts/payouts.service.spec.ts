@@ -9,6 +9,7 @@ import { PaymentMethod } from '../../database/entities/order.entity';
 import { Store, BankAccountVerificationStatus } from '../../database/entities/store.entity';
 import { OrderItem } from '../../database/entities/order-item.entity';
 import { NotificationsService } from '../notifications/notifications.service';
+import { DashboardEventsService } from '../dashboard-events/dashboard-events.service';
 import * as payoutCommissionCalculator from './payout-commission.calculator';
 
 function createQueryBuilderMock(result: Record<string, string>) {
@@ -39,6 +40,7 @@ describe('PayoutsService', () => {
     save: jest.fn(async (x) => ({ ...x, id: 'payout-1', createdAt: new Date('2026-07-01') })),
     find: jest.fn(),
     findOne: jest.fn(),
+    findAndCount: jest.fn(),
     createQueryBuilder: jest.fn(),
   };
   const storeRepo = {
@@ -82,6 +84,9 @@ describe('PayoutsService', () => {
   };
   const notificationsService = {
     notifyAdminsAboutManualPayoutRequest: jest.fn().mockResolvedValue(null),
+  };
+  const dashboardEventsService = {
+    publish: jest.fn().mockResolvedValue(undefined),
   };
   const configService = {
     get: jest.fn((key: string): number | Date | undefined => {
@@ -238,10 +243,15 @@ describe('PayoutsService', () => {
         { provide: DataSource, useValue: dataSource },
         { provide: ConfigService, useValue: configService },
         { provide: NotificationsService, useValue: notificationsService },
+        {
+          provide: DashboardEventsService,
+          useValue: dashboardEventsService,
+        },
       ],
     }).compile();
 
     service = module.get(PayoutsService);
+    dashboardEventsService.publish.mockClear();
   });
 
   it('creates manual payout for existing store', async () => {
@@ -271,10 +281,25 @@ describe('PayoutsService', () => {
   });
 
   it('lists payouts by store', async () => {
-    payoutRepo.find.mockResolvedValue([{ id: 'payout-1' }]);
+    payoutRepo.findAndCount.mockResolvedValue([[{ id: 'payout-1' }], 1]);
 
     const payouts = await service.findByStore('store-1');
-    expect(payouts).toHaveLength(1);
+    expect(payouts.items).toHaveLength(1);
+    expect(payouts.pagination).toEqual({ page: 1, limit: 20, total: 1, totalPages: 1 });
+    expect(payoutRepo.findAndCount).toHaveBeenCalledWith(
+      expect.objectContaining({ skip: 0, take: 20 }),
+    );
+  });
+
+  it('caps store payout page size at 100', async () => {
+    payoutRepo.findAndCount.mockResolvedValue([[], 0]);
+
+    const payouts = await service.findByStore('store-1', { page: 0, limit: 500 });
+
+    expect(payouts.pagination).toEqual({ page: 1, limit: 100, total: 0, totalPages: 1 });
+    expect(payoutRepo.findAndCount).toHaveBeenCalledWith(
+      expect.objectContaining({ skip: 0, take: 100 }),
+    );
   });
 
   it('calculates payout summary with available balance', async () => {
@@ -634,6 +659,13 @@ describe('PayoutsService', () => {
         status: PayoutStatus.PENDING,
         processedBy: 'vendor-1',
         notes: 'Vendor requested payout',
+      }),
+    );
+    expect(dashboardEventsService.publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'PAYOUT',
+        storeId: 'store-1',
+        roles: ['admin'],
       }),
     );
     expect(requested.status).toBe(PayoutStatus.PENDING);

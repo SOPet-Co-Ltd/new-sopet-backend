@@ -36,6 +36,7 @@ import { ApiKeysModule } from '../modules/api-keys/api-keys.module';
 import { SearchModule } from '../modules/search/search.module';
 import { AuditLogsModule } from '../modules/audit-logs/audit-logs.module';
 import { OrderAuditLogsModule } from '../modules/order-audit-logs/order-audit-logs.module';
+import { DashboardEventsModule } from '../modules/dashboard-events/dashboard-events.module';
 import { GraphqlLoadersModule } from './loaders/graphql-loaders.module';
 import { GraphqlContextFactory } from './loaders/graphql-context.factory';
 
@@ -188,6 +189,7 @@ const GRAPHQL_MAX_COMPLEXITY = 1000;
     SearchModule,
     AuditLogsModule,
     OrderAuditLogsModule,
+    DashboardEventsModule,
   ],
   providers: [AppGraphqlResolver],
 })

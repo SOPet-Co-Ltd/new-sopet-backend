@@ -8,15 +8,14 @@ import { StoreRequestStatus } from '../../database/entities/store-request.entity
 import { Customer } from '../../database/entities/customer.entity';
 import { Product } from '../../database/entities/product.entity';
 import { StoreRequest } from '../../database/entities/store-request.entity';
-
 describe('AnalyticsService', () => {
   let service: AnalyticsService;
 
   const orderRepository = { createQueryBuilder: jest.fn() };
   const orderItemRepository = { createQueryBuilder: jest.fn() };
-  const storeRepository = { count: jest.fn() };
+  const storeRepository = { count: jest.fn(), findOne: jest.fn() };
   const storeRequestRepository = { count: jest.fn() };
-  const customerRepository = { count: jest.fn() };
+  const customerRepository = { count: jest.fn(), findOne: jest.fn() };
   const productRepository = { count: jest.fn() };
 
   const createOrderItemQb = (raw: Record<string, string>) => ({

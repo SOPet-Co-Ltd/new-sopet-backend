@@ -56,4 +56,32 @@ describe('CustomerRepository', () => {
       isVerified: true,
     });
   });
+
+  describe('setEmailIfMissing', () => {
+    it('sets email when the customer has none', async () => {
+      repository.findOne.mockResolvedValue({ id: 'cust-1', email: null });
+
+      const wrote = await customerRepository.setEmailIfMissing('cust-1', '  new@example.com  ');
+
+      expect(wrote).toBe(true);
+      expect(repository.update).toHaveBeenCalledWith('cust-1', { email: 'new@example.com' });
+    });
+
+    it('does nothing when the customer already has an email', async () => {
+      repository.findOne.mockResolvedValue({ id: 'cust-1', email: 'old@example.com' });
+
+      const wrote = await customerRepository.setEmailIfMissing('cust-1', 'new@example.com');
+
+      expect(wrote).toBe(false);
+      expect(repository.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects invalid email values', async () => {
+      const wrote = await customerRepository.setEmailIfMissing('cust-1', 'not-an-email');
+
+      expect(wrote).toBe(false);
+      expect(repository.findOne).not.toHaveBeenCalled();
+      expect(repository.update).not.toHaveBeenCalled();
+    });
+  });
 });

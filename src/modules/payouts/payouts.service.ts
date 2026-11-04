@@ -2,6 +2,12 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from '@nes
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
+import { PaginatedResponse } from '../../common/interfaces';
+import {
+  buildAdminListPagination,
+  normalizeAdminListLimit,
+  normalizeAdminListPage,
+} from '../../common/utils/admin-list-pagination.util';
 import { Payout, PayoutSettlementRail, PayoutStatus } from '../../database/entities/payout.entity';
 import { FulfillmentStatus, OrderItem } from '../../database/entities/order-item.entity';
 import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
@@ -11,6 +17,8 @@ import { Promotion, PromotionScope } from '../../database/entities/promotion.ent
 import { PromotionUsage } from '../../database/entities/promotion-usage.entity';
 import { OrderStoreShipping } from '../../database/entities/order-store-shipping.entity';
 import { NotificationsService } from '../notifications/notifications.service';
+import { DashboardEventsService } from '../dashboard-events/dashboard-events.service';
+import { DashboardActivityKind } from '../dashboard-events/dashboard-activity.constants';
 import { DEFAULT_COMMISSION_RATE_PERCENT } from '../../config/commission.config';
 import {
   commissionSatang,
@@ -60,13 +68,25 @@ export class PayoutsService {
     private readonly dataSource: DataSource,
     private readonly configService: ConfigService,
     private readonly notificationsService: NotificationsService,
+    private readonly dashboardEventsService: DashboardEventsService,
   ) {}
 
-  async findByStore(storeId: string): Promise<Payout[]> {
-    return this.payoutRepository.find({
+  async findByStore(
+    storeId: string,
+    params: { page?: number; limit?: number } = {},
+  ): Promise<PaginatedResponse<Payout>> {
+    const page = normalizeAdminListPage(params.page);
+    const limit = normalizeAdminListLimit(params.limit);
+    const [items, total] = await this.payoutRepository.findAndCount({
       where: { storeId },
       order: { createdAt: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
     });
+    return {
+      items,
+      pagination: buildAdminListPagination(page, limit, total),
+    };
   }
 
   async findPendingManualPayouts(params: { page?: number; limit?: number }): Promise<{
@@ -193,6 +213,14 @@ export class PayoutsService {
       );
     }
 
+    void this.dashboardEventsService.publish({
+      kind: DashboardActivityKind.PAYOUT,
+      entityId: payout.id,
+      storeId,
+      userIds: store.ownerId ? [store.ownerId] : undefined,
+      roles: ['admin'],
+    });
+
     return payout;
   }
 
@@ -248,7 +276,7 @@ export class PayoutsService {
     const pending = await this.resolvePendingManualPayout(storeId, options.payoutId);
     const now = new Date();
 
-    return this.dataSource.transaction(async (manager) => {
+    const payout = await this.dataSource.transaction(async (manager) => {
       await this.lockStoreRowForPayout(manager, storeId);
 
       const locked = await manager
@@ -276,6 +304,16 @@ export class PayoutsService {
       locked.notes = options.notes ?? locked.notes ?? 'Admin approved manual payout after transfer';
       return manager.getRepository(Payout).save(locked);
     });
+
+    void this.dashboardEventsService.publish({
+      kind: DashboardActivityKind.PAYOUT,
+      entityId: payout.id,
+      storeId,
+      userIds: store.ownerId ? [store.ownerId] : undefined,
+      roles: ['admin'],
+    });
+
+    return payout;
   }
 
   /**
@@ -293,7 +331,7 @@ export class PayoutsService {
     const pending = await this.resolvePendingManualPayout(storeId, options.payoutId);
     const now = new Date();
 
-    return this.dataSource.transaction(async (manager) => {
+    const payout = await this.dataSource.transaction(async (manager) => {
       await this.lockStoreRowForPayout(manager, storeId);
 
       const locked = await manager
@@ -322,6 +360,16 @@ export class PayoutsService {
       locked.notes = options.notes ?? locked.notes;
       return manager.getRepository(Payout).save(locked);
     });
+
+    void this.dashboardEventsService.publish({
+      kind: DashboardActivityKind.PAYOUT,
+      entityId: payout.id,
+      storeId,
+      userIds: store.ownerId ? [store.ownerId] : undefined,
+      roles: ['admin'],
+    });
+
+    return payout;
   }
 
   private async resolvePendingManualPayout(storeId: string, payoutId?: string): Promise<Payout> {

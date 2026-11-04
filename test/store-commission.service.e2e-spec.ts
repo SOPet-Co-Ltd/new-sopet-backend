@@ -35,6 +35,7 @@ import { RolesGuard } from '../src/modules/auth/guards/roles.guard';
 import { JwtStrategy } from '../src/modules/auth/strategies/jwt.strategy';
 import { AuditLogsService } from '../src/modules/audit-logs/audit-logs.service';
 import { NotificationsService } from '../src/modules/notifications/notifications.service';
+import { DashboardEventsService } from '../src/modules/dashboard-events/dashboard-events.service';
 import { StorageService } from '../src/modules/storage/storage.service';
 import { StoreSuspensionHoldService } from '../src/modules/orders/store-suspension-hold.service';
 import { EmailDeliveryService } from '../src/modules/email/email-delivery.service';
@@ -216,6 +217,10 @@ describe('store commission service-integration-e2e harness', () => {
         {
           provide: NotificationsService,
           useValue: { notifyAdminsAboutManualPayoutRequest: jest.fn() },
+        },
+        {
+          provide: DashboardEventsService,
+          useValue: { publish: jest.fn().mockResolvedValue(undefined) },
         },
         { provide: StorageService, useValue: {} },
         {

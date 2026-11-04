@@ -181,6 +181,36 @@ describe('NotificationsService', () => {
       expect(userNotificationRepo.create).not.toHaveBeenCalled();
       expect(emailDeliveryService.sendOrderPaid).not.toHaveBeenCalled();
     });
+
+    it('prefers checkout guestEmail over account email for paid emails', async () => {
+      mockNoDedupeHit();
+      const order = {
+        id: 'order-4',
+        orderNumber: 'ORD-004',
+        customerId: 'cust-1',
+        guestEmail: 'checkout@example.com',
+        paymentMethod: 'promptpay',
+        subtotal: 100,
+        discountAmount: 0,
+        shippingFee: 0,
+        total: 100,
+        createdAt: new Date(),
+        paidAt: new Date(),
+        items: [],
+      } as unknown as Order;
+      customerRepo.findOne.mockResolvedValue({
+        id: 'cust-1',
+        email: 'account@example.com',
+        fullName: 'Buyer',
+      });
+
+      await service.notifyOrderPaid(order);
+
+      expect(emailDeliveryService.sendOrderPaid).toHaveBeenCalledWith(
+        'checkout@example.com',
+        expect.objectContaining({ orderNumber: 'ORD-004' }),
+      );
+    });
   });
 
   describe('notifyOrderStatusChanged', () => {
@@ -245,6 +275,26 @@ describe('NotificationsService', () => {
         expect.objectContaining({
           orderUrl: 'https://store.example.com/track/ORD-GUEST-1',
         }),
+      );
+    });
+
+    it('prefers checkout guestEmail over account email for status updates', async () => {
+      mockNoDedupeHit();
+      const order = {
+        id: 'order-1',
+        orderNumber: 'ORD-001',
+        customerId: 'cust-1',
+        guestEmail: 'checkout@example.com',
+        createdAt: new Date('2025-07-11T12:00:00.000Z'),
+        items: [],
+      } as unknown as Order;
+      customerRepo.findOne.mockResolvedValue({ id: 'cust-1', email: 'account@example.com' });
+
+      await service.notifyOrderStatusChanged(order, 'shipped');
+
+      expect(emailDeliveryService.sendOrderStatusChanged).toHaveBeenCalledWith(
+        'checkout@example.com',
+        expect.objectContaining({ orderNumber: 'ORD-001' }),
       );
     });
 
@@ -323,7 +373,10 @@ describe('NotificationsService', () => {
       const qb = {
         where: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
         getMany: jest.fn().mockResolvedValue(notifications),
       };
       userNotificationRepo.createQueryBuilder.mockReturnValue(qb);
@@ -334,6 +387,8 @@ describe('NotificationsService', () => {
         userId: 'user-1',
       });
       expect(qb.andWhere).not.toHaveBeenCalled();
+      expect(qb.skip).toHaveBeenCalledWith(0);
+      expect(qb.take).toHaveBeenCalledWith(50);
       expect(result).toEqual(notifications);
     });
 
@@ -342,7 +397,10 @@ describe('NotificationsService', () => {
       const qb = {
         where: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
         getMany: jest.fn().mockResolvedValue(notifications),
       };
       userNotificationRepo.createQueryBuilder.mockReturnValue(qb);
@@ -351,6 +409,24 @@ describe('NotificationsService', () => {
 
       expect(qb.andWhere).toHaveBeenCalledWith('notification.is_read = false');
       expect(result).toEqual(notifications);
+    });
+
+    it('caps limit at 100', async () => {
+      const qb = {
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+      };
+      userNotificationRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.findByUser('user-1', false, 3, 500);
+
+      expect(qb.skip).toHaveBeenCalledWith(200);
+      expect(qb.take).toHaveBeenCalledWith(100);
     });
   });
 

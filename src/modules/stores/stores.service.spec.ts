@@ -12,11 +12,13 @@ describe('StoresService', () => {
     findOne: jest.Mock;
     create: jest.Mock;
     save: jest.Mock;
+    createQueryBuilder: jest.Mock;
   };
   let userRepository: {
     findOne: jest.Mock;
     create: jest.Mock;
     save: jest.Mock;
+    createQueryBuilder: jest.Mock;
   };
   let storeMemberRepository: {
     findOne: jest.Mock;
@@ -49,11 +51,13 @@ describe('StoresService', () => {
       findOne: jest.fn().mockResolvedValue(null),
       create: jest.fn((data) => data),
       save: jest.fn(async (data) => ({ ...data, id: 'store-1' })),
+      createQueryBuilder: jest.fn(),
     };
     userRepository = {
       findOne: jest.fn(),
       create: jest.fn((data) => data),
       save: jest.fn(async (data) => ({ ...data, id: 'user-1' })),
+      createQueryBuilder: jest.fn(),
     };
     storeMemberRepository = {
       findOne: jest.fn().mockResolvedValue(null),
@@ -96,6 +100,7 @@ describe('StoresService', () => {
       {
         notifyVendorAboutStoreStatus: jest.fn().mockResolvedValue(undefined),
       } as never,
+      { publish: jest.fn().mockResolvedValue(undefined) } as never,
       {
         deleteObject: jest.fn(),
       } as never,
@@ -375,6 +380,36 @@ describe('StoresService', () => {
     });
 
     expect(store.name).toBe('New Name');
+  });
+
+  it('clears optional contact fields when null is sent', async () => {
+    const store = {
+      id: 'store-1',
+      ownerId: 'owner-1',
+      owner: { id: 'owner-1' },
+      name: 'Shop',
+      description: 'About',
+      contactPhone: '0812345678',
+      contactEmail: 'shop@example.com',
+      address: 'Bangkok',
+      status: StoreStatus.APPROVED,
+      commissionRate: null,
+    };
+    storeRepository.findOne.mockResolvedValueOnce(store).mockResolvedValueOnce(store);
+    storeRepository.save.mockImplementation(async (saved) => saved);
+
+    await service.updateAsAdmin({
+      id: 'store-1',
+      description: null,
+      contactPhone: null,
+      contactEmail: null,
+      address: null,
+    });
+
+    expect(store.description).toBeNull();
+    expect(store.contactPhone).toBeNull();
+    expect(store.contactEmail).toBeNull();
+    expect(store.address).toBeNull();
   });
 
   it('rejects clearing store owner', async () => {
@@ -711,6 +746,52 @@ describe('StoresService', () => {
 
       expect(emailDeliveryService.sendVendorAccountSuspended).not.toHaveBeenCalled();
     });
+
+    it('clears emailVerified when vendor email changes', async () => {
+      userRepository.findOne
+        .mockResolvedValueOnce({
+          id: 'vendor-1',
+          email: 'old@test.com',
+          fullName: 'Vendor One',
+          isActive: true,
+          emailVerified: true,
+          role: UserRole.VENDOR,
+          ownedStores: [],
+        })
+        .mockResolvedValueOnce(null);
+      userRepository.save.mockImplementation(async (data) => data);
+
+      const result = await service.updateVendorAsAdmin({
+        id: 'vendor-1',
+        email: 'new@test.com',
+      });
+
+      expect(result.email).toBe('new@test.com');
+      expect(result.emailVerified).toBe(false);
+    });
+
+    it('keeps emailVerified when email is unchanged', async () => {
+      userRepository.findOne
+        .mockResolvedValueOnce({
+          id: 'vendor-1',
+          email: 'vendor@test.com',
+          fullName: 'Vendor One',
+          isActive: true,
+          emailVerified: true,
+          role: UserRole.VENDOR,
+          ownedStores: [],
+        })
+        .mockResolvedValueOnce({ id: 'vendor-1', email: 'vendor@test.com' });
+      userRepository.save.mockImplementation(async (data) => data);
+
+      const result = await service.updateVendorAsAdmin({
+        id: 'vendor-1',
+        email: 'vendor@test.com',
+        fullName: 'Renamed',
+      });
+
+      expect(result.emailVerified).toBe(true);
+    });
   });
 
   describe('getVendorInsightsForAdmin', () => {
@@ -933,6 +1014,76 @@ describe('StoresService', () => {
         BadRequestException,
       );
       expect(storeRepository.save).not.toHaveBeenCalled();
+    });
+  });
+
+  it('paginates admin stores without loading products', async () => {
+    const qb = {
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      skip: jest.fn().mockReturnThis(),
+      take: jest.fn().mockReturnThis(),
+      getManyAndCount: jest.fn().mockResolvedValue([[{ id: 'store-1' }], 1]),
+    };
+    storeRepository.createQueryBuilder.mockReturnValue(qb);
+
+    const result = await service.findAllForAdmin({ page: 2, limit: 500, sort: 'name:asc' });
+
+    expect(qb.leftJoinAndSelect).toHaveBeenCalledTimes(1);
+    expect(qb.leftJoinAndSelect).toHaveBeenCalledWith('store.owner', 'owner');
+    expect(qb.skip).toHaveBeenCalledWith(100);
+    expect(qb.take).toHaveBeenCalledWith(100);
+    expect(result.pagination).toEqual({ page: 2, limit: 100, total: 1, totalPages: 1 });
+  });
+
+  it('rejects an unknown admin store status filter', async () => {
+    await expect(service.findAllForAdmin({ status: 'archived' })).rejects.toMatchObject({
+      response: { code: 'INVALID_STORE_STATUS' },
+    });
+    expect(storeRepository.createQueryBuilder).not.toHaveBeenCalled();
+  });
+
+  it('paginates admin vendors with a store count and no nested stores', async () => {
+    const countQb = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getCount: jest.fn().mockResolvedValue(3),
+    };
+    const listQb = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      skip: jest.fn().mockReturnThis(),
+      take: jest.fn().mockReturnThis(),
+      getRawAndEntities: jest.fn().mockResolvedValue({
+        entities: [{ id: 'vendor-1' }],
+        raw: [{ store_count: 4 }],
+      }),
+    };
+    userRepository.createQueryBuilder.mockReturnValueOnce(countQb).mockReturnValueOnce(listQb);
+
+    const result = await service.findVendors({ status: 'active', sort: 'storeCount:desc' });
+
+    expect(countQb.where).toHaveBeenCalled();
+    expect(listQb.addSelect).toHaveBeenCalled();
+    expect(listQb.orderBy).toHaveBeenCalledWith('store_count', 'DESC');
+    expect(result.items).toEqual([{ user: { id: 'vendor-1' }, storeCount: 4 }]);
+    expect(result.pagination).toEqual({ page: 1, limit: 20, total: 3, totalPages: 1 });
+  });
+
+  describe('assertStoreAccess', () => {
+    it('rejects empty or non-uuid store ids before querying', async () => {
+      await expect(service.assertStoreAccess('user-1', '')).rejects.toMatchObject({
+        response: { code: 'INVALID_STORE_ID' },
+      });
+      await expect(service.assertStoreAccess('user-1', 'not-a-uuid')).rejects.toMatchObject({
+        response: { code: 'INVALID_STORE_ID' },
+      });
+      expect(storeRepository.findOne).not.toHaveBeenCalled();
     });
   });
 });

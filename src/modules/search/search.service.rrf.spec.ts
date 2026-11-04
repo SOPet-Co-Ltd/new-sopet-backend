@@ -47,6 +47,7 @@ describe('SearchService RRF path', () => {
 
   const productRepository = {
     createQueryBuilder: jest.fn(),
+    find: jest.fn(),
   };
 
   const configService = {
@@ -80,13 +81,7 @@ describe('SearchService RRF path', () => {
     searchRepository.createPublicListingQuery.mockReturnValue(countQueryBuilder);
     searchRepository.applyListingFilters.mockImplementation(() => undefined);
 
-    const hydrateQueryBuilder = {
-      leftJoinAndSelect: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      orderBy: jest.fn().mockReturnThis(),
-      getMany: jest.fn().mockResolvedValue([{ id: 'p2' }, { id: 'p1' }]),
-    };
-    productRepository.createQueryBuilder.mockReturnValue(hydrateQueryBuilder);
+    productRepository.find.mockResolvedValue([{ id: 'p2' }, { id: 'p1' }]);
 
     const result = await service.searchProducts({
       search: 'cat food',
@@ -99,6 +94,7 @@ describe('SearchService RRF path', () => {
     expect(searchRepository.fetchTrigramLegIds).toHaveBeenCalled();
     expect(searchRepository.fetchSemanticLegIds).not.toHaveBeenCalled();
     expect(rrfEngine.merge).toHaveBeenCalled();
+    expect(productRepository.find).toHaveBeenCalled();
     expect(result.items).toHaveLength(2);
   });
 });

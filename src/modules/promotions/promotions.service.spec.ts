@@ -82,6 +82,7 @@ describe('PromotionsService', () => {
   let service: PromotionsService;
   let promotionRepository: {
     findOne: jest.Mock;
+    findAndCount: jest.Mock;
     createQueryBuilder: jest.Mock;
     create: jest.Mock;
     save: jest.Mock;
@@ -126,6 +127,7 @@ describe('PromotionsService', () => {
     };
     promotionRepository = {
       findOne: jest.fn().mockResolvedValue(mockPromotion),
+      findAndCount: jest.fn(),
       createQueryBuilder: jest.fn(),
       create: jest.fn(),
       save: jest.fn(),
@@ -184,6 +186,18 @@ describe('PromotionsService', () => {
       customerRepository as never,
       orderRepository as never,
     );
+  });
+
+  it('paginates platform promotions and caps the page size', async () => {
+    promotionRepository.findAndCount.mockResolvedValue([[mockPromotion], 1]);
+
+    const result = await service.findPlatform(1, 500);
+
+    expect(promotionRepository.findAndCount).toHaveBeenCalledWith(
+      expect.objectContaining({ skip: 0, take: 100 }),
+    );
+    expect(result.items).toEqual([mockPromotion]);
+    expect(result.pagination).toEqual({ page: 1, limit: 100, total: 1, totalPages: 1 });
   });
 
   it('validates a percentage promotion', async () => {

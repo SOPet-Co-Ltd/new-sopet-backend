@@ -1,3 +1,4 @@
+import { DashboardEventsService } from '../../src/modules/dashboard-events/dashboard-events.service';
 import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -81,6 +82,10 @@ export const searchTaxonomyGraphqlMockProviders = [
       notifyTaxonomyProposal: jest.fn(),
       notifyStoreStatusChanged: jest.fn(),
     },
+  },
+  {
+    provide: DashboardEventsService,
+    useValue: { publish: jest.fn().mockResolvedValue(undefined) },
   },
   {
     provide: StorageService,

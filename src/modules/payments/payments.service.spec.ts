@@ -12,6 +12,7 @@ import { FulfillmentStatus, OrderItem } from '../../database/entities/order-item
 import { Customer } from '../../database/entities/customer.entity';
 import { SavedPaymentMethod } from '../../database/entities/saved-payment-method.entity';
 import { NotificationsService } from '../notifications/notifications.service';
+import { DashboardEventsService } from '../dashboard-events/dashboard-events.service';
 import { PaymentEventsService } from './payment-events.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { PayoutsService } from '../payouts/payouts.service';
@@ -130,6 +131,10 @@ describe('PaymentsService guest access', () => {
         {
           provide: NotificationsService,
           useValue: { notifyOrderPaid: jest.fn() },
+        },
+        {
+          provide: DashboardEventsService,
+          useValue: { publish: jest.fn().mockResolvedValue(undefined) },
         },
         {
           provide: PaymentEventsService,
@@ -324,6 +329,10 @@ describe('PaymentsService payment read queries', () => {
           useValue: { notifyOrderPaid: jest.fn() },
         },
         {
+          provide: DashboardEventsService,
+          useValue: { publish: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
           provide: PaymentEventsService,
           useValue: paymentEventsServiceMock,
         },
@@ -499,6 +508,10 @@ describe('PaymentsService createCharge return_uri', () => {
         {
           provide: NotificationsService,
           useValue: { notifyOrderPaid: jest.fn() },
+        },
+        {
+          provide: DashboardEventsService,
+          useValue: { publish: jest.fn().mockResolvedValue(undefined) },
         },
         {
           provide: PaymentEventsService,
@@ -907,6 +920,10 @@ describe('PaymentsService handleBeamWebhook UD-001 fail', () => {
           useValue: { notifyOrderPaid: jest.fn() },
         },
         {
+          provide: DashboardEventsService,
+          useValue: { publish: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
           provide: PaymentEventsService,
           useValue: paymentEventsServiceMock,
         },
@@ -1183,6 +1200,10 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
         {
           provide: NotificationsService,
           useValue: { notifyOrderPaid: jest.fn() },
+        },
+        {
+          provide: DashboardEventsService,
+          useValue: { publish: jest.fn().mockResolvedValue(undefined) },
         },
         {
           provide: PaymentEventsService,
@@ -1627,6 +1648,10 @@ describe('PaymentsService cancelStaleUnpaidOrders (AC-019–021)', () => {
           provide: NotificationsService,
           useValue: { notifyOrderPaid: jest.fn() },
         },
+        {
+          provide: DashboardEventsService,
+          useValue: { publish: jest.fn().mockResolvedValue(undefined) },
+        },
         { provide: PaymentEventsService, useValue: paymentEventsServiceMock },
         { provide: InventoryService, useValue: inventoryService },
         { provide: PayoutsService, useValue: payoutsServiceMock },
@@ -2037,6 +2062,10 @@ describe('PaymentsService payment held gate + Decision #16 recompute (AC-026–0
           },
         },
         { provide: NotificationsService, useValue: { notifyOrderPaid: jest.fn() } },
+        {
+          provide: DashboardEventsService,
+          useValue: { publish: jest.fn().mockResolvedValue(undefined) },
+        },
         { provide: PaymentEventsService, useValue: paymentEventsServiceMock },
         { provide: InventoryService, useValue: { restoreOrderStock: jest.fn() } },
         { provide: PayoutsService, useValue: payoutsServiceMock },
@@ -2246,6 +2275,10 @@ describe('PaymentsService handleBeamWebhook', () => {
         { provide: getRepositoryToken(SavedPaymentMethod), useValue: { findOne: jest.fn() } },
         { provide: ConfigService, useValue: { get: jest.fn(() => '') } },
         { provide: NotificationsService, useValue: { notifyOrderPaid: jest.fn() } },
+        {
+          provide: DashboardEventsService,
+          useValue: { publish: jest.fn().mockResolvedValue(undefined) },
+        },
         { provide: PaymentEventsService, useValue: paymentEventsServiceMock },
         { provide: InventoryService, useValue: { restoreOrderStock: jest.fn() } },
         { provide: PayoutsService, useValue: payoutsServiceMock },

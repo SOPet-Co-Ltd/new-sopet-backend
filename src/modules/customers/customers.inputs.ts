@@ -1,5 +1,13 @@
 import { Field, InputType } from '@nestjs/graphql';
-import { IsEmail, IsOptional, IsPhoneNumber, IsString, IsUUID, Length } from 'class-validator';
+import {
+  IsEmail,
+  IsOptional,
+  IsPhoneNumber,
+  IsString,
+  IsUUID,
+  Length,
+  ValidateIf,
+} from 'class-validator';
 
 @InputType()
 export class UpdateCustomerAsAdminInput {
@@ -7,24 +15,27 @@ export class UpdateCustomerAsAdminInput {
   @IsUUID()
   id!: string;
 
-  @Field({ nullable: true })
+  @Field(() => String, { nullable: true })
   @IsOptional()
+  @ValidateIf((_, value) => value !== null)
   @IsString()
   @Length(1, 255)
-  fullName?: string;
+  fullName?: string | null;
 
-  @Field({ nullable: true })
+  @Field(() => String, { nullable: true })
   @IsOptional()
+  @ValidateIf((_, value) => value !== null)
   @IsEmail()
-  email?: string;
+  email?: string | null;
 
   @Field({ nullable: true })
   @IsOptional()
   @IsPhoneNumber('TH')
   phone?: string;
 
-  @Field({ nullable: true })
+  @Field(() => String, { nullable: true })
   @IsOptional()
+  @ValidateIf((_, value) => value !== null)
   @IsString()
-  dateOfBirth?: string;
+  dateOfBirth?: string | null;
 }

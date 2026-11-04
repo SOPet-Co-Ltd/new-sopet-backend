@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { DashboardEventsModule } from '../dashboard-events/dashboard-events.module';
 import { StorageModule } from '../storage/storage.module';
 import { OrdersModule } from '../orders/orders.module';
 import { StoresService } from './stores.service';
@@ -30,6 +31,7 @@ import { StoresResolver } from './stores.resolver';
   imports: [
     forwardRef(() => AuthModule),
     NotificationsModule,
+    DashboardEventsModule,
     StorageModule,
     forwardRef(() => OrdersModule),
     TypeOrmModule.forFeature([

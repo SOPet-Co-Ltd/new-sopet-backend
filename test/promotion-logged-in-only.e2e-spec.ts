@@ -14,6 +14,7 @@ import { DataSource, Repository } from 'typeorm';
 import { OrdersService } from '../src/modules/orders/orders.service';
 import { PromotionsService } from '../src/modules/promotions/promotions.service';
 import { NotificationsService } from '../src/modules/notifications/notifications.service';
+import { DashboardEventsService } from '../src/modules/dashboard-events/dashboard-events.service';
 import { GuestOrderLinkService } from '../src/modules/orders/guest-order-link.service';
 import { CustomerRepository } from '../src/database/repositories/customer.repository';
 import { InventoryService } from '../src/modules/inventory/inventory.service';
@@ -121,6 +122,10 @@ describe('Promotion loggedInOnly createOrder (service-integration-e2e)', () => {
             notifyVendorAboutNewOrder: jest.fn(),
             notifyVendorsAboutOrderStatus: jest.fn(),
           },
+        },
+        {
+          provide: DashboardEventsService,
+          useValue: { publish: jest.fn().mockResolvedValue(undefined) },
         },
         { provide: GuestOrderLinkService, useValue: { mergeGuestOrders: jest.fn() } },
         CustomerRepository,

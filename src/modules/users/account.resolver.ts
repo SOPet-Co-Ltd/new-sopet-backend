@@ -1,4 +1,4 @@
-import { Args, Field, InputType, Mutation, Query, Resolver } from '@nestjs/graphql';
+import { Args, Field, InputType, Int, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { UseGuards } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { FavoritesService } from './favorites.service';
@@ -165,8 +165,12 @@ export class AccountResolver {
   @Query(() => [FavoriteType])
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('customer')
-  async favorites(@CurrentUser('id') customerId: string): Promise<FavoriteType[]> {
-    const favorites = await this.favoritesService.list(customerId);
+  async favorites(
+    @CurrentUser('id') customerId: string,
+    @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page = 1,
+    @Args('limit', { type: () => Int, nullable: true, defaultValue: 24 }) limit = 24,
+  ): Promise<FavoriteType[]> {
+    const favorites = await this.favoritesService.list(customerId, page, limit);
     return favorites.map((favorite) => ({
       id: favorite.id,
       productId: favorite.productId,

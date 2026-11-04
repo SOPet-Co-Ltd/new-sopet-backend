@@ -100,6 +100,7 @@ describe('Checkout flow (integration)', () => {
           notifyVendorsAboutNewOrder: jest.fn().mockResolvedValue(undefined),
           notifyVendorsAboutOrderStatus: jest.fn().mockResolvedValue(undefined),
         } as never,
+        { publish: jest.fn().mockResolvedValue(undefined) } as never,
         { applyStackedPromotions: jest.fn() } as never,
         { mergeGuestOrders: jest.fn() } as never,
         { findActiveByPhone: jest.fn().mockResolvedValue(null) } as never,

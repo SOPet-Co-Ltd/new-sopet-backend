@@ -29,6 +29,7 @@ import { PaymentsService } from '../src/modules/payments/payments.service';
 import { BeamService } from '../src/modules/beam/beam.service';
 import { PaymentEventsService } from '../src/modules/payments/payment-events.service';
 import { NotificationsService } from '../src/modules/notifications/notifications.service';
+import { DashboardEventsService } from '../src/modules/dashboard-events/dashboard-events.service';
 import { InventoryService } from '../src/modules/inventory/inventory.service';
 import { PayoutsService } from '../src/modules/payouts/payouts.service';
 import { StoresService } from '../src/modules/stores/stores.service';
@@ -155,6 +156,10 @@ describe('Unpaid order payment method switch (service-integration-e2e)', () => {
         {
           provide: NotificationsService,
           useValue: { notifyOrderPaid: jest.fn() },
+        },
+        {
+          provide: DashboardEventsService,
+          useValue: { publish: jest.fn().mockResolvedValue(undefined) },
         },
         {
           provide: PayoutsService,

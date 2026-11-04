@@ -179,10 +179,11 @@ export class UpdateStoreAsAdminInput {
   @IsUUID()
   ownerId?: string | null;
 
-  @Field({ nullable: true })
+  @Field(() => String, { nullable: true })
   @IsOptional()
+  @ValidateIf((_, value) => value !== null)
   @IsString()
-  description?: string;
+  description?: string | null;
 
   @Field({ nullable: true })
   @IsOptional()
@@ -194,20 +195,23 @@ export class UpdateStoreAsAdminInput {
   @IsString()
   bannerUrl?: string;
 
-  @Field({ nullable: true })
+  @Field(() => String, { nullable: true })
   @IsOptional()
+  @ValidateIf((_, value) => value !== null)
   @IsPhoneNumber('TH')
-  contactPhone?: string;
+  contactPhone?: string | null;
 
-  @Field({ nullable: true })
+  @Field(() => String, { nullable: true })
   @IsOptional()
+  @ValidateIf((_, value) => value !== null)
   @IsEmail()
-  contactEmail?: string;
+  contactEmail?: string | null;
 
-  @Field({ nullable: true })
+  @Field(() => String, { nullable: true })
   @IsOptional()
+  @ValidateIf((_, value) => value !== null)
   @IsString()
-  address?: string;
+  address?: string | null;
 
   @Field({ nullable: true })
   @IsOptional()

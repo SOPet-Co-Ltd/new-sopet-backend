@@ -9,12 +9,14 @@ import { ReviewsService } from './reviews.service';
 import { ReviewsResolver } from './reviews.resolver';
 import { StoresModule } from '../stores/stores.module';
 import { StorageModule } from '../storage/storage.module';
+import { DashboardEventsModule } from '../dashboard-events/dashboard-events.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Review, ReviewReply, ReviewImage, Order, Product]),
     StoresModule,
     StorageModule,
+    DashboardEventsModule,
   ],
   providers: [ReviewsService, ReviewsResolver],
   exports: [ReviewsService],

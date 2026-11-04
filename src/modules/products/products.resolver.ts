@@ -695,6 +695,8 @@ export class ProductsResolver {
         optionsJson: entry.optionsJson,
         optionKey: entry.optionKey,
         reasons: entry.reasons,
+        disposition: entry.disposition,
+        openCartCount: entry.openCartCount,
       })),
     };
     return mapped;

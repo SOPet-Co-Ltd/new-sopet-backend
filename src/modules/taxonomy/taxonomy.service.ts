@@ -17,6 +17,8 @@ import { UserRole } from '../../database/entities/user.entity';
 import { generateSlug } from '../../common/utils/slug.util';
 import { StorageService } from '../storage/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { DashboardEventsService } from '../dashboard-events/dashboard-events.service';
+import { DashboardActivityKind } from '../dashboard-events/dashboard-activity.constants';
 import { SearchEmbeddingQueueService } from '../search/embedding/search-embedding-queue.service';
 import { DeleteTaxonomyResult, TaxonomyDeleteImpact } from './taxonomy-delete.types';
 
@@ -38,8 +40,18 @@ export class TaxonomyService {
     private readonly dataSource: DataSource,
     private readonly storageService: StorageService,
     private readonly notificationsService: NotificationsService,
+    private readonly dashboardEventsService: DashboardEventsService,
     @Optional() private readonly searchEmbeddingQueueService?: SearchEmbeddingQueueService,
   ) {}
+
+  private publishTaxonomyActivity(entityId: string, createdBy?: string | null): void {
+    void this.dashboardEventsService.publish({
+      kind: DashboardActivityKind.TAXONOMY,
+      entityId,
+      userIds: createdBy ? [createdBy] : undefined,
+      roles: ['admin'],
+    });
+  }
 
   private async ensureUniqueSlug(
     repository: TaxonomyRepository,
@@ -232,7 +244,9 @@ export class TaxonomyService {
     });
 
     try {
-      return await this.categoryRepository.save(category);
+      const saved = await this.categoryRepository.save(category);
+      this.publishTaxonomyActivity(saved.id, createdBy);
+      return saved;
     } catch (error) {
       if (this.isUniqueViolation(error)) {
         throw this.duplicateNameError('หมวดหมู่');
@@ -254,7 +268,9 @@ export class TaxonomyService {
     });
 
     try {
-      return await this.tagRepository.save(tag);
+      const saved = await this.tagRepository.save(tag);
+      this.publishTaxonomyActivity(saved.id, createdBy);
+      return saved;
     } catch (error) {
       if (this.isUniqueViolation(error)) {
         throw this.duplicateNameError('แท็ก');
@@ -465,7 +481,9 @@ export class TaxonomyService {
     }
 
     category.approvalStatus = approvalStatus;
-    return this.categoryRepository.save(category);
+    const saved = await this.categoryRepository.save(category);
+    this.publishTaxonomyActivity(saved.id, saved.createdBy);
+    return saved;
   }
 
   private async setTagStatus(id: string, approvalStatus: TaxonomyApprovalStatus): Promise<Tag> {
@@ -479,7 +497,9 @@ export class TaxonomyService {
     }
 
     tag.approvalStatus = approvalStatus;
-    return this.tagRepository.save(tag);
+    const saved = await this.tagRepository.save(tag);
+    this.publishTaxonomyActivity(saved.id, saved.createdBy);
+    return saved;
   }
 
   async getApprovedCategory(id: string): Promise<Category> {
@@ -720,7 +740,9 @@ export class TaxonomyService {
     });
 
     try {
-      return await this.petTypeRepository.save(petType);
+      const saved = await this.petTypeRepository.save(petType);
+      this.publishTaxonomyActivity(saved.id, createdBy);
+      return saved;
     } catch (error) {
       if (this.isUniqueViolation(error)) {
         throw this.duplicateNameError('ประเภทสัตว์เลี้ยง');
@@ -742,7 +764,9 @@ export class TaxonomyService {
     });
 
     try {
-      return await this.brandRepository.save(brand);
+      const saved = await this.brandRepository.save(brand);
+      this.publishTaxonomyActivity(saved.id, createdBy);
+      return saved;
     } catch (error) {
       if (this.isUniqueViolation(error)) {
         throw this.duplicateNameError('แบรนด์');
@@ -918,7 +942,9 @@ export class TaxonomyService {
     }
 
     petType.approvalStatus = approvalStatus;
-    return this.petTypeRepository.save(petType);
+    const saved = await this.petTypeRepository.save(petType);
+    this.publishTaxonomyActivity(saved.id, saved.createdBy);
+    return saved;
   }
 
   private async setBrandStatus(id: string, approvalStatus: TaxonomyApprovalStatus): Promise<Brand> {
@@ -932,7 +958,9 @@ export class TaxonomyService {
     }
 
     brand.approvalStatus = approvalStatus;
-    return this.brandRepository.save(brand);
+    const saved = await this.brandRepository.save(brand);
+    this.publishTaxonomyActivity(saved.id, saved.createdBy);
+    return saved;
   }
 
   async getApprovedPetType(id: string): Promise<PetType> {

@@ -7,6 +7,12 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, IsNull } from 'typeorm';
+import { PaginatedResponse } from '../../common/interfaces';
+import {
+  buildAdminListPagination,
+  normalizeAdminListLimit,
+  normalizeAdminListPage,
+} from '../../common/utils/admin-list-pagination.util';
 import { Promotion, PromotionScope, PromotionType } from '../../database/entities/promotion.entity';
 import { PromotionUsage } from '../../database/entities/promotion-usage.entity';
 import { Product } from '../../database/entities/product.entity';
@@ -136,11 +142,23 @@ export class PromotionsService {
     return qb.orderBy('promotion.priority', 'DESC').getMany();
   }
 
-  async findByStore(storeId: string): Promise<Promotion[]> {
-    return this.promotionRepository.find({
+  async findByStore(
+    storeId: string,
+    page?: number,
+    limit?: number,
+  ): Promise<PaginatedResponse<Promotion>> {
+    const safePage = normalizeAdminListPage(page);
+    const safeLimit = normalizeAdminListLimit(limit);
+    const [items, total] = await this.promotionRepository.findAndCount({
       where: { storeId, deletedAt: IsNull() },
       order: { priority: 'DESC', createdAt: 'DESC' },
+      skip: (safePage - 1) * safeLimit,
+      take: safeLimit,
     });
+    return {
+      items,
+      pagination: buildAdminListPagination(safePage, safeLimit, total),
+    };
   }
 
   async findActiveForStore(storeId: string): Promise<Promotion[]> {
@@ -159,11 +177,19 @@ export class PromotionsService {
       .getMany();
   }
 
-  async findPlatform(): Promise<Promotion[]> {
-    return this.promotionRepository.find({
+  async findPlatform(page?: number, limit?: number): Promise<PaginatedResponse<Promotion>> {
+    const safePage = normalizeAdminListPage(page);
+    const safeLimit = normalizeAdminListLimit(limit);
+    const [items, total] = await this.promotionRepository.findAndCount({
       where: { scope: PromotionScope.PLATFORM, deletedAt: IsNull() },
       order: { priority: 'DESC', createdAt: 'DESC' },
+      skip: (safePage - 1) * safeLimit,
+      take: safeLimit,
     });
+    return {
+      items,
+      pagination: buildAdminListPagination(safePage, safeLimit, total),
+    };
   }
 
   async findOne(id: string): Promise<Promotion> {

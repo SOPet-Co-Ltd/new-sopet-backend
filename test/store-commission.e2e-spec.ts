@@ -27,6 +27,7 @@ import { JwtAuthGuard } from '../src/modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../src/modules/auth/guards/roles.guard';
 import { AuditLogsService } from '../src/modules/audit-logs/audit-logs.service';
 import { NotificationsService } from '../src/modules/notifications/notifications.service';
+import { DashboardEventsService } from '../src/modules/dashboard-events/dashboard-events.service';
 import { StorageService } from '../src/modules/storage/storage.service';
 import { StoreSuspensionHoldService } from '../src/modules/orders/store-suspension-hold.service';
 import { EmailDeliveryService } from '../src/modules/email/email-delivery.service';
@@ -79,14 +80,19 @@ const TRIGGER_PAYOUT = `
 
 const ADMIN_STORE_PAYOUTS = `
   query AdminStorePayouts($storeId: String!) {
-    adminStorePayouts(storeId: $storeId) {
-      id
-      amount
-      netAmount
-      productSold
-      shippingFees
-      commissionAmount
-      commissionRate
+    adminStorePayouts(storeId: $storeId, page: 1, limit: 20) {
+      items {
+        id
+        amount
+        netAmount
+        productSold
+        shippingFees
+        commissionAmount
+        commissionRate
+      }
+      pagination {
+        total
+      }
     }
   }
 `;
@@ -202,6 +208,10 @@ describe('store commission — mixed-cutoff payout create [integration]', () => 
         {
           provide: NotificationsService,
           useValue: { notifyAdminsAboutManualPayoutRequest: jest.fn() },
+        },
+        {
+          provide: DashboardEventsService,
+          useValue: { publish: jest.fn().mockResolvedValue(undefined) },
         },
         { provide: StorageService, useValue: {} },
         {
@@ -502,7 +512,7 @@ describe('store commission — mixed-cutoff payout create [integration]', () => 
       .post('/graphql')
       .send({ query: ADMIN_STORE_PAYOUTS, variables: { storeId: omiseStore.id } })
       .expect(200);
-    expect(listRes.body.data.adminStorePayouts[0].amount).toBe(1410);
+    expect(listRes.body.data.adminStorePayouts.items[0].amount).toBe(1410);
 
     const manual = await payoutsService.requestManualPayout(
       manualStore.id,
@@ -603,6 +613,10 @@ describe('store commission — admin rate edit and snapshot immutability [integr
         {
           provide: NotificationsService,
           useValue: { notifyAdminsAboutManualPayoutRequest: jest.fn() },
+        },
+        {
+          provide: DashboardEventsService,
+          useValue: { publish: jest.fn().mockResolvedValue(undefined) },
         },
         { provide: StorageService, useValue: {} },
         {
@@ -917,6 +931,10 @@ describe('store commission — hold exclusion [integration]', () => {
         {
           provide: NotificationsService,
           useValue: { notifyAdminsAboutManualPayoutRequest: jest.fn() },
+        },
+        {
+          provide: DashboardEventsService,
+          useValue: { publish: jest.fn().mockResolvedValue(undefined) },
         },
       ],
     }).compile();

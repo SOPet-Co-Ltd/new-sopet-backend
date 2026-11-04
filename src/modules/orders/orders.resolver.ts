@@ -1,15 +1,23 @@
-import { Args, Int, Mutation, Query, Resolver } from '@nestjs/graphql';
-import { ForbiddenException, NotFoundException, UseGuards } from '@nestjs/common';
+import { Args, Context, Int, Mutation, Query, Resolver } from '@nestjs/graphql';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+  UseGuards,
+} from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { OrderFulfillmentService } from './order-fulfillment.service';
 import { PaymentsService } from '../payments/payments.service';
 import { ProductsService } from '../products/products.service';
 import { StoresService } from '../stores/stores.service';
 import {
+  AdminOrder,
+  AdminOrderConnection,
   OrderTrackingType,
   OrderType,
   ProductType,
   OrderConnection,
+  VendorOrderConnection,
 } from '../../graphql/models/types';
 import { mapProduct } from '../../graphql/models/mappers';
 import { mapOrder, mapOrderTracking } from './order.mapper';
@@ -20,16 +28,35 @@ import {
   ConfirmOrderDeliveredInput,
   CreateOrderInput,
   ShipVendorOrderInput,
+  UpdateOrderShippingAddressAsAdminInput,
   UpdateOrderStatusInput,
 } from './orders.inputs';
-import { OrderStatus } from '../../database/entities/order.entity';
+import { OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
 import { normalizeCheckoutPaymentMethod } from '../../common/utils/checkout-payment.util';
 import { CustomerOrderListFilter } from './order-list-filter.util';
+import { VendorOrderQueueFilter } from './vendor-order-action-queue.util';
+import type { AdminOrderRecord } from './orders.service';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constants';
+import { getAuditRequestContext } from '../audit-logs/audit-request-context';
+import { AuditActorType } from '../../database/entities/audit-log.entity';
+import type { GraphqlContext } from '../../graphql/loaders/graphql-context.types';
+
+function mapAdminOrder(record: AdminOrderRecord): AdminOrder {
+  const order = mapOrder(record.order);
+  order.guestPayToken = null;
+  return {
+    order,
+    stores: record.stores,
+    customer: record.customer,
+  };
+}
 
 @Resolver()
 export class OrdersResolver {
   constructor(
     private readonly ordersService: OrdersService,
+    private readonly auditLogsService: AuditLogsService,
     private readonly orderFulfillmentService: OrderFulfillmentService,
     private readonly paymentsService: PaymentsService,
     private readonly productsService: ProductsService,
@@ -118,17 +145,118 @@ export class OrdersResolver {
     return mapOrderTracking(order);
   }
 
-  @Query(() => [OrderType])
+  @Query(() => VendorOrderConnection)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('vendor')
   async vendorOrders(
     @Args('storeId') storeId: string,
     @CurrentUser('id') userId: string,
-  ): Promise<OrderType[]> {
+    @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page?: number,
+    @Args('limit', { type: () => Int, nullable: true, defaultValue: 20 }) limit?: number,
+    @Args('queue', {
+      type: () => VendorOrderQueueFilter,
+      nullable: true,
+      defaultValue: VendorOrderQueueFilter.ALL,
+    })
+    queue?: VendorOrderQueueFilter,
+    @Args('status', { type: () => String, nullable: true }) status?: string,
+    @Args('paymentMethod', { type: () => String, nullable: true }) paymentMethod?: string,
+    @Args('search', { type: () => String, nullable: true }) search?: string,
+  ): Promise<VendorOrderConnection> {
     await this.storesService.assertStoreAccess(userId, storeId);
 
-    const orders = await this.ordersService.findByStore(storeId);
-    return orders.map((order) => mapOrder(order, storeId));
+    let parsedStatus: OrderStatus | undefined;
+    if (status) {
+      const allowed = Object.values(OrderStatus) as string[];
+      if (!allowed.includes(status)) {
+        throw new BadRequestException({
+          code: 'INVALID_ORDER_STATUS',
+          message: 'Invalid order status filter',
+        });
+      }
+      parsedStatus = status as OrderStatus;
+    }
+
+    let parsedPayment: PaymentMethod | undefined;
+    if (paymentMethod) {
+      const allowed = Object.values(PaymentMethod) as string[];
+      if (!allowed.includes(paymentMethod)) {
+        throw new BadRequestException({
+          code: 'INVALID_PAYMENT_METHOD',
+          message: 'Invalid payment method filter',
+        });
+      }
+      parsedPayment = paymentMethod as PaymentMethod;
+    }
+
+    const result = await this.ordersService.findByStorePage(storeId, {
+      page,
+      limit,
+      queue,
+      status: parsedStatus,
+      paymentMethod: parsedPayment,
+      search,
+    });
+
+    return {
+      items: result.items.map((order) => mapOrder(order, storeId)),
+      pagination: result.pagination,
+      actionableCount: result.actionableCount,
+    };
+  }
+
+  @Query(() => OrderType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('vendor')
+  async vendorOrder(
+    @Args('storeId') storeId: string,
+    @Args('id') id: string,
+    @CurrentUser('id') userId: string,
+  ): Promise<OrderType> {
+    await this.storesService.assertStoreAccess(userId, storeId);
+    const order = await this.ordersService.findOneForVendor(storeId, id);
+    return mapOrder(order, storeId);
+  }
+
+  @Query(() => AdminOrderConnection)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async adminOrders(
+    @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page?: number,
+    @Args('limit', { type: () => Int, nullable: true, defaultValue: 20 }) limit?: number,
+    @Args('search', { type: () => String, nullable: true }) search?: string,
+    @Args('status', { type: () => String, nullable: true }) status?: string,
+  ): Promise<AdminOrderConnection> {
+    let parsedStatus: OrderStatus | undefined;
+    if (status) {
+      const allowed = Object.values(OrderStatus) as string[];
+      if (!allowed.includes(status)) {
+        throw new BadRequestException({
+          code: 'INVALID_ORDER_STATUS',
+          message: 'Invalid order status filter',
+        });
+      }
+      parsedStatus = status as OrderStatus;
+    }
+
+    const result = await this.ordersService.findForAdmin({
+      page,
+      limit,
+      search,
+      status: parsedStatus,
+    });
+    return {
+      items: result.items.map(mapAdminOrder),
+      pagination: result.pagination,
+    };
+  }
+
+  @Query(() => AdminOrder)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async adminOrder(@Args('id') id: string): Promise<AdminOrder> {
+    const record = await this.ordersService.findOneForAdmin(id);
+    return mapAdminOrder(record);
   }
 
   @Query(() => OrderConnection)
@@ -206,6 +334,8 @@ export class OrdersResolver {
   async updateOrderStatus(
     @Args('input') input: UpdateOrderStatusInput,
     @CurrentUser('id') userId: string,
+    @CurrentUser('email') adminEmail?: string,
+    @Context() context?: GraphqlContext,
   ): Promise<OrderType> {
     const order = await this.ordersService.findOne(input.orderId);
     if (!order) {
@@ -215,11 +345,58 @@ export class OrdersResolver {
       });
     }
 
+    const previousStatus = order.status;
     const updated = await this.ordersService.updateStatus(
       input.orderId,
       input.status as OrderStatus,
       userId,
     );
+
+    await this.auditLogsService.log({
+      actorType: AuditActorType.ADMIN,
+      actorId: userId,
+      actorLabel: adminEmail ?? null,
+      action: AuditAction.ORDER_STATUS_UPDATED,
+      resourceType: AuditResourceType.ORDER,
+      resourceId: updated.id,
+      metadata: { previousStatus, status: input.status },
+      ...getAuditRequestContext(context?.req),
+    });
+
+    return mapOrder(updated);
+  }
+
+  @Mutation(() => OrderType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async updateOrderShippingAddressAsAdmin(
+    @Args('input') input: UpdateOrderShippingAddressAsAdminInput,
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('email') adminEmail?: string,
+    @Context() context?: GraphqlContext,
+  ): Promise<OrderType> {
+    const updated = await this.ordersService.updateShippingAddressAsAdmin(input.orderId, {
+      fullName: input.fullName,
+      phone: input.phone,
+      addressLine1: input.addressLine1,
+      addressLine2: input.addressLine2,
+      tumbon: input.tumbon,
+      amphoe: input.amphoe,
+      province: input.province,
+      postalCode: input.postalCode,
+    });
+
+    await this.auditLogsService.log({
+      actorType: AuditActorType.ADMIN,
+      actorId: adminId,
+      actorLabel: adminEmail ?? null,
+      action: AuditAction.ORDER_SHIPPING_UPDATED,
+      resourceType: AuditResourceType.ORDER,
+      resourceId: updated.id,
+      metadata: { operation: 'shipping_address_update' },
+      ...getAuditRequestContext(context?.req),
+    });
+
     return mapOrder(updated);
   }
 

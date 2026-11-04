@@ -9,7 +9,7 @@ import {
   forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository, ILike } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import {
   Store,
   StoreStatus,
@@ -26,6 +26,8 @@ import * as bcrypt from 'bcrypt';
 import { generateUniqueStoreSlug } from '../../common/utils/slug.util';
 import { pickDefaultAccessibleStoreId } from './store-selection.util';
 import { NotificationsService } from '../notifications/notifications.service';
+import { DashboardEventsService } from '../dashboard-events/dashboard-events.service';
+import { DashboardActivityKind } from '../dashboard-events/dashboard-activity.constants';
 import { StorageService } from '../storage/storage.service';
 import {
   decryptBankAccountNumber,
@@ -36,12 +38,42 @@ import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constant
 import { getAuditRequestContext } from '../audit-logs/audit-request-context';
 import { StoreSuspensionHoldService } from '../orders/store-suspension-hold.service';
 import { EmailDeliveryService } from '../email/email-delivery.service';
+import { PaginatedResponse } from '../../common/interfaces';
+import {
+  buildAdminListPagination,
+  normalizeAdminListLimit,
+  normalizeAdminListPage,
+} from '../../common/utils/admin-list-pagination.util';
 
 const VENDOR_REVENUE_EXCLUDED_STATUSES = [
   OrderStatus.CANCELLED,
   OrderStatus.REFUNDED,
   OrderStatus.PENDING_PAYMENT,
 ];
+
+const ADMIN_STORE_LIST_SORTS: Record<string, { column: string; order: 'ASC' | 'DESC' }> = {
+  'createdAt:desc': { column: 'store.createdAt', order: 'DESC' },
+  'createdAt:asc': { column: 'store.createdAt', order: 'ASC' },
+  'name:asc': { column: 'store.name', order: 'ASC' },
+  'name:desc': { column: 'store.name', order: 'DESC' },
+};
+
+const ADMIN_VENDOR_LIST_SORTS: Record<string, { column: string; order: 'ASC' | 'DESC' }> = {
+  'createdAt:desc': { column: 'vendor.createdAt', order: 'DESC' },
+  'createdAt:asc': { column: 'vendor.createdAt', order: 'ASC' },
+  'fullName:asc': { column: 'vendor.fullName', order: 'ASC' },
+  'fullName:desc': { column: 'vendor.fullName', order: 'DESC' },
+  'storeCount:asc': { column: 'store_count', order: 'ASC' },
+  'storeCount:desc': { column: 'store_count', order: 'DESC' },
+};
+
+const VENDOR_STORE_COUNT_SQL =
+  '(SELECT COUNT(*)::int FROM stores owned_store WHERE owned_store.owner_id = vendor.id AND owned_store.deleted_at IS NULL)';
+
+export type AdminVendorListRecord = {
+  user: User;
+  storeCount: number;
+};
 
 const AUDIT_ACTION_ACTIVITY_KIND: Partial<Record<string, string>> = {
   [AuditAction.LOGIN]: 'last_login',
@@ -111,6 +143,7 @@ export class StoresService {
     @InjectRepository(AuditLog)
     private readonly auditLogRepository: Repository<AuditLog>,
     private readonly notificationsService: NotificationsService,
+    private readonly dashboardEventsService: DashboardEventsService,
     private readonly storageService: StorageService,
     private readonly auditLogsService: AuditLogsService,
     @Inject(forwardRef(() => StoreSuspensionHoldService))
@@ -189,7 +222,6 @@ export class StoresService {
     const where = status ? { status } : { status: StoreStatus.APPROVED };
     return this.storeRepository.find({
       where,
-      relations: ['owner', 'products'],
       order: { createdAt: 'DESC' },
     });
   }
@@ -197,7 +229,7 @@ export class StoresService {
   async findOne(id: string): Promise<Store> {
     const store = await this.storeRepository.findOne({
       where: { id },
-      relations: ['owner', 'products', 'members'],
+      relations: ['owner', 'members'],
     });
 
     if (!store) {
@@ -214,7 +246,6 @@ export class StoresService {
   async findBySlug(slug: string): Promise<Store> {
     const store = await this.storeRepository.findOne({
       where: { slug },
-      relations: ['owner', 'products'],
     });
 
     if (!store || store.status !== StoreStatus.APPROVED) {
@@ -254,6 +285,13 @@ export class StoresService {
     await this.notificationsService
       .notifyVendorAboutStoreStatus(store.ownerId, store, 'approved')
       .catch(() => {});
+    void this.dashboardEventsService.publish({
+      kind: DashboardActivityKind.STORE_STATUS,
+      entityId: store.id,
+      storeId: store.id,
+      userIds: [store.ownerId],
+      roles: ['admin'],
+    });
 
     await this.logAdminStoreAction(
       approveStoreDto.adminId,
@@ -290,6 +328,13 @@ export class StoresService {
         rejectStoreDto.rejectionReason,
       )
       .catch(() => {});
+    void this.dashboardEventsService.publish({
+      kind: DashboardActivityKind.STORE_STATUS,
+      entityId: store.id,
+      storeId: store.id,
+      userIds: [store.ownerId],
+      roles: ['admin'],
+    });
 
     await this.logAdminStoreAction(
       rejectStoreDto.adminId,
@@ -350,7 +395,6 @@ export class StoresService {
   async getVendorStores(userId: string): Promise<Store[]> {
     return this.storeRepository.find({
       where: { ownerId: userId },
-      relations: ['products'],
       order: { createdAt: 'DESC' },
     });
   }
@@ -439,7 +483,19 @@ export class StoresService {
 
   /** Any store member (owner, manager, or staff) may perform the action. */
   async assertStoreAccess(userId: string, storeId: string): Promise<void> {
-    const hasAccess = await this.userHasStoreAccess(userId, storeId);
+    const trimmed = storeId?.trim() ?? '';
+    // Avoid Postgres QueryFailedError (invalid uuid) becoming INTERNAL_SERVER_ERROR.
+    if (
+      !trimmed ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmed)
+    ) {
+      throw new BadRequestException({
+        code: 'INVALID_STORE_ID',
+        message: 'Invalid store id',
+      });
+    }
+
+    const hasAccess = await this.userHasStoreAccess(userId, trimmed);
     if (!hasAccess) {
       throw new ForbiddenException({
         code: 'STORE_ACCESS_DENIED',
@@ -583,11 +639,66 @@ export class StoresService {
     return saved;
   }
 
-  async findAllForAdmin(): Promise<Store[]> {
-    return this.storeRepository.find({
-      relations: ['owner'],
-      order: { createdAt: 'DESC' },
-    });
+  async findAllForAdmin(
+    params: {
+      page?: number;
+      limit?: number;
+      search?: string;
+      status?: string;
+      sort?: string;
+    } = {},
+  ): Promise<PaginatedResponse<Store>> {
+    const page = normalizeAdminListPage(params.page);
+    const limit = normalizeAdminListLimit(params.limit);
+    const sortKey = params.sort?.trim() || 'createdAt:desc';
+    const sort = ADMIN_STORE_LIST_SORTS[sortKey];
+    if (!sort) {
+      throw new BadRequestException({
+        code: 'INVALID_SORT',
+        message: 'Invalid store sort',
+      });
+    }
+
+    let status: StoreStatus | undefined;
+    const statusFilter = params.status?.trim();
+    if (statusFilter) {
+      const allowed = Object.values(StoreStatus) as string[];
+      if (!allowed.includes(statusFilter)) {
+        throw new BadRequestException({
+          code: 'INVALID_STORE_STATUS',
+          message: 'Invalid store status filter',
+        });
+      }
+      status = statusFilter as StoreStatus;
+    }
+
+    const qb = this.storeRepository
+      .createQueryBuilder('store')
+      .leftJoinAndSelect('store.owner', 'owner');
+
+    if (status) {
+      qb.andWhere('store.status = :status', { status });
+    }
+
+    const search = params.search?.trim();
+    if (search) {
+      qb.andWhere(
+        '(store.name ILIKE :search OR store.slug ILIKE :search OR owner.email ILIKE :search OR owner.full_name ILIKE :search)',
+        { search: `%${search}%` },
+      );
+    }
+
+    const [items, total] = await qb
+      .orderBy(sort.column, sort.order)
+      .addOrderBy('store.id', 'ASC')
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
+
+    return {
+      items,
+      pagination: buildAdminListPagination(page, limit, total),
+    };
   }
 
   async createAsAdmin(input: {
@@ -650,10 +761,10 @@ export class StoresService {
     ownerUserId?: string | null;
     name?: string;
     slug?: string;
-    description?: string;
-    contactPhone?: string;
-    contactEmail?: string;
-    address?: string;
+    description?: string | null;
+    contactPhone?: string | null;
+    contactEmail?: string | null;
+    address?: string | null;
     logoUrl?: string;
     bannerUrl?: string;
     status?: StoreStatus;
@@ -708,10 +819,18 @@ export class StoresService {
 
     if (input.name !== undefined) store.name = input.name.trim();
     if (input.slug !== undefined) store.slug = input.slug;
-    if (input.description !== undefined) store.description = input.description;
-    if (input.contactPhone !== undefined) store.contactPhone = input.contactPhone;
-    if (input.contactEmail !== undefined) store.contactEmail = input.contactEmail;
-    if (input.address !== undefined) store.address = input.address;
+    if (input.description !== undefined) {
+      store.description = input.description?.trim() || null;
+    }
+    if (input.contactPhone !== undefined) {
+      store.contactPhone = input.contactPhone || null;
+    }
+    if (input.contactEmail !== undefined) {
+      store.contactEmail = input.contactEmail?.trim() || null;
+    }
+    if (input.address !== undefined) {
+      store.address = input.address?.trim() || null;
+    }
     if (input.logoUrl !== undefined) store.logoUrl = input.logoUrl;
     if (input.bannerUrl !== undefined) store.bannerUrl = input.bannerUrl;
     if (input.commissionRate !== undefined) store.commissionRate = input.commissionRate;
@@ -800,24 +919,82 @@ export class StoresService {
     }
   }
 
-  async findVendors(search?: string): Promise<User[]> {
-    const trimmed = search?.trim();
-    if (!trimmed) {
-      return this.userRepository.find({
-        where: { role: UserRole.VENDOR },
-        relations: ['ownedStores'],
-        order: { createdAt: 'DESC' },
+  async findVendors(
+    params: {
+      page?: number;
+      limit?: number;
+      search?: string;
+      status?: string;
+      sort?: string;
+    } = {},
+  ): Promise<PaginatedResponse<AdminVendorListRecord>> {
+    const page = normalizeAdminListPage(params.page);
+    const limit = normalizeAdminListLimit(params.limit);
+    const sortKey = params.sort?.trim() || 'createdAt:desc';
+    const sort = ADMIN_VENDOR_LIST_SORTS[sortKey];
+    if (!sort) {
+      throw new BadRequestException({
+        code: 'INVALID_SORT',
+        message: 'Invalid vendor sort',
       });
     }
 
-    return this.userRepository.find({
-      where: [
-        { role: UserRole.VENDOR, fullName: ILike(`%${trimmed}%`) },
-        { role: UserRole.VENDOR, email: ILike(`%${trimmed}%`) },
-      ],
-      relations: ['ownedStores'],
-      order: { createdAt: 'DESC' },
-    });
+    let isActive: boolean | undefined;
+    const statusFilter = params.status?.trim();
+    if (statusFilter) {
+      if (statusFilter === 'active') isActive = true;
+      else if (statusFilter === 'inactive') isActive = false;
+      else {
+        throw new BadRequestException({
+          code: 'INVALID_VENDOR_STATUS',
+          message: 'Invalid vendor status filter',
+        });
+      }
+    }
+
+    const search = params.search?.trim();
+    const applyFilters = (qb: ReturnType<Repository<User>['createQueryBuilder']>) => {
+      qb.where('vendor.role = :role', { role: UserRole.VENDOR });
+      if (isActive !== undefined) {
+        qb.andWhere('vendor.is_active = :isActive', { isActive });
+      }
+      if (search) {
+        qb.andWhere('(vendor.full_name ILIKE :search OR vendor.email ILIKE :search)', {
+          search: `%${search}%`,
+        });
+      }
+      return qb;
+    };
+
+    const total = await applyFilters(this.userRepository.createQueryBuilder('vendor')).getCount();
+
+    const qb = applyFilters(this.userRepository.createQueryBuilder('vendor')).addSelect(
+      VENDOR_STORE_COUNT_SQL,
+      'store_count',
+    );
+    if (sort.column === 'store_count') {
+      qb.orderBy('store_count', sort.order);
+    } else {
+      qb.orderBy(sort.column, sort.order);
+    }
+
+    const { entities, raw } = await qb
+      .addOrderBy('vendor.id', 'ASC')
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getRawAndEntities();
+
+    return {
+      items: entities.map((user, index) => {
+        const rawRow = raw[index] as
+          { store_count?: number | string; storeCount?: number | string } | undefined;
+        return {
+          user,
+          storeCount: Number(rawRow?.store_count ?? rawRow?.storeCount ?? 0),
+        };
+      }),
+      pagination: buildAdminListPagination(page, limit, total),
+    };
   }
 
   async findVendorById(id: string): Promise<User> {
@@ -852,7 +1029,10 @@ export class StoresService {
           message: 'Email already in use',
         });
       }
-      user.email = input.email;
+      if (input.email !== user.email) {
+        user.email = input.email;
+        user.emailVerified = false;
+      }
     }
     if (input.fullName !== undefined) user.fullName = input.fullName;
     if (input.isActive !== undefined) user.isActive = input.isActive;
