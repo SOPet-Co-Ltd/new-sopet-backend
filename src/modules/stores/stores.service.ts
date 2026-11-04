@@ -29,10 +29,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { DashboardEventsService } from '../dashboard-events/dashboard-events.service';
 import { DashboardActivityKind } from '../dashboard-events/dashboard-activity.constants';
 import { StorageService } from '../storage/storage.service';
-import {
-  decryptBankAccountNumber,
-  encryptBankAccountNumber,
-} from '../../common/utils/bank-account-crypto.util';
+import { encryptBankAccountNumber } from '../../common/utils/bank-account-crypto.util';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constants';
 import { getAuditRequestContext } from '../audit-logs/audit-request-context';
@@ -565,13 +562,6 @@ export class StoresService {
   ): Promise<Store> {
     const store = await this.findOne(storeId);
 
-    const bankDetailsChanged =
-      (data.bankAccountName !== undefined && data.bankAccountName !== store.bankAccountName) ||
-      (data.bankAccountNumber !== undefined &&
-        data.bankAccountNumber !== decryptBankAccountNumber(store.bankAccountNumber)) ||
-      (data.bankCode !== undefined && data.bankCode !== store.bankCode) ||
-      (data.bankName !== undefined && data.bankName !== store.bankName);
-
     if (data.bankAccountName !== undefined) {
       store.bankAccountName = data.bankAccountName;
     }
@@ -580,12 +570,6 @@ export class StoresService {
     }
     if (data.bankName !== undefined) store.bankName = data.bankName;
     if (data.bankCode !== undefined) store.bankCode = data.bankCode;
-
-    if (bankDetailsChanged) {
-      // Any bank change requires admin re-verification before payouts can be requested.
-      store.bankAccountVerificationStatus = BankAccountVerificationStatus.PENDING_REVIEW;
-      store.bankAccountRejectionReason = null;
-    }
 
     return this.storeRepository.save(store);
   }

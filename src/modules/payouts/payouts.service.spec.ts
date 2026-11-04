@@ -6,7 +6,7 @@ import { DataSource } from 'typeorm';
 import { PayoutsService } from './payouts.service';
 import { Payout, PayoutSettlementRail, PayoutStatus } from '../../database/entities/payout.entity';
 import { PaymentMethod } from '../../database/entities/order.entity';
-import { Store, BankAccountVerificationStatus } from '../../database/entities/store.entity';
+import { Store } from '../../database/entities/store.entity';
 import { OrderItem } from '../../database/entities/order-item.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 import { DashboardEventsService } from '../dashboard-events/dashboard-events.service';
@@ -214,7 +214,10 @@ describe('PayoutsService', () => {
       id: 'store-1',
       name: 'Test Store',
       commissionRate: null,
-      bankAccountVerificationStatus: BankAccountVerificationStatus.VERIFIED,
+      bankAccountName: 'Test Account',
+      bankAccountNumber: '1234567890',
+      bankName: 'ธนาคารกสิกรไทย',
+      bankCode: 'kbank',
     });
     payoutRepo.findOne.mockResolvedValue(null);
     payoutRepo.find.mockResolvedValue([]);
@@ -548,27 +551,26 @@ describe('PayoutsService', () => {
       }
     });
 
-    it.each([
-      BankAccountVerificationStatus.UNVERIFIED,
-      BankAccountVerificationStatus.PENDING_REVIEW,
-      BankAccountVerificationStatus.REJECTED,
-    ])('blocks requestPayout when bank account is %s', async (status) => {
+    it('blocks requestPayout when bank account details are missing', async () => {
       storeRepo.findOne.mockResolvedValue({
         id: 'store-1',
         name: 'Test Store',
         commissionRate: null,
-        bankAccountVerificationStatus: status,
+        bankAccountName: null,
+        bankAccountNumber: null,
+        bankName: null,
+        bankCode: null,
       });
       orderItemRepo.createQueryBuilder.mockReturnValue(createQueryBuilderMock({ total: '5000' }));
 
       await expect(service.requestPayout('store-1', 'vendor-1')).rejects.toMatchObject({
-        response: { code: 'BANK_ACCOUNT_NOT_VERIFIED' },
+        response: { code: 'BANK_ACCOUNT_REQUIRED' },
       });
       expect(managerPayoutRepo.create).not.toHaveBeenCalled();
       expect(notificationsService.notifyAdminsAboutManualPayoutRequest).not.toHaveBeenCalled();
     });
 
-    it('requestPayout creates a pending manual payout and notifies admins when verified', async () => {
+    it('requestPayout creates a pending manual payout and notifies admins when bank account is saved', async () => {
       orderItemRepo.createQueryBuilder.mockReturnValue(createQueryBuilderMock({ total: '2000' }));
       payoutRepo.createQueryBuilder.mockImplementation(() =>
         createQueryBuilderMock({ total: '0' }),
@@ -582,12 +584,15 @@ describe('PayoutsService', () => {
       );
     });
 
-    it('reports canRequestPayout=false when bank account is not verified', async () => {
+    it('reports canRequestPayout=false when bank account details are missing', async () => {
       storeRepo.findOne.mockResolvedValue({
         id: 'store-1',
         name: 'Test Store',
         commissionRate: null,
-        bankAccountVerificationStatus: BankAccountVerificationStatus.PENDING_REVIEW,
+        bankAccountName: null,
+        bankAccountNumber: null,
+        bankName: null,
+        bankCode: null,
       });
       orderItemRepo.createQueryBuilder.mockReturnValue(createQueryBuilderMock({ total: '5000' }));
       payoutRepo.createQueryBuilder.mockImplementation(() =>

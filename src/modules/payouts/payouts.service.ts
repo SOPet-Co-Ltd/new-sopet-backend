@@ -12,7 +12,7 @@ import { Payout, PayoutSettlementRail, PayoutStatus } from '../../database/entit
 import { FulfillmentStatus, OrderItem } from '../../database/entities/order-item.entity';
 import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
 import { DataSource as OrderDataSource } from '../../database/entities/enums/data-source.enums';
-import { Store, BankAccountVerificationStatus } from '../../database/entities/store.entity';
+import { Store } from '../../database/entities/store.entity';
 import { Promotion, PromotionScope } from '../../database/entities/promotion.entity';
 import { PromotionUsage } from '../../database/entities/promotion-usage.entity';
 import { OrderStoreShipping } from '../../database/entities/order-store-shipping.entity';
@@ -130,7 +130,7 @@ export class PayoutsService {
     const availableBalance = Math.max(0, unpaid.net);
     const minimumPayoutAmount = this.getMinimumPayoutAmount();
     const canRequestPayout =
-      store.bankAccountVerificationStatus === BankAccountVerificationStatus.VERIFIED &&
+      this.hasCompleteBankAccount(store) &&
       pendingPayoutAmount <= 0 &&
       availableBalance > 0 &&
       availableBalance >= minimumPayoutAmount;
@@ -157,16 +157,16 @@ export class PayoutsService {
 
   /**
    * Vendor requests settlement of all accrued revenue (single manual rail).
-   * Requires an admin-verified bank account. Creates a PENDING payout; admin transfers
+   * Requires a saved bank account. Creates a PENDING payout; admin transfers
    * offline then calls settleManualPayout.
    */
   async requestPayout(storeId: string, processedBy?: string): Promise<Payout> {
     const store = await this.findStoreOrThrow(storeId);
 
-    if (store.bankAccountVerificationStatus !== BankAccountVerificationStatus.VERIFIED) {
+    if (!this.hasCompleteBankAccount(store)) {
       throw new BadRequestException({
-        code: 'BANK_ACCOUNT_NOT_VERIFIED',
-        message: 'Bank account must be verified by an admin before requesting a payout',
+        code: 'BANK_ACCOUNT_REQUIRED',
+        message: 'Bank account details must be saved before requesting a payout',
       });
     }
 
@@ -845,6 +845,14 @@ export class PayoutsService {
 
   private getMinimumPayoutAmount(): number {
     return this.configService.get<number>('payout.minPayoutAmount') ?? 100;
+  }
+
+  private hasCompleteBankAccount(store: Store): boolean {
+    return Boolean(
+      store.bankAccountName?.trim() &&
+      store.bankAccountNumber?.trim() &&
+      (store.bankName?.trim() || store.bankCode?.trim()),
+    );
   }
 
   private async findStoreOrThrow(storeId: string): Promise<Store> {

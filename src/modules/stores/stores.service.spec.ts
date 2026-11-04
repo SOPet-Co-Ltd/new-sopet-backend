@@ -907,7 +907,7 @@ describe('StoresService', () => {
       bankAccountRejectionReason: null,
     });
 
-    it('sets pending_review and clears rejection reason when bank details change', async () => {
+    it('saves bank details without changing verification status', async () => {
       storeRepository.findOne.mockResolvedValue({
         ...verifiedStore(),
         bankAccountVerificationStatus: BankAccountVerificationStatus.REJECTED,
@@ -921,28 +921,16 @@ describe('StoresService', () => {
         bankCode: 'bay',
       });
 
-      expect(saved.bankAccountVerificationStatus).toBe(
-        BankAccountVerificationStatus.PENDING_REVIEW,
-      );
-      expect(saved.bankAccountRejectionReason).toBeNull();
+      expect(saved.bankAccountName).toBe('New Name');
+      expect(saved.bankAccountVerificationStatus).toBe(BankAccountVerificationStatus.REJECTED);
+      expect(saved.bankAccountRejectionReason).toBe('Name mismatch');
       expect(storeRepository.save).toHaveBeenCalledWith(
         expect.objectContaining({
-          bankAccountVerificationStatus: BankAccountVerificationStatus.PENDING_REVIEW,
+          bankAccountName: 'New Name',
           bankAccountNumber: expect.stringMatching(/^enc:v1:/),
+          bankAccountVerificationStatus: BankAccountVerificationStatus.REJECTED,
         }),
       );
-    });
-
-    it('keeps verified status when submitted bank details are unchanged', async () => {
-      storeRepository.findOne.mockResolvedValue(verifiedStore());
-
-      const saved = await service.updateStorePayout('store-1', {
-        bankAccountName: 'Old Name',
-        bankName: 'ธนาคารกสิกรไทย',
-        bankCode: 'kbank',
-      });
-
-      expect(saved.bankAccountVerificationStatus).toBe(BankAccountVerificationStatus.VERIFIED);
     });
 
     it('persists plaintext bank number when encryption key is missing', async () => {
