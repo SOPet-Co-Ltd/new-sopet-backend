@@ -62,6 +62,7 @@ describe('PaymentsResolver payment queries', () => {
         qrCodeUrl: 'https://example.com/qr.png',
         qrCodeImage: null,
         expiresAt: paymentEntity.expiresAt,
+        failureCode: null,
       });
     });
 

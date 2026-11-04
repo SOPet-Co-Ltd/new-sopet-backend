@@ -34,9 +34,14 @@ export interface BeamCharge {
   amount?: number;
   currency?: string;
   referenceId?: string;
+  failureCode?: string;
   actionRequired?: BeamActionRequired;
   redirect?: { redirectUrl?: string };
-  encodedImage?: { imageBase64Encoded?: string };
+  encodedImage?: {
+    imageBase64Encoded?: string;
+    expiry?: string;
+    rawData?: string;
+  };
 }
 
 @Injectable()
@@ -67,13 +72,19 @@ export class BeamService {
     path: string,
     method: 'GET' | 'POST' = 'GET',
     body?: Record<string, unknown>,
+    options?: { idempotencyKey?: string },
   ): Promise<T> {
+    const headers: Record<string, string> = {
+      Authorization: this.basicAuthHeader(),
+      'Content-Type': 'application/json',
+    };
+    if (options?.idempotencyKey) {
+      headers['x-beam-idempotency-key'] = options.idempotencyKey;
+    }
+
     const response = await fetch(`${this.apiBaseUrl}${path}`, {
       method,
-      headers: {
-        Authorization: this.basicAuthHeader(),
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: body ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(15_000),
     });
@@ -89,11 +100,15 @@ export class BeamService {
     return data;
   }
 
-  async createCharge(body: BeamCreateChargeBody): Promise<BeamCharge> {
+  async createCharge(
+    body: BeamCreateChargeBody,
+    options?: { idempotencyKey?: string },
+  ): Promise<BeamCharge> {
     return this.request<BeamCharge>(
       '/api/v1/charges',
       'POST',
       body as unknown as Record<string, unknown>,
+      options,
     );
   }
 

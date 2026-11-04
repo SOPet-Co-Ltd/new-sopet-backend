@@ -25,6 +25,7 @@ export class PaymentsResolver {
     qrCodeUrl?: string | null;
     qrCodeImage?: string | null;
     expiresAt?: Date | null;
+    failureCode?: string | null;
     order?: { orderNumber?: string | null } | null;
   }): PaymentType {
     return {
@@ -39,6 +40,7 @@ export class PaymentsResolver {
       qrCodeUrl: payment.qrCodeUrl ?? null,
       qrCodeImage: payment.qrCodeImage ?? null,
       expiresAt: payment.expiresAt ?? null,
+      failureCode: payment.failureCode ?? null,
     };
   }
 
@@ -143,6 +145,7 @@ export class PaymentsResolver {
       customerId: effectiveCustomerId,
       guestPayToken: input.guestPayToken,
       platformType: input.platformType,
+      saveCard: input.saveCard,
     });
 
     const payment = await this.paymentsService.findById(

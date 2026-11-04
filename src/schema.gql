@@ -497,6 +497,7 @@ input CreatePaymentInput {
   orderId: String!
   paymentMethod: String!
   platformType: String
+  saveCard: SaveCardOnPaymentInput
   savedPaymentMethodId: String
 }
 
@@ -1232,6 +1233,7 @@ type PaymentType {
   authorizeUri: String
   currency: String!
   expiresAt: DateTime
+  failureCode: String
   id: String!
   orderId: String!
   orderNumber: String
@@ -1767,6 +1769,15 @@ type SalesTimePointType {
   revenue: Float!
 }
 
+input SaveCardOnPaymentInput {
+  brand: String!
+  cardToken: String!
+  expiryMonth: Int!
+  expiryYear: Int!
+  isDefault: Boolean
+  lastFour: String!
+}
+
 type SavedAddressType {
   addressLine1: String!
   addressLine2: String
@@ -1788,6 +1799,7 @@ type SavedPaymentMethodType {
   id: String!
   isDefault: Boolean!
   lastFour: String!
+  psp: String
   type: String!
 }
 

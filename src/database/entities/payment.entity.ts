@@ -67,6 +67,17 @@ export class Payment {
   @Column({ name: 'omise_charge_id', type: 'varchar', length: 255, nullable: true })
   omiseChargeId!: string | null;
 
+  /** Beam charge failureCode (e.g. CH_CARD_DECLINED) when status is failed. */
+  @Column({ name: 'failure_code', type: 'varchar', length: 64, nullable: true })
+  failureCode!: string | null;
+
+  /**
+   * Pending save-card intent (JSON). Applied in markOrderPaid; cleared after save or on failure.
+   * Shape: { cardToken, brand, lastFour, expiryMonth, expiryYear, isDefault? }
+   */
+  @Column({ name: 'save_card_payload', type: 'text', nullable: true })
+  saveCardPayload!: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
   createdAt!: Date;
 

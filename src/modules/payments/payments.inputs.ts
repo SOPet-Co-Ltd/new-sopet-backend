@@ -1,5 +1,52 @@
-import { Field, Float, InputType } from '@nestjs/graphql';
-import { IsIn, IsNotEmpty, IsNumber, IsOptional, IsString, IsUUID, Min } from 'class-validator';
+import { Field, Float, InputType, Int } from '@nestjs/graphql';
+import {
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Length,
+  Min,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
+
+@InputType()
+export class SaveCardOnPaymentInput {
+  @Field()
+  @IsNotEmpty()
+  @IsString()
+  cardToken!: string;
+
+  @Field()
+  @IsNotEmpty()
+  @IsString()
+  @Length(4, 4)
+  lastFour!: string;
+
+  @Field()
+  @IsNotEmpty()
+  @IsString()
+  brand!: string;
+
+  @Field(() => Int)
+  @IsInt()
+  @Min(1)
+  expiryMonth!: number;
+
+  @Field(() => Int)
+  @IsInt()
+  @Min(0)
+  expiryYear!: number;
+
+  @Field({ nullable: true })
+  @IsOptional()
+  @IsBoolean()
+  isDefault?: boolean;
+}
 
 @InputType()
 export class CreatePaymentInput {
@@ -47,4 +94,11 @@ export class CreatePaymentInput {
   @IsOptional()
   @IsIn(['IOS', 'ANDROID', 'WEB'])
   platformType?: 'IOS' | 'ANDROID' | 'WEB';
+
+  /** When set, card is saved only after this payment succeeds (Beam CIT). */
+  @Field(() => SaveCardOnPaymentInput, { nullable: true })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => SaveCardOnPaymentInput)
+  saveCard?: SaveCardOnPaymentInput;
 }

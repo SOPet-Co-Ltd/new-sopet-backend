@@ -29,6 +29,7 @@ function mapPaymentMethod(method: SavedPaymentMethod): SavedPaymentMethodType {
   return {
     id: method.id,
     type: method.type,
+    psp: method.psp ?? null,
     lastFour: method.lastFour,
     brand: method.brand,
     expiryMonth: method.expiryMonth,

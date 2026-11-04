@@ -16,6 +16,7 @@ export type PaymentStatusUpdatedPayload = {
     qrCodeUrl: string | null;
     qrCodeImage: string | null;
     expiresAt: Date | null;
+    failureCode: string | null;
   };
 };
 
@@ -33,6 +34,7 @@ function mapPaymentToPayload(
     qrCodeUrl: payment.qrCodeUrl ?? null,
     qrCodeImage: payment.qrCodeImage ?? null,
     expiresAt: payment.expiresAt ?? null,
+    failureCode: payment.failureCode ?? null,
   };
 }
 

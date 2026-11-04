@@ -17,6 +17,7 @@ import { PaymentEventsService } from './payment-events.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { PayoutsService } from '../payouts/payouts.service';
 import { StoresService } from '../stores/stores.service';
+import { UsersService } from '../users/users.service';
 import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.service';
 import { BankTransferSettingsService } from '../platform/bank-transfer-settings.service';
 import { OrderAuditLogsService } from '../order-audit-logs/order-audit-logs.service';
@@ -42,6 +43,10 @@ const beamServiceMock = {
   hasCredentials: jest.fn().mockReturnValue(true),
   createCharge: jest.fn(),
   getCharge: jest.fn(),
+};
+
+const usersServiceMock = {
+  addPaymentMethod: jest.fn().mockResolvedValue({ id: 'saved-1' }),
 };
 
 const orderAuditLogsServiceMock = {
@@ -152,6 +157,7 @@ describe('PaymentsService guest access', () => {
         },
         { provide: OrderAuditLogsService, useValue: orderAuditLogsServiceMock },
         { provide: BeamService, useValue: beamServiceMock },
+        { provide: UsersService, useValue: usersServiceMock },
         {
           provide: BankTransferSettingsService,
           useValue: {
@@ -348,6 +354,7 @@ describe('PaymentsService payment read queries', () => {
         },
         { provide: OrderAuditLogsService, useValue: orderAuditLogsServiceMock },
         { provide: BeamService, useValue: beamServiceMock },
+        { provide: UsersService, useValue: usersServiceMock },
         {
           provide: BankTransferSettingsService,
           useValue: {
@@ -529,6 +536,7 @@ describe('PaymentsService createCharge return_uri', () => {
         },
         { provide: OrderAuditLogsService, useValue: orderAuditLogsServiceMock },
         { provide: BeamService, useValue: beamServiceMock },
+        { provide: UsersService, useValue: usersServiceMock },
         {
           provide: BankTransferSettingsService,
           useValue: {
@@ -559,6 +567,13 @@ describe('PaymentsService createCharge return_uri', () => {
   function chargeBody(): BeamCreateChargeBody {
     expect(beamServiceMock.createCharge).toHaveBeenCalled();
     return beamServiceMock.createCharge.mock.calls[0][0] as BeamCreateChargeBody;
+  }
+
+  function chargeIdempotencyKey(): string | undefined {
+    expect(beamServiceMock.createCharge).toHaveBeenCalled();
+    const options = beamServiceMock.createCharge.mock.calls[0][1] as
+      { idempotencyKey?: string } | undefined;
+    return options?.idempotencyKey;
   }
 
   beforeEach(() => {
@@ -738,9 +753,92 @@ describe('PaymentsService createCharge return_uri', () => {
     expect(new Date(expiry as string).getTime()).toBeGreaterThan(Date.now());
     expect(result.qrCodeImage).toBe('BASE64QR');
     expect(result.expiresAt).toBeInstanceOf(Date);
+    expect(chargeIdempotencyKey()).toBe(PAYMENT_ID);
     expect(orderRepository.save).toHaveBeenCalledWith(
       expect.objectContaining({ paymentReference: 'beam_chrg_qr' }),
     );
+  });
+
+  it('prefers Beam encodedImage.expiry and stores rawData on qrCodeUrl', async () => {
+    service = await compileService(STOREFRONT_ORIGIN);
+    const beamExpiry = new Date(Date.now() + 8 * 60_000).toISOString();
+    beamServiceMock.createCharge.mockResolvedValue({
+      chargeId: 'beam_chrg_qr2',
+      status: 'PENDING',
+      actionRequired: 'ENCODED_IMAGE',
+      encodedImage: {
+        imageBase64Encoded: 'BASE64QR2',
+        expiry: beamExpiry,
+        rawData: '000201010212...',
+      },
+    });
+
+    const result = await service.createCharge({
+      orderId: 'ord-1',
+      amount: 300,
+      currency: 'THB',
+      paymentMethod: 'promptpay',
+      customerId: 'cust-1',
+    });
+
+    expect(result.qrCodeImage).toBe('BASE64QR2');
+    expect(result.qrCodeUrl).toBe('000201010212...');
+    expect(result.expiresAt?.toISOString()).toBe(new Date(beamExpiry).toISOString());
+  });
+
+  it('fails cleanly when REDIRECT lacks redirectUrl', async () => {
+    service = await compileService(STOREFRONT_ORIGIN);
+    beamServiceMock.createCharge.mockResolvedValue({
+      chargeId: 'beam_chrg_bad',
+      status: 'PENDING',
+      actionRequired: 'REDIRECT',
+      redirect: {},
+    });
+
+    await expect(
+      service.createCharge({
+        orderId: 'ord-1',
+        amount: 300,
+        currency: 'THB',
+        paymentMethod: 'credit_card',
+        cardToken: 'tok_1',
+        cardSecurityCode: '123',
+        customerId: 'cust-1',
+      }),
+    ).rejects.toMatchObject({ response: { code: 'BEAM_ACTION_REQUIRED_INVALID' } });
+  });
+
+  it('stores saveCard payload until paid and does not call addPaymentMethod on create', async () => {
+    service = await compileService(STOREFRONT_ORIGIN);
+    beamServiceMock.createCharge.mockResolvedValue({
+      chargeId: 'beam_chrg_save',
+      status: 'PENDING',
+      actionRequired: 'NONE',
+    });
+
+    await service.createCharge({
+      orderId: 'ord-1',
+      amount: 300,
+      currency: 'THB',
+      paymentMethod: 'credit_card',
+      cardToken: 'tok_new',
+      cardSecurityCode: '123',
+      customerId: 'cust-1',
+      saveCard: {
+        cardToken: 'tok_new',
+        lastFour: '4242',
+        brand: 'visa',
+        expiryMonth: 12,
+        expiryYear: 2030,
+        isDefault: true,
+      },
+    });
+
+    expect(usersServiceMock.addPaymentMethod).not.toHaveBeenCalled();
+    const savedPayment = paymentRepository.save.mock.calls
+      .map((c: [Payment]) => c[0])
+      .find((p) => p.pspChargeId === 'beam_chrg_save');
+    expect(savedPayment?.saveCardPayload).toContain('tok_new');
   });
 
   it('throws BEAM_NOT_CONFIGURED for online methods without credentials', async () => {
@@ -939,6 +1037,7 @@ describe('PaymentsService handleBeamWebhook UD-001 fail', () => {
         },
         { provide: OrderAuditLogsService, useValue: orderAuditLogsServiceMock },
         { provide: BeamService, useValue: beamServiceMock },
+        { provide: UsersService, useValue: usersServiceMock },
         {
           provide: BankTransferSettingsService,
           useValue: {
@@ -1221,6 +1320,7 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
         },
         { provide: OrderAuditLogsService, useValue: orderAuditLogsServiceMock },
         { provide: BeamService, useValue: beamServiceMock },
+        { provide: UsersService, useValue: usersServiceMock },
         {
           provide: BankTransferSettingsService,
           useValue: {
@@ -1362,6 +1462,7 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
       expect.objectContaining({
         paymentMethod: expect.objectContaining({ paymentMethodType: 'QR_PROMPT_PAY' }),
       }),
+      expect.objectContaining({ idempotencyKey: NEW_PAYMENT_ID }),
     );
     expect(order.paymentReference).toBe(NEW_CHARGE_ID);
     expect(order.paymentMethod).toBe('promptpay');
@@ -1662,6 +1763,7 @@ describe('PaymentsService cancelStaleUnpaidOrders (AC-019–021)', () => {
         },
         { provide: OrderAuditLogsService, useValue: orderAuditLogsServiceMock },
         { provide: BeamService, useValue: beamServiceMock },
+        { provide: UsersService, useValue: usersServiceMock },
         {
           provide: BankTransferSettingsService,
           useValue: {
@@ -2076,6 +2178,7 @@ describe('PaymentsService payment held gate + Decision #16 recompute (AC-026–0
         },
         { provide: OrderAuditLogsService, useValue: orderAuditLogsServiceMock },
         { provide: BeamService, useValue: beamServiceMock },
+        { provide: UsersService, useValue: usersServiceMock },
         {
           provide: BankTransferSettingsService,
           useValue: {
@@ -2289,6 +2392,7 @@ describe('PaymentsService handleBeamWebhook', () => {
         },
         { provide: OrderAuditLogsService, useValue: orderAuditLogsServiceMock },
         { provide: BeamService, useValue: beamServiceMock },
+        { provide: UsersService, useValue: usersServiceMock },
         { provide: BankTransferSettingsService, useValue: {} },
       ],
     }).compile();

@@ -92,4 +92,17 @@ export class CreateChargeDto {
   @IsOptional()
   @IsIn(['IOS', 'ANDROID', 'WEB'])
   platformType?: 'IOS' | 'ANDROID' | 'WEB';
+
+  @ApiPropertyOptional({
+    description: 'Save card after successful charge (applied in markOrderPaid)',
+  })
+  @IsOptional()
+  saveCard?: {
+    cardToken: string;
+    lastFour: string;
+    brand: string;
+    expiryMonth: number;
+    expiryYear: number;
+    isDefault?: boolean;
+  };
 }

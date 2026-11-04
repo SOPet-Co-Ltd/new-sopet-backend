@@ -7,6 +7,7 @@ import { InventoryModule } from '../inventory/inventory.module';
 import { PayoutsModule } from '../payouts/payouts.module';
 import { StoresModule } from '../stores/stores.module';
 import { OrdersModule } from '../orders/orders.module';
+import { UsersModule } from '../users/users.module';
 import { BeamModule } from '../beam/beam.module';
 import { PlatformModule } from '../platform/platform.module';
 import { PaymentsService } from './payments.service';
@@ -32,6 +33,7 @@ import { VendorWebhooksModule } from '../vendor-webhooks/vendor-webhooks.module'
     forwardRef(() => PayoutsModule),
     StoresModule,
     forwardRef(() => OrdersModule),
+    forwardRef(() => UsersModule),
     TypeOrmModule.forFeature([Payment, Order, Customer, SavedPaymentMethod]),
   ],
   controllers: [PaymentsWebhookController],

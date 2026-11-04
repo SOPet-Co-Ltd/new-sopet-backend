@@ -65,7 +65,7 @@ describe('BeamService', () => {
         },
       };
 
-      const result = await service.createCharge(body);
+      const result = await service.createCharge(body, { idempotencyKey: 'pay_1' });
 
       expect(result.chargeId).toBe('ch_test_1');
       expect(global.fetch).toHaveBeenCalledWith(
@@ -75,6 +75,7 @@ describe('BeamService', () => {
           headers: expect.objectContaining({
             Authorization: `Basic ${Buffer.from('merchant_test:api_key_test').toString('base64')}`,
             'Content-Type': 'application/json',
+            'x-beam-idempotency-key': 'pay_1',
           }),
           body: JSON.stringify(body),
         }),

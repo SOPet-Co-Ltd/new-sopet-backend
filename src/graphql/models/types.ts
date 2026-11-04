@@ -757,6 +757,10 @@ export class PaymentType {
 
   @Field(() => Date, { nullable: true })
   expiresAt?: Date | null;
+
+  /** Beam charge failureCode when payment failed (e.g. CH_CARD_DECLINED). */
+  @Field(() => String, { nullable: true })
+  failureCode?: string | null;
 }
 
 @ObjectType()
@@ -1243,6 +1247,10 @@ export class SavedPaymentMethodType {
 
   @Field()
   type!: string;
+
+  /** Payment service provider (`beam` or historical `omise`). */
+  @Field(() => String, { nullable: true })
+  psp?: string | null;
 
   @Field()
   lastFour!: string;

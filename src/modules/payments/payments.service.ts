@@ -4,6 +4,8 @@ import {
   BadRequestException,
   ForbiddenException,
   NotFoundException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -20,9 +22,15 @@ import { PaymentEventsService } from './payment-events.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { PayoutsService } from '../payouts/payouts.service';
 import { StoresService } from '../stores/stores.service';
+import { UsersService } from '../users/users.service';
 import { buildPaymentReturnUri } from './build-payment-return-uri';
 import { verifyBeamWebhookSignature } from './beam-webhook.util';
-import { BeamService, type BeamCharge, type BeamCreateChargeBody } from '../beam/beam.service';
+import {
+  BeamService,
+  type BeamActionRequired,
+  type BeamCharge,
+  type BeamCreateChargeBody,
+} from '../beam/beam.service';
 import {
   CheckoutPaymentMethod,
   isNonOmiseCheckoutPaymentMethod,
@@ -41,6 +49,15 @@ import {
   OrderAuditEventType,
   VENDOR_ADMIN_ACTOR_LABEL,
 } from '../order-audit-logs/order-audit-log.constants';
+
+type SaveCardPayload = {
+  cardToken: string;
+  lastFour: string;
+  brand: string;
+  expiryMonth: number;
+  expiryYear: number;
+  isDefault?: boolean;
+};
 
 @Injectable()
 export class PaymentsService {
@@ -64,6 +81,8 @@ export class PaymentsService {
     private bankTransferSettingsService: BankTransferSettingsService,
     private orderAuditLogsService: OrderAuditLogsService,
     private beamService: BeamService,
+    @Inject(forwardRef(() => UsersService))
+    private usersService: UsersService,
   ) {}
 
   private getQrExpiryMinutes(): number {
@@ -73,6 +92,62 @@ export class PaymentsService {
 
   private computeQrExpiresAt(from: Date = new Date()): Date {
     return new Date(from.getTime() + this.getQrExpiryMinutes() * 60_000);
+  }
+
+  private parseBeamExpiry(raw: string | undefined): Date | null {
+    if (!raw?.trim()) {
+      return null;
+    }
+    const parsed = new Date(raw);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  private serializeSaveCardPayload(
+    saveCard: CreateChargeDto['saveCard'] | undefined,
+  ): string | null {
+    if (!saveCard?.cardToken?.trim()) {
+      return null;
+    }
+    const payload: SaveCardPayload = {
+      cardToken: saveCard.cardToken.trim(),
+      lastFour: saveCard.lastFour.trim(),
+      brand: saveCard.brand.trim(),
+      expiryMonth: saveCard.expiryMonth,
+      expiryYear: saveCard.expiryYear,
+      isDefault: saveCard.isDefault,
+    };
+    return JSON.stringify(payload);
+  }
+
+  private parseSaveCardPayload(raw: string | null): SaveCardPayload | null {
+    if (!raw?.trim()) {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(raw) as SaveCardPayload;
+      if (!parsed?.cardToken || !parsed?.lastFour || !parsed?.brand) {
+        return null;
+      }
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  private resolveActionRequired(charge: BeamCharge): BeamActionRequired {
+    if (charge.actionRequired === 'REDIRECT' || charge.actionRequired === 'ENCODED_IMAGE') {
+      return charge.actionRequired;
+    }
+    if (charge.actionRequired === 'NONE') {
+      return 'NONE';
+    }
+    if (charge.redirect?.redirectUrl) {
+      return 'REDIRECT';
+    }
+    if (charge.encodedImage?.imageBase64Encoded) {
+      return 'ENCODED_IMAGE';
+    }
+    return 'NONE';
   }
 
   private getEffectiveExpiresAt(payment: Payment): Date | null {
@@ -484,6 +559,7 @@ export class PaymentsService {
     qrCodeUrl?: string;
     qrCodeImage?: string;
     expiresAt?: Date;
+    failureCode?: string | null;
   }> {
     const {
       orderId,
@@ -494,6 +570,7 @@ export class PaymentsService {
       savedPaymentMethodId,
       customerId,
       guestPayToken,
+      saveCard,
     } = createChargeDto;
     const paymentMethod = normalizeCheckoutPaymentMethod(rawPaymentMethod);
 
@@ -517,6 +594,7 @@ export class PaymentsService {
       qrCodeUrl?: string;
       qrCodeImage?: string;
       expiresAt?: Date;
+      failureCode?: string | null;
       paidImmediately?: { order: Order; payment: Payment; chargeId: string };
     };
 
@@ -605,10 +683,15 @@ export class PaymentsService {
           currency,
           paymentMethod: orderPaymentMethod,
           status: 'pending',
+          failureCode: null,
+          saveCardPayload:
+            paymentMethod === 'credit_card' && !savedPaymentMethodId
+              ? this.serializeSaveCardPayload(saveCard)
+              : null,
         });
         await manager.save(payment);
 
-        const qrExpiresAt = paymentMethod === 'promptpay' ? this.computeQrExpiresAt() : null;
+        const localQrExpiresAt = paymentMethod === 'promptpay' ? this.computeQrExpiresAt() : null;
         const chargeBody: BeamCreateChargeBody = {
           amount: amountSatang,
           currency: 'THB',
@@ -621,7 +704,7 @@ export class PaymentsService {
         if (paymentMethod === 'promptpay') {
           chargeBody.paymentMethod = {
             paymentMethodType: 'QR_PROMPT_PAY',
-            qrPromptPay: { expiryTime: (qrExpiresAt as Date).toISOString() },
+            qrPromptPay: { expiryTime: (localQrExpiresAt as Date).toISOString() },
           };
         } else if (paymentMethod === 'credit_card') {
           let cardTokenId = cardToken;
@@ -673,18 +756,51 @@ export class PaymentsService {
           chargeBody.paymentMethod = { paymentMethodType: 'SHOPEE_PAY', shopeePay: {} };
         }
 
-        const charge = await this.beamService.createCharge(chargeBody);
+        const charge = await this.beamService.createCharge(chargeBody, {
+          idempotencyKey: payment.id,
+        });
 
-        const authorizeUri = charge.redirect?.redirectUrl ?? null;
-        const qrCodeImage = charge.encodedImage?.imageBase64Encoded ?? null;
-        const expiresAt = qrExpiresAt;
+        const actionRequired = this.resolveActionRequired(charge);
+        let authorizeUri: string | null = null;
+        let qrCodeImage: string | null = null;
+        let qrCodeUrl: string | null = null;
+        let expiresAt: Date | null = localQrExpiresAt;
         const chargeStatus = (charge.status ?? '').toUpperCase();
+
+        if (actionRequired === 'REDIRECT') {
+          authorizeUri = charge.redirect?.redirectUrl?.trim() || null;
+          if (!authorizeUri) {
+            throw new BadRequestException({
+              code: 'BEAM_ACTION_REQUIRED_INVALID',
+              message: 'Payment provider required a redirect but did not return a URL',
+            });
+          }
+        } else if (actionRequired === 'ENCODED_IMAGE') {
+          qrCodeImage = charge.encodedImage?.imageBase64Encoded?.trim() || null;
+          if (!qrCodeImage) {
+            throw new BadRequestException({
+              code: 'BEAM_ACTION_REQUIRED_INVALID',
+              message: 'Payment provider required a QR image but did not return one',
+            });
+          }
+          const beamExpiry = this.parseBeamExpiry(charge.encodedImage?.expiry);
+          expiresAt = beamExpiry ?? localQrExpiresAt;
+          const rawData = charge.encodedImage?.rawData?.trim();
+          if (rawData) {
+            qrCodeUrl = rawData;
+          }
+        }
 
         payment.psp = 'beam';
         payment.pspChargeId = charge.chargeId;
         payment.status = chargeStatus === 'FAILED' ? 'failed' : 'pending';
+        payment.failureCode = chargeStatus === 'FAILED' ? charge.failureCode?.trim() || null : null;
+        if (payment.status === 'failed') {
+          payment.saveCardPayload = null;
+        }
         payment.authorizeUri = authorizeUri;
         payment.qrCodeImage = qrCodeImage;
+        payment.qrCodeUrl = qrCodeUrl;
         payment.expiresAt = expiresAt;
         await manager.save(payment);
 
@@ -712,10 +828,13 @@ export class PaymentsService {
           currency,
           paymentMethod,
           authorizeUri: authorizeUri ?? undefined,
+          qrCodeUrl: qrCodeUrl ?? undefined,
           qrCodeImage: qrCodeImage ?? undefined,
           expiresAt: expiresAt ?? undefined,
+          failureCode: payment.failureCode,
         };
 
+        // Only fulfill on create when Beam already reports SUCCEEDED (docs: 201 ≠ paid).
         if (chargeStatus === 'SUCCEEDED') {
           response.status = 'paid';
           response.paidImmediately = {
@@ -724,7 +843,6 @@ export class PaymentsService {
             chargeId: charge.chargeId,
           };
         }
-        // actionRequired NONE with non-succeeded status: stay pending; webhook finalizes.
 
         return response;
       },
@@ -748,6 +866,7 @@ export class PaymentsService {
       qrCodeUrl: result.qrCodeUrl,
       qrCodeImage: result.qrCodeImage,
       expiresAt: result.expiresAt,
+      failureCode: result.failureCode,
     };
   }
 
@@ -760,7 +879,12 @@ export class PaymentsService {
     return verifyBeamWebhookSignature(rawBody, signature, secret);
   }
 
-  async handleBeamWebhook(payload: Record<string, unknown>): Promise<void> {
+  async handleBeamWebhook(payload: Record<string, unknown>, eventType?: string): Promise<void> {
+    if (eventType && eventType !== 'charge.succeeded' && eventType !== 'charge.failed') {
+      this.logger.log(`Ignoring Beam webhook event=${eventType}`);
+      return;
+    }
+
     const chargeId = this.extractBeamChargeId(payload);
     if (!chargeId) {
       this.logger.warn('Beam webhook without chargeId — ignoring');
@@ -779,9 +903,15 @@ export class PaymentsService {
       order = await this.orderRepository.findOne({ where: { paymentReference: chargeId } });
       if (order) {
         payment = await this.paymentRepository.findOne({
-          where: { orderId: order.id },
+          where: { orderId: order.id, pspChargeId: chargeId },
           order: { createdAt: 'DESC' },
         });
+        if (!payment) {
+          payment = await this.paymentRepository.findOne({
+            where: { orderId: order.id },
+            order: { createdAt: 'DESC' },
+          });
+        }
       }
     }
     if (!order || !payment) {
@@ -828,16 +958,21 @@ export class PaymentsService {
         );
         return;
       }
+      // Late success is allowed while order is still PENDING_PAYMENT even if this
+      // payment row was locally expired/failed (Beam docs: charge can succeed late).
       await this.markOrderPaid(order, payment, chargeId);
       return;
     }
 
     if (chargeStatus === 'FAILED') {
-      if (payment.status !== 'pending') {
+      // Duplicate / already-terminal paid is handled above; ignore non-pending retries.
+      if (payment.status !== 'pending' && payment.status !== 'failed') {
         return;
       }
       await this.paymentRepository.manager.transaction(async (manager) => {
         payment.status = 'failed';
+        payment.failureCode = apiCharge.failureCode?.trim() || payment.failureCode || null;
+        payment.saveCardPayload = null;
         await manager.save(payment);
 
         if (order.paymentReference === chargeId) {
@@ -850,7 +985,7 @@ export class PaymentsService {
         .dispatchOrderEvent(order.id, 'order.payment_failed')
         .catch(() => {});
       this.logger.log(
-        `Payment ${payment.id} failed; order ${order.id} left PENDING_PAYMENT for retry`,
+        `Payment ${payment.id} failed code=${payment.failureCode ?? 'none'}; order ${order.id} left PENDING_PAYMENT for retry`,
       );
     }
   }
@@ -869,8 +1004,12 @@ export class PaymentsService {
   }
 
   private async markOrderPaid(order: Order, payment: Payment, chargeId: string): Promise<void> {
+    const saveCardPayload = this.parseSaveCardPayload(payment.saveCardPayload);
+
     await this.paymentRepository.manager.transaction(async (trx) => {
       payment.status = 'paid';
+      payment.failureCode = null;
+      payment.saveCardPayload = null;
       await trx.save(payment);
 
       order.status = OrderStatus.PAID;
@@ -878,6 +1017,25 @@ export class PaymentsService {
       order.paidAt = new Date();
       await trx.save(order);
     });
+
+    if (saveCardPayload && order.customerId) {
+      try {
+        await this.usersService.addPaymentMethod(order.customerId, {
+          cardToken: saveCardPayload.cardToken,
+          lastFour: saveCardPayload.lastFour,
+          brand: saveCardPayload.brand,
+          expiryMonth: saveCardPayload.expiryMonth,
+          expiryYear: saveCardPayload.expiryYear,
+          isDefault: saveCardPayload.isDefault ?? true,
+        });
+      } catch (error) {
+        this.logger.warn(
+          `Failed to save card after paid payment ${payment.id}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
 
     await this.paymentEventsService.publishPaymentStatusUpdated(payment);
     await this.notificationsService.notifyOrderPaid(order);
