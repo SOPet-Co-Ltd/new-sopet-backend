@@ -128,6 +128,9 @@ export class SearchProductSuggestionType {
   @Field(() => String)
   slug!: string;
 
+  @Field(() => String)
+  storeSlug!: string;
+
   @Field(() => String, { nullable: true })
   thumbnailUrl?: string | null;
 }
