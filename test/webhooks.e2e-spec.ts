@@ -23,6 +23,7 @@ import { OrderAuditLogsService } from '../src/modules/order-audit-logs/order-aud
 import { BankTransferSettingsService } from '../src/modules/platform/bank-transfer-settings.service';
 import { computeBeamWebhookSignature } from '../src/modules/payments/beam-webhook.util';
 import { BeamService } from '../src/modules/beam/beam.service';
+import { UsersService } from '../src/modules/users/users.service';
 
 describe('Beam webhook (e2e)', () => {
   let app: INestApplication<App>;
@@ -107,6 +108,10 @@ describe('Beam webhook (e2e)', () => {
             }),
           },
         },
+        {
+          provide: UsersService,
+          useValue: { addPaymentMethod: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile();
 
@@ -139,7 +144,7 @@ describe('Beam webhook (e2e)', () => {
 
     await signedRequest({ chargeId: 'chrg_e2e', status: 'SUCCEEDED' })
       .expect(200)
-      .expect({ received: true });
+      .expect({ received: true, ignored: true });
   });
 
   it('returns 401 for invalid signature', async () => {
