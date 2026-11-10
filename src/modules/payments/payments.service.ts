@@ -63,6 +63,10 @@ type SaveCardPayload = {
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
 
+  /** In-memory throttle for reconcile-on-read Beam GET charge (storefront polls ~2s). */
+  private static readonly RECONCILE_MIN_INTERVAL_MS = 5_000;
+  private readonly lastBeamReconcileAtByPaymentId = new Map<string, number>();
+
   constructor(
     @InjectRepository(Payment)
     private paymentRepository: Repository<Payment>,
@@ -524,7 +528,9 @@ export class PaymentsService {
     }
 
     await this.assertCanPayForOrder(payment.orderId, customerId, guestPayToken);
-    return this.expirePendingQrPaymentIfNeeded(payment);
+    return this.reconcilePendingBeamChargeIfNeeded(
+      await this.expirePendingQrPaymentIfNeeded(payment),
+    );
   }
 
   async findLatestByOrderId(
@@ -546,7 +552,48 @@ export class PaymentsService {
       });
     }
 
-    return this.expirePendingQrPaymentIfNeeded(payment);
+    return this.reconcilePendingBeamChargeIfNeeded(
+      await this.expirePendingQrPaymentIfNeeded(payment),
+    );
+  }
+
+  /**
+   * Safety net when Beam webhook is slow/missed: on payment read, GET the Beam charge
+   * and mark paid/failed if already terminal. Rate-limited per payment to avoid 429s
+   * while the storefront polls every ~2s.
+   */
+  async reconcilePendingBeamChargeIfNeeded(payment: Payment): Promise<Payment> {
+    if (
+      payment.status !== 'pending' ||
+      payment.psp !== 'beam' ||
+      !payment.pspChargeId?.trim() ||
+      payment.paymentMethod === PaymentMethod.BANK_TRANSFER
+    ) {
+      return payment;
+    }
+
+    const now = Date.now();
+    const lastAt = this.lastBeamReconcileAtByPaymentId.get(payment.id) ?? 0;
+    if (now - lastAt < PaymentsService.RECONCILE_MIN_INTERVAL_MS) {
+      return payment;
+    }
+    this.lastBeamReconcileAtByPaymentId.set(payment.id, now);
+
+    const order =
+      payment.order ?? (await this.orderRepository.findOne({ where: { id: payment.orderId } }));
+    if (!order) {
+      return payment;
+    }
+    if (order.status === OrderStatus.PAID || payment.status === 'paid') {
+      return payment;
+    }
+    if (order.status === OrderStatus.CANCELLED || order.status === OrderStatus.REFUNDED) {
+      return payment;
+    }
+
+    const chargeId = payment.pspChargeId.trim();
+    await this.applyBeamChargeOutcome(order, payment, chargeId);
+    return payment;
   }
 
   async createCharge(createChargeDto: CreateChargeDto): Promise<{
@@ -928,11 +975,28 @@ export class PaymentsService {
       return;
     }
 
+    await this.applyBeamChargeOutcome(order, payment, chargeId);
+  }
+
+  /**
+   * GET Beam charge and apply SUCCEEDED / FAILED to local payment + order.
+   * Shared by webhook handler and reconcile-on-read.
+   */
+  private async applyBeamChargeOutcome(
+    order: Order,
+    payment: Payment,
+    chargeId: string,
+  ): Promise<void> {
     let apiCharge: BeamCharge;
     try {
       apiCharge = await this.beamService.getCharge(chargeId);
     } catch (error) {
       this.logger.error(`Failed to re-fetch Beam charge ${chargeId}: ${error}`);
+      return;
+    }
+
+    if (!apiCharge) {
+      this.logger.warn(`Beam GET charge ${chargeId} returned no payload`);
       return;
     }
 
@@ -965,7 +1029,7 @@ export class PaymentsService {
     }
 
     if (chargeStatus === 'FAILED') {
-      // Duplicate / already-terminal paid is handled above; ignore non-pending retries.
+      // Duplicate / already-terminal paid is handled by callers; ignore non-pending retries.
       if (payment.status !== 'pending' && payment.status !== 'failed') {
         return;
       }
