@@ -584,7 +584,7 @@ export class PaymentsService {
     if (!order) {
       return payment;
     }
-    if (order.status === OrderStatus.PAID || payment.status === 'paid') {
+    if (order.status === OrderStatus.PAID) {
       return payment;
     }
     if (order.status === OrderStatus.CANCELLED || order.status === OrderStatus.REFUNDED) {
