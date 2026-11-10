@@ -46,6 +46,14 @@ export const STORE_COMMISSION_E2E_JWT_SECRET = 'sopet-e2e-store-commission-jwt';
 export const STORE_COMMISSION_E2E_OMISE_RECIPIENT_ID = 'recp_e2e_store_commission';
 export const STORE_COMMISSION_E2E_TRANSFER_ID = 'trsf_e2e_store_commission';
 
+/** Satisfies PayoutsService.hasCompleteBankAccount in manual-rail e2e. */
+export const STORE_COMMISSION_E2E_BANK_ACCOUNT = {
+  bankName: 'E2E Test Bank',
+  bankCode: '001',
+  bankAccountName: 'E2E Vendor Account',
+  bankAccountNumber: '1234567890',
+} as const;
+
 /** INT-1 / SVC-1 mixed-cutoff literals (THB) after store-scoped promo on post product. */
 export const STORE_COMMISSION_E2E_PRE_PRODUCT = 400;
 export const STORE_COMMISSION_E2E_POST_PRODUCT_GROSS = 1100;
@@ -353,8 +361,10 @@ async function seedCatalog(
     status: StoreStatus.APPROVED,
     approvedBy: vendor.id,
   });
+  const storeRepo = dataSource.getRepository(Store);
+  await storeRepo.update(store.id, { ...STORE_COMMISSION_E2E_BANK_ACCOUNT });
+  store = await storeRepo.findOneByOrFail({ id: store.id });
   if (input.connectOmiseRecipient) {
-    const storeRepo = dataSource.getRepository(Store);
     await storeRepo.update(store.id, {
       omiseRecipientId: STORE_COMMISSION_E2E_OMISE_RECIPIENT_ID,
       omiseRecipientStatus: OmiseRecipientStatus.ACTIVE,

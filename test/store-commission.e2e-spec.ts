@@ -57,6 +57,7 @@ import {
   isPostgresAvailable,
 } from './helpers';
 import { createTypeOrmTestOptions } from './helpers/typeorm-test.config';
+import { STORE_COMMISSION_E2E_BANK_ACCOUNT } from './helpers/store-commission-e2e.seed';
 
 const GO_LIVE_AT = new Date('2026-06-01T00:00:00.000Z');
 const PRE_PAID_AT = new Date('2026-05-01T00:00:00.000Z');
@@ -314,11 +315,12 @@ describe('store commission — mixed-cutoff payout create [integration]', () => 
       status: StoreStatus.APPROVED,
       approvedBy: owner.id,
     });
+    Object.assign(store, STORE_COMMISSION_E2E_BANK_ACCOUNT);
     if (rail === 'omise') {
       store.omiseRecipientId = `recp_${suffix}`;
       store.omiseRecipientStatus = OmiseRecipientStatus.ACTIVE;
-      await storeRepo.save(store);
     }
+    await storeRepo.save(store);
     return store;
   }
 
