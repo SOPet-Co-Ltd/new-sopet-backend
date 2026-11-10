@@ -1580,6 +1580,7 @@ type Query {
   platformTopProducts(limit: Int): [TopProductType!]!
   platformTopStores(limit: Int): [TopStoreType!]!
   product(id: String!): ProductType!
+  productByPath(path: String!): ProductType!
   productBySlug(slug: String!, storeId: String!): ProductType!
   productPublishChecklist(productId: String!): ProductPublishChecklistType!
   productReviews(limit: Int = 100, page: Int = 1, productId: String!): [ReviewType!]!
@@ -1826,6 +1827,7 @@ type SearchProductSuggestionType {
   id: String!
   name: String!
   slug: String!
+  storeSlug: String!
   thumbnailUrl: String
 }
 

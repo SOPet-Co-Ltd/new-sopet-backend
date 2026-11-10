@@ -397,6 +397,13 @@ export class ProductsResolver {
   }
 
   @Query(() => ProductType)
+  @Public()
+  async productByPath(@Args('path') path: string): Promise<ProductType> {
+    const product = await this.productsService.findByPathPublished(path);
+    return mapProduct(product);
+  }
+
+  @Query(() => ProductType)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('vendor')
   async vendorProduct(
