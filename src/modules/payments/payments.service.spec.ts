@@ -7,7 +7,7 @@ import { PaymentsService } from './payments.service';
 import { buildPaymentReturnUri } from './build-payment-return-uri';
 import { BeamService, type BeamCreateChargeBody } from '../beam/beam.service';
 import { Payment } from '../../database/entities/payment.entity';
-import { Order, OrderStatus } from '../../database/entities/order.entity';
+import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
 import { FulfillmentStatus, OrderItem } from '../../database/entities/order-item.entity';
 import { Customer } from '../../database/entities/customer.entity';
 import { SavedPaymentMethod } from '../../database/entities/saved-payment-method.entity';
@@ -2467,5 +2467,137 @@ describe('PaymentsService handleBeamWebhook', () => {
       where: { paymentReference: CHARGE_ID },
     });
     expect(order.status).toBe(OrderStatus.PAID);
+  });
+});
+
+describe('PaymentsService reconcilePendingBeamChargeIfNeeded', () => {
+  let service: PaymentsService;
+  const CHARGE_ID = 'beam_chrg_reconcile_1';
+  let order: Partial<Order>;
+  let payment: Payment;
+
+  const orderRepository = { findOne: jest.fn(), save: jest.fn() };
+  const paymentRepository = {
+    findOne: jest.fn(),
+    find: jest.fn(),
+    save: jest.fn(),
+    manager: {
+      transaction: jest.fn(),
+    },
+  };
+  const trx = { save: jest.fn((x: unknown) => Promise.resolve(x)) };
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    jest.useRealTimers();
+    order = {
+      id: 'ord-reconcile-1',
+      status: OrderStatus.PENDING_PAYMENT,
+      total: 300,
+      paymentReference: CHARGE_ID,
+    };
+    payment = {
+      id: 'pay-reconcile-1',
+      orderId: 'ord-reconcile-1',
+      amount: 300,
+      currency: 'THB',
+      status: 'pending',
+      paymentMethod: PaymentMethod.PROMPTPAY,
+      psp: 'beam',
+      pspChargeId: CHARGE_ID,
+      order: order as Order,
+    } as Payment;
+    paymentRepository.manager.transaction.mockImplementation(
+      async (cb: (m: typeof trx) => Promise<unknown>) => cb(trx),
+    );
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        PaymentsService,
+        { provide: getRepositoryToken(Payment), useValue: paymentRepository },
+        { provide: getRepositoryToken(Order), useValue: orderRepository },
+        { provide: getRepositoryToken(Customer), useValue: { findOne: jest.fn() } },
+        { provide: getRepositoryToken(SavedPaymentMethod), useValue: { findOne: jest.fn() } },
+        { provide: ConfigService, useValue: { get: jest.fn(() => '') } },
+        { provide: NotificationsService, useValue: { notifyOrderPaid: jest.fn() } },
+        {
+          provide: DashboardEventsService,
+          useValue: { publish: jest.fn().mockResolvedValue(undefined) },
+        },
+        { provide: PaymentEventsService, useValue: paymentEventsServiceMock },
+        { provide: InventoryService, useValue: { restoreOrderStock: jest.fn() } },
+        { provide: PayoutsService, useValue: payoutsServiceMock },
+        { provide: StoresService, useValue: storesServiceMock },
+        {
+          provide: VendorWebhooksService,
+          useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
+        },
+        { provide: OrderAuditLogsService, useValue: orderAuditLogsServiceMock },
+        { provide: BeamService, useValue: beamServiceMock },
+        { provide: UsersService, useValue: usersServiceMock },
+        { provide: BankTransferSettingsService, useValue: {} },
+      ],
+    }).compile();
+    service = module.get(PaymentsService);
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('marks paid + publishes when Beam GET returns SUCCEEDED', async () => {
+    beamServiceMock.getCharge.mockResolvedValue({
+      chargeId: CHARGE_ID,
+      status: 'SUCCEEDED',
+      amount: 30000,
+    });
+
+    const result = await service.reconcilePendingBeamChargeIfNeeded(payment);
+
+    expect(beamServiceMock.getCharge).toHaveBeenCalledWith(CHARGE_ID);
+    expect(result.status).toBe('paid');
+    expect(order.status).toBe(OrderStatus.PAID);
+    expect(paymentEventsServiceMock.publishPaymentStatusUpdated).toHaveBeenCalledWith(payment);
+  });
+
+  it('no-ops when Beam charge is still PENDING', async () => {
+    beamServiceMock.getCharge.mockResolvedValue({
+      chargeId: CHARGE_ID,
+      status: 'PENDING',
+      amount: 30000,
+    });
+
+    const result = await service.reconcilePendingBeamChargeIfNeeded(payment);
+
+    expect(beamServiceMock.getCharge).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe('pending');
+    expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
+  });
+
+  it('rate-limits Beam GET to once per 5s per payment id', async () => {
+    jest.useFakeTimers();
+    beamServiceMock.getCharge.mockResolvedValue({
+      chargeId: CHARGE_ID,
+      status: 'PENDING',
+      amount: 30000,
+    });
+
+    await service.reconcilePendingBeamChargeIfNeeded(payment);
+    await service.reconcilePendingBeamChargeIfNeeded(payment);
+    expect(beamServiceMock.getCharge).toHaveBeenCalledTimes(1);
+
+    jest.advanceTimersByTime(5_000);
+    await service.reconcilePendingBeamChargeIfNeeded(payment);
+    expect(beamServiceMock.getCharge).toHaveBeenCalledTimes(2);
+  });
+
+  it('skips bank_transfer and non-beam pending payments', async () => {
+    payment.paymentMethod = PaymentMethod.BANK_TRANSFER;
+    payment.psp = null;
+    payment.pspChargeId = null;
+
+    await service.reconcilePendingBeamChargeIfNeeded(payment);
+
+    expect(beamServiceMock.getCharge).not.toHaveBeenCalled();
   });
 });
