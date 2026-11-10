@@ -131,41 +131,10 @@ export class AdminManualPayoutConnection {
 }
 
 @ObjectType()
-export class PayoutRailSummaryType {
-  @Field(() => Float)
-  grossRevenue!: number;
-
-  @Field(() => Float)
-  totalPaidOut!: number;
-
-  @Field(() => Float)
-  availableBalance!: number;
-
-  @Field(() => Float)
-  productSold!: number;
-
-  @Field(() => Float)
-  shippingFees!: number;
-
-  @Field(() => Float)
-  commissionAmount!: number;
-
-  @Field(() => Int)
-  commissionRate!: number;
-
-  @Field(() => Float)
-  pendingPayoutAmount!: number;
-
-  @Field()
-  canRequestPayout!: boolean;
-}
-
-@ObjectType()
 export class PayoutSummaryType {
   @Field()
   storeId!: string;
 
-  /** Omise-rail gross (PromptPay/card). Kept for backward compatibility. */
   @Field(() => Float)
   grossRevenue!: number;
 
@@ -195,12 +164,6 @@ export class PayoutSummaryType {
 
   @Field()
   canRequestPayout!: boolean;
-
-  @Field(() => PayoutRailSummaryType)
-  omise!: PayoutRailSummaryType;
-
-  @Field(() => PayoutRailSummaryType)
-  manual!: PayoutRailSummaryType;
 }
 
 @InputType()
@@ -536,8 +499,6 @@ function mapSummary(summary: PayoutSummary): PayoutSummaryType {
     pendingPayoutAmount: summary.pendingPayoutAmount,
     minimumPayoutAmount: summary.minimumPayoutAmount,
     canRequestPayout: summary.canRequestPayout,
-    omise: { ...summary.omise },
-    manual: { ...summary.manual },
   };
 }
 

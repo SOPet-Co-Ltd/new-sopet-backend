@@ -6,20 +6,25 @@ import {
   UnauthorizedException,
   BadRequestException,
   HttpCode,
+  Logger,
 } from '@nestjs/common';
 import type { RawBodyRequest } from '@nestjs/common';
 import { Request } from 'express';
 import { Public } from '../../common/decorators';
 import { PaymentsService } from './payments.service';
 
+const HANDLED_BEAM_EVENTS = new Set(['charge.succeeded', 'charge.failed']);
+
 @Controller('webhooks')
 export class PaymentsWebhookController {
+  private readonly logger = new Logger(PaymentsWebhookController.name);
+
   constructor(private readonly paymentsService: PaymentsService) {}
 
   @Public()
-  @Post('omise')
+  @Post('beam')
   @HttpCode(200)
-  async handleOmiseWebhook(
+  async handleBeamWebhook(
     @Req() req: RawBodyRequest<Request>,
     @Body() payload: Record<string, unknown>,
   ) {
@@ -28,19 +33,26 @@ export class PaymentsWebhookController {
       throw new BadRequestException('Missing raw request body');
     }
 
-    const signature = req.headers['omise-signature'] as string | undefined;
-    const timestamp = req.headers['omise-signature-timestamp'] as string | undefined;
-
-    const verified = this.paymentsService.verifyOmiseWebhookSignature(
-      rawBody,
-      signature,
-      timestamp,
-    );
-    if (!verified) {
-      throw new UnauthorizedException('Invalid Omise webhook signature');
+    const signature = req.headers['x-beam-signature'] as string | undefined;
+    if (!this.paymentsService.verifyBeamWebhookSignature(rawBody, signature)) {
+      throw new UnauthorizedException('Invalid Beam webhook signature');
     }
 
-    await this.paymentsService.handleWebhook(payload);
+    const eventHeader = req.headers['x-beam-event'];
+    const eventType = Array.isArray(eventHeader)
+      ? eventHeader[0]?.trim()
+      : typeof eventHeader === 'string'
+        ? eventHeader.trim()
+        : '';
+
+    if (!eventType || !HANDLED_BEAM_EVENTS.has(eventType)) {
+      this.logger.log(
+        `Ignoring Beam webhook event=${eventType || '(missing)'} (only charge.succeeded/failed handled)`,
+      );
+      return { received: true, ignored: true };
+    }
+
+    await this.paymentsService.handleBeamWebhook(payload, eventType);
     return { received: true };
   }
 }

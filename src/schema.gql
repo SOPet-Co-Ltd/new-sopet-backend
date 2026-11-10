@@ -33,11 +33,11 @@ type ActiveSaleCampaignItemType {
 
 input AddPaymentMethodInput {
   brand: String!
+  cardToken: String!
   expiryMonth: Int!
   expiryYear: Int!
   isDefault: Boolean
   lastFour: String!
-  omiseCardToken: String!
 }
 
 input AddProductImageInput {
@@ -223,6 +223,8 @@ type AdminStoreType {
   address: String
   bankAccountName: String
   bankAccountNumber: String
+  bankAccountRejectionReason: String
+  bankAccountVerificationStatus: String!
   bankCode: String
   bankName: String
   bannerUrl: String
@@ -488,12 +490,14 @@ input CreateOrderInput {
 
 input CreatePaymentInput {
   amount: Float
+  cardSecurityCode: String
+  cardToken: String
   currency: String! = "THB"
   guestPayToken: String
-  omiseToken: String
   orderId: String!
   paymentMethod: String!
   platformType: String
+  saveCard: SaveCardOnPaymentInput
   savedPaymentMethodId: String
 }
 
@@ -921,8 +925,6 @@ type Mutation {
   inviteAdmin(input: InviteAdminInput!): AdminInvitationType!
   inviteStoreMember(input: InviteStoreMemberInput!): StoreMemberInvitationType!
   inviteVendor(input: InviteVendorInput!): VendorInvitationType!
-  linkStoreOmiseRecipient: MyStoreType!
-  linkStoreOmiseRecipientAsAdmin(storeId: String!): AdminStoreType!
   markAllNotificationsRead: Boolean!
   markNotificationRead(id: String!): Boolean!
   markVendorOrderPaid(orderId: String!): OrderType!
@@ -940,6 +942,7 @@ type Mutation {
   rejectPetType(id: String!): PetTypeType!
   rejectReview(id: String!): ReviewType!
   rejectStore(input: RejectStoreInput!): StoreType!
+  rejectStoreBankAccount(reason: String!, storeId: String!): AdminStoreType!
   rejectStoreReactivationRequest(input: RejectStoreReactivationRequestInput!): StoreReactivationRequestType!
   rejectStoreRequest(input: RejectStoreRequestInput!): StoreRequestType!
   rejectTag(id: String!): TagType!
@@ -1019,6 +1022,7 @@ type Mutation {
   verifyCustomerOtp(input: VerifyCustomerOtpInput!): CustomerAuthPayload!
   verifyCustomerPhoneAsAdmin(id: String!): AdminCustomerType!
   verifyEmail(input: VerifyEmailInput!): MessagePayload!
+  verifyStoreBankAccount(storeId: String!): AdminStoreType!
 }
 
 type MyPendingStoreInvitationType {
@@ -1035,6 +1039,8 @@ type MyStoreType {
   address: String
   bankAccountName: String
   bankAccountNumber: String
+  bankAccountRejectionReason: String
+  bankAccountVerificationStatus: String!
   bankCode: String
   bankName: String
   bannerUrl: String
@@ -1227,10 +1233,12 @@ type PaymentType {
   authorizeUri: String
   currency: String!
   expiresAt: DateTime
+  failureCode: String
   id: String!
   orderId: String!
   orderNumber: String
   paymentMethod: String!
+  qrCodeImage: String
   qrCodeUrl: String
   status: String!
 }
@@ -1240,27 +1248,13 @@ type PayoutConnection {
   pagination: PaginationMeta!
 }
 
-type PayoutRailSummaryType {
-  availableBalance: Float!
-  canRequestPayout: Boolean!
-  commissionAmount: Float!
-  commissionRate: Int!
-  grossRevenue: Float!
-  pendingPayoutAmount: Float!
-  productSold: Float!
-  shippingFees: Float!
-  totalPaidOut: Float!
-}
-
 type PayoutSummaryType {
   availableBalance: Float!
   canRequestPayout: Boolean!
   commissionAmount: Float!
   commissionRate: Int!
   grossRevenue: Float!
-  manual: PayoutRailSummaryType!
   minimumPayoutAmount: Float!
-  omise: PayoutRailSummaryType!
   pendingPayoutAmount: Float!
   productSold: Float!
   shippingFees: Float!
@@ -1775,6 +1769,15 @@ type SalesTimePointType {
   revenue: Float!
 }
 
+input SaveCardOnPaymentInput {
+  brand: String!
+  cardToken: String!
+  expiryMonth: Int!
+  expiryYear: Int!
+  isDefault: Boolean
+  lastFour: String!
+}
+
 type SavedAddressType {
   addressLine1: String!
   addressLine2: String
@@ -1796,6 +1799,7 @@ type SavedPaymentMethodType {
   id: String!
   isDefault: Boolean!
   lastFour: String!
+  psp: String
   type: String!
 }
 

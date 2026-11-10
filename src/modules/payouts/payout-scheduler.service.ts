@@ -6,7 +6,7 @@ import { Queue } from 'bullmq';
 import { Repository } from 'typeorm';
 import { PayoutsService } from './payouts.service';
 import { PAYOUT_SCHEDULER_JOB, PAYOUT_SCHEDULER_QUEUE } from './payout-scheduler.constants';
-import { Store, PayoutSchedule, StoreStatus } from '../../database/entities/store.entity';
+import { Store, PayoutSchedule } from '../../database/entities/store.entity';
 
 @Injectable()
 export class PayoutSchedulerService implements OnModuleInit, OnModuleDestroy {
@@ -57,46 +57,12 @@ export class PayoutSchedulerService implements OnModuleInit, OnModuleDestroy {
     await this.payoutQueue?.close();
   }
 
+  /**
+   * No-op: all payouts use the manual rail (vendor requests, admin transfers offline).
+   * The scheduler no longer creates payouts or transfers.
+   */
   async runScheduledPayouts(): Promise<void> {
-    const stores = await this.storeRepository.find({
-      where: {
-        status: StoreStatus.APPROVED,
-        payoutSchedulePaused: false,
-      },
-    });
-
-    const minimumPayoutAmount = this.configService.get<number>('payout.minPayoutAmount') ?? 100;
-    const now = new Date();
-
-    for (const store of stores) {
-      if (store.payoutSchedule === PayoutSchedule.MANUAL) {
-        continue;
-      }
-
-      if (!this.isDue(store.payoutSchedule, now)) {
-        continue;
-      }
-
-      try {
-        const summary = await this.payoutsService.getPayoutSummary(store.id);
-        if (summary.availableBalance < minimumPayoutAmount) {
-          continue;
-        }
-
-        if (summary.pendingPayoutAmount > 0) {
-          continue;
-        }
-
-        await this.payoutsService.createManualPayout(store.id, summary.availableBalance, {
-          notes: 'Scheduled payout',
-        });
-        this.logger.log(
-          `Scheduled payout created for store ${store.id}: ฿${summary.availableBalance}`,
-        );
-      } catch (err) {
-        this.logger.error(`Scheduled payout failed for store ${store.id}`, err);
-      }
-    }
+    this.logger.log('Scheduled payouts skipped — manual settlement rail only');
   }
 
   isDue(schedule: PayoutSchedule, now: Date): boolean {

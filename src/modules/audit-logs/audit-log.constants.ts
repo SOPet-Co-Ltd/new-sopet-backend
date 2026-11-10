@@ -19,6 +19,8 @@ export const AuditAction = {
   STORE_REACTIVATED: 'store.reactivated',
   STORE_APPROVED: 'store.approved',
   STORE_REJECTED: 'store.rejected',
+  STORE_BANK_VERIFIED: 'store.bank_verified',
+  STORE_BANK_REJECTED: 'store.bank_rejected',
   PAYOUT_TRIGGERED: 'payout.triggered',
   PAYOUT_MANUAL_SETTLED: 'payout.manual_settled',
   PAYOUT_MANUAL_REJECTED: 'payout.manual_rejected',

@@ -3,7 +3,6 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { BullModule } from '@nestjs/bullmq';
 import { ConfigModule } from '@nestjs/config';
 import { isRedisConfigured } from '../../common/utils/is-redis-configured';
-import { OmiseModule } from '../omise/omise.module';
 import { StoresModule } from '../stores/stores.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { DashboardEventsModule } from '../dashboard-events/dashboard-events.module';
@@ -38,7 +37,6 @@ const payoutQueueProviders = isRedisConfigured() ? [PayoutSchedulerProcessor] : 
 
 @Module({
   imports: [
-    OmiseModule,
     StoresModule,
     NotificationsModule,
     DashboardEventsModule,

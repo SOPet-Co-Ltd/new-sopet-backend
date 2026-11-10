@@ -31,7 +31,6 @@ import { SearchAnalyticsService } from '../../src/modules/search/search-analytic
 import { SearchRepository } from '../../src/modules/search/search.repository';
 import { PersonalizationService } from '../../src/modules/search/personalization.service';
 import { SearchSettingsService } from '../../src/modules/search/search-settings.service';
-import { OmiseService } from '../../src/modules/omise/omise.service';
 import { NotificationsService } from '../../src/modules/notifications/notifications.service';
 import { StorageService } from '../../src/modules/storage/storage.service';
 import { AuditLogsService } from '../../src/modules/audit-logs/audit-logs.service';
@@ -76,10 +75,6 @@ export const searchTaxonomyGraphqlMockProviders = [
     useValue: {
       getRankingWeights: jest.fn().mockResolvedValue({}),
     },
-  },
-  {
-    provide: OmiseService,
-    useValue: {},
   },
   {
     provide: NotificationsService,

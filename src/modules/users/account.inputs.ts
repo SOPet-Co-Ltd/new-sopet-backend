@@ -163,7 +163,7 @@ export class AddPaymentMethodInput {
   @Field()
   @IsNotEmpty()
   @IsString()
-  omiseCardToken!: string;
+  cardToken!: string;
 
   @Field()
   @IsNotEmpty()

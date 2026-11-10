@@ -7,7 +7,7 @@ import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
 import appConfig from './config/app.config';
 import jwtConfig from './config/jwt.config';
 import otpConfig from './config/otp.config';
-import omiseConfig from './config/omise.config';
+import beamConfig from './config/beam.config';
 import storageConfig from './config/storage.config';
 import twilioConfig from './config/twilio.config';
 import resendConfig from './config/resend.config';
@@ -60,7 +60,7 @@ import { getPostgresSslOptions } from './database/postgres-ssl.util';
         appConfig,
         jwtConfig,
         otpConfig,
-        omiseConfig,
+        beamConfig,
         storageConfig,
         twilioConfig,
         thaibulksmsConfig,

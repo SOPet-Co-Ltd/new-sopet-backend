@@ -9,7 +9,7 @@
 //   yarn test:e2e --testPathPatterns=store-commission.service
 //
 // @real-dependency: PostgreSQL (stores, payouts, orders, order_items, order_store_shippings)
-// @real-dependency: PayoutsService createOmisePayout + requestManualPayout + getPayoutSummary
+// @real-dependency: PayoutsService createManualPayout + requestManualPayout + getPayoutSummary
 // @real-dependency: StoresService.updateAsAdmin
 // @real-dependency: payout-commission.calculator (pure)
 // Mock: Omise HTTP only (createTransfer satang = Math.round(netAmount * 100))
@@ -34,7 +34,6 @@ import { JwtAuthGuard } from '../src/modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../src/modules/auth/guards/roles.guard';
 import { JwtStrategy } from '../src/modules/auth/strategies/jwt.strategy';
 import { AuditLogsService } from '../src/modules/audit-logs/audit-logs.service';
-import { OmiseService } from '../src/modules/omise/omise.service';
 import { NotificationsService } from '../src/modules/notifications/notifications.service';
 import { DashboardEventsService } from '../src/modules/dashboard-events/dashboard-events.service';
 import { StorageService } from '../src/modules/storage/storage.service';
@@ -63,11 +62,9 @@ import {
   STORE_COMMISSION_E2E_NULL_PAID_AT_PRODUCT,
   applyStoreCommissionE2eEnv,
   cleanupStoreCommissionE2eSeed,
-  readOmiseCreateTransferSatang,
   seedStoreCommissionE2eDataset,
   storeCommissionE2eConfigGet,
   storeCommissionSchedulerMockProviders,
-  stubOmiseCreateTransferHttp,
   type StoreCommissionE2eSeedDataset,
 } from './helpers/store-commission-e2e.seed';
 
@@ -170,8 +167,6 @@ describe('store commission service-integration-e2e harness', () => {
   let dataSource: DataSource;
   let payoutsService: PayoutsService;
   let storesService: StoresService;
-  let omiseFetchMock: jest.Mock;
-  const originalFetch = global.fetch;
 
   beforeAll(async () => {
     applyStoreCommissionE2eEnv();
@@ -179,8 +174,6 @@ describe('store commission service-integration-e2e harness', () => {
     if (!postgresAvailable) {
       return;
     }
-
-    omiseFetchMock = stubOmiseCreateTransferHttp();
 
     moduleFixture = await Test.createTestingModule({
       imports: [
@@ -213,7 +206,6 @@ describe('store commission service-integration-e2e harness', () => {
         PayoutsResolver,
         PayoutsService,
         StoresService,
-        OmiseService,
         JwtStrategy,
         JwtAuthGuard,
         RolesGuard,
@@ -253,7 +245,6 @@ describe('store commission service-integration-e2e harness', () => {
   });
 
   afterAll(async () => {
-    global.fetch = originalFetch;
     if (app) {
       await app.close();
     }
@@ -377,7 +368,6 @@ describe('store commission service-integration-e2e harness', () => {
       }
 
       const dataset = await seedStoreCommissionE2eDataset(dataSource);
-      omiseFetchMock.mockClear();
 
       try {
         const omiseGql = await postGraphql<{ triggerPayout: PayoutGraphql }>(
@@ -408,17 +398,6 @@ describe('store commission service-integration-e2e harness', () => {
         );
         expect(pairColumns).toEqual([]);
 
-        expect(readOmiseCreateTransferSatang(omiseFetchMock)).toEqual([
-          SVC1_FOURS.createTransferSatang,
-        ]);
-
-        const transferCallsBeforeManual = omiseFetchMock.mock.calls.filter(
-          (call: [string, RequestInit | undefined]) =>
-            typeof call[0] === 'string' &&
-            call[0].includes('/transfers') &&
-            call[1]?.method === 'POST',
-        ).length;
-
         const manualGql = await postGraphql<{ requestManualPayout: PayoutGraphql }>(
           dataset.auth.manualVendorAccessToken,
           REQUEST_MANUAL_PAYOUT,
@@ -430,14 +409,6 @@ describe('store commission service-integration-e2e harness', () => {
         expectSnapshotIdentity(manualSql, { ...SVC1_FOURS, commissionRate: 7 });
         expect(Number(manualSql.amount)).toBe(manualPayout.amount);
         expect(manualPayout.amount).toBe(omisePayout.amount);
-
-        const transferCallsAfterManual = omiseFetchMock.mock.calls.filter(
-          (call: [string, RequestInit | undefined]) =>
-            typeof call[0] === 'string' &&
-            call[0].includes('/transfers') &&
-            call[1]?.method === 'POST',
-        ).length;
-        expect(transferCallsAfterManual).toBe(transferCallsBeforeManual);
 
         const frozen = {
           amount: Number(omiseSql.amount),
@@ -520,8 +491,8 @@ describe('store commission service-integration-e2e harness', () => {
         expect(heldSummary.shippingFees).toBe(0);
         expect(heldSummary.commissionAmount).toBe(0);
         expect(heldSummary.availableBalance).toBe(0);
-        expect(heldSummary.omise.productSold).toBe(0);
-        expect(heldSummary.omise.shippingFees).toBe(0);
+        expect(heldSummary.productSold).toBe(0);
+        expect(heldSummary.shippingFees).toBe(0);
 
         await expect(
           payoutsService.triggerPayout(dataset.hold.store.id, { bypassMinimum: true }),

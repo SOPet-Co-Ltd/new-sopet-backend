@@ -44,7 +44,7 @@ async function bootstrap() {
 
   // `bodyParser: false` skips Nest's default (100kb) parser registration so we
   // can register path-specific parsers below. `rawBody: true` is still honored
-  // by Nest's body parser helpers for Omise webhook HMAC verification; we also
+  // by Nest's body parser helpers for webhook HMAC verification; we also
   // set rawBody on the webhook path via verify().
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     rawBody: true,
@@ -67,7 +67,7 @@ async function bootstrap() {
   };
 
   // Path-specific smaller limits first (SOPET-L-01)
-  app.use('/webhooks/omise', express.json({ limit: REST_BODY_LIMIT, verify: captureRawBody }));
+  app.use('/webhooks/beam', express.json({ limit: REST_BODY_LIMIT, verify: captureRawBody }));
   app.use('/api/v1', express.json({ limit: REST_BODY_LIMIT }));
   app.use('/api/v1', express.urlencoded({ extended: true, limit: REST_BODY_LIMIT }));
 
@@ -100,7 +100,7 @@ async function bootstrap() {
 
   bootstrapLogger.log(`SOPet API: ${apiUrl}/graphql`);
   bootstrapLogger.log(`GraphQL subscriptions: ${apiUrl.replace(/^http/, 'ws')}/graphql`);
-  bootstrapLogger.log(`Omise webhook: ${apiUrl}/webhooks/omise`);
+  bootstrapLogger.log(`Beam webhook: ${apiUrl}/webhooks/beam`);
   bootstrapLogger.log(
     `Public API: ${apiUrl}/api/v1/stores/{storeId} (Authorization: Bearer sopet_sk_...)`,
   );

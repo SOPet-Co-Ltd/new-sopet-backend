@@ -219,6 +219,8 @@ export function mapAdminStore(store: Store): AdminStoreType {
     omiseRecipientId: store.omiseRecipientId,
     omiseRecipientStatus: store.omiseRecipientStatus,
     omiseRecipientFailureMessage: store.omiseRecipientFailureMessage,
+    bankAccountVerificationStatus: store.bankAccountVerificationStatus,
+    bankAccountRejectionReason: store.bankAccountRejectionReason ?? null,
     payoutSchedule: store.payoutSchedule,
     payoutSchedulePaused: store.payoutSchedulePaused,
     commissionRate: store.commissionRate ?? null,
