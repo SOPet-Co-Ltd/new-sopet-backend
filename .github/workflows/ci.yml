@@ -79,9 +79,11 @@ jobs:
     env:
       NODE_ENV: test
       JWT_SECRET: ci-dummy-jwt-secret-not-for-production
-      OMISE_SECRET_KEY: skey_test_ci_dummy
-      OMISE_PUBLIC_KEY: pkey_test_ci_dummy
-      OMISE_WEBHOOK_SECRET: whsec_ci_dummy
+      BEAM_API_BASE_URL: https://playground.api.beamcheckout.com
+      BEAM_MERCHANT_ID: ci_dummy_merchant
+      BEAM_API_KEY: ci_dummy_api_key
+      BEAM_PUBLISHABLE_KEY: ci_dummy_publishable_key
+      BEAM_WEBHOOK_SECRET: Y2lfZHVtbXk=
       DB_HOST: localhost
       DB_PORT: 5432
       DB_USERNAME: postgres

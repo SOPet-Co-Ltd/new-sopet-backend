@@ -158,9 +158,11 @@ jobs:
           BANK_DATA_ENCRYPTION_KEY: ${{ secrets.BANK_DATA_ENCRYPTION_KEY }}
           THAIBULKSMS_API_KEY: ${{ secrets.THAIBULKSMS_API_KEY }}
           THAIBULKSMS_API_SECRET: ${{ secrets.THAIBULKSMS_API_SECRET }}
-          OMISE_PUBLIC_KEY: ${{ secrets.OMISE_PUBLIC_KEY }}
-          OMISE_SECRET_KEY: ${{ secrets.OMISE_SECRET_KEY }}
-          OMISE_WEBHOOK_SECRET: ${{ secrets.OMISE_WEBHOOK_SECRET }}
+          BEAM_API_BASE_URL: ${{ vars.BEAM_API_BASE_URL }}
+          BEAM_MERCHANT_ID: ${{ vars.BEAM_MERCHANT_ID }}
+          BEAM_API_KEY: ${{ secrets.BEAM_API_KEY }}
+          BEAM_PUBLISHABLE_KEY: ${{ secrets.BEAM_PUBLISHABLE_KEY }}
+          BEAM_WEBHOOK_SECRET: ${{ secrets.BEAM_WEBHOOK_SECRET }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
@@ -181,9 +183,11 @@ jobs:
           BANK_DATA_ENCRYPTION_KEY: ${{ secrets.BANK_DATA_ENCRYPTION_KEY }}
           THAIBULKSMS_API_KEY: ${{ secrets.THAIBULKSMS_API_KEY }}
           THAIBULKSMS_API_SECRET: ${{ secrets.THAIBULKSMS_API_SECRET }}
-          OMISE_PUBLIC_KEY: ${{ secrets.OMISE_PUBLIC_KEY }}
-          OMISE_SECRET_KEY: ${{ secrets.OMISE_SECRET_KEY }}
-          OMISE_WEBHOOK_SECRET: ${{ secrets.OMISE_WEBHOOK_SECRET }}
+          BEAM_API_BASE_URL: ${{ vars.BEAM_API_BASE_URL }}
+          BEAM_MERCHANT_ID: ${{ vars.BEAM_MERCHANT_ID }}
+          BEAM_API_KEY: ${{ secrets.BEAM_API_KEY }}
+          BEAM_PUBLISHABLE_KEY: ${{ secrets.BEAM_PUBLISHABLE_KEY }}
+          BEAM_WEBHOOK_SECRET: ${{ secrets.BEAM_WEBHOOK_SECRET }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
         run: |
           chmod +x infra/validate-deploy-env.sh
