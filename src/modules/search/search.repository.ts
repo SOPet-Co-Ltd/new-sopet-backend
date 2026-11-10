@@ -444,6 +444,7 @@ export class SearchRepository {
       .select('product.id', 'id')
       .addSelect('product.name', 'name')
       .addSelect('product.slug', 'slug')
+      .addSelect('store.slug', 'store_slug')
       .addSelect((subQuery) => {
         return subQuery
           .select('img.url')
@@ -473,12 +474,19 @@ export class SearchRepository {
       .orderBy('sim', 'DESC')
       .addOrderBy('product.name', 'ASC')
       .limit(limit)
-      .getRawMany<{ id: string; name: string; slug: string; thumbnail_url: string | null }>();
+      .getRawMany<{
+        id: string;
+        name: string;
+        slug: string;
+        store_slug: string;
+        thumbnail_url: string | null;
+      }>();
 
     return rows.map((row) => ({
       id: row.id,
       name: row.name,
       slug: row.slug,
+      storeSlug: row.store_slug,
       thumbnailUrl: row.thumbnail_url ?? null,
     }));
   }

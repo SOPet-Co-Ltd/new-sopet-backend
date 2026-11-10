@@ -752,8 +752,15 @@ export class PaymentType {
   @Field(() => String, { nullable: true })
   qrCodeUrl?: string | null;
 
+  @Field(() => String, { nullable: true })
+  qrCodeImage?: string | null;
+
   @Field(() => Date, { nullable: true })
   expiresAt?: Date | null;
+
+  /** Beam charge failureCode when payment failed (e.g. CH_CARD_DECLINED). */
+  @Field(() => String, { nullable: true })
+  failureCode?: string | null;
 }
 
 @ObjectType()
@@ -1240,6 +1247,10 @@ export class SavedPaymentMethodType {
 
   @Field()
   type!: string;
+
+  /** Payment service provider (`beam` or historical `omise`). */
+  @Field(() => String, { nullable: true })
+  psp?: string | null;
 
   @Field()
   lastFour!: string;
@@ -1778,6 +1789,12 @@ export class AdminStoreType {
   omiseRecipientFailureMessage?: string | null;
 
   @Field()
+  bankAccountVerificationStatus!: string;
+
+  @Field(() => String, { nullable: true })
+  bankAccountRejectionReason?: string | null;
+
+  @Field()
   payoutSchedule!: string;
 
   @Field()
@@ -2148,6 +2165,12 @@ export class MyStoreType {
 
   @Field(() => String, { nullable: true })
   omiseRecipientFailureMessage?: string | null;
+
+  @Field()
+  bankAccountVerificationStatus!: string;
+
+  @Field(() => String, { nullable: true })
+  bankAccountRejectionReason?: string | null;
 
   @Field()
   status!: string;

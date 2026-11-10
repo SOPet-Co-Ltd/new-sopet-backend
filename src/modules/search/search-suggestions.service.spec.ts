@@ -10,6 +10,7 @@ describe('SearchSuggestionsService', () => {
         id: 'prod-1',
         name: 'Royal Canin Cat Food',
         slug: 'royal-canin-cat-food',
+        storeSlug: 'sopet-pet-shop',
         thumbnailUrl: 'https://example.com/royal-canin.jpg',
       },
     ]);
@@ -40,6 +41,7 @@ describe('SearchSuggestionsService', () => {
       id: 'prod-1',
       name: 'Royal Canin Cat Food',
       slug: 'royal-canin-cat-food',
+      storeSlug: 'sopet-pet-shop',
       thumbnailUrl: 'https://example.com/royal-canin.jpg',
     });
   });

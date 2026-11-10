@@ -884,6 +884,54 @@ export class ProductsService {
     return product;
   }
 
+  /**
+   * Public SEO path: `{product.slug}-{store.slug}` as a single URL segment.
+   * Matched via concat so hyphens inside either slug do not require client-side splits.
+   */
+  async findByPath(path: string): Promise<Product> {
+    const normalizedPath = path.trim();
+    if (!normalizedPath) {
+      throw new NotFoundException({
+        code: 'PRODUCT_NOT_FOUND',
+        message: 'Product not found',
+      });
+    }
+
+    const product = await this.productRepository
+      .createQueryBuilder('product')
+      .innerJoinAndSelect('product.store', 'store')
+      .leftJoinAndSelect('product.images', 'images')
+      .leftJoinAndSelect('product.variants', 'variants')
+      .leftJoinAndSelect('product.categoryRelation', 'categoryRelation')
+      .leftJoinAndSelect('product.petTypeRelation', 'petTypeRelation')
+      .leftJoinAndSelect('product.brandRelation', 'brandRelation')
+      .leftJoinAndSelect('product.taxonomyTags', 'taxonomyTags')
+      .where("product.slug || '-' || store.slug = :path", { path: normalizedPath })
+      .andWhere('product.deleted_at IS NULL')
+      .getOne();
+
+    if (!product) {
+      throw new NotFoundException({
+        code: 'PRODUCT_NOT_FOUND',
+        message: 'Product not found',
+      });
+    }
+
+    return product;
+  }
+
+  async findByPathPublished(path: string): Promise<Product> {
+    const product = await this.findByPath(path);
+    if (product.status !== ProductStatus.PUBLISHED) {
+      throw new NotFoundException({
+        code: 'PRODUCT_NOT_FOUND',
+        message: 'Product not found',
+      });
+    }
+    this.assertPublishedStoreApproved(product);
+    return product;
+  }
+
   /** Public PDP/recommend: treat non-approved store products as not found. */
   private assertPublishedStoreApproved(product: Product): void {
     if (product.store?.status !== StoreStatus.APPROVED) {

@@ -347,6 +347,80 @@ describe('ProductsService', () => {
     });
   });
 
+  function mockPathQueryBuilder(resolved: unknown) {
+    const qb = {
+      innerJoinAndSelect: jest.fn().mockReturnThis(),
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue(resolved),
+    };
+    productRepository.createQueryBuilder.mockReturnValue(qb);
+    return qb;
+  }
+
+  it('finds published product by composite path', async () => {
+    const published = {
+      ...product,
+      status: ProductStatus.PUBLISHED,
+      store: { id: 'store-1', status: StoreStatus.APPROVED, slug: 'sopet-pet-shop' },
+    };
+    const qb = mockPathQueryBuilder(published);
+
+    const result = await service.findByPathPublished('dog-food-sopet-pet-shop');
+
+    expect(result).toEqual(published);
+    expect(qb.where).toHaveBeenCalledWith("product.slug || '-' || store.slug = :path", {
+      path: 'dog-food-sopet-pet-shop',
+    });
+  });
+
+  it('finds published product by Thai composite path', async () => {
+    const published = {
+      ...product,
+      slug: 'อาหารสุนัข',
+      status: ProductStatus.PUBLISHED,
+      store: { id: 'store-1', status: StoreStatus.APPROVED, slug: 'sopet-pet-shop' },
+    };
+    mockPathQueryBuilder(published);
+
+    await expect(service.findByPathPublished('อาหารสุนัข-sopet-pet-shop')).resolves.toEqual(
+      published,
+    );
+  });
+
+  it('returns not found for unknown product path', async () => {
+    mockPathQueryBuilder(null);
+
+    await expect(service.findByPathPublished('missing-store')).rejects.toMatchObject({
+      response: { code: 'PRODUCT_NOT_FOUND' },
+    });
+  });
+
+  it('hides published products from suspended stores on findByPathPublished', async () => {
+    mockPathQueryBuilder({
+      ...product,
+      status: ProductStatus.PUBLISHED,
+      store: { id: 'store-1', status: StoreStatus.SUSPENDED, slug: 'sopet-pet-shop' },
+    });
+
+    await expect(service.findByPathPublished('dog-food-sopet-pet-shop')).rejects.toMatchObject({
+      response: { code: 'PRODUCT_NOT_FOUND' },
+    });
+  });
+
+  it('hides unpublished products on findByPathPublished', async () => {
+    mockPathQueryBuilder({
+      ...product,
+      status: ProductStatus.DRAFT,
+      store: { id: 'store-1', status: StoreStatus.APPROVED, slug: 'sopet-pet-shop' },
+    });
+
+    await expect(service.findByPathPublished('dog-food-sopet-pet-shop')).rejects.toMatchObject({
+      response: { code: 'PRODUCT_NOT_FOUND' },
+    });
+  });
+
   it('filters suspended-store products from findPublishedByIds (AC-001)', async () => {
     productRepository.find.mockResolvedValue([
       {

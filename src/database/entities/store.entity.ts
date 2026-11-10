@@ -40,6 +40,13 @@ export enum OmiseRecipientStatus {
   FAILED = 'failed',
 }
 
+export enum BankAccountVerificationStatus {
+  UNVERIFIED = 'unverified',
+  PENDING_REVIEW = 'pending_review',
+  VERIFIED = 'verified',
+  REJECTED = 'rejected',
+}
+
 @Entity('stores')
 @Index(['slug'], { unique: true, where: 'deleted_at IS NULL' })
 @Index(['status'])
@@ -155,6 +162,23 @@ export class Store {
   })
   @IsOptional()
   omiseRecipientFailureMessage!: string | null;
+
+  @Column({
+    name: 'bank_account_verification_status',
+    type: 'enum',
+    enum: BankAccountVerificationStatus,
+    enumName: 'store_bank_account_verification_status_enum',
+    default: BankAccountVerificationStatus.UNVERIFIED,
+  })
+  bankAccountVerificationStatus!: BankAccountVerificationStatus;
+
+  @Column({
+    name: 'bank_account_rejection_reason',
+    type: 'text',
+    nullable: true,
+  })
+  @IsOptional()
+  bankAccountRejectionReason!: string | null;
 
   @Column({
     name: 'payout_schedule',

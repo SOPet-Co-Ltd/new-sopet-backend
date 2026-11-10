@@ -6,7 +6,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, MoreThan, QueryFailedError } from 'typeorm';
+import { Repository, MoreThan, QueryFailedError, IsNull } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { Customer } from '../../database/entities/customer.entity';
@@ -18,13 +18,14 @@ import {
 import { CustomerRepository } from '../../database/repositories/customer.repository';
 import { OtpCode } from '../../database/entities/otp-code.entity';
 import { OrdersService } from '../orders/orders.service';
-import { PaymentsService, SavedOmiseCardDetails } from '../payments/payments.service';
 import { normalizeThaiPhoneToLocal } from '../../common/utils/phone.util';
 import { isAcceptedOtpCode } from '../../common/utils/otp-code.util';
 import { UpdateProfileDto, CreateAddressDto, UpdateAddressDto } from './dto';
 import { JwtPayload } from '../../common/interfaces';
 import { isPendingDeletion, isDeletionRetentionExpired } from '../customers/customer-deletion.util';
 import { StorageService } from '../storage/storage.service';
+
+const BEAM_PSP = 'beam';
 
 interface ReactivationJwtPayload {
   sub: string;
@@ -44,7 +45,6 @@ export class UsersService {
     private otpRepository: Repository<OtpCode>,
     private readonly customerRepo: CustomerRepository,
     private readonly ordersService: OrdersService,
-    private readonly paymentsService: PaymentsService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly storageService: StorageService,
@@ -354,7 +354,7 @@ export class UsersService {
 
   async getPaymentMethods(customerId: string): Promise<SavedPaymentMethod[]> {
     return this.paymentMethodRepository.find({
-      where: { customerId },
+      where: { customerId, psp: BEAM_PSP, deletedAt: IsNull() },
       order: { isDefault: 'DESC', createdAt: 'DESC' },
     });
   }
@@ -375,6 +375,19 @@ export class UsersService {
     );
   }
 
+  private async softDeleteLegacyOmiseMethods(customerId: string): Promise<void> {
+    await this.paymentMethodRepository.softDelete({
+      customerId,
+      psp: IsNull(),
+      deletedAt: IsNull(),
+    });
+    await this.paymentMethodRepository.softDelete({
+      customerId,
+      psp: 'omise',
+      deletedAt: IsNull(),
+    });
+  }
+
   private async findActivePaymentMethodByDetails(
     customerId: string,
     details: {
@@ -382,21 +395,12 @@ export class UsersService {
       brand: string;
       expiryMonth: number;
       expiryYear: number;
-      cardFingerprint?: string | null;
     },
   ): Promise<SavedPaymentMethod | null> {
-    if (details.cardFingerprint) {
-      const byFingerprint = await this.paymentMethodRepository.findOne({
-        where: { customerId, cardFingerprint: details.cardFingerprint },
-      });
-      if (byFingerprint) {
-        return byFingerprint;
-      }
-    }
-
     return this.paymentMethodRepository
       .createQueryBuilder('method')
       .where('method.customerId = :customerId', { customerId })
+      .andWhere('method.psp = :psp', { psp: BEAM_PSP })
       .andWhere('method.lastFour = :lastFour', { lastFour: details.lastFour })
       .andWhere('LOWER(method.brand) = LOWER(:brand)', { brand: details.brand })
       .andWhere('method.expiryMonth = :expiryMonth', { expiryMonth: details.expiryMonth })
@@ -411,23 +415,13 @@ export class UsersService {
       brand: string;
       expiryMonth: number;
       expiryYear: number;
-      cardFingerprint?: string | null;
     },
   ): Promise<SavedPaymentMethod | null> {
-    if (details.cardFingerprint) {
-      const byFingerprint = await this.paymentMethodRepository.findOne({
-        where: { customerId, cardFingerprint: details.cardFingerprint },
-        withDeleted: true,
-      });
-      if (byFingerprint?.deletedAt) {
-        return byFingerprint;
-      }
-    }
-
     const byDetails = await this.paymentMethodRepository
       .createQueryBuilder('method')
       .withDeleted()
       .where('method.customerId = :customerId', { customerId })
+      .andWhere('method.psp = :psp', { psp: BEAM_PSP })
       .andWhere('method.lastFour = :lastFour', { lastFour: details.lastFour })
       .andWhere('LOWER(method.brand) = LOWER(:brand)', { brand: details.brand })
       .andWhere('method.expiryMonth = :expiryMonth', { expiryMonth: details.expiryMonth })
@@ -437,36 +431,10 @@ export class UsersService {
     return byDetails?.deletedAt ? byDetails : null;
   }
 
-  private async findRestorablePaymentMethod(
-    customerId: string,
-    savedCard: SavedOmiseCardDetails,
-  ): Promise<SavedPaymentMethod | null> {
-    return this.findRestorablePaymentMethodByDetails(customerId, {
-      lastFour: savedCard.lastFour,
-      brand: savedCard.brand,
-      expiryMonth: savedCard.expiryMonth,
-      expiryYear: savedCard.expiryYear,
-      cardFingerprint: savedCard.cardFingerprint,
-    });
-  }
-
-  private async findActivePaymentMethod(
-    customerId: string,
-    savedCard: SavedOmiseCardDetails,
-  ): Promise<SavedPaymentMethod | null> {
-    return this.findActivePaymentMethodByDetails(customerId, {
-      lastFour: savedCard.lastFour,
-      brand: savedCard.brand,
-      expiryMonth: savedCard.expiryMonth,
-      expiryYear: savedCard.expiryYear,
-      cardFingerprint: savedCard.cardFingerprint,
-    });
-  }
-
   async addPaymentMethod(
     customerId: string,
     input: {
-      omiseCardToken: string;
+      cardToken: string;
       lastFour: string;
       brand: string;
       expiryMonth: number;
@@ -475,13 +443,13 @@ export class UsersService {
     },
   ): Promise<SavedPaymentMethod> {
     const existingMethods = await this.paymentMethodRepository.find({
-      where: { customerId },
+      where: { customerId, psp: BEAM_PSP },
     });
     const shouldBeDefault = this.resolveShouldBeDefault(existingMethods, input.isDefault);
 
     const cardDetails = {
       lastFour: input.lastFour,
-      brand: input.brand,
+      brand: input.brand.toLowerCase(),
       expiryMonth: input.expiryMonth,
       expiryYear: input.expiryYear,
     };
@@ -494,40 +462,26 @@ export class UsersService {
       });
     }
 
-    const savedCard = await this.paymentsService.saveCustomerCard(customerId, input.omiseCardToken);
+    await this.softDeleteLegacyOmiseMethods(customerId);
 
-    const existingAfterOmise = await this.findActivePaymentMethodByDetails(customerId, {
-      ...cardDetails,
-      cardFingerprint: savedCard.cardFingerprint,
-    });
-    if (existingAfterOmise) {
-      throw new ConflictException({
-        code: 'PAYMENT_METHOD_ALREADY_EXISTS',
-        message: 'This payment method already exists',
-      });
-    }
-
-    const activeMethod = await this.findActivePaymentMethod(customerId, savedCard);
-    if (activeMethod) {
-      throw new ConflictException({
-        code: 'PAYMENT_METHOD_ALREADY_EXISTS',
-        message: 'This payment method already exists',
-      });
-    }
-
-    const restorableMethod = await this.findRestorablePaymentMethod(customerId, savedCard);
+    const restorableMethod = await this.findRestorablePaymentMethodByDetails(
+      customerId,
+      cardDetails,
+    );
     if (restorableMethod) {
       await this.paymentMethodRepository.restore(restorableMethod.id);
       if (shouldBeDefault) {
         await this.clearDefaultPaymentMethods(customerId);
       }
 
-      restorableMethod.omiseCardToken = savedCard.omiseCardId;
-      restorableMethod.cardFingerprint = savedCard.cardFingerprint;
-      restorableMethod.lastFour = savedCard.lastFour;
-      restorableMethod.brand = savedCard.brand;
-      restorableMethod.expiryMonth = savedCard.expiryMonth;
-      restorableMethod.expiryYear = savedCard.expiryYear;
+      restorableMethod.psp = BEAM_PSP;
+      restorableMethod.pspCardToken = input.cardToken;
+      restorableMethod.omiseCardToken = null;
+      restorableMethod.cardFingerprint = null;
+      restorableMethod.lastFour = cardDetails.lastFour;
+      restorableMethod.brand = cardDetails.brand;
+      restorableMethod.expiryMonth = cardDetails.expiryMonth;
+      restorableMethod.expiryYear = cardDetails.expiryYear;
       restorableMethod.isDefault = shouldBeDefault;
       restorableMethod.deletedAt = null;
 
@@ -541,12 +495,14 @@ export class UsersService {
     const method = this.paymentMethodRepository.create({
       customerId,
       type: PaymentMethodType.CREDIT_CARD,
-      omiseCardToken: savedCard.omiseCardId,
-      cardFingerprint: savedCard.cardFingerprint,
-      lastFour: savedCard.lastFour,
-      brand: savedCard.brand,
-      expiryMonth: savedCard.expiryMonth,
-      expiryYear: savedCard.expiryYear,
+      psp: BEAM_PSP,
+      pspCardToken: input.cardToken,
+      omiseCardToken: null,
+      cardFingerprint: null,
+      lastFour: cardDetails.lastFour,
+      brand: cardDetails.brand,
+      expiryMonth: cardDetails.expiryMonth,
+      expiryYear: cardDetails.expiryYear,
       isDefault: shouldBeDefault,
     });
 
@@ -557,11 +513,7 @@ export class UsersService {
         error instanceof QueryFailedError &&
         (error.driverError as { code?: string }).code === '23505'
       ) {
-        const existing =
-          (await this.findActivePaymentMethodByDetails(customerId, {
-            ...cardDetails,
-            cardFingerprint: savedCard.cardFingerprint,
-          })) ?? (await this.findActivePaymentMethod(customerId, savedCard));
+        const existing = await this.findActivePaymentMethodByDetails(customerId, cardDetails);
         if (existing) {
           throw new ConflictException({
             code: 'PAYMENT_METHOD_ALREADY_EXISTS',
@@ -586,11 +538,10 @@ export class UsersService {
     }
 
     const wasDefault = method.isDefault;
-    await this.paymentsService.deleteOmiseCustomerCard(customerId, method.omiseCardToken);
     await this.paymentMethodRepository.softDelete(methodId);
 
     const remaining = await this.paymentMethodRepository.find({
-      where: { customerId },
+      where: { customerId, psp: BEAM_PSP },
       order: { createdAt: 'ASC' },
     });
 

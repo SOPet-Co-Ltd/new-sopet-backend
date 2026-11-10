@@ -8,7 +8,7 @@
 //
 // @real-dependency: PostgreSQL (orders, payments, inventory stock restore)
 // @real-dependency: GraphQL createPayment → PaymentsResolver → createCharge
-// Mock: Omise HTTP (global.fetch) — never live Omise in CI
+// Mock: BeamService (createCharge) — never live Beam in CI
 // Mock: Clock via cancelStaleUnpaidOrders(now) for 24h eligibility
 //
 // Journey 1: GraphQL createPayment supersede persists new payment + field sync
@@ -26,6 +26,7 @@ import { App } from 'supertest/types';
 import { DataSource, Repository } from 'typeorm';
 import { PaymentsResolver } from '../src/modules/payments/payments.resolver';
 import { PaymentsService } from '../src/modules/payments/payments.service';
+import { BeamService } from '../src/modules/beam/beam.service';
 import { PaymentEventsService } from '../src/modules/payments/payment-events.service';
 import { NotificationsService } from '../src/modules/notifications/notifications.service';
 import { DashboardEventsService } from '../src/modules/dashboard-events/dashboard-events.service';
@@ -34,6 +35,7 @@ import { PayoutsService } from '../src/modules/payouts/payouts.service';
 import { StoresService } from '../src/modules/stores/stores.service';
 import { VendorWebhooksService } from '../src/modules/vendor-webhooks/vendor-webhooks.service';
 import { BankTransferSettingsService } from '../src/modules/platform/bank-transfer-settings.service';
+import { UsersService } from '../src/modules/users/users.service';
 import { OrderAuditLogsService } from '../src/modules/order-audit-logs/order-audit-logs.service';
 import { Payment } from '../src/database/entities/payment.entity';
 import { Order, OrderStatus, PaymentMethod } from '../src/database/entities/order.entity';
@@ -68,7 +70,7 @@ const CREATE_PAYMENT_MUTATION = `
       currency
       status
       paymentMethod
-      qrCodeUrl
+      qrCodeImage
       expiresAt
     }
   }
@@ -100,7 +102,11 @@ describe('Unpaid order payment method switch (service-integration-e2e)', () => {
     variantIds: [] as string[],
   };
 
-  const originalFetch = global.fetch;
+  const beamServiceMock = {
+    hasCredentials: jest.fn().mockReturnValue(true),
+    createCharge: jest.fn(),
+    getCharge: jest.fn(),
+  };
 
   beforeAll(async () => {
     postgresAvailable = await isPostgresAvailable();
@@ -140,16 +146,14 @@ describe('Unpaid order payment method switch (service-integration-e2e)', () => {
           provide: ConfigService,
           useValue: {
             get: (key: string) => {
-              if (key === 'omise.secretKey') return 'skey_test_e2e';
-              if (key === 'omise.publicKey') return 'pkey_test_e2e';
               if (key === 'app.storefrontUrl') return 'https://shop.example.com';
               if (key === 'payment.qrExpiryMinutes') return 15;
-              if (key === 'payment.omiseCancelTimeoutMs') return 200;
               if (key === 'payment.unpaidOrderCancelAfterMs') return 86_400_000;
               return undefined;
             },
           },
         },
+        { provide: BeamService, useValue: beamServiceMock },
         {
           provide: NotificationsService,
           useValue: { notifyOrderPaid: jest.fn() },
@@ -160,11 +164,11 @@ describe('Unpaid order payment method switch (service-integration-e2e)', () => {
         },
         {
           provide: PayoutsService,
-          useValue: { handleOmiseTransferWebhook: jest.fn() },
+          useValue: {},
         },
         {
           provide: StoresService,
-          useValue: { handleOmiseRecipientWebhook: jest.fn() },
+          useValue: {},
         },
         {
           provide: VendorWebhooksService,
@@ -191,6 +195,10 @@ describe('Unpaid order payment method switch (service-integration-e2e)', () => {
             }),
           },
         },
+        {
+          provide: UsersService,
+          useValue: { addPaymentMethod: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile();
 
@@ -208,7 +216,6 @@ describe('Unpaid order payment method switch (service-integration-e2e)', () => {
   });
 
   afterAll(async () => {
-    global.fetch = originalFetch;
     if (dataSource?.isInitialized) {
       await cleanupTracked();
       await cleanupSeedRun(dataSource, seedContext);
@@ -219,7 +226,6 @@ describe('Unpaid order payment method switch (service-integration-e2e)', () => {
   });
 
   afterEach(() => {
-    global.fetch = originalFetch;
     jest.restoreAllMocks();
   });
 
@@ -259,53 +265,20 @@ describe('Unpaid order payment method switch (service-integration-e2e)', () => {
     tracked.variantIds = [];
   }
 
-  function stubOmiseFetch(opts: { expireOk?: boolean; newChargeId?: string } = {}): void {
-    const expireOk = opts.expireOk ?? true;
+  function stubBeamCharges(opts: { newChargeId?: string } = {}): void {
     const newChargeId = opts.newChargeId ?? NEW_CHARGE_ID;
     let createCount = 0;
 
-    global.fetch = jest.fn().mockImplementation((url: string) => {
-      if (typeof url === 'string' && (url.includes('/expire') || url.includes('/reverse'))) {
-        if (!expireOk) {
-          return Promise.resolve({
-            ok: false,
-            json: () =>
-              Promise.resolve({
-                object: 'error',
-                code: 'failed_expire',
-                message: 'cannot expire',
-              }),
-          });
-        }
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ id: OLD_CHARGE_ID, status: 'expired' }),
-        });
-      }
-
-      if (typeof url === 'string' && url.includes('/charges') && !url.includes('/expire')) {
-        createCount += 1;
-        const chargeId = createCount === 1 ? newChargeId : `${newChargeId}_${createCount}`;
-        return Promise.resolve({
-          ok: true,
-          json: () =>
-            Promise.resolve({
-              id: chargeId,
-              status: 'pending',
-              source: {
-                scannable_code: {
-                  image: { download_uri: `https://api.omise.co/qr/${chargeId}` },
-                },
-              },
-            }),
-        });
-      }
-
+    beamServiceMock.hasCredentials.mockReturnValue(true);
+    beamServiceMock.createCharge.mockImplementation(() => {
+      createCount += 1;
+      const chargeId = createCount === 1 ? newChargeId : `${newChargeId}_${createCount}`;
       return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve({ id: 'unused', status: 'pending' }),
+        chargeId,
+        status: 'PENDING',
+        encodedImage: { imageBase64Encoded: 'data:image/png;base64,AAAA' },
       });
-    }) as typeof fetch;
+    });
   }
 
   async function seedCatalog(label: string): Promise<{
@@ -413,7 +386,7 @@ describe('Unpaid order payment method switch (service-integration-e2e)', () => {
     orderId: string;
     status: Payment['status'];
     paymentMethod: PaymentMethod;
-    omiseChargeId: string | null;
+    chargeId: string | null;
     expiresAt?: Date | null;
     createdAt?: Date;
   }): Promise<Payment> {
@@ -424,11 +397,8 @@ describe('Unpaid order payment method switch (service-integration-e2e)', () => {
         currency: 'THB',
         paymentMethod: input.paymentMethod,
         status: input.status,
-        omiseChargeId: input.omiseChargeId,
-        qrCodeUrl:
-          input.paymentMethod === PaymentMethod.PROMPTPAY
-            ? `https://api.omise.co/qr/${input.omiseChargeId ?? 'none'}`
-            : null,
+        psp: input.chargeId ? 'beam' : null,
+        pspChargeId: input.chargeId,
         expiresAt: input.expiresAt ?? null,
         authorizeUri: null,
       }),
@@ -452,7 +422,7 @@ describe('Unpaid order payment method switch (service-integration-e2e)', () => {
   itWhenPostgres(
     'Journey 1: GraphQL createPayment supersede persists new payment + field sync',
     async () => {
-      stubOmiseFetch({ expireOk: true, newChargeId: NEW_CHARGE_ID });
+      stubBeamCharges({ newChargeId: NEW_CHARGE_ID });
 
       const catalog = await seedCatalog('j1');
       const { order, guestPayToken } = await seedGuestOrder({
@@ -468,7 +438,7 @@ describe('Unpaid order payment method switch (service-integration-e2e)', () => {
         orderId: order.id,
         status: 'pending',
         paymentMethod: PaymentMethod.PROMPTPAY,
-        omiseChargeId: OLD_CHARGE_ID,
+        chargeId: OLD_CHARGE_ID,
         expiresAt: new Date(Date.now() + 10 * 60 * 1000),
       });
 
@@ -504,7 +474,7 @@ describe('Unpaid order payment method switch (service-integration-e2e)', () => {
       expect(priorDb.status).toBe('failed');
 
       const newDb = await paymentRepo.findOneByOrFail({ id: gqlPayment.id });
-      expect(newDb.omiseChargeId).toBe(NEW_CHARGE_ID);
+      expect(newDb.pspChargeId).toBe(NEW_CHARGE_ID);
       expect(newDb.status).toBe('pending');
       expect(newDb.paymentMethod).toBe(PaymentMethod.PROMPTPAY);
 
@@ -519,13 +489,7 @@ describe('Unpaid order payment method switch (service-integration-e2e)', () => {
       expect(pendingForOrder).toHaveLength(1);
       expect(pendingForOrder[0].id).toBe(gqlPayment.id);
 
-      const fetchUrls = (global.fetch as jest.Mock).mock.calls.map((c: [string]) => c[0]);
-      expect(fetchUrls.some((u: string) => u.includes(`/charges/${OLD_CHARGE_ID}/expire`))).toBe(
-        true,
-      );
-      expect(fetchUrls.some((u: string) => u.endsWith('/charges') || u.includes('/charges?'))).toBe(
-        true,
-      );
+      expect(beamServiceMock.createCharge).toHaveBeenCalledTimes(1);
     },
   );
 
@@ -555,7 +519,7 @@ describe('Unpaid order payment method switch (service-integration-e2e)', () => {
         orderId: staleOrder.id,
         status: 'pending',
         paymentMethod: PaymentMethod.PROMPTPAY,
-        omiseChargeId: 'chrg_e2e_stale',
+        chargeId: 'chrg_e2e_stale',
         expiresAt: new Date(NOW.getTime() - ONE_HOUR_MS),
         createdAt: new Date(NOW.getTime() - TWENTY_FIVE_HOURS_MS),
       });
@@ -579,7 +543,7 @@ describe('Unpaid order payment method switch (service-integration-e2e)', () => {
         orderId: youngOrder.id,
         status: 'pending',
         paymentMethod: PaymentMethod.CREDIT_CARD,
-        omiseChargeId: 'chrg_e2e_young',
+        chargeId: 'chrg_e2e_young',
         createdAt: new Date(NOW.getTime() - ONE_HOUR_MS),
       });
 
@@ -598,7 +562,7 @@ describe('Unpaid order payment method switch (service-integration-e2e)', () => {
         orderId: paidOrder.id,
         status: 'paid',
         paymentMethod: PaymentMethod.PROMPTPAY,
-        omiseChargeId: 'chrg_e2e_paid',
+        chargeId: 'chrg_e2e_paid',
         createdAt: new Date(NOW.getTime() - TWENTY_FIVE_HOURS_MS),
       });
 
@@ -668,7 +632,7 @@ describe('Unpaid order payment method switch (service-integration-e2e)', () => {
         orderId: qrOrder.id,
         status: 'pending',
         paymentMethod: PaymentMethod.PROMPTPAY,
-        omiseChargeId: 'chrg_e2e_qr',
+        chargeId: 'chrg_e2e_qr',
         expiresAt: null,
         createdAt: qrCreatedAt,
       });

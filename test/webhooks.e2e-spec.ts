@@ -5,7 +5,7 @@ import { ConfigModule } from '@nestjs/config';
 import { randomBytes } from 'crypto';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import omiseConfig from '../src/config/omise.config';
+import beamConfig from '../src/config/beam.config';
 import { PaymentsWebhookController } from '../src/modules/payments/payments-webhook.controller';
 import { PaymentsService } from '../src/modules/payments/payments.service';
 import { Payment } from '../src/database/entities/payment.entity';
@@ -21,9 +21,11 @@ import { StoresService } from '../src/modules/stores/stores.service';
 import { VendorWebhooksService } from '../src/modules/vendor-webhooks/vendor-webhooks.service';
 import { OrderAuditLogsService } from '../src/modules/order-audit-logs/order-audit-logs.service';
 import { BankTransferSettingsService } from '../src/modules/platform/bank-transfer-settings.service';
-import { computeOmiseWebhookSignature } from '../src/modules/payments/omise-webhook.util';
+import { computeBeamWebhookSignature } from '../src/modules/payments/beam-webhook.util';
+import { BeamService } from '../src/modules/beam/beam.service';
+import { UsersService } from '../src/modules/users/users.service';
 
-describe('Omise webhook (e2e)', () => {
+describe('Beam webhook (e2e)', () => {
   let app: INestApplication<App>;
   const secretB64 = randomBytes(32).toString('base64');
   const paymentRepo = {
@@ -40,13 +42,13 @@ describe('Omise webhook (e2e)', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    process.env.OMISE_WEBHOOK_SECRET = secretB64;
+    process.env.BEAM_WEBHOOK_SECRET = secretB64;
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({
           isGlobal: true,
-          load: [omiseConfig],
+          load: [beamConfig],
         }),
       ],
       controllers: [PaymentsWebhookController],
@@ -71,11 +73,15 @@ describe('Omise webhook (e2e)', () => {
         },
         {
           provide: PayoutsService,
-          useValue: { handleOmiseTransferWebhook: jest.fn() },
+          useValue: {},
         },
         {
           provide: StoresService,
-          useValue: { handleOmiseRecipientWebhook: jest.fn() },
+          useValue: {},
+        },
+        {
+          provide: BeamService,
+          useValue: { hasCredentials: jest.fn().mockReturnValue(true), getCharge: jest.fn() },
         },
         {
           provide: VendorWebhooksService,
@@ -102,6 +108,10 @@ describe('Omise webhook (e2e)', () => {
             }),
           },
         },
+        {
+          provide: UsersService,
+          useValue: { addPaymentMethod: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile();
 
@@ -110,7 +120,7 @@ describe('Omise webhook (e2e)', () => {
   });
 
   afterEach(async () => {
-    delete process.env.OMISE_WEBHOOK_SECRET;
+    delete process.env.BEAM_WEBHOOK_SECRET;
     if (app) {
       await app.close();
     }
@@ -118,40 +128,32 @@ describe('Omise webhook (e2e)', () => {
 
   function signedRequest(body: Record<string, unknown>) {
     const rawBody = JSON.stringify(body);
-    const timestamp = String(Math.floor(Date.now() / 1000));
-    const signature = computeOmiseWebhookSignature(rawBody, timestamp, secretB64);
+    const signature = computeBeamWebhookSignature(rawBody, secretB64);
 
     return request(app.getHttpServer())
-      .post('/webhooks/omise')
+      .post('/webhooks/beam')
       .set('Content-Type', 'application/json')
-      .set('Omise-Signature', signature)
-      .set('Omise-Signature-Timestamp', timestamp)
+      .set('X-Beam-Signature', signature)
       .send(rawBody);
   }
 
   it('returns 200 for valid signed payload', async () => {
     orderRepo.findOne.mockResolvedValue(null);
 
-    await signedRequest({
-      key: 'charge.complete',
-      data: { id: 'chrg_e2e', status: 'successful' },
-    })
+    paymentRepo.findOne.mockResolvedValue(null);
+
+    await signedRequest({ chargeId: 'chrg_e2e', status: 'SUCCEEDED' })
       .expect(200)
-      .expect({ received: true });
+      .expect({ received: true, ignored: true });
   });
 
   it('returns 401 for invalid signature', async () => {
-    const rawBody = JSON.stringify({
-      key: 'charge.complete',
-      data: { id: 'chrg_bad', status: 'successful' },
-    });
-    const timestamp = String(Math.floor(Date.now() / 1000));
+    const rawBody = JSON.stringify({ chargeId: 'chrg_bad', status: 'SUCCEEDED' });
 
     await request(app.getHttpServer())
-      .post('/webhooks/omise')
+      .post('/webhooks/beam')
       .set('Content-Type', 'application/json')
-      .set('Omise-Signature', 'invalid')
-      .set('Omise-Signature-Timestamp', timestamp)
+      .set('X-Beam-Signature', 'invalid')
       .send(rawBody)
       .expect(401);
   });

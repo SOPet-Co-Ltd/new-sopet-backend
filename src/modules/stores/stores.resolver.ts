@@ -186,6 +186,8 @@ function mapMyStore(store: Store, includePayout: boolean): MyStoreType {
     omiseRecipientId: includePayout ? store.omiseRecipientId : null,
     omiseRecipientStatus: store.omiseRecipientStatus,
     omiseRecipientFailureMessage: includePayout ? store.omiseRecipientFailureMessage : null,
+    bankAccountVerificationStatus: store.bankAccountVerificationStatus,
+    bankAccountRejectionReason: includePayout ? (store.bankAccountRejectionReason ?? null) : null,
     status: store.status,
   };
 }
@@ -874,11 +876,7 @@ export class StoresResolver {
 
     await this.storesService.assertStoreAccess(userId, storeId);
     const includePayout = await this.storesService.isStoreOwner(userId, storeId);
-    // Refresh Omise recipient status so dashboard activations show up without
-    // requiring the vendor to re-save bank details.
-    const store = includePayout
-      ? await this.storesService.refreshOmiseRecipientStatus(storeId)
-      : await this.storesService.findOne(storeId);
+    const store = await this.storesService.findOne(storeId);
     return mapMyStore(store, includePayout);
   }
 
@@ -1046,40 +1044,33 @@ export class StoresResolver {
     return mapMyStore(store, true);
   }
 
-  @Mutation(() => MyStoreType)
+  @Mutation(() => AdminStoreType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
-  async linkStoreOmiseRecipient(
-    @CurrentUser('storeId') storeId: string,
-    @CurrentUser('id') userId: string,
-  ): Promise<MyStoreType> {
-    await this.storesService.assertStoreOwner(userId, storeId);
-    const store = await this.storesService.linkStoreOmiseRecipient(storeId);
-    return mapMyStore(store, true);
+  @Roles('admin')
+  async verifyStoreBankAccount(
+    @Args('storeId') storeId: string,
+    @CurrentUser('id') adminId: string,
+    @Context() context?: GraphqlContext,
+  ): Promise<AdminStoreType> {
+    const store = await this.storesService.verifyStoreBankAccount(storeId, adminId, context?.req);
+    return mapAdminStore(store);
   }
 
   @Mutation(() => AdminStoreType)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
-  async linkStoreOmiseRecipientAsAdmin(
+  async rejectStoreBankAccount(
     @Args('storeId') storeId: string,
+    @Args('reason') reason: string,
     @CurrentUser('id') adminId: string,
-    @CurrentUser('email') adminEmail?: string,
     @Context() context?: GraphqlContext,
   ): Promise<AdminStoreType> {
-    const store = await this.storesService.linkStoreOmiseRecipient(storeId);
-    await this.auditLogsService.log({
-      ...this.adminActor(adminId, adminEmail),
-      action: AuditAction.STORE_UPDATED,
-      resourceType: AuditResourceType.STORE,
-      resourceId: store.id,
-      metadata: {
-        storeName: store.name,
-        omiseRecipientStatus: store.omiseRecipientStatus,
-        action: 'link_omise_recipient',
-      },
-      ...getAuditRequestContext(context?.req),
-    });
+    const store = await this.storesService.rejectStoreBankAccount(
+      storeId,
+      reason,
+      adminId,
+      context?.req,
+    );
     return mapAdminStore(store);
   }
 
