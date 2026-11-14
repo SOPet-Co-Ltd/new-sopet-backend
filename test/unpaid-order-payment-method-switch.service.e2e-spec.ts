@@ -566,6 +566,12 @@ describe('Unpaid order payment method switch (service-integration-e2e)', () => {
         createdAt: new Date(NOW.getTime() - TWENTY_FIVE_HOURS_MS),
       });
 
+      // Stale cancel GETs Beam first. An open (not SUCCEEDED) charge is still cancelled.
+      beamServiceMock.getCharge.mockImplementation(async (chargeId: string) => ({
+        chargeId,
+        status: 'PENDING',
+      }));
+
       const cancelledFirst = await paymentsService.cancelStaleUnpaidOrders(NOW);
       expect(cancelledFirst).toBeGreaterThanOrEqual(1);
 
