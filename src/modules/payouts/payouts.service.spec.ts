@@ -5,9 +5,9 @@ import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 import { PayoutsService } from './payouts.service';
 import { Payout, PayoutSettlementRail, PayoutStatus } from '../../database/entities/payout.entity';
-import { PaymentMethod } from '../../database/entities/order.entity';
-import { Store } from '../../database/entities/store.entity';
-import { OrderItem } from '../../database/entities/order-item.entity';
+import { OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
+import { BankAccountVerificationStatus, Store } from '../../database/entities/store.entity';
+import { FulfillmentStatus, OrderItem } from '../../database/entities/order-item.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 import { DashboardEventsService } from '../dashboard-events/dashboard-events.service';
 import * as payoutCommissionCalculator from './payout-commission.calculator';
@@ -84,6 +84,7 @@ describe('PayoutsService', () => {
   };
   const notificationsService = {
     notifyAdminsAboutManualPayoutRequest: jest.fn().mockResolvedValue(null),
+    notifyVendorAboutManualPayoutOutcome: jest.fn().mockResolvedValue(null),
   };
   const dashboardEventsService = {
     publish: jest.fn().mockResolvedValue(undefined),
@@ -213,11 +214,13 @@ describe('PayoutsService', () => {
     storeRepo.findOne.mockResolvedValue({
       id: 'store-1',
       name: 'Test Store',
+      ownerId: 'vendor-owner-1',
       commissionRate: null,
       bankAccountName: 'Test Account',
       bankAccountNumber: '1234567890',
       bankName: 'ธนาคารกสิกรไทย',
       bankCode: 'kbank',
+      bankAccountVerificationStatus: BankAccountVerificationStatus.VERIFIED,
     });
     payoutRepo.findOne.mockResolvedValue(null);
     payoutRepo.find.mockResolvedValue([]);
@@ -605,6 +608,98 @@ describe('PayoutsService', () => {
       expect(summary.canRequestPayout).toBe(false);
     });
 
+    it('allows canRequestPayout and requestPayout when bank account is verified and balance is eligible', async () => {
+      orderItemRepo.createQueryBuilder.mockReturnValue(createQueryBuilderMock({ total: '2000' }));
+      payoutRepo.createQueryBuilder.mockImplementation(() =>
+        createQueryBuilderMock({ total: '0' }),
+      );
+
+      const summary = await service.getPayoutSummary('store-1');
+      expect(summary.canRequestPayout).toBe(true);
+
+      const payout = await service.requestPayout('store-1', 'vendor-1');
+
+      expect(payout.settlementRail).toBe(PayoutSettlementRail.MANUAL);
+      expect(payout.status).toBe(PayoutStatus.PENDING);
+      expect(managerPayoutRepo.create).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      BankAccountVerificationStatus.UNVERIFIED,
+      BankAccountVerificationStatus.PENDING_REVIEW,
+      BankAccountVerificationStatus.REJECTED,
+    ])('blocks canRequestPayout and requestPayout when bank status is %s', async (status) => {
+      storeRepo.findOne.mockResolvedValue({
+        id: 'store-1',
+        name: 'Test Store',
+        ownerId: 'vendor-owner-1',
+        commissionRate: null,
+        bankAccountName: 'Test Account',
+        bankAccountNumber: '1234567890',
+        bankName: 'ธนาคารกสิกรไทย',
+        bankCode: 'kbank',
+        bankAccountVerificationStatus: status,
+      });
+      orderItemRepo.createQueryBuilder.mockReturnValue(createQueryBuilderMock({ total: '5000' }));
+      payoutRepo.createQueryBuilder.mockImplementation(() =>
+        createQueryBuilderMock({ total: '0' }),
+      );
+
+      const summary = await service.getPayoutSummary('store-1');
+      expect(summary.availableBalance).toBeGreaterThan(0);
+      expect(summary.canRequestPayout).toBe(false);
+
+      await expect(service.requestPayout('store-1', 'vendor-1')).rejects.toMatchObject({
+        response: { code: 'BANK_ACCOUNT_NOT_VERIFIED' },
+      });
+      expect(managerPayoutRepo.create).not.toHaveBeenCalled();
+    });
+
+    it('settleManualPayout still succeeds when the store bank account is not verified', async () => {
+      storeRepo.findOne.mockResolvedValue({
+        id: 'store-1',
+        name: 'Test Store',
+        ownerId: 'vendor-owner-1',
+        commissionRate: null,
+        bankAccountName: 'Test Account',
+        bankAccountNumber: '1234567890',
+        bankName: 'ธนาคารกสิกรไทย',
+        bankCode: 'kbank',
+        bankAccountVerificationStatus: BankAccountVerificationStatus.PENDING_REVIEW,
+      });
+
+      const pendingRow = {
+        id: 'payout-manual-unverified',
+        storeId: 'store-1',
+        amount: 1860,
+        netAmount: 1860,
+        fee: 0,
+        productSold: 2000,
+        shippingFees: 0,
+        commissionAmount: 140,
+        commissionRate: 7,
+        status: PayoutStatus.PENDING,
+        settlementRail: 'manual',
+        processedBy: 'vendor-1',
+        notes: 'Vendor requested payout',
+      };
+      payoutRepo.findOne.mockResolvedValue(pendingRow);
+      managerPayoutQueryBuilder.getOne.mockResolvedValue({ ...pendingRow });
+
+      const payout = await service.settleManualPayout('store-1', {
+        processedBy: 'admin-1',
+        notes: 'Transferred via SCB',
+      });
+
+      expect(payout.status).toBe(PayoutStatus.COMPLETED);
+      expect(managerPayoutRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'payout-manual-unverified',
+          status: PayoutStatus.COMPLETED,
+        }),
+      );
+    });
+
     it('consumes historical payouts from any rail so legacy Omise payouts are not paid twice', async () => {
       await service.getPayoutSummary('store-1');
 
@@ -714,6 +809,15 @@ describe('PayoutsService', () => {
       }),
     );
     expect(payout.status).toBe(PayoutStatus.COMPLETED);
+    expect(notificationsService.notifyVendorAboutManualPayoutOutcome).toHaveBeenCalledWith({
+      vendorId: 'vendor-owner-1',
+      payoutId: 'payout-manual-1',
+      storeId: 'store-1',
+      storeName: 'Test Store',
+      amount: 1860,
+      outcome: 'approved',
+      notes: 'Transferred via SCB',
+    });
   });
 
   it('rejects settle when vendor has not requested manual payout', async () => {
@@ -747,6 +851,15 @@ describe('PayoutsService', () => {
 
     expect(payout.status).toBe(PayoutStatus.FAILED);
     expect(payout.failureReason).toBe('Bank details incomplete');
+    expect(notificationsService.notifyVendorAboutManualPayoutOutcome).toHaveBeenCalledWith({
+      vendorId: 'vendor-owner-1',
+      payoutId: 'payout-manual-2',
+      storeId: 'store-1',
+      storeName: 'Test Store',
+      amount: 2000,
+      outcome: 'rejected',
+      notes: 'Bank details incomplete',
+    });
   });
 
   describe('available-balance fours identity (AC-016 / AC-D-016)', () => {
@@ -1091,6 +1204,260 @@ describe('PayoutsService', () => {
         }),
       );
       expect(payout.transferReference).toBeNull();
+    });
+  });
+
+  describe('fulfillment-status payout eligibility (ADR-0016)', () => {
+    type EligibilityFixture = {
+      id: string;
+      status: OrderStatus;
+      paymentMethod: PaymentMethod;
+      product: number;
+      shipping: number;
+      promoDiscount?: number;
+      fulfillmentStatus?: FulfillmentStatus;
+      source?: string;
+    };
+
+    type EligibilityQbState = {
+      statuses?: OrderStatus[];
+      paymentMethods?: PaymentMethod[];
+      heldFulfillment?: string;
+      heldOrderStatus?: string;
+      vendorImportSource?: string;
+    };
+
+    const EXCLUDED_STATUSES = [
+      OrderStatus.ON_HOLD,
+      OrderStatus.PENDING_PAYMENT,
+      OrderStatus.CANCELLED,
+      OrderStatus.REFUNDED,
+    ];
+
+    function isEligible(
+      fixture: EligibilityFixture,
+      state: EligibilityQbState,
+      forPromo: boolean,
+    ): boolean {
+      if (!state.statuses?.includes(fixture.status)) return false;
+      if (state.paymentMethods && !state.paymentMethods.includes(fixture.paymentMethod))
+        return false;
+      if (state.heldOrderStatus && fixture.status === (state.heldOrderStatus as OrderStatus))
+        return false;
+      if (state.vendorImportSource && (fixture.source ?? 'checkout') === state.vendorImportSource) {
+        return false;
+      }
+      if (
+        !forPromo &&
+        state.heldFulfillment &&
+        (fixture.fulfillmentStatus ?? FulfillmentStatus.PENDING) === state.heldFulfillment
+      ) {
+        return false;
+      }
+      return true;
+    }
+
+    function mockEligibilityFixtures(fixtures: EligibilityFixture[]) {
+      const capturedStatuses: OrderStatus[][] = [];
+
+      function trackStatuses(state: EligibilityQbState, params?: { statuses?: OrderStatus[] }) {
+        if (params?.statuses) {
+          state.statuses = params.statuses;
+          capturedStatuses.push([...params.statuses]);
+        }
+      }
+
+      function createEligibilityQb(mode: 'item' | 'promo' | 'slice') {
+        const state: EligibilityQbState = {};
+        const qb = createQueryBuilderMock({ total: '0' });
+        qb.andWhere.mockImplementation((clause: string, params?: Record<string, unknown>) => {
+          if (params && 'statuses' in params) {
+            trackStatuses(state, params);
+          }
+          if (params && 'paymentMethods' in params) {
+            state.paymentMethods = params.paymentMethods as PaymentMethod[];
+          }
+          if (params && 'heldFulfillment' in params) {
+            state.heldFulfillment = params.heldFulfillment as string;
+          }
+          if (params && 'heldOrderStatus' in params) {
+            state.heldOrderStatus = params.heldOrderStatus as string;
+          }
+          if (params && 'vendorImportSource' in params) {
+            state.vendorImportSource = params.vendorImportSource as string;
+          }
+          return qb;
+        });
+
+        qb.getRawOne.mockImplementation(async () => {
+          const eligible = fixtures.filter((f) => isEligible(f, state, mode === 'promo'));
+          if (mode === 'promo') {
+            const total = eligible.reduce((sum, f) => sum + (f.promoDiscount ?? 0), 0);
+            return { total: String(total) };
+          }
+          const total = eligible.reduce((sum, f) => sum + f.product, 0);
+          return { total: String(total) };
+        });
+
+        qb.getRawMany.mockImplementation(async () => {
+          const eligible = fixtures.filter((f) => isEligible(f, state, false));
+          return eligible.map((f) => ({
+            product: String(f.product),
+            shipping: String(f.shipping),
+          }));
+        });
+
+        return qb;
+      }
+
+      orderItemRepo.createQueryBuilder.mockImplementation(() => createEligibilityQb('item'));
+      payoutRepo.createQueryBuilder.mockImplementation(() =>
+        createQueryBuilderMock({ total: '0' }),
+      );
+      payoutRepo.find.mockResolvedValue([]);
+      dataSource.createQueryBuilder.mockImplementation((entity?: { name?: string }) => {
+        if (isShippingSliceEntity(entity)) {
+          return createEligibilityQb('slice');
+        }
+        return createEligibilityQb('promo');
+      });
+
+      return { capturedStatuses };
+    }
+
+    const paidNetFixture = (id: string, status: OrderStatus): EligibilityFixture => ({
+      id,
+      status,
+      paymentMethod: PaymentMethod.PROMPTPAY,
+      product: 1000,
+      shipping: 80,
+    });
+
+    it('includes processing and shipped PromptPay orders at the same net as paid', async () => {
+      const { capturedStatuses } = mockEligibilityFixtures([
+        paidNetFixture('o-processing', OrderStatus.PROCESSING),
+        paidNetFixture('o-shipped', OrderStatus.SHIPPED),
+      ]);
+
+      const summary = await service.getPayoutSummary('store-1');
+
+      expectFoursIdentity(summary, {
+        productSold: 2000,
+        shippingFees: 160,
+        commissionAmount: 140,
+        commissionRate: 7,
+        availableBalance: 2020,
+      });
+      expect(capturedStatuses.length).toBeGreaterThanOrEqual(3);
+      expect(capturedStatuses[0]).toEqual(capturedStatuses[1]);
+      expect(capturedStatuses[1]).toEqual(capturedStatuses[2]);
+      expect(capturedStatuses[0]).toEqual([
+        OrderStatus.PAID,
+        OrderStatus.PROCESSING,
+        OrderStatus.SHIPPED,
+        OrderStatus.DELIVERED,
+      ]);
+      for (const excluded of EXCLUDED_STATUSES) {
+        expect(capturedStatuses[0]).not.toContain(excluded);
+      }
+    });
+
+    it('keeps the same net when those orders are delivered (no double count)', async () => {
+      const { capturedStatuses } = mockEligibilityFixtures([
+        paidNetFixture('o-delivered-1', OrderStatus.DELIVERED),
+        paidNetFixture('o-delivered-2', OrderStatus.DELIVERED),
+      ]);
+
+      const summary = await service.getPayoutSummary('store-1');
+
+      expectFoursIdentity(summary, {
+        productSold: 2000,
+        shippingFees: 160,
+        commissionAmount: 140,
+        commissionRate: 7,
+        availableBalance: 2020,
+      });
+      expect(orderItemRepo.createQueryBuilder).toHaveBeenCalledTimes(1);
+      expect(
+        dataSource.createQueryBuilder.mock.calls.filter(([entity]) => isShippingSliceEntity(entity))
+          .length,
+      ).toBe(1);
+      expect(capturedStatuses[0]).toEqual([
+        OrderStatus.PAID,
+        OrderStatus.PROCESSING,
+        OrderStatus.SHIPPED,
+        OrderStatus.DELIVERED,
+      ]);
+    });
+
+    it('excludes on_hold orders, held lines, cancelled, and COD (still zero)', async () => {
+      mockEligibilityFixtures([
+        {
+          id: 'o-hold',
+          status: OrderStatus.ON_HOLD,
+          paymentMethod: PaymentMethod.PROMPTPAY,
+          product: 1000,
+          shipping: 80,
+        },
+        {
+          id: 'o-held-line',
+          status: OrderStatus.PAID,
+          paymentMethod: PaymentMethod.PROMPTPAY,
+          product: 1000,
+          shipping: 80,
+          fulfillmentStatus: FulfillmentStatus.ON_HOLD,
+        },
+        {
+          id: 'o-cancelled',
+          status: OrderStatus.CANCELLED,
+          paymentMethod: PaymentMethod.PROMPTPAY,
+          product: 1000,
+          shipping: 80,
+        },
+        {
+          id: 'o-cod',
+          status: OrderStatus.PAID,
+          paymentMethod: PaymentMethod.COD,
+          product: 1000,
+          shipping: 80,
+        },
+      ]);
+
+      const summary = await service.getPayoutSummary('store-1');
+
+      expectFoursIdentity(summary, {
+        productSold: 0,
+        shippingFees: 0,
+        commissionAmount: 0,
+        commissionRate: 7,
+        availableBalance: 0,
+      });
+    });
+
+    it('subtracts a store promo on a shipped order in the same getPayoutSummary generation', async () => {
+      const { capturedStatuses } = mockEligibilityFixtures([
+        {
+          id: 'o-shipped-promo',
+          status: OrderStatus.SHIPPED,
+          paymentMethod: PaymentMethod.PROMPTPAY,
+          product: 1000,
+          shipping: 0,
+          promoDiscount: 100,
+        },
+      ]);
+
+      const summary = await service.getPayoutSummary('store-1');
+
+      expectFoursIdentity(summary, {
+        productSold: 900,
+        shippingFees: 0,
+        commissionAmount: 63,
+        commissionRate: 7,
+        availableBalance: 837,
+      });
+      expect(capturedStatuses.length).toBeGreaterThanOrEqual(2);
+      expect(capturedStatuses[0]).toEqual(capturedStatuses[1]);
+      expect(capturedStatuses[0]).toContain(OrderStatus.SHIPPED);
     });
   });
 });

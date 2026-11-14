@@ -12,7 +12,7 @@ import { Payout, PayoutSettlementRail, PayoutStatus } from '../../database/entit
 import { FulfillmentStatus, OrderItem } from '../../database/entities/order-item.entity';
 import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
 import { DataSource as OrderDataSource } from '../../database/entities/enums/data-source.enums';
-import { Store } from '../../database/entities/store.entity';
+import { BankAccountVerificationStatus, Store } from '../../database/entities/store.entity';
 import { Promotion, PromotionScope } from '../../database/entities/promotion.entity';
 import { PromotionUsage } from '../../database/entities/promotion-usage.entity';
 import { OrderStoreShipping } from '../../database/entities/order-store-shipping.entity';
@@ -52,6 +52,18 @@ const MANUAL_RAIL_PAYMENT_METHODS = [
   PaymentMethod.TRUEMONEY,
   PaymentMethod.SHOPEEPAY,
   PaymentMethod.BANK_TRANSFER,
+];
+
+/**
+ * Shared payout-eligible order statuses (ADR-0016). Used by item subtotal,
+ * store-promo discount, and per-order slice queries so the three cannot drift.
+ * Still excludes on_hold, pending_payment, cancelled, refunded via this list.
+ */
+const PAYOUT_ELIGIBLE_ORDER_STATUSES = [
+  OrderStatus.PAID,
+  OrderStatus.PROCESSING,
+  OrderStatus.SHIPPED,
+  OrderStatus.DELIVERED,
 ];
 
 @Injectable()
@@ -131,6 +143,7 @@ export class PayoutsService {
     const minimumPayoutAmount = this.getMinimumPayoutAmount();
     const canRequestPayout =
       this.hasCompleteBankAccount(store) &&
+      store.bankAccountVerificationStatus === BankAccountVerificationStatus.VERIFIED &&
       pendingPayoutAmount <= 0 &&
       availableBalance > 0 &&
       availableBalance >= minimumPayoutAmount;
@@ -157,8 +170,8 @@ export class PayoutsService {
 
   /**
    * Vendor requests settlement of all accrued revenue (single manual rail).
-   * Requires a saved bank account. Creates a PENDING payout; admin transfers
-   * offline then calls settleManualPayout.
+   * Requires a saved and verified bank account. Creates a PENDING payout;
+   * admin transfers offline then calls settleManualPayout.
    */
   async requestPayout(storeId: string, processedBy?: string): Promise<Payout> {
     const store = await this.findStoreOrThrow(storeId);
@@ -167,6 +180,13 @@ export class PayoutsService {
       throw new BadRequestException({
         code: 'BANK_ACCOUNT_REQUIRED',
         message: 'Bank account details must be saved before requesting a payout',
+      });
+    }
+
+    if (store.bankAccountVerificationStatus !== BankAccountVerificationStatus.VERIFIED) {
+      throw new BadRequestException({
+        code: 'BANK_ACCOUNT_NOT_VERIFIED',
+        message: 'Bank account must be verified before requesting a payout',
       });
     }
 
@@ -305,6 +325,26 @@ export class PayoutsService {
       return manager.getRepository(Payout).save(locked);
     });
 
+    if (store.ownerId) {
+      try {
+        await this.notificationsService.notifyVendorAboutManualPayoutOutcome({
+          vendorId: store.ownerId,
+          payoutId: payout.id,
+          storeId,
+          storeName: store.name,
+          amount: Number(payout.amount),
+          outcome: 'approved',
+          notes: payout.notes,
+        });
+      } catch (error) {
+        this.logger.warn(
+          `Failed to notify vendor about approved payout ${payout.id}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+
     void this.dashboardEventsService.publish({
       kind: DashboardActivityKind.PAYOUT,
       entityId: payout.id,
@@ -360,6 +400,26 @@ export class PayoutsService {
       locked.notes = options.notes ?? locked.notes;
       return manager.getRepository(Payout).save(locked);
     });
+
+    if (store.ownerId) {
+      try {
+        await this.notificationsService.notifyVendorAboutManualPayoutOutcome({
+          vendorId: store.ownerId,
+          payoutId: payout.id,
+          storeId,
+          storeName: store.name,
+          amount: Number(payout.amount),
+          outcome: 'rejected',
+          notes: payout.failureReason,
+        });
+      } catch (error) {
+        this.logger.warn(
+          `Failed to notify vendor about rejected payout ${payout.id}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
 
     void this.dashboardEventsService.publish({
       kind: DashboardActivityKind.PAYOUT,
@@ -647,10 +707,10 @@ export class PayoutsService {
         .innerJoin(Order, 'order', 'order.id = item.order_id')
         .where('item.store_id = :storeId', { storeId })
         .andWhere('order.status IN (:...statuses)', {
-          statuses: [OrderStatus.PAID, OrderStatus.DELIVERED],
+          statuses: PAYOUT_ELIGIBLE_ORDER_STATUSES,
         })
         .andWhere('order.payment_method IN (:...paymentMethods)', { paymentMethods })
-        // Held item portions are not payout-eligible (AC-030); restore re-includes under PAID|DELIVERED.
+        // Held item portions are not payout-eligible (AC-030); restore re-includes under eligible statuses.
         .andWhere('item.fulfillment_status <> :heldFulfillment', {
           heldFulfillment: FulfillmentStatus.ON_HOLD,
         })
@@ -705,7 +765,7 @@ export class PayoutsService {
   }
 
   /**
-   * Store-scoped promo SUM. Order paid/delivered + rail + order-level on_hold only.
+   * Store-scoped promo SUM. Eligible order statuses + rail + order-level on_hold only.
    * Intentionally no order_items / item.fulfillment_status join (AC-D-010 preserved gap).
    */
   private storePromotionDiscountQuery(storeId: string, paymentMethods: PaymentMethod[]) {
@@ -716,7 +776,7 @@ export class PayoutsService {
       .where('promotion.store_id = :storeId', { storeId })
       .andWhere('promotion.scope = :scope', { scope: PromotionScope.STORE })
       .andWhere('order.status IN (:...statuses)', {
-        statuses: [OrderStatus.PAID, OrderStatus.DELIVERED],
+        statuses: PAYOUT_ELIGIBLE_ORDER_STATUSES,
       })
       .andWhere('order.payment_method IN (:...paymentMethods)', { paymentMethods })
       .andWhere('order.status <> :heldOrderStatus', { heldOrderStatus: OrderStatus.ON_HOLD })
@@ -770,7 +830,7 @@ export class PayoutsService {
         heldFulfillment: FulfillmentStatus.ON_HOLD,
       })
       .andWhere('order.status IN (:...statuses)', {
-        statuses: [OrderStatus.PAID, OrderStatus.DELIVERED],
+        statuses: PAYOUT_ELIGIBLE_ORDER_STATUSES,
       })
       .andWhere('order.payment_method IN (:...paymentMethods)', { paymentMethods })
       .andWhere('order.status <> :heldOrderStatus', { heldOrderStatus: OrderStatus.ON_HOLD })
