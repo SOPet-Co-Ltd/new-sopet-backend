@@ -25,6 +25,7 @@ import { StoresService } from '../stores/stores.service';
 import { UsersService } from '../users/users.service';
 import { buildPaymentReturnUri } from './build-payment-return-uri';
 import { verifyBeamWebhookSignature } from './beam-webhook.util';
+import { BeamWebhookRetryableError } from './beam-webhook-retryable.error';
 import {
   BeamService,
   type BeamActionRequired,
@@ -49,6 +50,11 @@ import {
   OrderAuditEventType,
   VENDOR_ADMIN_ACTOR_LABEL,
 } from '../order-audit-logs/order-audit-log.constants';
+
+const MANUAL_RAIL_PAYMENT_METHODS = new Set<PaymentMethod>([
+  PaymentMethod.COD,
+  PaymentMethod.BANK_TRANSFER,
+]);
 
 type SaveCardPayload = {
   cardToken: string;
@@ -295,6 +301,42 @@ export class PaymentsService {
         const orderPayments = await this.paymentRepository.find({
           where: { orderId: order.id },
         });
+
+        // Before cancelling, GET any Beam charges that may already be SUCCEEDED.
+        const beamCharges = orderPayments.filter(
+          (p) => p.psp === 'beam' && !!p.pspChargeId?.trim(),
+        );
+        let beamLookupFailed = false;
+        let collected = false;
+        for (const beamPayment of beamCharges) {
+          const chargeId = beamPayment.pspChargeId!.trim();
+          try {
+            await this.applyBeamChargeOutcome(order, beamPayment, chargeId);
+          } catch (error) {
+            if (error instanceof BeamWebhookRetryableError) {
+              this.logger.warn(
+                `Skipping stale unpaid cancel for order ${order.id}: Beam GET unavailable for ${chargeId}`,
+              );
+              beamLookupFailed = true;
+              break;
+            }
+            throw error;
+          }
+          // markOrderPaid mutates order.status; TS still narrows the property to
+          // PENDING_PAYMENT after the guard above, so read through a widened cast.
+          const statusAfterApply = order.status as OrderStatus;
+          if (beamPayment.status === 'paid' || statusAfterApply !== OrderStatus.PENDING_PAYMENT) {
+            collected = true;
+            break;
+          }
+        }
+        if (beamLookupFailed) {
+          continue;
+        }
+        if (collected) {
+          continue;
+        }
+
         const pendingPayments = orderPayments.filter((p) => p.status === 'pending');
 
         await this.cancelOrderRestoreStockAndFailPayments(
@@ -528,9 +570,7 @@ export class PaymentsService {
     }
 
     await this.assertCanPayForOrder(payment.orderId, customerId, guestPayToken);
-    return this.reconcilePendingBeamChargeIfNeeded(
-      await this.expirePendingQrPaymentIfNeeded(payment),
-    );
+    return this.resolvePaymentOnRead(payment);
   }
 
   async findLatestByOrderId(
@@ -552,9 +592,45 @@ export class PaymentsService {
       });
     }
 
-    return this.reconcilePendingBeamChargeIfNeeded(
-      await this.expirePendingQrPaymentIfNeeded(payment),
-    );
+    return this.resolvePaymentOnRead(payment);
+  }
+
+  /**
+   * PromptPay late-success path: reconcile the current Beam charge before expiring the QR
+   * when the order is still pending_payment. Other payments keep expire-then-reconcile.
+   */
+  private async resolvePaymentOnRead(payment: Payment): Promise<Payment> {
+    const order =
+      payment.order ?? (await this.orderRepository.findOne({ where: { id: payment.orderId } }));
+    if (order && !payment.order) {
+      payment.order = order;
+    }
+
+    const reconcileBeforeExpire =
+      payment.psp === 'beam' &&
+      Boolean(payment.pspChargeId?.trim()) &&
+      payment.paymentMethod === PaymentMethod.PROMPTPAY &&
+      order?.status === OrderStatus.PENDING_PAYMENT;
+
+    if (!reconcileBeforeExpire) {
+      return this.reconcilePendingBeamChargeIfNeeded(
+        await this.expirePendingQrPaymentIfNeeded(payment),
+      );
+    }
+
+    const { payment: afterReconcile, outcome } = await this.reconcileBeamChargeWithOutcome(payment);
+
+    if (afterReconcile.status === 'paid') {
+      return afterReconcile;
+    }
+
+    // Expire only after a completed GET that says still open or FAILED.
+    // Rate-limit skip (null) and GET error leave the row / paymentReference as-is.
+    if (outcome === 'open' || outcome === 'failed') {
+      return this.expirePendingQrPaymentIfNeeded(afterReconcile);
+    }
+
+    return afterReconcile;
   }
 
   /**
@@ -563,37 +639,65 @@ export class PaymentsService {
    * while the storefront polls every ~2s.
    */
   async reconcilePendingBeamChargeIfNeeded(payment: Payment): Promise<Payment> {
+    const { payment: updated } = await this.reconcileBeamChargeWithOutcome(payment);
+    return updated;
+  }
+
+  private async reconcileBeamChargeWithOutcome(payment: Payment): Promise<{
+    payment: Payment;
+    outcome: 'succeeded' | 'failed' | 'open' | 'ignored' | 'error' | null;
+  }> {
     if (
-      payment.status !== 'pending' ||
       payment.psp !== 'beam' ||
       !payment.pspChargeId?.trim() ||
       payment.paymentMethod === PaymentMethod.BANK_TRANSFER
     ) {
-      return payment;
+      return { payment, outcome: null };
+    }
+
+    const order =
+      payment.order ?? (await this.orderRepository.findOne({ where: { id: payment.orderId } }));
+    if (!order) {
+      return { payment, outcome: null };
+    }
+    if (!payment.order) {
+      payment.order = order;
+    }
+
+    const mayFetchFailedPromptPay =
+      payment.status === 'failed' &&
+      payment.paymentMethod === PaymentMethod.PROMPTPAY &&
+      order.status === OrderStatus.PENDING_PAYMENT;
+
+    if (payment.status !== 'pending' && !mayFetchFailedPromptPay) {
+      return { payment, outcome: null };
+    }
+
+    if (order.status === OrderStatus.PAID) {
+      return { payment, outcome: null };
+    }
+    if (order.status === OrderStatus.CANCELLED || order.status === OrderStatus.REFUNDED) {
+      return { payment, outcome: null };
     }
 
     const now = Date.now();
     const lastAt = this.lastBeamReconcileAtByPaymentId.get(payment.id) ?? 0;
     if (now - lastAt < PaymentsService.RECONCILE_MIN_INTERVAL_MS) {
-      return payment;
+      return { payment, outcome: null };
     }
     this.lastBeamReconcileAtByPaymentId.set(payment.id, now);
 
-    const order =
-      payment.order ?? (await this.orderRepository.findOne({ where: { id: payment.orderId } }));
-    if (!order) {
-      return payment;
-    }
-    if (order.status === OrderStatus.PAID) {
-      return payment;
-    }
-    if (order.status === OrderStatus.CANCELLED || order.status === OrderStatus.REFUNDED) {
-      return payment;
-    }
-
     const chargeId = payment.pspChargeId.trim();
-    await this.applyBeamChargeOutcome(order, payment, chargeId);
-    return payment;
+    try {
+      const outcome = await this.applyBeamChargeOutcome(order, payment, chargeId);
+      return { payment, outcome };
+    } catch (error) {
+      if (error instanceof BeamWebhookRetryableError) {
+        this.logger.warn(`Beam reconcile deferred for payment ${payment.id}: ${error.message}`);
+        return { payment, outcome: 'error' };
+      }
+      throw error;
+    }
   }
 
   async createCharge(createChargeDto: CreateChargeDto): Promise<{
@@ -630,7 +734,7 @@ export class PaymentsService {
     });
     this.assertOrderPayableForCreate(order, latestPayment);
 
-    // Short FOR UPDATE: re-check → local supersede → insert payment → Beam charge.
+    // Short FOR UPDATE: re-check → local supersede → insert payment (Beam HTTP is outside).
     type CreateChargeResult = {
       paymentId: string;
       status: string;
@@ -645,44 +749,50 @@ export class PaymentsService {
       paidImmediately?: { order: Order; payment: Payment; chargeId: string };
     };
 
-    const result = await this.paymentRepository.manager.transaction(
-      async (manager): Promise<CreateChargeResult> => {
-        const lockedOrder = await manager.findOne(Order, {
-          where: { id: orderId },
-          lock: { mode: 'pessimistic_write' },
-        });
-        if (!lockedOrder) {
-          throw new BadRequestException({
-            code: 'ORDER_NOT_FOUND',
-            message: 'Order not found',
+    type PreparedBeamCharge = {
+      payment: Payment;
+      order: Order;
+      orderAmount: number;
+      orderPaymentMethod: PaymentMethod;
+      localQrExpiresAt: Date | null;
+    };
+
+    if (isNonOmiseCheckoutPaymentMethod(paymentMethod)) {
+      const result = await this.paymentRepository.manager.transaction(
+        async (manager): Promise<CreateChargeResult> => {
+          const lockedOrder = await manager.findOne(Order, {
+            where: { id: orderId },
+            lock: { mode: 'pessimistic_write' },
           });
-        }
+          if (!lockedOrder) {
+            throw new BadRequestException({
+              code: 'ORDER_NOT_FOUND',
+              message: 'Order not found',
+            });
+          }
 
-        await this.loadOrderItemsIfNeeded(lockedOrder, manager);
+          await this.loadOrderItemsIfNeeded(lockedOrder, manager);
 
-        const latestUnderLock = await manager.findOne(Payment, {
-          where: { orderId },
-          order: { createdAt: 'DESC' },
-        });
-        this.assertOrderPayableForCreate(lockedOrder, latestUnderLock);
-
-        await this.supersedePendingPaymentsForOrder(orderId, manager);
-
-        // Always charge the locked order total — ignore client-supplied CreatePaymentInput.amount.
-        const orderAmount = Number(lockedOrder.total);
-        if (!Number.isFinite(orderAmount) || orderAmount < 0) {
-          throw new BadRequestException({
-            code: 'INVALID_ORDER_TOTAL',
-            message: 'Order total is invalid',
+          const latestUnderLock = await manager.findOne(Payment, {
+            where: { orderId },
+            order: { createdAt: 'DESC' },
           });
-        }
+          this.assertOrderPayableForCreate(lockedOrder, latestUnderLock);
 
-        const previousPaymentMethod = lockedOrder.paymentMethod;
-        const orderPaymentMethod = this.toOrderPaymentMethod(paymentMethod);
+          await this.supersedePendingPaymentsForOrder(orderId, manager);
 
-        if (isNonOmiseCheckoutPaymentMethod(paymentMethod)) {
+          const orderAmount = Number(lockedOrder.total);
+          if (!Number.isFinite(orderAmount) || orderAmount < 0) {
+            throw new BadRequestException({
+              code: 'INVALID_ORDER_TOTAL',
+              message: 'Order total is invalid',
+            });
+          }
+
+          const previousPaymentMethod = lockedOrder.paymentMethod;
+          const orderPaymentMethod = this.toOrderPaymentMethod(paymentMethod);
+
           if (paymentMethod === 'bank_transfer') {
-            // Ensure display config is present before accepting the method.
             await this.assertBankTransferConfigured();
           }
 
@@ -713,146 +823,98 @@ export class PaymentsService {
             currency,
             paymentMethod,
           };
-        }
+        },
+      );
 
-        if (!this.beamService.hasCredentials()) {
+      return result;
+    }
+
+    if (!this.beamService.hasCredentials()) {
+      throw new BadRequestException({
+        code: 'BEAM_NOT_CONFIGURED',
+        message: 'Payment provider is not configured',
+      });
+    }
+
+    const prepared = await this.paymentRepository.manager.transaction(
+      async (manager): Promise<PreparedBeamCharge> => {
+        const lockedOrder = await manager.findOne(Order, {
+          where: { id: orderId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!lockedOrder) {
           throw new BadRequestException({
-            code: 'BEAM_NOT_CONFIGURED',
-            message: 'Payment provider is not configured',
+            code: 'ORDER_NOT_FOUND',
+            message: 'Order not found',
           });
         }
 
-        const amountSatang = Math.round(orderAmount * 100);
+        await this.loadOrderItemsIfNeeded(lockedOrder, manager);
 
-        const payment = manager.create(Payment, {
-          orderId,
-          amount: orderAmount,
-          currency,
-          paymentMethod: orderPaymentMethod,
-          status: 'pending',
-          failureCode: null,
-          saveCardPayload:
+        const latestUnderLock = await manager.findOne(Payment, {
+          where: { orderId },
+          order: { createdAt: 'DESC' },
+        });
+        this.assertOrderPayableForCreate(lockedOrder, latestUnderLock);
+
+        const orderAmount = Number(lockedOrder.total);
+        if (!Number.isFinite(orderAmount) || orderAmount < 0) {
+          throw new BadRequestException({
+            code: 'INVALID_ORDER_TOTAL',
+            message: 'Order total is invalid',
+          });
+        }
+
+        const previousPaymentMethod = lockedOrder.paymentMethod;
+        const orderPaymentMethod = this.toOrderPaymentMethod(paymentMethod);
+        const localQrExpiresAt = paymentMethod === 'promptpay' ? this.computeQrExpiresAt() : null;
+
+        const reusable =
+          latestUnderLock &&
+          latestUnderLock.status === 'pending' &&
+          latestUnderLock.psp === 'beam' &&
+          !latestUnderLock.pspChargeId &&
+          latestUnderLock.paymentMethod === orderPaymentMethod
+            ? latestUnderLock
+            : null;
+
+        let payment: Payment;
+        if (reusable) {
+          payment = reusable;
+          payment.failureCode = null;
+          payment.saveCardPayload =
             paymentMethod === 'credit_card' && !savedPaymentMethodId
               ? this.serializeSaveCardPayload(saveCard)
-              : null,
-        });
-        await manager.save(payment);
-
-        const localQrExpiresAt = paymentMethod === 'promptpay' ? this.computeQrExpiresAt() : null;
-        const chargeBody: BeamCreateChargeBody = {
-          amount: amountSatang,
-          currency: 'THB',
-          referenceId: payment.id,
-          returnUrl: this.applyPaymentReturnUri(payment.id),
-          skip3dsFlow: false,
-          paymentMethod: { paymentMethodType: 'QR_PROMPT_PAY' },
-        };
-
-        if (paymentMethod === 'promptpay') {
-          chargeBody.paymentMethod = {
-            paymentMethodType: 'QR_PROMPT_PAY',
-            qrPromptPay: { expiryTime: (localQrExpiresAt as Date).toISOString() },
-          };
-        } else if (paymentMethod === 'credit_card') {
-          let cardTokenId = cardToken;
-          if (savedPaymentMethodId) {
-            if (!customerId) {
-              throw new BadRequestException({
-                code: 'CUSTOMER_REQUIRED',
-                message: 'Customer ID required for saved payment method',
-              });
-            }
-            const saved = await this.savedPaymentMethodRepository.findOne({
-              where: { id: savedPaymentMethodId, customerId },
-            });
-            if (!saved) {
-              throw new BadRequestException({
-                code: 'PAYMENT_METHOD_NOT_FOUND',
-                message: 'Saved payment method not found',
-              });
-            }
-            if (saved.psp !== 'beam') {
-              throw new BadRequestException({
-                code: 'SAVED_CARD_PROVIDER_UNSUPPORTED',
-                message: 'This saved card cannot be used with the current payment provider',
-              });
-            }
-            cardTokenId = cardToken ?? saved.pspCardToken ?? undefined;
+              : null;
+          if (paymentMethod === 'promptpay' && !payment.expiresAt) {
+            payment.expiresAt = localQrExpiresAt;
           }
+          await manager.save(payment);
+        } else {
+          await this.supersedePendingPaymentsForOrder(orderId, manager);
 
-          if (!cardTokenId) {
-            throw new BadRequestException({
-              code: 'CARD_TOKEN_REQUIRED',
-              message: 'Credit card payments require a card token or saved payment method',
-            });
-          }
-          if (!cardSecurityCode?.trim()) {
-            throw new BadRequestException({
-              code: 'CARD_SECURITY_CODE_REQUIRED',
-              message: 'Credit card payments require a security code',
-            });
-          }
-
-          chargeBody.paymentMethod = {
-            paymentMethodType: 'CARD_TOKEN',
-            cardToken: { cardTokenId, securityCode: cardSecurityCode.trim() },
-          };
-        } else if (paymentMethod === 'truemoney') {
-          chargeBody.paymentMethod = { paymentMethodType: 'TRUE_MONEY', trueMoney: {} };
-        } else if (paymentMethod === 'shopeepay') {
-          chargeBody.paymentMethod = { paymentMethodType: 'SHOPEE_PAY', shopeePay: {} };
+          payment = manager.create(Payment, {
+            orderId,
+            amount: orderAmount,
+            currency,
+            paymentMethod: orderPaymentMethod,
+            status: 'pending',
+            psp: 'beam',
+            pspChargeId: null,
+            failureCode: null,
+            saveCardPayload:
+              paymentMethod === 'credit_card' && !savedPaymentMethodId
+                ? this.serializeSaveCardPayload(saveCard)
+                : null,
+            expiresAt: localQrExpiresAt,
+          });
+          await manager.save(payment);
         }
-
-        const charge = await this.beamService.createCharge(chargeBody, {
-          idempotencyKey: payment.id,
-        });
-
-        const actionRequired = this.resolveActionRequired(charge);
-        let authorizeUri: string | null = null;
-        let qrCodeImage: string | null = null;
-        let qrCodeUrl: string | null = null;
-        let expiresAt: Date | null = localQrExpiresAt;
-        const chargeStatus = (charge.status ?? '').toUpperCase();
-
-        if (actionRequired === 'REDIRECT') {
-          authorizeUri = charge.redirect?.redirectUrl?.trim() || null;
-          if (!authorizeUri) {
-            throw new BadRequestException({
-              code: 'BEAM_ACTION_REQUIRED_INVALID',
-              message: 'Payment provider required a redirect but did not return a URL',
-            });
-          }
-        } else if (actionRequired === 'ENCODED_IMAGE') {
-          qrCodeImage = charge.encodedImage?.imageBase64Encoded?.trim() || null;
-          if (!qrCodeImage) {
-            throw new BadRequestException({
-              code: 'BEAM_ACTION_REQUIRED_INVALID',
-              message: 'Payment provider required a QR image but did not return one',
-            });
-          }
-          const beamExpiry = this.parseBeamExpiry(charge.encodedImage?.expiry);
-          expiresAt = beamExpiry ?? localQrExpiresAt;
-          const rawData = charge.encodedImage?.rawData?.trim();
-          if (rawData) {
-            qrCodeUrl = rawData;
-          }
-        }
-
-        payment.psp = 'beam';
-        payment.pspChargeId = charge.chargeId;
-        payment.status = chargeStatus === 'FAILED' ? 'failed' : 'pending';
-        payment.failureCode = chargeStatus === 'FAILED' ? charge.failureCode?.trim() || null : null;
-        if (payment.status === 'failed') {
-          payment.saveCardPayload = null;
-        }
-        payment.authorizeUri = authorizeUri;
-        payment.qrCodeImage = qrCodeImage;
-        payment.qrCodeUrl = qrCodeUrl;
-        payment.expiresAt = expiresAt;
-        await manager.save(payment);
 
         lockedOrder.paymentMethod = orderPaymentMethod;
-        lockedOrder.paymentReference = charge.chargeId;
+        if (!reusable) {
+          lockedOrder.paymentReference = null;
+        }
         await manager.save(lockedOrder);
         await this.appendPaymentMethodChangedIfNeeded(
           manager,
@@ -861,46 +923,160 @@ export class PaymentsService {
           orderPaymentMethod,
         );
 
-        if (payment.status === 'failed') {
-          await this.paymentEventsService.publishPaymentStatusUpdated(payment);
-          this.vendorWebhooksService
-            .dispatchOrderEvent(lockedOrder.id, 'order.payment_failed')
-            .catch(() => {});
-        }
-
-        const response: CreateChargeResult = {
-          paymentId: payment.id,
-          status: payment.status,
-          amount: orderAmount,
-          currency,
-          paymentMethod,
-          authorizeUri: authorizeUri ?? undefined,
-          qrCodeUrl: qrCodeUrl ?? undefined,
-          qrCodeImage: qrCodeImage ?? undefined,
-          expiresAt: expiresAt ?? undefined,
-          failureCode: payment.failureCode,
+        return {
+          payment,
+          order: lockedOrder,
+          orderAmount,
+          orderPaymentMethod,
+          localQrExpiresAt,
         };
-
-        // Only fulfill on create when Beam already reports SUCCEEDED (docs: 201 ≠ paid).
-        if (chargeStatus === 'SUCCEEDED') {
-          response.status = 'paid';
-          response.paidImmediately = {
-            order: lockedOrder,
-            payment,
-            chargeId: charge.chargeId,
-          };
-        }
-
-        return response;
       },
     );
 
-    if (result.paidImmediately) {
-      await this.markOrderPaid(
-        result.paidImmediately.order,
-        result.paidImmediately.payment,
-        result.paidImmediately.chargeId,
-      );
+    const { payment, order: lockedOrder, orderAmount, localQrExpiresAt } = prepared;
+    const amountSatang = Math.round(orderAmount * 100);
+
+    const chargeBody: BeamCreateChargeBody = {
+      amount: amountSatang,
+      currency: 'THB',
+      referenceId: payment.id,
+      returnUrl: this.applyPaymentReturnUri(payment.id),
+      skip3dsFlow: false,
+      paymentMethod: { paymentMethodType: 'QR_PROMPT_PAY' },
+    };
+
+    if (paymentMethod === 'promptpay') {
+      chargeBody.paymentMethod = {
+        paymentMethodType: 'QR_PROMPT_PAY',
+        qrPromptPay: {
+          expiryTime: (localQrExpiresAt ?? this.computeQrExpiresAt()).toISOString(),
+        },
+      };
+    } else if (paymentMethod === 'credit_card') {
+      let cardTokenId = cardToken;
+      if (savedPaymentMethodId) {
+        if (!customerId) {
+          throw new BadRequestException({
+            code: 'CUSTOMER_REQUIRED',
+            message: 'Customer ID required for saved payment method',
+          });
+        }
+        const saved = await this.savedPaymentMethodRepository.findOne({
+          where: { id: savedPaymentMethodId, customerId },
+        });
+        if (!saved) {
+          throw new BadRequestException({
+            code: 'PAYMENT_METHOD_NOT_FOUND',
+            message: 'Saved payment method not found',
+          });
+        }
+        if (saved.psp !== 'beam') {
+          throw new BadRequestException({
+            code: 'SAVED_CARD_PROVIDER_UNSUPPORTED',
+            message: 'This saved card cannot be used with the current payment provider',
+          });
+        }
+        cardTokenId = cardToken ?? saved.pspCardToken ?? undefined;
+      }
+
+      if (!cardTokenId) {
+        throw new BadRequestException({
+          code: 'CARD_TOKEN_REQUIRED',
+          message: 'Credit card payments require a card token or saved payment method',
+        });
+      }
+      if (!cardSecurityCode?.trim()) {
+        throw new BadRequestException({
+          code: 'CARD_SECURITY_CODE_REQUIRED',
+          message: 'Credit card payments require a security code',
+        });
+      }
+
+      chargeBody.paymentMethod = {
+        paymentMethodType: 'CARD_TOKEN',
+        cardToken: { cardTokenId, securityCode: cardSecurityCode.trim() },
+      };
+    } else if (paymentMethod === 'truemoney') {
+      chargeBody.paymentMethod = { paymentMethodType: 'TRUE_MONEY', trueMoney: {} };
+    } else if (paymentMethod === 'shopeepay') {
+      chargeBody.paymentMethod = { paymentMethodType: 'SHOPEE_PAY', shopeePay: {} };
+    }
+
+    const charge = await this.beamService.createCharge(chargeBody, {
+      idempotencyKey: payment.id,
+    });
+
+    const actionRequired = this.resolveActionRequired(charge);
+    let authorizeUri: string | null = null;
+    let qrCodeImage: string | null = null;
+    let qrCodeUrl: string | null = null;
+    let expiresAt: Date | null = localQrExpiresAt ?? payment.expiresAt;
+    const chargeStatus = (charge.status ?? '').toUpperCase();
+
+    if (actionRequired === 'REDIRECT') {
+      authorizeUri = charge.redirect?.redirectUrl?.trim() || null;
+      if (!authorizeUri) {
+        throw new BadRequestException({
+          code: 'BEAM_ACTION_REQUIRED_INVALID',
+          message: 'Payment provider required a redirect but did not return a URL',
+        });
+      }
+    } else if (actionRequired === 'ENCODED_IMAGE') {
+      qrCodeImage = charge.encodedImage?.imageBase64Encoded?.trim() || null;
+      if (!qrCodeImage) {
+        throw new BadRequestException({
+          code: 'BEAM_ACTION_REQUIRED_INVALID',
+          message: 'Payment provider required a QR image but did not return one',
+        });
+      }
+      const beamExpiry = this.parseBeamExpiry(charge.encodedImage?.expiry);
+      expiresAt = beamExpiry ?? localQrExpiresAt;
+      const rawData = charge.encodedImage?.rawData?.trim();
+      if (rawData) {
+        qrCodeUrl = rawData;
+      }
+    }
+
+    payment.psp = 'beam';
+    payment.pspChargeId = charge.chargeId;
+    payment.status = chargeStatus === 'FAILED' ? 'failed' : 'pending';
+    payment.failureCode = chargeStatus === 'FAILED' ? charge.failureCode?.trim() || null : null;
+    if (payment.status === 'failed') {
+      payment.saveCardPayload = null;
+    }
+    payment.authorizeUri = authorizeUri;
+    payment.qrCodeImage = qrCodeImage;
+    payment.qrCodeUrl = qrCodeUrl;
+    payment.expiresAt = expiresAt;
+    await this.paymentRepository.save(payment);
+
+    lockedOrder.paymentReference = charge.chargeId;
+    await this.orderRepository.save(lockedOrder);
+
+    if (payment.status === 'failed') {
+      await this.paymentEventsService.publishPaymentStatusUpdated(payment);
+      this.vendorWebhooksService
+        .dispatchOrderEvent(lockedOrder.id, 'order.payment_failed')
+        .catch(() => {});
+    }
+
+    const result: CreateChargeResult = {
+      paymentId: payment.id,
+      status: payment.status,
+      amount: orderAmount,
+      currency,
+      paymentMethod,
+      authorizeUri: authorizeUri ?? undefined,
+      qrCodeUrl: qrCodeUrl ?? undefined,
+      qrCodeImage: qrCodeImage ?? undefined,
+      expiresAt: expiresAt ?? undefined,
+      failureCode: payment.failureCode,
+    };
+
+    // Only fulfill on create when Beam already reports SUCCEEDED (docs: 201 ≠ paid).
+    if (chargeStatus === 'SUCCEEDED') {
+      result.status = 'paid';
+      await this.markOrderPaid(lockedOrder, payment, charge.chargeId);
     }
 
     return {
@@ -963,6 +1139,13 @@ export class PaymentsService {
     }
     if (!order || !payment) {
       this.logger.warn(`No order/payment for Beam charge ${chargeId}`);
+      throw new BeamWebhookRetryableError(`No order/payment for Beam charge ${chargeId}`);
+    }
+
+    // Superseded / manual-rail check runs before the already-paid short-circuit so a
+    // second Beam charge that already paid the order still logs the abandoned success.
+    if (this.isSupersededOrManualRailBeamCharge(order, payment, chargeId)) {
+      await this.logSupersededBeamSuccessIfNeeded(order, payment, chargeId);
       return;
     }
 
@@ -979,25 +1162,111 @@ export class PaymentsService {
   }
 
   /**
+   * A failed Beam row whose charge id is no longer order.paymentReference is superseded.
+   * COD / bank_transfer orders must never be moved to paid by an older Beam charge.
+   */
+  private isSupersededOrManualRailBeamCharge(
+    order: Order,
+    payment: Payment,
+    chargeId: string,
+  ): boolean {
+    if (MANUAL_RAIL_PAYMENT_METHODS.has(order.paymentMethod)) {
+      return true;
+    }
+    return payment.status === 'failed' && order.paymentReference !== chargeId;
+  }
+
+  /**
+   * Current means paymentReference matches this charge, or this payment is the latest
+   * non-failed Beam row and the order method still matches that payment.
+   */
+  private async isCurrentBeamCharge(
+    order: Order,
+    payment: Payment,
+    chargeId: string,
+    manager?: EntityManager,
+  ): Promise<boolean> {
+    if (MANUAL_RAIL_PAYMENT_METHODS.has(order.paymentMethod)) {
+      return false;
+    }
+    if (order.paymentReference === chargeId) {
+      return true;
+    }
+    const latestNonFailed = manager
+      ? await manager.findOne(Payment, {
+          where: {
+            orderId: order.id,
+            psp: 'beam',
+            status: Not('failed'),
+          },
+          order: { createdAt: 'DESC' },
+        })
+      : await this.paymentRepository.findOne({
+          where: {
+            orderId: order.id,
+            psp: 'beam',
+            status: Not('failed'),
+          },
+          order: { createdAt: 'DESC' },
+        });
+    return (
+      !!latestNonFailed &&
+      latestNonFailed.id === payment.id &&
+      order.paymentMethod === payment.paymentMethod
+    );
+  }
+
+  /** Best-effort GET + structured log for ops; never marks paid or retries the webhook. */
+  private async logSupersededBeamSuccessIfNeeded(
+    order: Order,
+    payment: Payment,
+    chargeId: string,
+  ): Promise<void> {
+    try {
+      const apiCharge = await this.beamService.getCharge(chargeId);
+      if ((apiCharge?.status ?? '').toUpperCase() !== 'SUCCEEDED') {
+        return;
+      }
+      this.logger.warn(
+        JSON.stringify({
+          event: 'beam_superseded_charge_succeeded',
+          orderId: order.id,
+          paymentId: payment.id,
+          chargeId,
+          amount: typeof apiCharge.amount === 'number' ? apiCharge.amount : null,
+        }),
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Failed to GET superseded Beam charge ${chargeId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  /**
    * GET Beam charge and apply SUCCEEDED / FAILED to local payment + order.
-   * Shared by webhook handler and reconcile-on-read.
+   * Shared by webhook handler, reconcile-on-read, and stale unpaid cancel.
+   * Throws BeamWebhookRetryableError when GET is unavailable so webhooks can 503.
+   * Callers may ignore the return value; reconcile uses it to decide QR expiry.
    */
   private async applyBeamChargeOutcome(
     order: Order,
     payment: Payment,
     chargeId: string,
-  ): Promise<void> {
+  ): Promise<'succeeded' | 'failed' | 'open' | 'ignored'> {
     let apiCharge: BeamCharge;
     try {
       apiCharge = await this.beamService.getCharge(chargeId);
     } catch (error) {
       this.logger.error(`Failed to re-fetch Beam charge ${chargeId}: ${error}`);
-      return;
+      throw new BeamWebhookRetryableError(`Failed to re-fetch Beam charge ${chargeId}`);
     }
 
     if (!apiCharge) {
       this.logger.warn(`Beam GET charge ${chargeId} returned no payload`);
-      return;
+      throw new BeamWebhookRetryableError(`Beam GET charge ${chargeId} returned no payload`);
     }
 
     const chargeStatus = (apiCharge.status ?? '').toUpperCase();
@@ -1020,18 +1289,32 @@ export class PaymentsService {
             beamAmountSatang: apiAmount ?? null,
           }),
         );
-        return;
+        // Amount mismatch stays unpaid and is not treated as "still open" for expiry.
+        return 'ignored';
+      }
+      if (!(await this.isCurrentBeamCharge(order, payment, chargeId))) {
+        this.logger.warn(
+          JSON.stringify({
+            event: 'beam_superseded_charge_succeeded',
+            orderId: order.id,
+            paymentId: payment.id,
+            chargeId,
+            amount: apiAmount,
+          }),
+        );
+        return 'ignored';
       }
       // Late success is allowed while order is still PENDING_PAYMENT even if this
-      // payment row was locally expired/failed (Beam docs: charge can succeed late).
+      // payment row was locally expired/failed (Beam docs: charge can succeed late),
+      // but only when this charge is still the order's current payment.
       await this.markOrderPaid(order, payment, chargeId);
-      return;
+      return 'succeeded';
     }
 
     if (chargeStatus === 'FAILED') {
       // Duplicate / already-terminal paid is handled by callers; ignore non-pending retries.
       if (payment.status !== 'pending' && payment.status !== 'failed') {
-        return;
+        return 'ignored';
       }
       await this.paymentRepository.manager.transaction(async (manager) => {
         payment.status = 'failed';
@@ -1051,7 +1334,10 @@ export class PaymentsService {
       this.logger.log(
         `Payment ${payment.id} failed code=${payment.failureCode ?? 'none'}; order ${order.id} left PENDING_PAYMENT for retry`,
       );
+      return 'failed';
     }
+
+    return 'open';
   }
 
   private extractBeamChargeId(payload: Record<string, unknown>): string | null {
@@ -1069,18 +1355,71 @@ export class PaymentsService {
 
   private async markOrderPaid(order: Order, payment: Payment, chargeId: string): Promise<void> {
     const saveCardPayload = this.parseSaveCardPayload(payment.saveCardPayload);
+    let didMarkPaid = false;
 
     await this.paymentRepository.manager.transaction(async (trx) => {
+      const lockedOrder = await trx.findOne(Order, {
+        where: { id: order.id },
+        lock: { mode: 'pessimistic_write' },
+      });
+      const lockedPayment = await trx.findOne(Payment, {
+        where: { id: payment.id },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!lockedOrder || !lockedPayment) {
+        return;
+      }
+      if (lockedOrder.status !== OrderStatus.PENDING_PAYMENT) {
+        return;
+      }
+      if (lockedOrder.paymentMethod !== lockedPayment.paymentMethod) {
+        return;
+      }
+      if (!(await this.isCurrentBeamCharge(lockedOrder, lockedPayment, chargeId, trx))) {
+        return;
+      }
+
+      await this.loadOrderItemsIfNeeded(lockedOrder, trx);
+
+      const nextStatus = deriveOrderStatusFromFulfillment(
+        OrderStatus.PAID,
+        (lockedOrder.items ?? []).map((item) => item.fulfillmentStatus),
+      );
+
+      lockedPayment.status = 'paid';
+      lockedPayment.failureCode = null;
+      lockedPayment.saveCardPayload = null;
+      await trx.save(lockedPayment);
+
+      lockedOrder.status = nextStatus;
+      lockedOrder.paymentReference = chargeId;
+      lockedOrder.paidAt = new Date();
+      await trx.save(lockedOrder);
+
+      await trx.save(
+        OrderStatusHistory,
+        trx.create(OrderStatusHistory, {
+          orderId: lockedOrder.id,
+          status: nextStatus,
+          changedBy: null,
+          notes: `Beam charge ${chargeId} succeeded`,
+        }),
+      );
+
+      order.status = nextStatus;
+      order.paymentReference = chargeId;
+      order.paidAt = lockedOrder.paidAt;
+      order.items = lockedOrder.items;
       payment.status = 'paid';
       payment.failureCode = null;
       payment.saveCardPayload = null;
-      await trx.save(payment);
-
-      order.status = OrderStatus.PAID;
-      order.paymentReference = chargeId;
-      order.paidAt = new Date();
-      await trx.save(order);
+      didMarkPaid = true;
     });
+
+    if (!didMarkPaid) {
+      return;
+    }
 
     if (saveCardPayload && order.customerId) {
       try {

@@ -352,6 +352,49 @@ export class NotificationsService {
   }
 
   /**
+   * Notify the store owner that their manual payout request was approved or rejected.
+   */
+  async notifyVendorAboutManualPayoutOutcome(input: {
+    vendorId: string;
+    payoutId: string;
+    storeId: string;
+    storeName: string;
+    amount: number;
+    outcome: 'approved' | 'rejected';
+    notes?: string | null;
+  }): Promise<UserNotification | null> {
+    if (!input.vendorId) {
+      return null;
+    }
+
+    const amountLabel = Number(input.amount).toLocaleString('th-TH', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    const note = input.notes?.trim();
+    const baseMessage =
+      input.outcome === 'approved'
+        ? `ร้านของคุณได้รับเงิน ฿${amountLabel} แล้ว`
+        : `คำขอรับเงิน ฿${amountLabel} ถูกปฏิเสธ`;
+    const message = note ? `${baseMessage} — ${note}` : baseMessage;
+
+    return this.createUserNotification(
+      input.vendorId,
+      input.outcome === 'approved' ? 'manual_payout_approved' : 'manual_payout_rejected',
+      message,
+      {
+        payoutId: input.payoutId,
+        storeId: input.storeId,
+        storeName: input.storeName,
+        amount: Number(input.amount),
+        outcome: input.outcome,
+        notes: note ?? null,
+      },
+      ['payoutId', 'outcome'],
+    );
+  }
+
+  /**
    * Notify a vendor that their store has been approved or rejected.
    */
   async notifyVendorAboutStoreStatus(

@@ -23,6 +23,7 @@ import { AuditActorType } from '../../database/entities/audit-log.entity';
 import type { GraphqlContext } from '../../graphql/loaders/graphql-context.types';
 import { StoresService } from '../stores/stores.service';
 import { PaginationMeta } from '../../graphql/models/types';
+import { decryptBankAccountNumber } from '../../common/utils/bank-account-crypto.util';
 import type { PayoutSummary } from './payouts.types';
 
 @ObjectType()
@@ -57,6 +58,15 @@ export class PayoutType {
   @Field()
   settlementRail!: string;
 
+  @Field(() => String, { nullable: true })
+  notes!: string | null;
+
+  @Field(() => String, { nullable: true })
+  failureReason!: string | null;
+
+  @Field(() => Date, { nullable: true })
+  processedAt!: Date | null;
+
   @Field()
   createdAt!: Date;
 }
@@ -84,6 +94,9 @@ export class AdminManualPayoutType {
   @Field(() => String, { nullable: true })
   bankAccountNumber!: string | null;
 
+  @Field(() => String, { nullable: true })
+  bankAccountVerificationStatus!: string | null;
+
   @Field(() => Float)
   amount!: number;
 
@@ -107,6 +120,15 @@ export class AdminManualPayoutType {
 
   @Field()
   settlementRail!: string;
+
+  @Field(() => String, { nullable: true })
+  notes!: string | null;
+
+  @Field(() => String, { nullable: true })
+  failureReason!: string | null;
+
+  @Field(() => Date, { nullable: true })
+  processedAt!: Date | null;
 
   @Field()
   createdAt!: Date;
@@ -307,7 +329,8 @@ export class PayoutsResolver {
         bankName: payout.store?.bankName ?? null,
         bankCode: payout.store?.bankCode ?? null,
         bankAccountName: payout.store?.bankAccountName ?? null,
-        bankAccountNumber: payout.store?.bankAccountNumber ?? null,
+        bankAccountNumber: decryptBankAccountNumber(payout.store?.bankAccountNumber),
+        bankAccountVerificationStatus: payout.store?.bankAccountVerificationStatus ?? null,
       })),
       pagination: result.pagination,
     };
@@ -513,6 +536,9 @@ function mapPayout(payout: {
   commissionRate?: number | null;
   status: string;
   settlementRail: string;
+  notes?: string | null;
+  failureReason?: string | null;
+  processedAt?: Date | null;
   createdAt: Date;
 }): PayoutType {
   return {
@@ -526,6 +552,9 @@ function mapPayout(payout: {
     commissionRate: payout.commissionRate == null ? null : Number(payout.commissionRate),
     status: payout.status,
     settlementRail: payout.settlementRail,
+    notes: payout.notes ?? null,
+    failureReason: payout.failureReason ?? null,
+    processedAt: payout.processedAt ?? null,
     createdAt: payout.createdAt,
   };
 }

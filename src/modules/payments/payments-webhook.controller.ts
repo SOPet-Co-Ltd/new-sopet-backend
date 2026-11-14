@@ -5,6 +5,7 @@ import {
   Req,
   UnauthorizedException,
   BadRequestException,
+  ServiceUnavailableException,
   HttpCode,
   Logger,
 } from '@nestjs/common';
@@ -12,6 +13,7 @@ import type { RawBodyRequest } from '@nestjs/common';
 import { Request } from 'express';
 import { Public } from '../../common/decorators';
 import { PaymentsService } from './payments.service';
+import { BeamWebhookRetryableError } from './beam-webhook-retryable.error';
 
 const HANDLED_BEAM_EVENTS = new Set(['charge.succeeded', 'charge.failed']);
 
@@ -52,7 +54,18 @@ export class PaymentsWebhookController {
       return { received: true, ignored: true };
     }
 
-    await this.paymentsService.handleBeamWebhook(payload, eventType);
+    try {
+      await this.paymentsService.handleBeamWebhook(payload, eventType);
+    } catch (error) {
+      if (error instanceof BeamWebhookRetryableError) {
+        this.logger.warn(`Beam webhook retryable: ${error.message}`);
+        throw new ServiceUnavailableException({
+          code: error.code,
+          message: error.message,
+        });
+      }
+      throw error;
+    }
     return { received: true };
   }
 }

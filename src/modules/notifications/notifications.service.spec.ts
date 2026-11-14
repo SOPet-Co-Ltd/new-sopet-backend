@@ -465,6 +465,86 @@ describe('NotificationsService', () => {
     });
   });
 
+  describe('notifyVendorAboutManualPayoutOutcome', () => {
+    function mockNoDedupeHit() {
+      const qb = {
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(null),
+      };
+      userNotificationRepo.createQueryBuilder.mockReturnValue(qb);
+    }
+
+    it('returns null when vendorId is empty', async () => {
+      const result = await service.notifyVendorAboutManualPayoutOutcome({
+        vendorId: '',
+        payoutId: 'payout-1',
+        storeId: 'store-1',
+        storeName: 'Pet Shop',
+        amount: 1500,
+        outcome: 'approved',
+      });
+      expect(result).toBeNull();
+      expect(userNotificationRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('notifies vendor on approval with the admin note', async () => {
+      mockNoDedupeHit();
+      userNotificationRepo.save.mockResolvedValue({ id: 'notif-approved' });
+
+      await service.notifyVendorAboutManualPayoutOutcome({
+        vendorId: 'vendor-1',
+        payoutId: 'payout-1',
+        storeId: 'store-1',
+        storeName: 'Pet Shop',
+        amount: 1500,
+        outcome: 'approved',
+        notes: 'โอนผ่าน SCB แล้ว',
+      });
+
+      expect(userNotificationRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'vendor-1',
+          type: 'manual_payout_approved',
+          message: expect.stringContaining('ร้านของคุณได้รับเงิน'),
+        }),
+      );
+      expect(userNotificationRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringContaining('โอนผ่าน SCB แล้ว'),
+        }),
+      );
+    });
+
+    it('notifies vendor on rejection with the reason', async () => {
+      mockNoDedupeHit();
+      userNotificationRepo.save.mockResolvedValue({ id: 'notif-rejected' });
+
+      await service.notifyVendorAboutManualPayoutOutcome({
+        vendorId: 'vendor-1',
+        payoutId: 'payout-1',
+        storeId: 'store-1',
+        storeName: 'Pet Shop',
+        amount: 1500,
+        outcome: 'rejected',
+        notes: 'เลขบัญชีไม่ตรงชื่อ',
+      });
+
+      expect(userNotificationRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'vendor-1',
+          type: 'manual_payout_rejected',
+          message: expect.stringContaining('ถูกปฏิเสธ'),
+        }),
+      );
+      expect(userNotificationRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringContaining('เลขบัญชีไม่ตรงชื่อ'),
+        }),
+      );
+    });
+  });
+
   describe('notifyVendorAboutNewOrder', () => {
     it('returns existing notification for the same order', async () => {
       const order = {

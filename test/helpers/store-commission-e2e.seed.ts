@@ -11,7 +11,12 @@ import { getQueueToken } from '@nestjs/bullmq';
 import { DataSource } from 'typeorm';
 import { JwtPayload } from '../../src/common/interfaces';
 import { User, UserRole } from '../../src/database/entities/user.entity';
-import { Store, StoreStatus, OmiseRecipientStatus } from '../../src/database/entities/store.entity';
+import {
+  Store,
+  StoreStatus,
+  OmiseRecipientStatus,
+  BankAccountVerificationStatus,
+} from '../../src/database/entities/store.entity';
 import { Product, ProductStatus } from '../../src/database/entities/product.entity';
 import { ProductVariant } from '../../src/database/entities/product-variant.entity';
 import { Order, OrderStatus, PaymentMethod } from '../../src/database/entities/order.entity';
@@ -46,12 +51,13 @@ export const STORE_COMMISSION_E2E_JWT_SECRET = 'sopet-e2e-store-commission-jwt';
 export const STORE_COMMISSION_E2E_OMISE_RECIPIENT_ID = 'recp_e2e_store_commission';
 export const STORE_COMMISSION_E2E_TRANSFER_ID = 'trsf_e2e_store_commission';
 
-/** Satisfies PayoutsService.hasCompleteBankAccount in manual-rail e2e. */
+/** Satisfies PayoutsService.hasCompleteBankAccount and the verified-account gate in manual-rail e2e. */
 export const STORE_COMMISSION_E2E_BANK_ACCOUNT = {
   bankName: 'E2E Test Bank',
   bankCode: '001',
   bankAccountName: 'E2E Vendor Account',
   bankAccountNumber: '1234567890',
+  bankAccountVerificationStatus: BankAccountVerificationStatus.VERIFIED,
 } as const;
 
 /** INT-1 / SVC-1 mixed-cutoff literals (THB) after store-scoped promo on post product. */
