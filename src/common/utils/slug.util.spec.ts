@@ -1,9 +1,21 @@
 import {
+  decodeSlugParam,
   generateRandomSlug,
   generateSlug,
   generateUniqueStoreSlug,
   isAllThaiStoreName,
 } from './slug.util';
+
+describe('decodeSlugParam', () => {
+  it('decodes a percent-encoded Thai slug', () => {
+    expect(decodeSlugParam(encodeURIComponent('ร้านไทย'))).toBe('ร้านไทย');
+  });
+
+  it('leaves a plain slug unchanged', () => {
+    expect(decodeSlugParam('sopet-pet-shop')).toBe('sopet-pet-shop');
+    expect(decodeSlugParam('ร้านไทย')).toBe('ร้านไทย');
+  });
+});
 
 describe('generateSlug', () => {
   it('slugifies Latin names', () => {

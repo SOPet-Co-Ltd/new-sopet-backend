@@ -298,6 +298,19 @@ describe('StoresService', () => {
     expect(storeSuspensionHoldService.restoreHoldForStore).not.toHaveBeenCalled();
   });
 
+  it('decodes a percent-encoded Thai slug before lookup', async () => {
+    storeRepository.findOne.mockResolvedValue({
+      id: 'store-1',
+      slug: 'ร้านไทย',
+      status: StoreStatus.APPROVED,
+    });
+
+    const store = await service.findBySlug(encodeURIComponent('ร้านไทย'));
+
+    expect(storeRepository.findOne).toHaveBeenCalledWith({ where: { slug: 'ร้านไทย' } });
+    expect(store.slug).toBe('ร้านไทย');
+  });
+
   it('finds store by slug', async () => {
     storeRepository.findOne.mockResolvedValue({
       id: 'store-1',

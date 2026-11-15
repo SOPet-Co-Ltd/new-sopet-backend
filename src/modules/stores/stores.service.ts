@@ -23,7 +23,7 @@ import { AuditLog, AuditActorType } from '../../database/entities/audit-log.enti
 import { OrderStatus } from '../../database/entities/enums/order.enums';
 import { CreateStoreDto, UpdateStoreDto, ApproveStoreDto, RejectStoreDto } from './dto';
 import * as bcrypt from 'bcrypt';
-import { generateUniqueStoreSlug } from '../../common/utils/slug.util';
+import { decodeSlugParam, generateUniqueStoreSlug } from '../../common/utils/slug.util';
 import { pickDefaultAccessibleStoreId } from './store-selection.util';
 import { NotificationsService } from '../notifications/notifications.service';
 import { DashboardEventsService } from '../dashboard-events/dashboard-events.service';
@@ -242,7 +242,7 @@ export class StoresService {
   // Get store by slug (public discovery — approved stores only)
   async findBySlug(slug: string): Promise<Store> {
     const store = await this.storeRepository.findOne({
-      where: { slug },
+      where: { slug: decodeSlugParam(slug) },
     });
 
     if (!store || store.status !== StoreStatus.APPROVED) {

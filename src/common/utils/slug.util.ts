@@ -6,6 +6,20 @@ const RANDOM_SLUG_CHARS = 'abcdefghijklmnopqrstuvwxyz0123456789';
 const DEFAULT_RANDOM_SLUG_LENGTH = 8;
 const MAX_UNIQUE_SLUG_ATTEMPTS = 20;
 
+/** Turn a percent-encoded path segment back into the stored slug. */
+export function decodeSlugParam(value: string): string {
+  const trimmed = value.trim();
+  if (!/%[0-9A-Fa-f]{2}/.test(trimmed)) {
+    return trimmed;
+  }
+
+  try {
+    return decodeURIComponent(trimmed);
+  } catch {
+    return trimmed;
+  }
+}
+
 /** Slug for Thai + Latin names (keeps letters, numbers, and combining marks). */
 export function generateSlug(name: string, fallback = 'item'): string {
   const slug = name
