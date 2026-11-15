@@ -43,6 +43,7 @@ import {
   normalizeVendorOrdersPage,
   VendorOrderQueueFilter,
 } from './vendor-order-action-queue.util';
+import { assertOrderHasNoReviews } from './order-review-cancel.guard';
 import { assertNotManualHoldTransition } from './store-suspension-hold.service';
 import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.service';
 import { webhookEventForOrderStatus } from '../vendor-webhooks/vendor-webhook.events';
@@ -1352,6 +1353,10 @@ export class OrdersService {
     }
 
     assertNotManualHoldTransition(previousStatus, status);
+
+    if (status === OrderStatus.CANCELLED || status === OrderStatus.REFUNDED) {
+      await assertOrderHasNoReviews(this.dataSource, id);
+    }
 
     const isAdminHoldExit =
       (status === OrderStatus.CANCELLED || status === OrderStatus.REFUNDED) &&
