@@ -852,6 +852,48 @@ describe('ProductsService', () => {
     expect(productRepository.find).toHaveBeenCalled();
   });
 
+  it('sorts price by the discounted payable price instead of basePrice', async () => {
+    const idQb = {
+      andWhere: jest.fn().mockReturnThis(),
+      innerJoin: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      setParameter: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      distinct: jest.fn().mockReturnThis(),
+      offset: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue([{ id: 'prod-1' }]),
+    };
+    const countQb = {
+      andWhere: jest.fn().mockReturnThis(),
+      innerJoin: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      getRawOne: jest.fn().mockResolvedValue({ cnt: '1' }),
+    };
+    productRepository.createQueryBuilder.mockReturnValueOnce(idQb).mockReturnValueOnce(countQb);
+    productRepository.find.mockResolvedValue([product]);
+
+    await service.findAll({
+      sortBy: 'basePrice',
+      sortOrder: 'ASC',
+      page: 1,
+      limit: 10,
+    });
+
+    expect(idQb.addSelect).toHaveBeenCalledWith(
+      expect.stringContaining('sale_campaign_items') as string,
+      'payable_price_sort',
+    );
+    expect(idQb.addSelect).toHaveBeenCalledWith(
+      expect.stringContaining('discount_percent') as string,
+      'payable_price_sort',
+    );
+    expect(idQb.orderBy).toHaveBeenCalledWith('payable_price_sort', 'ASC');
+    expect(idQb.orderBy).not.toHaveBeenCalledWith('product.basePrice', 'ASC');
+  });
+
   it('preserves relevance sort select columns in phase A id query', async () => {
     const idQb = {
       andWhere: jest.fn().mockReturnThis(),

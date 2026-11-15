@@ -33,6 +33,7 @@ import {
   getProductPublishChecklist,
   ProductPublishChecklist,
 } from './product-publish.validation';
+import { payablePriceSortExpression } from './payable-price-sort';
 import { SearchService } from '../search/search.service';
 import { SearchEmbeddingQueueService } from '../search/embedding/search-embedding-queue.service';
 import { StorageService } from '../storage/storage.service';
@@ -753,6 +754,13 @@ export class ProductsService {
       return;
     }
 
+    if (sortBy === 'basePrice') {
+      queryBuilder
+        .addSelect(payablePriceSortExpression('product'), 'payable_price_sort')
+        .orderBy('payable_price_sort', sortOrder);
+      return;
+    }
+
     if (sortBy === 'relevance') {
       if (search) {
         queryBuilder
@@ -772,7 +780,6 @@ export class ProductsService {
 
     const allowedColumns: Record<string, string> = {
       createdAt: 'createdAt',
-      basePrice: 'basePrice',
       averageRating: 'averageRating',
       name: 'name',
     };

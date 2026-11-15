@@ -6,6 +6,7 @@ import { ProductImage } from '../../database/entities/product-image.entity';
 import { Product, ProductStatus } from '../../database/entities/product.entity';
 import { OrderStatus } from '../../database/entities/enums/order.enums';
 import { ProductQueryDto } from '../products/dto/product-query.dto';
+import { payablePriceSortExpression } from '../products/payable-price-sort';
 import { RankingEngine } from './ranking.engine';
 import type {
   SearchProductSuggestion,
@@ -424,9 +425,15 @@ export class SearchRepository {
       return;
     }
 
+    if (sortBy === 'basePrice') {
+      queryBuilder
+        .addSelect(payablePriceSortExpression(alias), 'payable_price_sort')
+        .orderBy('payable_price_sort', sortOrder);
+      return;
+    }
+
     const allowedColumns: Record<string, string> = {
       createdAt: 'createdAt',
-      basePrice: 'basePrice',
       averageRating: 'averageRating',
       name: 'name',
     };
