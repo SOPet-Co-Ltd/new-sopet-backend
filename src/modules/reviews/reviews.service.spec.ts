@@ -7,6 +7,7 @@ import {
   maskCustomerName,
   resolveReviewCustomerName,
   resolveReviewCustomerProfilePhotoUrl,
+  resolveVendorReviewCustomerName,
   UNKNOWN_CUSTOMER_DISPLAY_NAME,
   getReviewWindowDays,
   addDays,
@@ -416,6 +417,50 @@ describe('ReviewsService', () => {
     });
   });
 
+  describe('resolveVendorReviewCustomerName', () => {
+    it('returns the full account name for the store that received the order', () => {
+      expect(
+        resolveVendorReviewCustomerName({
+          source: ReviewSource.CUSTOMER,
+          customerId: 'c1',
+          customer: { fullName: 'สมชาย ใจดี' },
+        }),
+      ).toBe('สมชาย ใจดี');
+    });
+
+    it('uses the account phone when the account has no name', () => {
+      expect(
+        resolveVendorReviewCustomerName({
+          source: ReviewSource.CUSTOMER,
+          customerId: 'c1',
+          customer: { fullName: null, phone: '0812345678' },
+          order: { shippingAddress: { fullName: '23r' } },
+        }),
+      ).toBe('0812345678');
+    });
+
+    it('uses the shipping name when the account has no name or phone', () => {
+      expect(
+        resolveVendorReviewCustomerName({
+          source: ReviewSource.CUSTOMER,
+          customerId: 'c1',
+          customer: { fullName: null, phone: '' },
+          order: { shippingAddress: { fullName: 'สมหญิง ซื้อของ' } },
+        }),
+      ).toBe('สมหญิง ซื้อของ');
+    });
+
+    it('keeps imported reviews unnamed', () => {
+      expect(
+        resolveVendorReviewCustomerName({
+          source: ReviewSource.VENDOR_IMPORT,
+          customerId: null,
+          customer: null,
+        }),
+      ).toBe(UNKNOWN_CUSTOMER_DISPLAY_NAME);
+    });
+  });
+
   describe('resolveReviewCustomerProfilePhotoUrl', () => {
     it('returns null for vendor imports', () => {
       expect(
@@ -564,7 +609,13 @@ describe('ReviewsService', () => {
           comment: 'Okay',
           createdAt: new Date('2026-01-02T00:00:00.000Z'),
           product: { name: 'Cat Food', slug: 'cat-food', images: [] },
-          customer: { fullName: 'Jane Doe', phone: '0899999999' },
+          source: ReviewSource.CUSTOMER,
+          customerId: 'customer-1',
+          customer: {
+            fullName: 'Jane Doe',
+            phone: '0899999999',
+            profilePhotoUrl: 'https://cdn.example.com/jane.jpg',
+          },
           reply: null,
         },
       ]);
@@ -601,6 +652,9 @@ describe('ReviewsService', () => {
       expect(result.items[0]).toMatchObject({
         id: 'review-2',
         productName: 'Cat Food',
+        customerId: 'customer-1',
+        customerName: 'Jane Doe',
+        customerProfilePhotoUrl: 'https://cdn.example.com/jane.jpg',
       });
       expect(result.pagination).toEqual({
         page: 2,

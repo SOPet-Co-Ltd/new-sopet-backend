@@ -106,6 +106,43 @@ export function resolveReviewCustomerName(
   return maskCustomerName(review.customer);
 }
 
+/** Buyer name for the vendor review list. Public reviews stay masked. */
+export function resolveVendorReviewCustomerName(
+  review: Pick<Review, 'source' | 'customerId'> & {
+    customer?: Pick<Customer, 'fullName' | 'phone'> | null;
+    order?: {
+      guestName?: string | null;
+      shippingAddress?: { fullName?: string | null } | null;
+    } | null;
+  },
+): string {
+  if (review.source === ReviewSource.VENDOR_IMPORT || !review.customerId) {
+    return UNKNOWN_CUSTOMER_DISPLAY_NAME;
+  }
+
+  const accountName = review.customer?.fullName?.trim();
+  if (accountName) {
+    return accountName;
+  }
+
+  const phone = review.customer?.phone?.trim();
+  if (phone) {
+    return phone;
+  }
+
+  const shippingName = review.order?.shippingAddress?.fullName?.trim();
+  if (shippingName) {
+    return shippingName;
+  }
+
+  const guestName = review.order?.guestName?.trim();
+  if (guestName) {
+    return guestName;
+  }
+
+  return 'ลูกค้า';
+}
+
 export function resolveReviewCustomerProfilePhotoUrl(
   review: Pick<Review, 'source' | 'customerId'> & {
     customer?: Pick<Customer, 'profilePhotoUrl'> | null;
@@ -205,6 +242,7 @@ export interface StoreProductReviewResult {
   productImageUrl: string | null;
   rating: number;
   comment: string | null;
+  customerId: string | null;
   customerName: string;
   customerProfilePhotoUrl?: string | null;
   createdAt: Date;
@@ -357,7 +395,11 @@ function mapReviewImages(images: ReviewImage[] | null | undefined): ReviewImageR
   }));
 }
 
-function mapReviewToStoreProductReview(review: Review): StoreProductReviewResult {
+function mapReviewToStoreProductReview(
+  review: Review,
+  options?: { revealBuyer?: boolean },
+): StoreProductReviewResult {
+  const revealBuyer = options?.revealBuyer === true;
   return {
     id: review.id,
     productId: review.productId,
@@ -366,7 +408,10 @@ function mapReviewToStoreProductReview(review: Review): StoreProductReviewResult
     productImageUrl: review.product ? resolveThumbnailUrl(review.product.images) : null,
     rating: review.rating,
     comment: review.comment,
-    customerName: resolveReviewCustomerName(review),
+    customerId: revealBuyer ? review.customerId : null,
+    customerName: revealBuyer
+      ? resolveVendorReviewCustomerName(review)
+      : resolveReviewCustomerName(review),
     customerProfilePhotoUrl: resolveReviewCustomerProfilePhotoUrl(review),
     createdAt: review.createdAt,
     images: mapReviewImages(review.images),
@@ -957,7 +1002,7 @@ export class ReviewsService {
     return reviewIds
       .map((id) => reviewsById.get(id))
       .filter((review): review is Review => review !== undefined)
-      .map(mapReviewToStoreProductReview);
+      .map((review) => mapReviewToStoreProductReview(review));
   }
 
   async findByStorePaginated(params: {
@@ -1009,6 +1054,8 @@ export class ReviewsService {
       .innerJoinAndSelect('review.product', 'product')
       .leftJoinAndSelect('product.images', 'images')
       .leftJoinAndSelect('review.customer', 'customer')
+      .leftJoinAndSelect('review.order', 'reviewOrder')
+      .leftJoinAndSelect('reviewOrder.shippingAddress', 'shippingAddress')
       .leftJoinAndSelect('review.reply', 'reply')
       .leftJoinAndSelect('review.images', 'reviewImages')
       .where('review.id IN (:...reviewIds)', { reviewIds })
@@ -1020,7 +1067,7 @@ export class ReviewsService {
       .filter((review): review is Review => review !== undefined);
 
     return {
-      items: reviews.map(mapReviewToStoreProductReview),
+      items: reviews.map((review) => mapReviewToStoreProductReview(review, { revealBuyer: true })),
       pagination: {
         page,
         limit,

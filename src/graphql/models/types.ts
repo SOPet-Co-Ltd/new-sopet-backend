@@ -2031,6 +2031,9 @@ export class StoreProductReviewType {
   @Field(() => String, { nullable: true })
   comment?: string | null;
 
+  @Field(() => String, { nullable: true })
+  customerId?: string | null;
+
   @Field()
   customerName!: string;
 
