@@ -14,6 +14,7 @@ describe('OrderFulfillmentService hold guards', () => {
   let vendorWebhooksService: { dispatchOrderEvent: jest.Mock };
   let dataSource: {
     transaction: jest.Mock;
+    getRepository: jest.Mock;
     manager: { save: jest.Mock; findOne: jest.Mock };
   };
 
@@ -38,6 +39,9 @@ describe('OrderFulfillmentService hold guards', () => {
           find: jest.fn().mockResolvedValue([]),
         }),
       ),
+      getRepository: jest.fn().mockReturnValue({
+        count: jest.fn().mockResolvedValue(0),
+      }),
       manager: {
         save: jest.fn().mockResolvedValue(undefined),
         findOne: jest.fn().mockResolvedValue({ id: 'store-1', name: 'Test Store' }),
@@ -79,6 +83,31 @@ describe('OrderFulfillmentService hold guards', () => {
       response: { code: 'HOLD_CANCEL_FORBIDDEN' },
     });
     expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
+  });
+
+  it('denies vendor cancel when the order already has a review', async () => {
+    orderRepository.findOne.mockResolvedValue(
+      heldOrder({
+        status: OrderStatus.DELIVERED,
+        items: [
+          {
+            id: 'item-1',
+            orderId: 'ord-1',
+            storeId: 'store-1',
+            fulfillmentStatus: FulfillmentStatus.DELIVERED,
+          } as OrderItem,
+        ],
+      }),
+    );
+    dataSource.getRepository.mockReturnValue({
+      count: jest.fn().mockResolvedValue(1),
+    });
+
+    await expect(service.cancelVendorOrder('vendor-1', 'store-1', 'ord-1')).rejects.toMatchObject({
+      response: { code: 'ORDER_REVIEWED_CANNOT_CANCEL' },
+    });
+    expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
+    expect(dataSource.transaction).not.toHaveBeenCalled();
   });
 
   it('denies vendor acknowledge of held items with HOLD_TRANSITION_FORBIDDEN', async () => {

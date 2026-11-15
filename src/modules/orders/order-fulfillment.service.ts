@@ -31,6 +31,7 @@ import {
   OrderAuditEventType,
 } from '../order-audit-logs/order-audit-log.constants';
 import { assertGuestPayTokenAccess } from '../../common/utils/guest-pay-token.util';
+import { assertOrderHasNoReviews } from './order-review-cancel.guard';
 
 @Injectable()
 export class OrderFulfillmentService {
@@ -449,6 +450,8 @@ export class OrderFulfillmentService {
         message: 'Order is already cancelled',
       });
     }
+
+    await assertOrderHasNoReviews(this.dataSource, order.id);
 
     if (!VENDOR_CANCELLABLE_ORDER_STATUSES.has(order.status)) {
       throw new BadRequestException({

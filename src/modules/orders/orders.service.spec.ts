@@ -133,6 +133,7 @@ describe('OrdersService', () => {
       transaction: jest.fn((cb: (manager: typeof mockManager) => unknown) => cb(mockManager)),
       getRepository: jest.fn().mockReturnValue({
         save: jest.fn(async (entity: unknown) => entity),
+        count: jest.fn().mockResolvedValue(0),
       }),
     };
 
@@ -885,6 +886,32 @@ describe('OrdersService', () => {
       mockManager,
       'Order status changed to cancelled',
     );
+  });
+
+  it('rejects cancel and refund when the order already has a review', async () => {
+    const order = {
+      id: 'ord-1',
+      status: OrderStatus.DELIVERED,
+      items: [],
+      shippingAddress: {},
+      storeShippings: [],
+      statusHistory: [],
+    };
+    orderRepository.findOne.mockResolvedValue(order);
+    dataSource.getRepository.mockReturnValue({
+      count: jest.fn().mockResolvedValue(1),
+    });
+
+    await expect(
+      service.updateStatus('ord-1', OrderStatus.CANCELLED, 'admin-1'),
+    ).rejects.toMatchObject({ response: { code: 'ORDER_REVIEWED_CANNOT_CANCEL' } });
+    await expect(
+      service.updateStatus('ord-1', OrderStatus.REFUNDED, 'admin-1'),
+    ).rejects.toMatchObject({ response: { code: 'ORDER_REVIEWED_CANNOT_CANCEL' } });
+
+    expect(order.status).toBe(OrderStatus.DELIVERED);
+    expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
+    expect(dataSource.transaction).not.toHaveBeenCalled();
   });
 
   describe('updateStatus hold hardening (AC-013–AC-015, AC-020)', () => {
