@@ -2002,6 +2002,7 @@ type StoreProductReviewConnection {
 type StoreProductReviewType {
   comment: String
   createdAt: DateTime!
+  customerId: String
   customerName: String!
   customerProfilePhotoUrl: String
   id: String!

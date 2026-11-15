@@ -109,7 +109,7 @@ export function resolveReviewCustomerName(
 /** Buyer name for the vendor review list. Public reviews stay masked. */
 export function resolveVendorReviewCustomerName(
   review: Pick<Review, 'source' | 'customerId'> & {
-    customer?: Pick<Customer, 'fullName'> | null;
+    customer?: Pick<Customer, 'fullName' | 'phone'> | null;
     order?: {
       guestName?: string | null;
       shippingAddress?: { fullName?: string | null } | null;
@@ -123,6 +123,11 @@ export function resolveVendorReviewCustomerName(
   const accountName = review.customer?.fullName?.trim();
   if (accountName) {
     return accountName;
+  }
+
+  const phone = review.customer?.phone?.trim();
+  if (phone) {
+    return phone;
   }
 
   const shippingName = review.order?.shippingAddress?.fullName?.trim();
@@ -997,7 +1002,7 @@ export class ReviewsService {
     return reviewIds
       .map((id) => reviewsById.get(id))
       .filter((review): review is Review => review !== undefined)
-      .map(mapReviewToStoreProductReview);
+      .map((review) => mapReviewToStoreProductReview(review));
   }
 
   async findByStorePaginated(params: {

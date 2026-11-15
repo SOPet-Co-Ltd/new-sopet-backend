@@ -428,12 +428,23 @@ describe('ReviewsService', () => {
       ).toBe('สมชาย ใจดี');
     });
 
-    it('uses the shipping name when the account has no name', () => {
+    it('uses the account phone when the account has no name', () => {
       expect(
         resolveVendorReviewCustomerName({
           source: ReviewSource.CUSTOMER,
           customerId: 'c1',
-          customer: { fullName: null },
+          customer: { fullName: null, phone: '0812345678' },
+          order: { shippingAddress: { fullName: '23r' } },
+        }),
+      ).toBe('0812345678');
+    });
+
+    it('uses the shipping name when the account has no name or phone', () => {
+      expect(
+        resolveVendorReviewCustomerName({
+          source: ReviewSource.CUSTOMER,
+          customerId: 'c1',
+          customer: { fullName: null, phone: '' },
           order: { shippingAddress: { fullName: 'สมหญิง ซื้อของ' } },
         }),
       ).toBe('สมหญิง ซื้อของ');
