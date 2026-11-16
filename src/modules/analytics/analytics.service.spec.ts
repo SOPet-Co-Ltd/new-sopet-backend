@@ -216,9 +216,13 @@ describe('AnalyticsService', () => {
       );
 
       const selected = (qb.select.mock.calls as Array<[string]>).map((call) => call[0]).join('\n');
+      const added = (qb.addSelect.mock.calls as Array<[string]>).map((call) => call[0]).join('\n');
       const filters = (qb.andWhere.mock.calls as Array<[string]>).map((call) => call[0]).join('\n');
       expect(selected).toContain("'guest:'");
       expect(selected).toContain('guest_phone');
+      expect(added).toContain('promotion_usages');
+      expect(added).toContain('discount_amount');
+      expect(added).toContain("type NOT IN ('free_shipping'");
       expect(filters).not.toContain('customerId IS NOT NULL');
       expect(result.buyersInMonth).toBe(2);
       expect(result.orderCount).toBe(2);

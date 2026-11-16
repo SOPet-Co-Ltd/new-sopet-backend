@@ -9,6 +9,7 @@ import { Customer } from '../../database/entities/customer.entity';
 import { Product } from '../../database/entities/product.entity';
 import { OrderStatus } from '../../database/entities/enums/order.enums';
 import { orderBuyerKeySql } from '../../common/sql/buyer-identity.sql';
+import { storeNetMerchandiseSql } from '../../common/sql/store-net-merchandise.sql';
 import {
   assertSummaryMonthNotBeforeCreatedAt,
   assertValidSummaryMonth,
@@ -418,7 +419,7 @@ export class AnalyticsService {
       .createQueryBuilder('oi')
       .innerJoin('oi.order', 'o')
       .select('COUNT(DISTINCT o.id)', 'orderCount')
-      .addSelect('COALESCE(SUM(oi.subtotal), 0)', 'revenue')
+      .addSelect(storeNetMerchandiseSql(), 'revenue')
       .addSelect(`COUNT(DISTINCT ${buyerKey})`, 'buyersInMonth')
       .where('oi.storeId = :storeId', { storeId })
       .andWhere('o.status NOT IN (:...excludedStatuses)', {
