@@ -13,6 +13,8 @@ import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { assertProductionSecurityConfig } from './config/security-boot.util';
 import { reportServerError } from './common/utils/report-server-error.util';
+import { McpService } from './modules/mcp/mcp.service';
+import { isMcpEnabled } from './modules/mcp/config';
 
 // Base64 image uploads via the `uploadImage` GraphQL mutation can exceed the
 // default ~100kb body-parser limit. 10mb comfortably fits the client's 5MB
@@ -104,6 +106,14 @@ async function bootstrap() {
   bootstrapLogger.log(
     `Public API: ${apiUrl}/api/v1/stores/{storeId} (Authorization: Bearer sopet_sk_...)`,
   );
+
+  if (isMcpEnabled()) {
+    const mcp = app.get(McpService);
+    await mcp.startAfterListen();
+    if (mcp.isReady()) {
+      bootstrapLogger.log(`Admin MCP: ${mcp.endpointUrl()}`);
+    }
+  }
 }
 
 void bootstrap();

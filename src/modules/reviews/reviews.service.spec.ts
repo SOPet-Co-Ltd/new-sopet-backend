@@ -64,6 +64,7 @@ describe('ReviewsService', () => {
   const storesService = {
     userHasStoreAccess: jest.fn(),
     assertStoreAccess: jest.fn().mockResolvedValue(undefined),
+    assertActorStoreAccess: jest.fn().mockResolvedValue('store-1'),
   };
 
   const storageService = {
@@ -668,7 +669,7 @@ describe('ReviewsService', () => {
   describe('createReviewReply', () => {
     it('creates reply when vendor has store access', async () => {
       reviewRepo.findOne.mockResolvedValue(approvedReview);
-      storesService.userHasStoreAccess.mockResolvedValue(true);
+      storesService.assertActorStoreAccess.mockResolvedValue('store-1');
       reviewReplyRepo.findOne.mockResolvedValue(null);
       reviewReplyRepo.save.mockResolvedValue({
         id: 'reply-1',
@@ -691,7 +692,7 @@ describe('ReviewsService', () => {
 
     it('rejects duplicate reply before save', async () => {
       reviewRepo.findOne.mockResolvedValue(approvedReview);
-      storesService.userHasStoreAccess.mockResolvedValue(true);
+      storesService.assertActorStoreAccess.mockResolvedValue('store-1');
       reviewReplyRepo.findOne.mockResolvedValue({ id: 'reply-existing' });
 
       await expect(
@@ -707,7 +708,7 @@ describe('ReviewsService', () => {
 
     it('maps unique violation on save to REVIEW_REPLY_ALREADY_EXISTS', async () => {
       reviewRepo.findOne.mockResolvedValue(approvedReview);
-      storesService.userHasStoreAccess.mockResolvedValue(true);
+      storesService.assertActorStoreAccess.mockResolvedValue('store-1');
       reviewReplyRepo.findOne.mockResolvedValue(null);
       reviewReplyRepo.save.mockRejectedValue(
         new QueryFailedError('INSERT', [], { code: '23505' } as never),
@@ -729,7 +730,7 @@ describe('ReviewsService', () => {
         ...approvedReview,
         status: ReviewStatus.PENDING,
       });
-      storesService.userHasStoreAccess.mockResolvedValue(true);
+      storesService.assertActorStoreAccess.mockResolvedValue('store-1');
 
       await expect(
         service.createReviewReply({
@@ -744,7 +745,12 @@ describe('ReviewsService', () => {
 
     it('rejects when vendor lacks store access', async () => {
       reviewRepo.findOne.mockResolvedValue(approvedReview);
-      storesService.userHasStoreAccess.mockResolvedValue(false);
+      storesService.assertActorStoreAccess.mockRejectedValue(
+        new ForbiddenException({
+          code: 'STORE_ACCESS_DENIED',
+          message: 'No access',
+        }),
+      );
 
       await expect(
         service.createReviewReply({
@@ -757,7 +763,7 @@ describe('ReviewsService', () => {
 
     it('rejects empty and HTML bodies', async () => {
       reviewRepo.findOne.mockResolvedValue(approvedReview);
-      storesService.userHasStoreAccess.mockResolvedValue(true);
+      storesService.assertActorStoreAccess.mockResolvedValue('store-1');
       reviewReplyRepo.findOne.mockResolvedValue(null);
 
       await expect(
@@ -791,7 +797,7 @@ describe('ReviewsService', () => {
         review: approvedReview,
       });
       reviewRepo.findOne.mockResolvedValue(approvedReview);
-      storesService.userHasStoreAccess.mockResolvedValue(true);
+      storesService.assertActorStoreAccess.mockResolvedValue('store-1');
       reviewReplyRepo.save.mockImplementation((reply: object) =>
         Promise.resolve({ id: 'reply-1', ...reply }),
       );
@@ -816,7 +822,7 @@ describe('ReviewsService', () => {
         ...approvedReview,
         status: ReviewStatus.PENDING,
       });
-      storesService.userHasStoreAccess.mockResolvedValue(true);
+      storesService.assertActorStoreAccess.mockResolvedValue('store-1');
 
       await expect(
         service.updateReviewReply({

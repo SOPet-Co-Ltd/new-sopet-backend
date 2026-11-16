@@ -61,15 +61,16 @@ export class ApiKeysResolver {
 
   @Mutation(() => CreateStoreApiKeyPayload)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async createStoreApiKey(
     @Args('storeId') storeId: string,
     @Args('name') name: string,
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
     @CurrentUser('email') userEmail?: string,
     @Context() context?: GraphqlContext,
   ): Promise<CreateStoreApiKeyPayload> {
-    const { apiKey, secret } = await this.apiKeysService.create(userId, storeId, name);
+    const { apiKey, secret } = await this.apiKeysService.create(userId, storeId, name, role);
     await this.auditLogsService.log({
       actorType: AuditActorType.VENDOR,
       actorId: userId,
@@ -92,26 +93,28 @@ export class ApiKeysResolver {
 
   @Query(() => [StoreApiKeyType])
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async storeApiKeys(
     @Args('storeId') storeId: string,
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
   ): Promise<StoreApiKeyType[]> {
-    const keys = await this.apiKeysService.listForStore(userId, storeId);
+    const keys = await this.apiKeysService.listForStore(userId, storeId, role);
     return keys.map(mapStoreApiKey);
   }
 
   @Mutation(() => Boolean)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async revokeStoreApiKey(
     @Args('storeId') storeId: string,
     @Args('id') id: string,
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
     @CurrentUser('email') userEmail?: string,
     @Context() context?: GraphqlContext,
   ): Promise<boolean> {
-    await this.apiKeysService.revoke(userId, storeId, id);
+    await this.apiKeysService.revoke(userId, storeId, id, role);
     await this.auditLogsService.log({
       actorType: AuditActorType.VENDOR,
       actorId: userId,

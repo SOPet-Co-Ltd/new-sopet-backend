@@ -147,6 +147,7 @@ jobs:
           PAYOUT_CRON_SCHEDULE: ${{ vars.PAYOUT_CRON_SCHEDULE }}
           PAYOUT_CRON_TIMEZONE: ${{ vars.PAYOUT_CRON_TIMEZONE }}
           COMMISSION_GO_LIVE_AT: ${{ vars.COMMISSION_GO_LIVE_AT }}
+          MCP_ADMIN_EMAIL: ${{ vars.MCP_ADMIN_EMAIL }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -165,6 +166,8 @@ jobs:
           BEAM_WEBHOOK_SECRET: ${{ secrets.BEAM_WEBHOOK_SECRET }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          MCP_HTTP_TOKEN: ${{ secrets.MCP_HTTP_TOKEN }}
+          MCP_ADMIN_PASSWORD: ${{ secrets.MCP_ADMIN_PASSWORD }}
         run: |
           chmod +x infra/export-github-env.sh
           infra/export-github-env.sh

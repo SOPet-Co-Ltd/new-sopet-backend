@@ -12,13 +12,14 @@ export class OrderAuditLogsResolver {
 
   @Query(() => OrderAuditLogType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async orderAuditLog(
     @Args('orderId') orderId: string,
     @Args('storeId') storeId: string,
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
   ): Promise<OrderAuditLogType> {
-    const result = await this.orderAuditLogsService.listForVendor(userId, storeId, orderId);
+    const result = await this.orderAuditLogsService.listForVendor(userId, storeId, orderId, role);
     return {
       orderId: result.orderId,
       entries: result.entries.map((entry): OrderAuditLogEntryType => ({

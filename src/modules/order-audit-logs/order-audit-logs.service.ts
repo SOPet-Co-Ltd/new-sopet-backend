@@ -103,6 +103,7 @@ export class OrderAuditLogsService {
     userId: string,
     storeId: string,
     orderId: string,
+    role?: string,
   ): Promise<VendorOrderAuditLogResult> {
     if (!UUID_RE.test(orderId) || !UUID_RE.test(storeId)) {
       throw new NotFoundException({
@@ -111,7 +112,7 @@ export class OrderAuditLogsService {
       });
     }
 
-    await this.storesService.assertStoreAccess(userId, storeId);
+    await this.storesService.assertStoreAccessIfVendor(role, userId, storeId);
 
     const storeItemCount = await this.orderItemRepository.count({
       where: { orderId, storeId },

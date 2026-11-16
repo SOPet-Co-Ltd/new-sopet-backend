@@ -147,10 +147,11 @@ export class OrdersResolver {
 
   @Query(() => VendorOrderConnection)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async vendorOrders(
     @Args('storeId') storeId: string,
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
     @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page?: number,
     @Args('limit', { type: () => Int, nullable: true, defaultValue: 20 }) limit?: number,
     @Args('queue', {
@@ -163,7 +164,7 @@ export class OrdersResolver {
     @Args('paymentMethod', { type: () => String, nullable: true }) paymentMethod?: string,
     @Args('search', { type: () => String, nullable: true }) search?: string,
   ): Promise<VendorOrderConnection> {
-    await this.storesService.assertStoreAccess(userId, storeId);
+    await this.storesService.assertStoreAccessIfVendor(role, userId, storeId);
 
     let parsedStatus: OrderStatus | undefined;
     if (status) {
@@ -207,13 +208,14 @@ export class OrdersResolver {
 
   @Query(() => OrderType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async vendorOrder(
     @Args('storeId') storeId: string,
     @Args('id') id: string,
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
   ): Promise<OrderType> {
-    await this.storesService.assertStoreAccess(userId, storeId);
+    await this.storesService.assertStoreAccessIfVendor(role, userId, storeId);
     const order = await this.ordersService.findOneForVendor(storeId, id);
     return mapOrder(order, storeId);
   }
@@ -402,13 +404,20 @@ export class OrdersResolver {
 
   @Mutation(() => OrderType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async markVendorOrderPaid(
     @Args('orderId') orderId: string,
     @CurrentUser('id') userId: string,
-    @CurrentUser('storeId') storeId: string,
+    @CurrentUser('role') role: string,
+    @CurrentUser('storeId') jwtStoreId?: string,
+    @Args('storeId', { nullable: true }) argsStoreId?: string,
   ): Promise<OrderType> {
-    await this.storesService.assertStoreAccess(userId, storeId);
+    const storeId = await this.storesService.resolveActorStoreId(
+      role,
+      userId,
+      jwtStoreId,
+      argsStoreId,
+    );
     const updated = await this.orderFulfillmentService.markVendorOrderPaid(
       userId,
       storeId,
@@ -419,13 +428,20 @@ export class OrdersResolver {
 
   @Mutation(() => OrderType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async acknowledgeVendorOrder(
     @Args('orderId') orderId: string,
     @CurrentUser('id') userId: string,
-    @CurrentUser('storeId') storeId: string,
+    @CurrentUser('role') role: string,
+    @CurrentUser('storeId') jwtStoreId?: string,
+    @Args('storeId', { nullable: true }) argsStoreId?: string,
   ): Promise<OrderType> {
-    await this.storesService.assertStoreAccess(userId, storeId);
+    const storeId = await this.storesService.resolveActorStoreId(
+      role,
+      userId,
+      jwtStoreId,
+      argsStoreId,
+    );
     const updated = await this.orderFulfillmentService.acknowledgeVendorOrder(
       userId,
       storeId,
@@ -436,13 +452,20 @@ export class OrdersResolver {
 
   @Mutation(() => OrderType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async shipVendorOrder(
     @Args('input') input: ShipVendorOrderInput,
     @CurrentUser('id') userId: string,
-    @CurrentUser('storeId') storeId: string,
+    @CurrentUser('role') role: string,
+    @CurrentUser('storeId') jwtStoreId?: string,
+    @Args('storeId', { nullable: true }) argsStoreId?: string,
   ): Promise<OrderType> {
-    await this.storesService.assertStoreAccess(userId, storeId);
+    const storeId = await this.storesService.resolveActorStoreId(
+      role,
+      userId,
+      jwtStoreId,
+      argsStoreId,
+    );
     const updated = await this.orderFulfillmentService.shipVendorOrder(
       userId,
       storeId,
@@ -490,13 +513,20 @@ export class OrdersResolver {
 
   @Mutation(() => OrderType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async cancelVendorOrder(
     @Args('orderId') orderId: string,
     @CurrentUser('id') userId: string,
-    @CurrentUser('storeId') storeId: string,
+    @CurrentUser('role') role: string,
+    @CurrentUser('storeId') jwtStoreId?: string,
+    @Args('storeId', { nullable: true }) argsStoreId?: string,
   ): Promise<OrderType> {
-    await this.storesService.assertStoreAccess(userId, storeId);
+    const storeId = await this.storesService.resolveActorStoreId(
+      role,
+      userId,
+      jwtStoreId,
+      argsStoreId,
+    );
     const updated = await this.orderFulfillmentService.cancelVendorOrder(userId, storeId, orderId);
     return mapOrder(updated, storeId);
   }

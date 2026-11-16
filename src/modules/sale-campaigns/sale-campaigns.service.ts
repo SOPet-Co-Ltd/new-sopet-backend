@@ -71,8 +71,9 @@ export class SaleCampaignsService {
     userId: string,
     storeId: string,
     input: CreateSaleCampaignInput,
+    role?: string,
   ): Promise<SaleCampaign> {
-    await this.storesService.assertStoreAccess(userId, storeId);
+    await this.storesService.assertStoreAccessIfVendor(role, userId, storeId);
     this.assertValidDateRange(input.startsAt, input.expiresAt);
     await this.assertValidItems(storeId, input.items);
 
@@ -90,9 +91,14 @@ export class SaleCampaignsService {
     return this.findOne(saved.id);
   }
 
-  async update(id: string, userId: string, input: UpdateSaleCampaignInput): Promise<SaleCampaign> {
+  async update(
+    id: string,
+    userId: string,
+    input: UpdateSaleCampaignInput,
+    role?: string,
+  ): Promise<SaleCampaign> {
     const campaign = await this.findOne(id);
-    await this.storesService.assertStoreAccess(userId, campaign.storeId);
+    await this.storesService.assertStoreAccessIfVendor(role, userId, campaign.storeId);
 
     const nextStartsAt =
       input.startsAt === undefined
@@ -130,15 +136,20 @@ export class SaleCampaignsService {
     return this.findOne(campaign.id);
   }
 
-  async softDelete(id: string, userId: string): Promise<void> {
+  async softDelete(id: string, userId: string, role?: string): Promise<void> {
     const campaign = await this.findOne(id);
-    await this.storesService.assertStoreAccess(userId, campaign.storeId);
+    await this.storesService.assertStoreAccessIfVendor(role, userId, campaign.storeId);
     await this.campaignRepository.softDelete(id);
   }
 
-  async toggle(id: string, userId: string, isActive: boolean): Promise<SaleCampaign> {
+  async toggle(
+    id: string,
+    userId: string,
+    isActive: boolean,
+    role?: string,
+  ): Promise<SaleCampaign> {
     const campaign = await this.findOne(id);
-    await this.storesService.assertStoreAccess(userId, campaign.storeId);
+    await this.storesService.assertStoreAccessIfVendor(role, userId, campaign.storeId);
     campaign.isActive = isActive;
     await this.campaignRepository.save(campaign);
     return this.findOne(id);

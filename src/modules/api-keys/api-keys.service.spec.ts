@@ -12,7 +12,7 @@ describe('ApiKeysService', () => {
     findOne: jest.Mock;
   };
   let storesService: {
-    assertStoreManager: jest.Mock;
+    assertStoreManagerIfVendor: jest.Mock;
     findOne: jest.Mock;
   };
 
@@ -31,7 +31,7 @@ describe('ApiKeysService', () => {
       findOne: jest.fn(),
     };
     storesService = {
-      assertStoreManager: jest.fn().mockResolvedValue(undefined),
+      assertStoreManagerIfVendor: jest.fn().mockResolvedValue(undefined),
       findOne: jest.fn().mockResolvedValue({
         id: 'store-1',
         status: StoreStatus.APPROVED,
@@ -42,9 +42,13 @@ describe('ApiKeysService', () => {
   });
 
   it('creates a hashed key and returns the secret once', async () => {
-    const result = await service.create('user-1', 'store-1', 'Integration');
+    const result = await service.create('user-1', 'store-1', 'Integration', 'vendor');
 
-    expect(storesService.assertStoreManager).toHaveBeenCalledWith('user-1', 'store-1');
+    expect(storesService.assertStoreManagerIfVendor).toHaveBeenCalledWith(
+      'vendor',
+      'user-1',
+      'store-1',
+    );
     expect(result.secret).toMatch(/^sopet_sk_[0-9a-f]{64}$/);
     expect(result.apiKey.keyHash).toBeDefined();
     expect(result.apiKey.keyHash).not.toBe(result.secret);
@@ -102,8 +106,13 @@ describe('ApiKeysService', () => {
       revokedAt: null,
     });
 
-    await service.revoke('user-1', 'store-1', 'key-1');
+    await service.revoke('user-1', 'store-1', 'key-1', 'vendor');
 
+    expect(storesService.assertStoreManagerIfVendor).toHaveBeenCalledWith(
+      'vendor',
+      'user-1',
+      'store-1',
+    );
     expect(apiKeyRepository.save).toHaveBeenCalledWith(
       expect.objectContaining({ revokedAt: expect.any(Date) }),
     );
@@ -112,6 +121,8 @@ describe('ApiKeysService', () => {
   it('throws when revoking a missing key', async () => {
     apiKeyRepository.findOne.mockResolvedValue(null);
 
-    await expect(service.revoke('user-1', 'store-1', 'missing')).rejects.toThrow(NotFoundException);
+    await expect(service.revoke('user-1', 'store-1', 'missing', 'vendor')).rejects.toThrow(
+      NotFoundException,
+    );
   });
 });

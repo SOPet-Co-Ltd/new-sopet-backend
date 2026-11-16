@@ -1,4 +1,10 @@
-import { BadRequestException, ConflictException, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { StoresService } from './stores.service';
 import { BankAccountVerificationStatus, StoreStatus } from '../../database/entities/store.entity';
 import { AuditAction } from '../audit-logs/audit-log.constants';
@@ -1085,6 +1091,56 @@ describe('StoresService', () => {
         response: { code: 'INVALID_STORE_ID' },
       });
       expect(storeRepository.findOne).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('assertActorStoreAccess', () => {
+    const storeId = '11111111-1111-1111-1111-111111111111';
+
+    beforeEach(() => {
+      storeRepository.findOne.mockImplementation(async (query: { where?: { id?: string } }) => {
+        if (query.where?.id === storeId) {
+          return { id: storeId, status: StoreStatus.APPROVED };
+        }
+        return null;
+      });
+    });
+
+    it('allows platform admin when the store exists', async () => {
+      const result = await service.assertActorStoreAccess('admin', 'admin-1', storeId);
+      expect(result).toBe(storeId);
+      expect(storeRepository.findOne).toHaveBeenCalled();
+    });
+
+    it('requires membership for vendors', async () => {
+      jest.spyOn(service, 'userHasStoreAccess').mockResolvedValue(false);
+
+      await expect(service.assertActorStoreAccess('vendor', 'user-1', storeId)).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it('blocks vendors on suspended stores when requireActive is set', async () => {
+      jest.spyOn(service, 'userHasStoreAccess').mockResolvedValue(true);
+      jest.spyOn(service, 'isStoreSuspended').mockResolvedValue(true);
+
+      await expect(
+        service.assertActorStoreAccess('vendor', 'user-1', storeId, {
+          requireActive: true,
+          action: 'update products',
+        }),
+      ).rejects.toMatchObject({ response: { code: 'STORE_SUSPENDED' } });
+    });
+
+    it('allows admin on suspended stores regardless of requireActive', async () => {
+      jest.spyOn(service, 'isStoreSuspended').mockResolvedValue(true);
+
+      await expect(
+        service.assertActorStoreAccess('admin', 'admin-1', storeId, {
+          requireActive: true,
+          action: 'update products',
+        }),
+      ).resolves.toBe(storeId);
     });
   });
 });
