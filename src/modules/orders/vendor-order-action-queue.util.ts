@@ -44,6 +44,7 @@ export function isVendorOrderActionable(
     order.status === 'cancelled' ||
     order.status === 'refunded' ||
     order.status === 'delivered' ||
+    order.status === 'shipped' ||
     order.status === 'on_hold'
   ) {
     return false;
@@ -94,6 +95,7 @@ export function applyVendorActionQueueFilter(qb: SelectQueryBuilder<Order>, stor
       OrderStatus.CANCELLED,
       OrderStatus.REFUNDED,
       OrderStatus.DELIVERED,
+      OrderStatus.SHIPPED,
       OrderStatus.ON_HOLD,
     ],
   });
