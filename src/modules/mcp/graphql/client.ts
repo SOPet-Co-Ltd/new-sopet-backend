@@ -181,8 +181,15 @@ export class SopetGraphqlClient {
     };
 
     if (!response.ok) {
+      const detail =
+        json.errors
+          ?.map((e) => e.message)
+          .filter(Boolean)
+          .join('; ') ||
+        response.statusText ||
+        'Unknown error';
       throw new GraphQlRequestError(
-        `GraphQL HTTP ${response.status}`,
+        `GraphQL HTTP ${response.status}: ${detail}`,
         json.errors ?? [{ message: response.statusText }],
         response.status,
       );

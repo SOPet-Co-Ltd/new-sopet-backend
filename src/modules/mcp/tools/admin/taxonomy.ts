@@ -2,7 +2,11 @@ import { z } from 'zod';
 import { gqlTool } from '../helpers';
 import type { SopetToolDefinition } from '../types';
 
-const ITEM = `id name slug status imageUrl createdAt`;
+/** Matches CategoryType / PetTypeType (has imageUrl). */
+const ITEM_IMAGE = `id name slug approvalStatus imageUrl createdAt updatedAt`;
+/** Matches BrandType / TagType (no imageUrl). */
+const ITEM = `id name slug approvalStatus createdAt updatedAt`;
+const DELETE_RESULT = `success deletedId detachedProductCount reassignedProductCount notifiedStoreCount`;
 
 export const adminTaxonomyTools: SopetToolDefinition[] = [
   gqlTool({
@@ -10,7 +14,7 @@ export const adminTaxonomyTools: SopetToolDefinition[] = [
     description: 'List approved categories.',
     role: 'admin',
     inputSchema: {},
-    query: `query { approvedCategories { ${ITEM} } }`,
+    query: `query { approvedCategories { ${ITEM_IMAGE} } }`,
     pick: 'approvedCategories',
   }),
   gqlTool({
@@ -18,7 +22,7 @@ export const adminTaxonomyTools: SopetToolDefinition[] = [
     description: 'List categories awaiting approval.',
     role: 'admin',
     inputSchema: {},
-    query: `query { pendingCategories { ${ITEM} } }`,
+    query: `query { pendingCategories { ${ITEM_IMAGE} } }`,
     pick: 'pendingCategories',
   }),
   gqlTool({
@@ -28,11 +32,11 @@ export const adminTaxonomyTools: SopetToolDefinition[] = [
     writes: true,
     inputSchema: {
       name: z.string().min(1),
-      parentId: z.string().uuid().optional(),
+      imageUrl: z.string().url().optional(),
     },
     query: `
       mutation CreateCategory($input: CreateCategoryInput!) {
-        createCategory(input: $input) { ${ITEM} }
+        createCategory(input: $input) { ${ITEM_IMAGE} }
       }
     `,
     variables: (args) => ({ input: args }),
@@ -40,17 +44,17 @@ export const adminTaxonomyTools: SopetToolDefinition[] = [
   }),
   gqlTool({
     name: 'admin_update_category',
-    description: 'Update a category.',
+    description: 'Update a category name (and optional slug).',
     role: 'admin',
     writes: true,
     inputSchema: {
-      id: z.string().uuid(),
-      name: z.string().optional(),
-      parentId: z.string().uuid().nullable().optional(),
+      categoryId: z.string().uuid(),
+      name: z.string().min(1),
+      slug: z.string().optional(),
     },
     query: `
       mutation UpdateCategory($input: UpdateCategoryInput!) {
-        updateCategory(input: $input) { ${ITEM} }
+        updateCategory(input: $input) { ${ITEM_IMAGE} }
       }
     `,
     variables: (args) => ({ input: args }),
@@ -62,7 +66,7 @@ export const adminTaxonomyTools: SopetToolDefinition[] = [
     role: 'admin',
     writes: true,
     inputSchema: { id: z.string().uuid() },
-    query: `mutation($id: String!) { approveCategory(id: $id) { ${ITEM} } }`,
+    query: `mutation($id: String!) { approveCategory(id: $id) { ${ITEM_IMAGE} } }`,
     pick: 'approveCategory',
   }),
   gqlTool({
@@ -71,7 +75,7 @@ export const adminTaxonomyTools: SopetToolDefinition[] = [
     role: 'admin',
     writes: true,
     inputSchema: { id: z.string().uuid() },
-    query: `mutation($id: String!) { rejectCategory(id: $id) { ${ITEM} } }`,
+    query: `mutation($id: String!) { rejectCategory(id: $id) { ${ITEM_IMAGE} } }`,
     pick: 'rejectCategory',
   }),
   gqlTool({
@@ -81,11 +85,11 @@ export const adminTaxonomyTools: SopetToolDefinition[] = [
     writes: true,
     inputSchema: {
       id: z.string().uuid(),
-      reassignToCategoryId: z.string().uuid().optional(),
+      replacementCategoryId: z.string().uuid().optional(),
     },
     query: `
       mutation DeleteCategory($input: DeleteTaxonomyInput!) {
-        deleteCategory(input: $input) { success affectedProductCount }
+        deleteCategory(input: $input) { ${DELETE_RESULT} }
       }
     `,
     variables: (args) => ({ input: args }),
@@ -137,7 +141,7 @@ export const adminTaxonomyTools: SopetToolDefinition[] = [
     role: 'admin',
     writes: true,
     inputSchema: { id: z.string().uuid() },
-    query: `mutation($id: String!) { deleteTag(id: $id) { success } }`,
+    query: `mutation($id: String!) { deleteTag(id: $id) { ${DELETE_RESULT} } }`,
     pick: 'deleteTag',
   }),
   gqlTool({
@@ -145,7 +149,7 @@ export const adminTaxonomyTools: SopetToolDefinition[] = [
     description: 'List approved pet types.',
     role: 'admin',
     inputSchema: {},
-    query: `query { approvedPetTypes { ${ITEM} } }`,
+    query: `query { approvedPetTypes { ${ITEM_IMAGE} } }`,
     pick: 'approvedPetTypes',
   }),
   gqlTool({
@@ -156,7 +160,7 @@ export const adminTaxonomyTools: SopetToolDefinition[] = [
     inputSchema: { name: z.string().min(1) },
     query: `
       mutation CreatePetType($input: CreatePetTypeInput!) {
-        createPetType(input: $input) { ${ITEM} }
+        createPetType(input: $input) { ${ITEM_IMAGE} }
       }
     `,
     variables: (args) => ({ input: args }),
@@ -168,7 +172,7 @@ export const adminTaxonomyTools: SopetToolDefinition[] = [
     role: 'admin',
     writes: true,
     inputSchema: { id: z.string().uuid() },
-    query: `mutation($id: String!) { approvePetType(id: $id) { ${ITEM} } }`,
+    query: `mutation($id: String!) { approvePetType(id: $id) { ${ITEM_IMAGE} } }`,
     pick: 'approvePetType',
   }),
   gqlTool({

@@ -37,11 +37,30 @@ function mapVendorCustomer(customer: Customer): VendorCustomerType {
   };
 }
 
-function mapAdminCustomer(customer: Customer): AdminCustomerType {
+function mapAdminCustomer(customer: {
+  id: string;
+  phone: string;
+  fullName: string | null;
+  email: string | null;
+  dateOfBirth?: string | null;
+  isVerified: boolean;
+  isActive: boolean;
+  lastLoginAt?: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  isGuest?: boolean;
+}): AdminCustomerType {
   return {
-    ...mapVendorCustomer(customer),
-    dateOfBirth: customer.dateOfBirth,
+    id: customer.id,
+    phone: customer.phone,
+    fullName: customer.fullName,
+    email: customer.email,
+    dateOfBirth: customer.dateOfBirth ?? null,
+    isVerified: customer.isVerified,
     isActive: customer.isActive,
+    isGuest: customer.isGuest ?? false,
+    lastLoginAt: customer.lastLoginAt ?? null,
+    createdAt: customer.createdAt,
     updatedAt: customer.updatedAt,
   };
 }

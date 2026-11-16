@@ -96,6 +96,7 @@ type AdminCustomerDetailType {
   id: String!
   insights: AdminCustomerInsightsType!
   isActive: Boolean!
+  isGuest: Boolean!
   isVerified: Boolean!
   lastLoginAt: DateTime
   phone: String!
@@ -135,6 +136,7 @@ type AdminCustomerType {
   fullName: String
   id: String!
   isActive: Boolean!
+  isGuest: Boolean!
   isVerified: Boolean!
   lastLoginAt: DateTime
   phone: String!
