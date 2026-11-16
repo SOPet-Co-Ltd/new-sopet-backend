@@ -42,12 +42,14 @@ describe('OrderAuditLogsResolver', () => {
       '11111111-1111-4111-8111-111111111111',
       '33333333-3333-4333-8333-333333333333',
       'user-1',
+      'vendor',
     );
 
     expect(orderAuditLogsService.listForVendor).toHaveBeenCalledWith(
       'user-1',
       '33333333-3333-4333-8333-333333333333',
       '11111111-1111-4111-8111-111111111111',
+      'vendor',
     );
     expect(result.entries).toHaveLength(1);
     expect(result.entries[0].eventType).toBe(OrderAuditEventType.ORDER_PLACED);

@@ -46,6 +46,7 @@ describe('ProductsService', () => {
     delete: jest.Mock;
   };
   let storesService: {
+    assertActorStoreAccess: jest.Mock;
     userHasStoreAccess: jest.Mock;
     resolveDefaultStoreId: jest.Mock;
     isStoreSuspended: jest.Mock;
@@ -144,7 +145,34 @@ describe('ProductsService', () => {
       ),
       resolveDefaultStoreId: jest.fn(() => Promise.resolve('store-1')),
       isStoreSuspended: jest.fn(() => Promise.resolve(false)),
+      assertActorStoreAccess: jest.fn(),
     };
+    storesService.assertActorStoreAccess.mockImplementation(
+      async (
+        role: string | undefined,
+        userId: string,
+        storeId: string,
+        options?: { requireActive?: boolean },
+      ) => {
+        if (role === 'admin') {
+          return storeId;
+        }
+        const hasAccess = await storesService.userHasStoreAccess(userId, storeId);
+        if (!hasAccess) {
+          throw new ForbiddenException({
+            code: 'STORE_ACCESS_DENIED',
+            message: 'No access',
+          });
+        }
+        if (options?.requireActive && (await storesService.isStoreSuspended(storeId))) {
+          throw new ForbiddenException({
+            code: 'STORE_SUSPENDED',
+            message: 'Suspended',
+          });
+        }
+        return storeId;
+      },
+    );
     taxonomyService = {
       getApprovedCategory: jest.fn(),
       getApprovedTags: jest.fn(() => Promise.resolve([])),
@@ -232,6 +260,27 @@ describe('ProductsService', () => {
     await expect(
       service.update('prod-1', 'user-1', { name: 'Hacked while suspended' }),
     ).rejects.toMatchObject({ response: { code: 'STORE_SUSPENDED' } });
+  });
+
+  it('allows admin to update a product while the store is suspended', async () => {
+    productRepository.findOne.mockResolvedValue({ ...product });
+    productRepository.save.mockImplementation((p: Record<string, unknown>) => p);
+    storesService.isStoreSuspended.mockResolvedValue(true);
+
+    const result = await service.update(
+      'prod-1',
+      'admin-1',
+      { name: 'Admin edit while suspended' },
+      'admin',
+    );
+
+    expect(result.name).toBe('Admin edit while suspended');
+    expect(storesService.assertActorStoreAccess).toHaveBeenCalledWith(
+      'admin',
+      'admin-1',
+      'store-1',
+      expect.objectContaining({ requireActive: false }),
+    );
   });
 
   it('still allows read-only store resolution (resolveActiveStoreId) while the store is suspended', async () => {

@@ -1111,10 +1111,15 @@ export class ReviewsService {
 
   async createReviewReply(params: {
     userId: string;
+    role?: string;
     reviewId: string;
     body: string;
   }): Promise<ReviewReply> {
-    const review = await this.assertVendorCanAccessReview(params.userId, params.reviewId);
+    const review = await this.assertVendorCanAccessReview(
+      params.userId,
+      params.reviewId,
+      params.role,
+    );
     if (review.status !== ReviewStatus.APPROVED) {
       throw new BadRequestException({
         code: 'REVIEW_NOT_APPROVED',
@@ -1152,6 +1157,7 @@ export class ReviewsService {
 
   async updateReviewReply(params: {
     userId: string;
+    role?: string;
     replyId: string;
     body: string;
   }): Promise<ReviewReply> {
@@ -1166,7 +1172,7 @@ export class ReviewsService {
       });
     }
 
-    await this.assertVendorCanAccessReview(params.userId, reply.reviewId);
+    await this.assertVendorCanAccessReview(params.userId, reply.reviewId, params.role);
 
     if (reply.review.status !== ReviewStatus.APPROVED) {
       throw new BadRequestException({
@@ -1180,7 +1186,11 @@ export class ReviewsService {
     return this.reviewReplyRepository.save(reply);
   }
 
-  private async assertVendorCanAccessReview(userId: string, reviewId: string): Promise<Review> {
+  private async assertVendorCanAccessReview(
+    userId: string,
+    reviewId: string,
+    role?: string,
+  ): Promise<Review> {
     const review = await this.reviewRepository.findOne({
       where: { id: reviewId },
       relations: ['product'],
@@ -1192,13 +1202,9 @@ export class ReviewsService {
       });
     }
 
-    const hasAccess = await this.storesService.userHasStoreAccess(userId, review.product.storeId);
-    if (!hasAccess) {
-      throw new ForbiddenException({
-        code: 'STORE_ACCESS_DENIED',
-        message: 'No access to this store',
-      });
-    }
+    await this.storesService.assertActorStoreAccess(role, userId, review.product.storeId, {
+      action: 'manage store reviews',
+    });
 
     return review;
   }

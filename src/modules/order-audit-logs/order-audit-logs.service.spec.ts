@@ -25,12 +25,12 @@ describe('OrderAuditLogsService', () => {
     count: jest.fn(),
   };
   const storesService = {
-    assertStoreAccess: jest.fn().mockResolvedValue(undefined),
+    assertStoreAccessIfVendor: jest.fn().mockResolvedValue(undefined),
   };
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    storesService.assertStoreAccess.mockResolvedValue(undefined);
+    storesService.assertStoreAccessIfVendor.mockResolvedValue(undefined);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [

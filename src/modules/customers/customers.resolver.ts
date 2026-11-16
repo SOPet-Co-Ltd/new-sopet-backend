@@ -315,15 +315,22 @@ export class CustomersResolver {
 
   @Query(() => VendorCustomerConnection)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async vendorCustomers(
     @CurrentUser('id') userId: string,
-    @CurrentUser('storeId') storeId: string,
+    @CurrentUser('role') role: string,
     @Args('page', { type: () => Int, defaultValue: 1 }) page: number,
     @Args('limit', { type: () => Int, defaultValue: 20 }) limit: number,
+    @CurrentUser('storeId') jwtStoreId?: string,
+    @Args('storeId', { nullable: true }) argsStoreId?: string,
     @Args('search', { nullable: true }) search?: string,
   ): Promise<VendorCustomerConnection> {
-    await this.storesService.assertStoreAccess(userId, storeId);
+    const storeId = await this.storesService.resolveActorStoreId(
+      role,
+      userId,
+      jwtStoreId,
+      argsStoreId,
+    );
     const result = await this.customersService.findForVendorStore(storeId, page, limit, search);
     return {
       items: result.items.map(mapVendorCustomer),
@@ -333,26 +340,40 @@ export class CustomersResolver {
 
   @Query(() => VendorCustomerType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async vendorCustomer(
     @CurrentUser('id') userId: string,
-    @CurrentUser('storeId') storeId: string,
+    @CurrentUser('role') role: string,
     @Args('id') id: string,
+    @CurrentUser('storeId') jwtStoreId?: string,
+    @Args('storeId', { nullable: true }) argsStoreId?: string,
   ): Promise<VendorCustomerType> {
-    await this.storesService.assertStoreAccess(userId, storeId);
+    const storeId = await this.storesService.resolveActorStoreId(
+      role,
+      userId,
+      jwtStoreId,
+      argsStoreId,
+    );
     const customer = await this.customersService.findByIdForVendor(storeId, id);
     return mapVendorCustomer(customer);
   }
 
   @Query(() => VendorCustomerDetailType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async vendorCustomerDetail(
     @CurrentUser('id') userId: string,
-    @CurrentUser('storeId') storeId: string,
+    @CurrentUser('role') role: string,
     @Args('id') id: string,
+    @CurrentUser('storeId') jwtStoreId?: string,
+    @Args('storeId', { nullable: true }) argsStoreId?: string,
   ): Promise<VendorCustomerDetailType> {
-    await this.storesService.assertStoreAccess(userId, storeId);
+    const storeId = await this.storesService.resolveActorStoreId(
+      role,
+      userId,
+      jwtStoreId,
+      argsStoreId,
+    );
     const customer = await this.customersService.findByIdForVendor(storeId, id);
     const insights = await this.customersService.getInsightsForVendorStore(storeId, id);
     return {

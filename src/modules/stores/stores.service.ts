@@ -478,8 +478,7 @@ export class StoresService {
     }
   }
 
-  /** Any store member (owner, manager, or staff) may perform the action. */
-  async assertStoreAccess(userId: string, storeId: string): Promise<void> {
+  normalizeStoreId(storeId: string | undefined | null): string {
     const trimmed = storeId?.trim() ?? '';
     // Avoid Postgres QueryFailedError (invalid uuid) becoming INTERNAL_SERVER_ERROR.
     if (
@@ -491,6 +490,96 @@ export class StoresService {
         message: 'Invalid store id',
       });
     }
+    return trimmed;
+  }
+
+  async assertStoreExists(storeId: string): Promise<Store> {
+    const trimmed = this.normalizeStoreId(storeId);
+    const store = await this.storeRepository.findOne({ where: { id: trimmed } });
+    if (!store) {
+      throw new NotFoundException({
+        code: 'STORE_NOT_FOUND',
+        message: 'Store not found',
+      });
+    }
+    return store;
+  }
+
+  /**
+   * Platform admin may act on any existing store when storeId is explicit.
+   * Vendors still require membership; optional requireActive blocks suspended stores for vendors only.
+   */
+  async assertActorStoreAccess(
+    role: string | undefined,
+    userId: string,
+    storeId: string,
+    options?: { requireActive?: boolean; action?: string },
+  ): Promise<string> {
+    const trimmed = this.normalizeStoreId(storeId);
+    const action = options?.action ?? 'access';
+    const requireActive = options?.requireActive ?? false;
+
+    if (role === 'admin' || role === UserRole.ADMIN) {
+      await this.assertStoreExists(trimmed);
+      return trimmed;
+    }
+
+    const hasAccess = await this.userHasStoreAccess(userId, trimmed);
+    if (!hasAccess) {
+      throw new ForbiddenException({
+        code: 'STORE_ACCESS_DENIED',
+        message: `You do not have permission to ${action} for this store`,
+      });
+    }
+
+    if (requireActive && (await this.isStoreSuspended(trimmed))) {
+      throw new ForbiddenException({
+        code: 'STORE_SUSPENDED',
+        message: `Cannot ${action} — this store is suspended`,
+      });
+    }
+
+    return trimmed;
+  }
+
+  /** Resolve storeId for admin (required arg) or vendor (JWT / default). */
+  async resolveActorStoreId(
+    role: string | undefined,
+    userId: string,
+    jwtStoreId: string | undefined,
+    argsStoreId?: string | null,
+  ): Promise<string> {
+    if (role === 'admin' || role === UserRole.ADMIN) {
+      if (!argsStoreId?.trim()) {
+        throw new BadRequestException({
+          code: 'STORE_ID_REQUIRED',
+          message: 'Store ID is required for admin store operations',
+        });
+      }
+      return this.assertActorStoreAccess(role, userId, argsStoreId);
+    }
+
+    const storeId = argsStoreId?.trim() || jwtStoreId?.trim();
+    if (storeId) {
+      return this.assertActorStoreAccess(role, userId, storeId, {
+        requireActive: false,
+        action: 'access',
+      });
+    }
+
+    const defaultStoreId = await this.resolveDefaultStoreId(userId);
+    if (!defaultStoreId) {
+      throw new BadRequestException({
+        code: 'NO_ACTIVE_STORE',
+        message: 'No active store. Switch to a store and try again.',
+      });
+    }
+    return defaultStoreId;
+  }
+
+  /** Any store member (owner, manager, or staff) may perform the action. */
+  async assertStoreAccess(userId: string, storeId: string): Promise<void> {
+    const trimmed = this.normalizeStoreId(storeId);
 
     const hasAccess = await this.userHasStoreAccess(userId, trimmed);
     if (!hasAccess) {
@@ -499,6 +588,43 @@ export class StoresService {
         message: 'No access to this store',
       });
     }
+  }
+
+  /** Skip membership checks for admin; keep owner/manager/access checks for vendors. */
+  async assertStoreAccessIfVendor(
+    role: string | undefined,
+    userId: string,
+    storeId: string,
+  ): Promise<void> {
+    if (role === 'admin' || role === UserRole.ADMIN) {
+      await this.assertStoreExists(storeId);
+      return;
+    }
+    await this.assertStoreAccess(userId, storeId);
+  }
+
+  async assertStoreOwnerIfVendor(
+    role: string | undefined,
+    userId: string,
+    storeId: string,
+  ): Promise<void> {
+    if (role === 'admin' || role === UserRole.ADMIN) {
+      await this.assertStoreExists(storeId);
+      return;
+    }
+    await this.assertStoreOwner(userId, storeId);
+  }
+
+  async assertStoreManagerIfVendor(
+    role: string | undefined,
+    userId: string,
+    storeId: string,
+  ): Promise<void> {
+    if (role === 'admin' || role === UserRole.ADMIN) {
+      await this.assertStoreExists(storeId);
+      return;
+    }
+    await this.assertStoreManager(userId, storeId);
   }
 
   async userHasStoreManagerAccess(userId: string, storeId: string): Promise<boolean> {

@@ -22,25 +22,27 @@ export class SaleCampaignsResolver {
 
   @Query(() => [SaleCampaignType])
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async storeSaleCampaigns(
     @Args('storeId') storeId: string,
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
   ): Promise<SaleCampaignType[]> {
-    await this.storesService.assertStoreAccess(userId, storeId);
+    await this.storesService.assertStoreAccessIfVendor(role, userId, storeId);
     const campaigns = await this.saleCampaignsService.findByStore(storeId);
     return campaigns.map(mapSaleCampaign);
   }
 
   @Query(() => SaleCampaignType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async saleCampaign(
     @Args('id') id: string,
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
   ): Promise<SaleCampaignType> {
     const campaign = await this.saleCampaignsService.findOne(id);
-    await this.storesService.assertStoreAccess(userId, campaign.storeId);
+    await this.storesService.assertStoreAccessIfVendor(role, userId, campaign.storeId);
     return mapSaleCampaign(campaign);
   }
 
@@ -66,55 +68,76 @@ export class SaleCampaignsResolver {
 
   @Mutation(() => SaleCampaignType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async createSaleCampaign(
     @Args('input') input: CreateSaleCampaignInput,
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
     @CurrentUser('storeId') jwtStoreId?: string,
   ): Promise<SaleCampaignType> {
-    const storeId = input.storeId ?? jwtStoreId;
-    if (!storeId) {
-      throw new BadRequestException({
-        code: 'NO_STORE_SELECTED',
-        message: 'Store ID required for sale campaigns',
-      });
+    let storeId: string;
+    if (role === 'admin') {
+      if (!input.storeId?.trim()) {
+        throw new BadRequestException({
+          code: 'STORE_ID_REQUIRED',
+          message: 'Store ID is required for admin store operations',
+        });
+      }
+      storeId = await this.storesService.resolveActorStoreId(
+        role,
+        userId,
+        jwtStoreId,
+        input.storeId,
+      );
+    } else {
+      storeId = input.storeId ?? jwtStoreId ?? '';
+      if (!storeId) {
+        throw new BadRequestException({
+          code: 'NO_STORE_SELECTED',
+          message: 'Store ID required for sale campaigns',
+        });
+      }
+      storeId = await this.storesService.resolveActorStoreId(role, userId, jwtStoreId, storeId);
     }
-    const campaign = await this.saleCampaignsService.create(userId, storeId, input);
+    const campaign = await this.saleCampaignsService.create(userId, storeId, input, role);
     return mapSaleCampaign(campaign);
   }
 
   @Mutation(() => SaleCampaignType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async updateSaleCampaign(
     @Args('id') id: string,
     @Args('input') input: UpdateSaleCampaignInput,
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
   ): Promise<SaleCampaignType> {
-    const campaign = await this.saleCampaignsService.update(id, userId, input);
+    const campaign = await this.saleCampaignsService.update(id, userId, input, role);
     return mapSaleCampaign(campaign);
   }
 
   @Mutation(() => Boolean)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async deleteSaleCampaign(
     @Args('id') id: string,
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
   ): Promise<boolean> {
-    await this.saleCampaignsService.softDelete(id, userId);
+    await this.saleCampaignsService.softDelete(id, userId, role);
     return true;
   }
 
   @Mutation(() => SaleCampaignType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async toggleSaleCampaign(
     @Args('id') id: string,
     @Args('isActive') isActive: boolean,
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
   ): Promise<SaleCampaignType> {
-    const campaign = await this.saleCampaignsService.toggle(id, userId, isActive);
+    const campaign = await this.saleCampaignsService.toggle(id, userId, isActive, role);
     return mapSaleCampaign(campaign);
   }
 }

@@ -4,7 +4,7 @@ import { CreateSaleCampaignInput } from './sale-campaigns.inputs';
 
 describe('SaleCampaignsService', () => {
   const storesService = {
-    assertStoreAccess: jest.fn().mockResolvedValue(undefined),
+    assertStoreAccessIfVendor: jest.fn().mockResolvedValue(undefined),
   };
 
   const campaignRepository = {
@@ -143,7 +143,11 @@ describe('SaleCampaignsService', () => {
       };
 
       const result = await service.create('user-1', 'store-1', input);
-      expect(storesService.assertStoreAccess).toHaveBeenCalledWith('user-1', 'store-1');
+      expect(storesService.assertStoreAccessIfVendor).toHaveBeenCalledWith(
+        undefined,
+        'user-1',
+        'store-1',
+      );
       expect(itemRepository.delete).toHaveBeenCalledWith({ campaignId: 'camp-1' });
       expect(itemRepository.save).toHaveBeenCalled();
       expect(result.id).toBe('camp-1');

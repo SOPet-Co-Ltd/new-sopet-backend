@@ -59,6 +59,7 @@ describe('ApiKeysResolver audit logging (AC-B-009)', () => {
       STORE_ID,
       'CI key',
       VENDOR_ID,
+      'vendor',
       VENDOR_EMAIL,
       graphqlContext,
     );
@@ -92,9 +93,16 @@ describe('ApiKeysResolver audit logging (AC-B-009)', () => {
   });
 
   it('logs api_key.revoked once without secret or keyHash', async () => {
-    await resolver.revokeStoreApiKey(STORE_ID, API_KEY_ID, VENDOR_ID, VENDOR_EMAIL, graphqlContext);
+    await resolver.revokeStoreApiKey(
+      STORE_ID,
+      API_KEY_ID,
+      VENDOR_ID,
+      'vendor',
+      VENDOR_EMAIL,
+      graphqlContext,
+    );
 
-    expect(apiKeysService.revoke).toHaveBeenCalledWith(VENDOR_ID, STORE_ID, API_KEY_ID);
+    expect(apiKeysService.revoke).toHaveBeenCalledWith(VENDOR_ID, STORE_ID, API_KEY_ID, 'vendor');
     expect(auditLogsService.log).toHaveBeenCalledTimes(1);
     expect(auditLogsService.log).toHaveBeenCalledWith(
       expect.objectContaining({

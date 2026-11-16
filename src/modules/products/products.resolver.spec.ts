@@ -133,7 +133,9 @@ describe('ProductsResolver', () => {
     it('forwards petTypeIds, brandIds, tag, minPrice, and maxPrice to findAll', async () => {
       await resolver.vendorProducts(
         'user-1',
+        'vendor',
         'store-1',
+        undefined,
         'treats',
         'cat-food',
         'organic',
@@ -165,7 +167,9 @@ describe('ProductsResolver', () => {
     it('forwards status filter to findAll for published-only pickers', async () => {
       await resolver.vendorProducts(
         'user-1',
+        'vendor',
         'store-1',
+        undefined,
         undefined,
         undefined,
         undefined,
@@ -275,7 +279,9 @@ describe('ProductsResolver', () => {
     it('clamps an excessive limit to 100', async () => {
       await resolver.vendorProducts(
         'user-1',
+        'vendor',
         'store-1',
+        undefined,
         undefined,
         undefined,
         undefined,

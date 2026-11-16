@@ -2,7 +2,6 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
-  ForbiddenException,
   Logger,
   Optional,
 } from '@nestjs/common';
@@ -139,33 +138,30 @@ export class ProductsService {
     storeId: string,
     action: string,
     requireActive = true,
+    role?: string,
   ): Promise<void> {
-    const hasAccess = await this.storesService.userHasStoreAccess(userId, storeId);
-    if (!hasAccess) {
-      throw new ForbiddenException({
-        code: 'FORBIDDEN',
-        message: `You do not have permission to ${action} for this store`,
-      });
-    }
-
-    // Suspension is enforced live (not just via the JWT's cached storeId), so a
-    // vendor with access to another active store can't keep managing a
-    // suspended one's products/variants/images through it.
-    if (requireActive && (await this.storesService.isStoreSuspended(storeId))) {
-      throw new ForbiddenException({
-        code: 'STORE_SUSPENDED',
-        message: `Cannot ${action} — this store is suspended`,
-      });
-    }
+    // Admin may act on any existing store (including suspended). Vendors keep
+    // membership + live suspension checks.
+    await this.storesService.assertActorStoreAccess(role, userId, storeId, {
+      requireActive: role === 'admin' ? false : requireActive,
+      action,
+    });
   }
 
-  async resolveActiveStoreId(userId: string, storeId?: string): Promise<string> {
+  async resolveActiveStoreId(userId: string, storeId?: string, role?: string): Promise<string> {
     if (storeId) {
       // Read-only resolution (viewing own products/checklist) stays allowed even
       // while suspended; mutations re-assert with requireActive via the
       // dedicated assertStoreAccess calls in create/update/delete/publish below.
-      await this.assertStoreAccess(userId, storeId, 'access', false);
+      await this.assertStoreAccess(userId, storeId, 'access', false, role);
       return storeId;
+    }
+
+    if (role === 'admin') {
+      throw new BadRequestException({
+        code: 'STORE_ID_REQUIRED',
+        message: 'Store ID is required for admin store operations',
+      });
     }
 
     const defaultStoreId = await this.storesService.resolveDefaultStoreId(userId);
@@ -262,8 +258,9 @@ export class ProductsService {
     userId: string,
     storeId: string,
     createProductDto: CreateProductDto,
+    role?: string,
   ): Promise<Product> {
-    await this.assertStoreAccess(userId, storeId, 'create products');
+    await this.assertStoreAccess(userId, storeId, 'create products', true, role);
     const { name, categoryId, tagIds, petTypeId, brandId, category, tags, ...productData } =
       createProductDto;
     const taxonomy = await this.resolveTaxonomyFields({
@@ -338,8 +335,9 @@ export class ProductsService {
         options: Record<string, string>;
       }>;
     },
+    role?: string,
   ): Promise<Product> {
-    await this.assertStoreAccess(userId, storeId, 'create products');
+    await this.assertStoreAccess(userId, storeId, 'create products', true, role);
 
     // Normalize + validate option groups (parent "variants")
     const groups = (input.variants ?? []).map((group) => ({
@@ -967,9 +965,9 @@ export class ProductsService {
     }
   }
 
-  async publish(id: string, userId: string): Promise<Product> {
+  async publish(id: string, userId: string, role?: string): Promise<Product> {
     const product = await this.findOne(id);
-    await this.assertStoreAccess(userId, product.storeId, 'publish products');
+    await this.assertStoreAccess(userId, product.storeId, 'publish products', true, role);
     await this.assertPublishable(product);
     product.status = ProductStatus.PUBLISHED;
     const saved = await this.productRepository.save(product);
@@ -979,7 +977,11 @@ export class ProductsService {
 
   static readonly BATCH_PUBLISH_MAX_IDS = 50;
 
-  async publishMany(ids: string[], userId: string): Promise<BatchPublishProductsResult> {
+  async publishMany(
+    ids: string[],
+    userId: string,
+    role?: string,
+  ): Promise<BatchPublishProductsResult> {
     const startedAt = Date.now();
 
     if (ids.length === 0) {
@@ -1009,7 +1011,7 @@ export class ProductsService {
 
     const storeIds = [...new Set(products.map((product) => product.storeId))];
     for (const storeId of storeIds) {
-      await this.assertStoreAccess(userId, storeId, 'publish products');
+      await this.assertStoreAccess(userId, storeId, 'publish products', true, role);
     }
 
     const shippingByStore = new Map<string, boolean>();
@@ -1291,11 +1293,16 @@ export class ProductsService {
   }
 
   // Update product
-  async update(id: string, userId: string, updateProductDto: UpdateProductDto): Promise<Product> {
+  async update(
+    id: string,
+    userId: string,
+    updateProductDto: UpdateProductDto,
+    role?: string,
+  ): Promise<Product> {
     const product = await this.findOne(id);
     const previousStatus = product.status;
 
-    await this.assertStoreAccess(userId, product.storeId, 'update products');
+    await this.assertStoreAccess(userId, product.storeId, 'update products', true, role);
 
     const { categoryId, tagIds, petTypeId, brandId, category, tags, ...rest } = updateProductDto;
     const taxonomy = await this.resolveTaxonomyFields({
@@ -1347,10 +1354,10 @@ export class ProductsService {
   }
 
   // Delete product (soft delete)
-  async remove(id: string, userId: string): Promise<void> {
+  async remove(id: string, userId: string, role?: string): Promise<void> {
     const product = await this.findOne(id);
 
-    await this.assertStoreAccess(userId, product.storeId, 'delete products');
+    await this.assertStoreAccess(userId, product.storeId, 'delete products', true, role);
 
     await this.productRepository.softDelete(id);
   }
@@ -1392,10 +1399,11 @@ export class ProductsService {
     productId: string,
     userId: string,
     createVariantDto: CreateVariantDto,
+    role?: string,
   ): Promise<ProductVariant> {
     const product = await this.findOne(productId);
 
-    await this.assertStoreAccess(userId, product.storeId, 'manage product variants');
+    await this.assertStoreAccess(userId, product.storeId, 'manage product variants', true, role);
 
     // Check SKU uniqueness
     const existingVariant = await this.variantRepository.findOne({
@@ -1429,6 +1437,7 @@ export class ProductsService {
     variantId: string,
     userId: string,
     updateVariantDto: UpdateVariantDto,
+    role?: string,
   ): Promise<ProductVariant> {
     const variant = await this.variantRepository.findOne({
       where: { id: variantId },
@@ -1442,7 +1451,13 @@ export class ProductsService {
       });
     }
 
-    await this.assertStoreAccess(userId, variant.product.storeId, 'manage product variants');
+    await this.assertStoreAccess(
+      userId,
+      variant.product.storeId,
+      'manage product variants',
+      true,
+      role,
+    );
 
     const { name, attributes, priceModifier, sku, stockQuantity, compareAtPrice } =
       updateVariantDto;
@@ -1655,7 +1670,7 @@ export class ProductsService {
   }
 
   // Delete / retire variant
-  async removeVariant(variantId: string, userId: string): Promise<void> {
+  async removeVariant(variantId: string, userId: string, role?: string): Promise<void> {
     const variant = await this.variantRepository.findOne({
       where: { id: variantId },
       relations: ['product'],
@@ -1668,7 +1683,13 @@ export class ProductsService {
       });
     }
 
-    await this.assertStoreAccess(userId, variant.product.storeId, 'manage product variants');
+    await this.assertStoreAccess(
+      userId,
+      variant.product.storeId,
+      'manage product variants',
+      true,
+      role,
+    );
     await this.applyRemovals([variant]);
   }
 
@@ -1676,9 +1697,10 @@ export class ProductsService {
     productId: string,
     userId: string,
     items: SyncVariantItem[],
+    role?: string,
   ): Promise<ProductVariantSyncImpact> {
     const product = await this.findOne(productId);
-    await this.assertStoreAccess(userId, product.storeId, 'manage product variants');
+    await this.assertStoreAccess(userId, product.storeId, 'manage product variants', true, role);
 
     if (!items.length) {
       throw new BadRequestException({
@@ -1721,10 +1743,11 @@ export class ProductsService {
     productId: string,
     userId: string,
     items: SyncVariantItem[],
+    role?: string,
   ): Promise<ProductVariant[]> {
     const product = await this.findOne(productId);
 
-    await this.assertStoreAccess(userId, product.storeId, 'manage product variants');
+    await this.assertStoreAccess(userId, product.storeId, 'manage product variants', true, role);
 
     if (!items.length) {
       throw new BadRequestException({
@@ -1992,10 +2015,11 @@ export class ProductsService {
     sortOrder: number = 0,
     altText?: string,
     isThumbnail?: boolean,
+    role?: string,
   ): Promise<ProductImage> {
     const product = await this.findOne(productId);
 
-    await this.assertStoreAccess(userId, product.storeId, 'manage product images');
+    await this.assertStoreAccess(userId, product.storeId, 'manage product images', true, role);
 
     const existingImages = await this.imageRepository.find({
       where: { productId },
@@ -2026,6 +2050,7 @@ export class ProductsService {
     imageId: string,
     userId: string,
     updates: { sortOrder?: number; altText?: string; isThumbnail?: boolean },
+    role?: string,
   ): Promise<ProductImage> {
     const image = await this.imageRepository.findOne({
       where: { id: imageId },
@@ -2039,7 +2064,13 @@ export class ProductsService {
       });
     }
 
-    await this.assertStoreAccess(userId, image.product.storeId, 'manage product images');
+    await this.assertStoreAccess(
+      userId,
+      image.product.storeId,
+      'manage product images',
+      true,
+      role,
+    );
 
     if (updates.sortOrder !== undefined) {
       image.sortOrder = updates.sortOrder;
@@ -2063,10 +2094,11 @@ export class ProductsService {
     productId: string,
     imageId: string,
     userId: string,
+    role?: string,
   ): Promise<ProductImage> {
     const product = await this.findOne(productId);
 
-    await this.assertStoreAccess(userId, product.storeId, 'manage product images');
+    await this.assertStoreAccess(userId, product.storeId, 'manage product images', true, role);
 
     const image = await this.imageRepository.findOne({
       where: { id: imageId, productId },
@@ -2089,10 +2121,11 @@ export class ProductsService {
     productId: string,
     userId: string,
     imageIds: string[],
+    role?: string,
   ): Promise<ProductImage[]> {
     const product = await this.findOne(productId);
 
-    await this.assertStoreAccess(userId, product.storeId, 'manage product images');
+    await this.assertStoreAccess(userId, product.storeId, 'manage product images', true, role);
 
     const images = await this.imageRepository.find({ where: { productId } });
     const validIds = new Set(images.map((img) => img.id));
@@ -2120,7 +2153,7 @@ export class ProductsService {
   }
 
   // Delete image
-  async removeImage(imageId: string, userId: string): Promise<void> {
+  async removeImage(imageId: string, userId: string, role?: string): Promise<void> {
     const image = await this.imageRepository.findOne({
       where: { id: imageId },
       relations: ['product'],
@@ -2133,7 +2166,13 @@ export class ProductsService {
       });
     }
 
-    await this.assertStoreAccess(userId, image.product.storeId, 'manage product images');
+    await this.assertStoreAccess(
+      userId,
+      image.product.storeId,
+      'manage product images',
+      true,
+      role,
+    );
 
     const productId = image.productId;
     const wasThumbnail = image.isThumbnail;

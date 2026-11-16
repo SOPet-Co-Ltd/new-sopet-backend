@@ -9,7 +9,7 @@ import {
   Query,
   Resolver,
 } from '@nestjs/graphql';
-import { UseGuards, ForbiddenException } from '@nestjs/common';
+import { UseGuards } from '@nestjs/common';
 import {
   IsInt,
   IsNotEmpty,
@@ -367,22 +367,17 @@ export class ReviewsResolver {
 
   @Query(() => StoreProductReviewConnection)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async storeProductReviews(
     @Args('storeId') storeId: string,
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
     @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page?: number,
     @Args('limit', { type: () => Int, nullable: true, defaultValue: 20 }) limit?: number,
     @Args('replyFilter', { type: () => String, nullable: true }) replyFilter?: string,
     @Args('ratingFilter', { type: () => String, nullable: true }) ratingFilter?: string,
   ): Promise<StoreProductReviewConnection> {
-    const hasAccess = await this.storesService.userHasStoreAccess(userId, storeId);
-    if (!hasAccess) {
-      throw new ForbiddenException({
-        code: 'STORE_ACCESS_DENIED',
-        message: 'No access to this store',
-      });
-    }
+    await this.storesService.assertStoreAccessIfVendor(role, userId, storeId);
     return this.reviewsService.findByStorePaginated({
       storeId,
       page,
@@ -428,13 +423,15 @@ export class ReviewsResolver {
 
   @Mutation(() => ReviewReplyType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async createReviewReply(
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
     @Args('input') input: CreateReviewReplyInput,
   ): Promise<ReviewReplyType> {
     const reply = await this.reviewsService.createReviewReply({
       userId,
+      role,
       reviewId: input.reviewId,
       body: input.body,
     });
@@ -448,13 +445,15 @@ export class ReviewsResolver {
 
   @Mutation(() => ReviewReplyType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async updateReviewReply(
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
     @Args('input') input: UpdateReviewReplyInput,
   ): Promise<ReviewReplyType> {
     const reply = await this.reviewsService.updateReviewReply({
       userId,
+      role,
       replyId: input.replyId,
       body: input.body,
     });

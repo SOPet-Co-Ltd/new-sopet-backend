@@ -29,8 +29,10 @@ src/
 ├── config/                 # Environment config factories (registerAs)
 ├── database/               # Entities, migrations, repositories, seeds, SSL/timestamp helpers
 ├── graphql/                # Apollo module, shared models/mappers, DataLoaders
-└── modules/                # 28 feature modules
+└── modules/                # Feature modules (incl. optional Admin MCP at /mcp)
 ```
+
+**Admin MCP:** `src/modules/mcp/` — when `MCP_HTTP_TOKEN` is set, Streamable HTTP MCP is served at `{API_URL}/mcp` on the same Nest process (no separate subdomain). Local Cursor stdio remains under `sopet-admin/mcp`.
 
 `app.service.ts` exists but is unused (not registered in `AppModule`).
 
