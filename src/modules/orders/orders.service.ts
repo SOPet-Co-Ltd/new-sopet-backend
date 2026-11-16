@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
 import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
@@ -80,6 +80,7 @@ export interface AdminOrderRecord {
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
   constructor(
     @InjectRepository(Order)
     private orderRepository: Repository<Order>,
@@ -1409,7 +1410,16 @@ export class OrdersService {
     });
 
     const saved = await this.findOne(id);
-    await this.notificationsService.notifyOrderStatusChanged(saved, status);
+    try {
+      await this.notificationsService.notifyOrderStatusChanged(saved, status);
+    } catch (error) {
+      // Status is already committed. A mail-provider failure must not turn the
+      // admin mutation into INTERNAL_SERVER_ERROR after the write succeeded.
+      const detail = error instanceof Error ? error.message : 'unknown';
+      this.logger.warn(
+        `Order ${saved.orderNumber} status saved; customer notification failed: ${detail}`,
+      );
+    }
     this.notificationsService.notifyVendorsAboutOrderStatus(saved, status).catch(() => {});
     this.publishOrderActivity(saved).catch(() => {});
     if (previousStatus !== status) {
