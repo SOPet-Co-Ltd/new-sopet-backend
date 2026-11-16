@@ -2202,6 +2202,10 @@ export class AdminCustomerType {
   @Field()
   isActive!: boolean;
 
+  /** True when this row is a guest buyer with no customer account. */
+  @Field()
+  isGuest!: boolean;
+
   @Field(() => Date, { nullable: true })
   lastLoginAt?: Date | null;
 

@@ -25,6 +25,8 @@ describe('AnalyticsService', () => {
     where: jest.fn().mockReturnThis(),
     andWhere: jest.fn().mockReturnThis(),
     groupBy: jest.fn().mockReturnThis(),
+    having: jest.fn().mockReturnThis(),
+    distinct: jest.fn().mockReturnThis(),
     getRawOne: jest.fn().mockResolvedValue(raw),
     getRawMany: jest.fn().mockResolvedValue([]),
   });
@@ -189,6 +191,37 @@ describe('AnalyticsService', () => {
 
       expect(result).toEqual([]);
       expect(orderItemRepository.createQueryBuilder).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getStoreCustomerSummary', () => {
+    it('counts guest buyers as well as accounts', async () => {
+      storeRepository.findOne.mockResolvedValue({
+        id: 'store-1',
+        createdAt: new Date('2020-01-01T00:00:00.000Z'),
+      });
+      const qb = createOrderItemQb({
+        orderCount: '2',
+        revenue: '300',
+        buyersInMonth: '2',
+        count: '2',
+      });
+      orderItemRepository.createQueryBuilder.mockReturnValue(qb);
+
+      const result = await service.getStoreCustomerSummary(
+        'store-1',
+        2026,
+        11,
+        new Date('2026-11-16T05:00:00.000Z'),
+      );
+
+      const selected = (qb.select.mock.calls as Array<[string]>).map((call) => call[0]).join('\n');
+      const filters = (qb.andWhere.mock.calls as Array<[string]>).map((call) => call[0]).join('\n');
+      expect(selected).toContain("'guest:'");
+      expect(selected).toContain('guest_phone');
+      expect(filters).not.toContain('customerId IS NOT NULL');
+      expect(result.buyersInMonth).toBe(2);
+      expect(result.orderCount).toBe(2);
     });
   });
 });
