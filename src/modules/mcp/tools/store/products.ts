@@ -2,10 +2,17 @@ import { z } from 'zod';
 import { gqlTool, storeIdField } from '../helpers';
 import type { SopetToolDefinition } from '../types';
 
-const PRODUCT_FIELDS = `
+/**
+ * ProductType selection — must stay in sync with schema.gql `type ProductType`.
+ * Do not add createdAt/updatedAt (not on ProductType).
+ */
+export const PRODUCT_FIELDS = `
   id name slug description basePrice compareAtPrice status storeId
-  categoryId petTypeId brandId warning expiryDate createdAt updatedAt
+  categoryId petTypeId brandId brandName warning expiryDate thumbnailUrl
 `;
+
+/** Fields that must never appear in ProductType MCP selections. */
+export const PRODUCT_TYPE_FORBIDDEN_FIELDS = ['createdAt', 'updatedAt'] as const;
 
 export const storeProductTools: SopetToolDefinition[] = [
   gqlTool({
@@ -220,7 +227,7 @@ export const storeProductTools: SopetToolDefinition[] = [
     query: `
       mutation SyncProductVariants($productId: String!, $variants: [SyncProductVariantItemInput!]!) {
         syncProductVariants(productId: $productId, variants: $variants) {
-          id sku stockQuantity price compareAtPrice attributes
+          id sku stockQuantity price compareAtPrice optionsJson
         }
       }
     `,
@@ -246,7 +253,7 @@ export const storeProductTools: SopetToolDefinition[] = [
     query: `
       mutation AddProductImage($productId: String!, $input: AddProductImageInput!) {
         addProductImage(productId: $productId, input: $input) {
-          id url altText sortOrder isThumbnail
+          id imageUrl sortOrder isThumbnail
         }
       }
     `,
