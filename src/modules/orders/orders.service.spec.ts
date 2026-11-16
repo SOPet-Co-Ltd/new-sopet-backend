@@ -787,6 +787,27 @@ describe('OrdersService', () => {
     expect(guestOrderLinkService.mergeGuestOrders).toHaveBeenCalledWith('cust-1', '+66812345678');
   });
 
+  it('still returns the saved order when customer notification fails', async () => {
+    const order = {
+      id: 'ord-1',
+      orderNumber: 'ORD-1',
+      status: OrderStatus.PENDING_PAYMENT,
+      items: [],
+      shippingAddress: {},
+      storeShippings: [],
+      statusHistory: [],
+    };
+    orderRepository.findOne.mockResolvedValue(order);
+    notificationsService.notifyOrderStatusChanged.mockRejectedValue(
+      new Error('Failed to send email: rate limit'),
+    );
+
+    const updated = await service.updateStatus('ord-1', OrderStatus.PROCESSING, 'admin-1');
+
+    expect(updated.status).toBe(OrderStatus.PROCESSING);
+    expect(notificationsService.notifyOrderStatusChanged).toHaveBeenCalled();
+  });
+
   it('updates order status and notifies', async () => {
     const order = {
       id: 'ord-1',

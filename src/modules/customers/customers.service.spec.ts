@@ -18,6 +18,7 @@ describe('CustomersService', () => {
     findOne: jest.fn(),
     save: jest.fn(async (x: Customer) => x),
     createQueryBuilder: jest.fn(),
+    query: jest.fn(),
   };
 
   const orderItemRepo = {
@@ -392,45 +393,101 @@ describe('CustomersService', () => {
   });
 
   describe('list pagination caps', () => {
-    function mockListQuery(total: number) {
-      const qb = {
-        where: jest.fn().mockReturnThis(),
-        andWhere: jest.fn().mockReturnThis(),
-        orderBy: jest.fn().mockReturnThis(),
-        skip: jest.fn().mockReturnThis(),
-        take: jest.fn().mockReturnThis(),
-        getManyAndCount: jest.fn().mockResolvedValue([[{ id: 'cust-1' }], total]),
-      };
-      customerRepo.createQueryBuilder.mockReturnValue(qb);
-      return qb;
+    function mockListQuery(total: number, rows: Array<Record<string, unknown>> = []) {
+      customerRepo.query.mockImplementation(async (sql: string) => {
+        if (String(sql).includes('COUNT(*)')) {
+          return [{ count: String(total) }];
+        }
+        return rows;
+      });
+    }
+
+    function listQueryCall(): [string, unknown[]] | undefined {
+      const calls = customerRepo.query.mock.calls as Array<[string, unknown[]]>;
+      return calls.find((call) => !call[0].includes('COUNT(*)'));
     }
 
     it('clamps admin customer limit to 100 and uses it in the page math', async () => {
-      const qb = mockListQuery(250);
+      mockListQuery(250, [
+        {
+          id: 'cust-1',
+          phone: '0812345678',
+          fullName: 'Ann',
+          email: null,
+          dateOfBirth: null,
+          isVerified: true,
+          isActive: true,
+          lastLoginAt: null,
+          createdAt: new Date('2026-01-01T00:00:00.000Z'),
+          updatedAt: new Date('2026-01-02T00:00:00.000Z'),
+          isGuest: false,
+        },
+      ]);
 
       const result = await service.findAllForAdmin(2, 500);
 
-      expect(qb.take).toHaveBeenCalledWith(100);
-      expect(qb.skip).toHaveBeenCalledWith(100);
+      const listCall = listQueryCall();
+      expect(listCall?.[1]).toEqual([null, 100, 100]);
+      expect(listCall?.[0]).toContain('guest:');
       expect(result.pagination).toEqual({
         page: 2,
         limit: 100,
         total: 250,
         totalPages: 3,
       });
+      expect(result.items[0]).toMatchObject({ id: 'cust-1', isGuest: false });
     });
 
     it('raises a non-positive admin limit to 1', async () => {
-      const qb = mockListQuery(0);
+      mockListQuery(0);
 
       const result = await service.findAllForAdmin(1, 0);
 
-      expect(qb.take).toHaveBeenCalledWith(1);
+      const listCall = listQueryCall();
+      expect(listCall?.[1]).toEqual([null, 1, 0]);
       expect(result.pagination.limit).toBe(1);
     });
 
+    it('maps unmatched guest buyers into the admin list', async () => {
+      mockListQuery(1, [
+        {
+          id: 'guest:0811111111',
+          phone: '0811111111',
+          fullName: 'Guest Buyer',
+          email: 'guest@example.com',
+          dateOfBirth: null,
+          isVerified: false,
+          isActive: true,
+          lastLoginAt: null,
+          createdAt: '2026-02-01T00:00:00.000Z',
+          updatedAt: '2026-02-02T00:00:00.000Z',
+          isGuest: true,
+        },
+      ]);
+
+      const result = await service.findAllForAdmin(1, 20, '081111');
+
+      const listCall = listQueryCall();
+      expect(listCall?.[1][0]).toBe('%081111%');
+      expect(listCall?.[0]).toContain('guest_phone');
+      expect(result.items[0]).toMatchObject({
+        id: 'guest:0811111111',
+        fullName: 'Guest Buyer',
+        isGuest: true,
+        createdAt: new Date('2026-02-01T00:00:00.000Z'),
+      });
+    });
+
     it('clamps vendor customer limit to 100', async () => {
-      const qb = mockListQuery(10);
+      const qb = {
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([[{ id: 'cust-1' }], 10]),
+      };
+      customerRepo.createQueryBuilder.mockReturnValue(qb);
 
       const result = await service.findForVendorStore('store-1', 1, 1000, 'ann');
 

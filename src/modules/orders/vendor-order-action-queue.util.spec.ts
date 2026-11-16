@@ -104,6 +104,19 @@ describe('isVendorOrderActionable', () => {
     ).toBe(false);
   });
 
+  it('excludes admin-shipped orders whose items are still pending', () => {
+    expect(
+      isVendorOrderActionable(
+        order({
+          status: OrderStatus.SHIPPED,
+          paymentMethod: PaymentMethod.BANK_TRANSFER,
+          items: [{ storeId: STORE, fulfillmentStatus: FulfillmentStatus.PENDING }],
+        }),
+        STORE,
+      ),
+    ).toBe(false);
+  });
+
   it('excludes all shipped/delivered (awaiting_customer / completed)', () => {
     expect(
       isVendorOrderActionable(

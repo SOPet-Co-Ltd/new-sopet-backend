@@ -19,6 +19,10 @@ import { UpdateCustomerAsAdminInput } from './customers.inputs';
 import { OrdersService } from '../orders/orders.service';
 import { CustomerRepository } from '../../database/repositories/customer.repository';
 import { guestPhoneLookupValues, normalizeThaiPhoneToLocal } from '../../common/utils/phone.util';
+import {
+  guestPhoneMatchesCustomerSql,
+  normalizedGuestPhoneSql,
+} from '../../common/sql/buyer-identity.sql';
 
 const CUSTOMER_SPEND_EXCLUDED_STATUSES = [
   OrderStatus.CANCELLED,
@@ -35,6 +39,112 @@ function clampCustomerList(
   const safePage = Math.max(page, 1);
   return { page: safePage, limit: safeLimit, skip: (safePage - 1) * safeLimit };
 }
+
+type AdminCustomerListRow = {
+  id: string;
+  phone: string;
+  fullName: string | null;
+  email: string | null;
+  dateOfBirth: Date | string | null;
+  isVerified: boolean;
+  isActive: boolean;
+  lastLoginAt: Date | string | null;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+  isGuest: boolean;
+};
+
+function asDate(value: Date | string | null | undefined): Date | null {
+  if (!value) return null;
+  return value instanceof Date ? value : new Date(value);
+}
+
+function asDateOnly(value: Date | string | null | undefined): string | null {
+  if (!value) return null;
+  if (value instanceof Date) {
+    return value.toISOString().slice(0, 10);
+  }
+  return String(value).slice(0, 10);
+}
+
+function mapAdminCustomerListRow(row: AdminCustomerListRow): AdminCustomerListItem {
+  return {
+    id: row.id,
+    phone: row.phone,
+    fullName: row.fullName,
+    email: row.email,
+    dateOfBirth: asDateOnly(row.dateOfBirth),
+    isVerified: row.isVerified,
+    isActive: row.isActive,
+    lastLoginAt: asDate(row.lastLoginAt),
+    createdAt: asDate(row.createdAt) ?? new Date(0),
+    updatedAt: asDate(row.updatedAt) ?? new Date(0),
+    isGuest: row.isGuest,
+  };
+}
+
+/** Accounts plus guest buyers whose phone does not already belong to an account. */
+function adminCustomerPeopleSql(): string {
+  const phoneKey = normalizedGuestPhoneSql('o.guest_phone');
+  return `
+    SELECT
+      c.id::text AS id,
+      c.phone,
+      c.full_name,
+      c.email,
+      c.date_of_birth,
+      c.is_verified,
+      c.is_active,
+      c.last_login_at,
+      c.created_at,
+      c.updated_at,
+      false AS is_guest
+    FROM customers c
+    WHERE c.deleted_at IS NULL
+    UNION ALL
+    SELECT
+      'guest:' || g.phone_key AS id,
+      g.phone_key AS phone,
+      (ARRAY_AGG(g.guest_name ORDER BY g.created_at DESC) FILTER (WHERE g.guest_name IS NOT NULL))[1] AS full_name,
+      (ARRAY_AGG(g.guest_email ORDER BY g.created_at DESC) FILTER (WHERE g.guest_email IS NOT NULL))[1] AS email,
+      NULL::date AS date_of_birth,
+      false AS is_verified,
+      true AS is_active,
+      NULL::timestamp AS last_login_at,
+      MIN(g.created_at) AS created_at,
+      MAX(g.created_at) AS updated_at,
+      true AS is_guest
+    FROM (
+      SELECT
+        ${phoneKey} AS phone_key,
+        NULLIF(BTRIM(o.guest_name), '') AS guest_name,
+        NULLIF(BTRIM(o.guest_email), '') AS guest_email,
+        o.created_at
+      FROM orders o
+      WHERE o.customer_id IS NULL
+        AND ${phoneKey} IS NOT NULL
+    ) g
+    WHERE NOT EXISTS (
+      SELECT 1 FROM customers c
+      WHERE ${guestPhoneMatchesCustomerSql('g.phone_key')}
+    )
+    GROUP BY g.phone_key
+  `;
+}
+
+export type AdminCustomerListItem = {
+  id: string;
+  phone: string;
+  fullName: string | null;
+  email: string | null;
+  dateOfBirth: string | null;
+  isVerified: boolean;
+  isActive: boolean;
+  lastLoginAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  isGuest: boolean;
+};
 
 export type AdminCustomerInsightsResult = {
   totalSpent: number;
@@ -102,27 +212,45 @@ export class CustomersService {
     page: number,
     limit: number,
     search?: string,
-  ): Promise<PaginatedResponse<Customer>> {
+  ): Promise<PaginatedResponse<AdminCustomerListItem>> {
     const clamped = clampCustomerList(page, limit);
-    const qb = this.customerRepository
-      .createQueryBuilder('customer')
-      .where('customer.deleted_at IS NULL');
+    const trimmed = search?.trim();
+    const searchPattern = trimmed ? `%${trimmed}%` : null;
+    const peopleSql = adminCustomerPeopleSql();
+    const searchSql = `(
+      $1::text IS NULL
+      OR phone ILIKE $1
+      OR full_name ILIKE $1
+      OR email ILIKE $1
+    )`;
 
-    if (search?.trim()) {
-      qb.andWhere(
-        '(customer.phone ILIKE :search OR customer.full_name ILIKE :search OR customer.email ILIKE :search)',
-        { search: `%${search.trim()}%` },
-      );
-    }
+    const countRows: Array<{ count: string }> = await this.customerRepository.query(
+      `SELECT COUNT(*)::text AS count FROM (${peopleSql}) people WHERE ${searchSql}`,
+      [searchPattern],
+    );
+    const rows: AdminCustomerListRow[] = await this.customerRepository.query(
+      `SELECT
+         id,
+         phone,
+         full_name AS "fullName",
+         email,
+         date_of_birth AS "dateOfBirth",
+         is_verified AS "isVerified",
+         is_active AS "isActive",
+         last_login_at AS "lastLoginAt",
+         created_at AS "createdAt",
+         updated_at AS "updatedAt",
+         is_guest AS "isGuest"
+       FROM (${peopleSql}) people
+       WHERE ${searchSql}
+       ORDER BY created_at DESC, id ASC
+       LIMIT $2 OFFSET $3`,
+      [searchPattern, clamped.limit, clamped.skip],
+    );
 
-    const [items, total] = await qb
-      .orderBy('customer.created_at', 'DESC')
-      .skip(clamped.skip)
-      .take(clamped.limit)
-      .getManyAndCount();
-
+    const total = Number(countRows[0]?.count ?? 0);
     return {
-      items,
+      items: rows.map(mapAdminCustomerListRow),
       pagination: {
         page: clamped.page,
         limit: clamped.limit,

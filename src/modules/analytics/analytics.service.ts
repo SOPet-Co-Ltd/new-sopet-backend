@@ -8,6 +8,8 @@ import { StoreRequest, StoreRequestStatus } from '../../database/entities/store-
 import { Customer } from '../../database/entities/customer.entity';
 import { Product } from '../../database/entities/product.entity';
 import { OrderStatus } from '../../database/entities/enums/order.enums';
+import { orderBuyerKeySql } from '../../common/sql/buyer-identity.sql';
+import { storeNetMerchandiseSql } from '../../common/sql/store-net-merchandise.sql';
 import {
   assertSummaryMonthNotBeforeCreatedAt,
   assertValidSummaryMonth,
@@ -410,14 +412,16 @@ export class AnalyticsService {
     const priorYearBounds = bangkokYearBounds(priorYear);
     const selectedYearBounds = bangkokYearBounds(year, selectedYearEndCap);
 
+    const buyerKey = orderBuyerKeySql('o');
+    const priorBuyerKey = orderBuyerKeySql('o2');
+
     const monthStats = await this.orderItemRepository
       .createQueryBuilder('oi')
       .innerJoin('oi.order', 'o')
       .select('COUNT(DISTINCT o.id)', 'orderCount')
-      .addSelect('COALESCE(SUM(oi.subtotal), 0)', 'revenue')
-      .addSelect('COUNT(DISTINCT o.customerId)', 'buyersInMonth')
+      .addSelect(storeNetMerchandiseSql(), 'revenue')
+      .addSelect(`COUNT(DISTINCT ${buyerKey})`, 'buyersInMonth')
       .where('oi.storeId = :storeId', { storeId })
-      .andWhere('o.customerId IS NOT NULL')
       .andWhere('o.status NOT IN (:...excludedStatuses)', {
         excludedStatuses: SUMMARY_EXCLUDED_STATUSES,
       })
@@ -432,9 +436,8 @@ export class AnalyticsService {
     const totalCustomersResult = await this.orderItemRepository
       .createQueryBuilder('oi')
       .innerJoin('oi.order', 'o')
-      .select('COUNT(DISTINCT o.customerId)', 'count')
+      .select(`COUNT(DISTINCT ${buyerKey})`, 'count')
       .where('oi.storeId = :storeId', { storeId })
-      .andWhere('o.customerId IS NOT NULL')
       .andWhere('o.status NOT IN (:...excludedStatuses)', {
         excludedStatuses: SUMMARY_EXCLUDED_STATUSES,
       })
@@ -446,27 +449,27 @@ export class AnalyticsService {
     const newCustomerResult = await this.orderItemRepository
       .createQueryBuilder('oi')
       .innerJoin('oi.order', 'o')
-      .select('o.customerId', 'customerId')
+      .select(buyerKey, 'buyerKey')
       .addSelect('MIN(o.createdAt)', 'firstAt')
       .where('oi.storeId = :storeId', { storeId })
-      .andWhere('o.customerId IS NOT NULL')
+      .andWhere(`${buyerKey} IS NOT NULL`)
       .andWhere('o.status NOT IN (:...excludedStatuses)', {
         excludedStatuses: SUMMARY_EXCLUDED_STATUSES,
       })
       .andWhere('o.createdAt <= :monthTo', { monthTo })
-      .groupBy('o.customerId')
+      .groupBy(buyerKey)
       .having('MIN(o.createdAt) >= :monthFrom', { monthFrom })
-      .getRawMany<{ customerId: string; firstAt: Date }>();
+      .getRawMany<{ buyerKey: string; firstAt: Date }>();
 
     const newCustomerCount = newCustomerResult.length;
 
     const oldCustomerResult = await this.orderItemRepository
       .createQueryBuilder('oi')
       .innerJoin('oi.order', 'o')
-      .select('o.customerId', 'customerId')
+      .select(buyerKey, 'buyerKey')
       .distinct(true)
       .where('oi.storeId = :storeId', { storeId })
-      .andWhere('o.customerId IS NOT NULL')
+      .andWhere(`${buyerKey} IS NOT NULL`)
       .andWhere('o.status NOT IN (:...excludedStatuses)', {
         excludedStatuses: SUMMARY_EXCLUDED_STATUSES,
       })
@@ -477,13 +480,13 @@ export class AnalyticsService {
           SELECT 1 FROM order_items oi2
           INNER JOIN orders o2 ON o2.id = oi2.order_id
           WHERE oi2.store_id = :storeId
-            AND o2.customer_id = o.customer_id
-            AND o2.customer_id IS NOT NULL
+            AND ${priorBuyerKey} = ${buyerKey}
+            AND ${priorBuyerKey} IS NOT NULL
             AND o2.status NOT IN (:...excludedStatuses)
             AND o2.created_at < :monthFrom
         )`,
       )
-      .getRawMany<{ customerId: string }>();
+      .getRawMany<{ buyerKey: string }>();
 
     const oldCustomerCount = oldCustomerResult.length;
     const { oldCustomerPercent } = computeOldCustomerShare(oldCustomerCount, buyersInMonth);
@@ -491,9 +494,8 @@ export class AnalyticsService {
     const priorYearBuyersResult = await this.orderItemRepository
       .createQueryBuilder('oi')
       .innerJoin('oi.order', 'o')
-      .select('COUNT(DISTINCT o.customerId)', 'count')
+      .select(`COUNT(DISTINCT ${buyerKey})`, 'count')
       .where('oi.storeId = :storeId', { storeId })
-      .andWhere('o.customerId IS NOT NULL')
       .andWhere('o.status NOT IN (:...excludedStatuses)', {
         excludedStatuses: SUMMARY_EXCLUDED_STATUSES,
       })
@@ -506,9 +508,9 @@ export class AnalyticsService {
     const returningBuyersResult = await this.orderItemRepository
       .createQueryBuilder('oi')
       .innerJoin('oi.order', 'o')
-      .select('COUNT(DISTINCT o.customerId)', 'count')
+      .select(`COUNT(DISTINCT ${buyerKey})`, 'count')
       .where('oi.storeId = :storeId', { storeId })
-      .andWhere('o.customerId IS NOT NULL')
+      .andWhere(`${buyerKey} IS NOT NULL`)
       .andWhere('o.status NOT IN (:...excludedStatuses)', {
         excludedStatuses: SUMMARY_EXCLUDED_STATUSES,
       })
@@ -519,8 +521,8 @@ export class AnalyticsService {
           SELECT 1 FROM order_items oi2
           INNER JOIN orders o2 ON o2.id = oi2.order_id
           WHERE oi2.store_id = :storeId
-            AND o2.customer_id = o.customer_id
-            AND o2.customer_id IS NOT NULL
+            AND ${priorBuyerKey} = ${buyerKey}
+            AND ${priorBuyerKey} IS NOT NULL
             AND o2.status NOT IN (:...excludedStatuses)
             AND o2.created_at >= :priorFrom
             AND o2.created_at <= :priorTo
