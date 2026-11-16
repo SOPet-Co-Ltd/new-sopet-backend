@@ -5,7 +5,7 @@ import type { SopetToolDefinition } from '../types';
 const ADMIN_STORE_FIELDS = `
   id name slug description status contactPhone contactEmail address
   commissionRate ownerId createdAt updatedAt
-  bankAccountName bankAccountNumberMasked bankName bankAccountVerified
+  bankAccountName bankAccountNumber bankName bankAccountVerificationStatus
 `;
 
 export const adminStoreTools: SopetToolDefinition[] = [
