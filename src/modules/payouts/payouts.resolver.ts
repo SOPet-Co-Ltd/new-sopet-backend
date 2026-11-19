@@ -358,6 +358,43 @@ export class PayoutsResolver {
   @Mutation(() => PayoutType)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('vendor')
+  async cancelPayoutRequest(
+    @CurrentUser('id') userId: string,
+    @CurrentUser('email') userEmail: string | null,
+    @CurrentUser('storeId') storeId: string,
+    @Context() context?: GraphqlContext,
+  ): Promise<PayoutType> {
+    if (!storeId) {
+      throw new BadRequestException({
+        code: 'STORE_CONTEXT_REQUIRED',
+        message: 'Store context is required',
+      });
+    }
+
+    await this.storesService.assertStoreOwner(userId, storeId);
+    const payout = await this.payoutsService.cancelPayoutRequest(storeId, userId);
+
+    await this.auditLogsService.log({
+      actorType: AuditActorType.VENDOR,
+      actorId: userId,
+      actorLabel: userEmail ?? null,
+      action: AuditAction.PAYOUT_REQUEST_CANCELLED,
+      resourceType: AuditResourceType.PAYOUT,
+      resourceId: payout.id,
+      metadata: {
+        storeId,
+        amount: payout.amount,
+        settlementRail: payout.settlementRail,
+      },
+      ...getAuditRequestContext(context?.req),
+    });
+
+    return mapPayout(payout);
+  }
+
+  @Mutation(() => PayoutType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('vendor')
   async requestManualPayout(
     @CurrentUser('id') userId: string,
     @CurrentUser('storeId') storeId: string,

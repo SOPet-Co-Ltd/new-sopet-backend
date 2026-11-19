@@ -33,6 +33,19 @@ export const vendorOnlyTools: SopetToolDefinition[] = [
     pick: 'requestPayout',
   }),
   gqlTool({
+    name: 'vendor_cancel_payout_request',
+    description: 'Cancel the vendor session store pending payout request. Moves money state.',
+    role: 'vendor',
+    writes: true,
+    inputSchema: {},
+    query: `
+      mutation {
+        cancelPayoutRequest { id amount status storeId failureReason }
+      }
+    `,
+    pick: 'cancelPayoutRequest',
+  }),
+  gqlTool({
     name: 'vendor_request_manual_payout',
     description: 'Request a manual payout for the vendor session store. Moves money state.',
     role: 'vendor',
