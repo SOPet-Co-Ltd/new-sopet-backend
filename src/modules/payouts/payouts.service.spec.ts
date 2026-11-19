@@ -84,6 +84,7 @@ describe('PayoutsService', () => {
   };
   const notificationsService = {
     notifyAdminsAboutManualPayoutRequest: jest.fn().mockResolvedValue(null),
+    notifyAdminsAboutManualPayoutCancellation: jest.fn().mockResolvedValue(null),
     notifyVendorAboutManualPayoutOutcome: jest.fn().mockResolvedValue(null),
   };
   const dashboardEventsService = {
@@ -608,7 +609,7 @@ describe('PayoutsService', () => {
       expect(summary.canRequestPayout).toBe(false);
     });
 
-    it('allows canRequestPayout and requestPayout when bank account is verified and balance is eligible', async () => {
+    it('allows canRequestPayout and requestPayout when bank account is saved and balance is eligible', async () => {
       orderItemRepo.createQueryBuilder.mockReturnValue(createQueryBuilderMock({ total: '2000' }));
       payoutRepo.createQueryBuilder.mockImplementation(() =>
         createQueryBuilderMock({ total: '0' }),
@@ -628,32 +629,35 @@ describe('PayoutsService', () => {
       BankAccountVerificationStatus.UNVERIFIED,
       BankAccountVerificationStatus.PENDING_REVIEW,
       BankAccountVerificationStatus.REJECTED,
-    ])('blocks canRequestPayout and requestPayout when bank status is %s', async (status) => {
-      storeRepo.findOne.mockResolvedValue({
-        id: 'store-1',
-        name: 'Test Store',
-        ownerId: 'vendor-owner-1',
-        commissionRate: null,
-        bankAccountName: 'Test Account',
-        bankAccountNumber: '1234567890',
-        bankName: 'ธนาคารกสิกรไทย',
-        bankCode: 'kbank',
-        bankAccountVerificationStatus: status,
-      });
-      orderItemRepo.createQueryBuilder.mockReturnValue(createQueryBuilderMock({ total: '5000' }));
-      payoutRepo.createQueryBuilder.mockImplementation(() =>
-        createQueryBuilderMock({ total: '0' }),
-      );
+      BankAccountVerificationStatus.VERIFIED,
+    ])(
+      'allows canRequestPayout and requestPayout when bank details are saved and status is %s',
+      async (status) => {
+        storeRepo.findOne.mockResolvedValue({
+          id: 'store-1',
+          name: 'Test Store',
+          ownerId: 'vendor-owner-1',
+          commissionRate: null,
+          bankAccountName: 'Test Account',
+          bankAccountNumber: '1234567890',
+          bankName: 'ธนาคารกสิกรไทย',
+          bankCode: 'kbank',
+          bankAccountVerificationStatus: status,
+        });
+        orderItemRepo.createQueryBuilder.mockReturnValue(createQueryBuilderMock({ total: '5000' }));
+        payoutRepo.createQueryBuilder.mockImplementation(() =>
+          createQueryBuilderMock({ total: '0' }),
+        );
 
-      const summary = await service.getPayoutSummary('store-1');
-      expect(summary.availableBalance).toBeGreaterThan(0);
-      expect(summary.canRequestPayout).toBe(false);
+        const summary = await service.getPayoutSummary('store-1');
+        expect(summary.availableBalance).toBeGreaterThan(0);
+        expect(summary.canRequestPayout).toBe(true);
 
-      await expect(service.requestPayout('store-1', 'vendor-1')).rejects.toMatchObject({
-        response: { code: 'BANK_ACCOUNT_NOT_VERIFIED' },
-      });
-      expect(managerPayoutRepo.create).not.toHaveBeenCalled();
-    });
+        const payout = await service.requestPayout('store-1', 'vendor-1');
+        expect(payout.status).toBe(PayoutStatus.PENDING);
+        expect(managerPayoutRepo.create).toHaveBeenCalled();
+      },
+    );
 
     it('settleManualPayout still succeeds when the store bank account is not verified', async () => {
       storeRepo.findOne.mockResolvedValue({
@@ -860,6 +864,62 @@ describe('PayoutsService', () => {
       outcome: 'rejected',
       notes: 'Bank details incomplete',
     });
+  });
+
+  it('lets the vendor cancel a pending payout and notifies admins', async () => {
+    const pendingRow = {
+      id: 'payout-manual-cancel',
+      storeId: 'store-1',
+      amount: 2927.16,
+      netAmount: 2927.16,
+      status: PayoutStatus.PENDING,
+      settlementRail: 'manual',
+      processedBy: 'vendor-1',
+      notes: 'Vendor requested payout',
+    };
+    payoutRepo.findOne.mockResolvedValue(pendingRow);
+    managerPayoutQueryBuilder.getOne.mockResolvedValue({ ...pendingRow });
+
+    const payout = await service.cancelPayoutRequest('store-1', 'vendor-1');
+
+    expect(payout.status).toBe(PayoutStatus.FAILED);
+    expect(payout.failureReason).toBe('ร้านยกเลิกคำขอรับเงิน');
+    expect(notificationsService.notifyAdminsAboutManualPayoutCancellation).toHaveBeenCalledWith({
+      payoutId: 'payout-manual-cancel',
+      storeId: 'store-1',
+      storeName: 'Test Store',
+      amount: 2927.16,
+    });
+    expect(notificationsService.notifyVendorAboutManualPayoutOutcome).not.toHaveBeenCalled();
+  });
+
+  it('lets the vendor cancel a processing payout that is still waiting for admin', async () => {
+    const processingRow = {
+      id: 'payout-manual-processing',
+      storeId: 'store-1',
+      amount: 2927.16,
+      netAmount: 2927.16,
+      status: PayoutStatus.PROCESSING,
+      settlementRail: 'manual',
+      processedBy: 'vendor-1',
+      notes: 'Vendor requested payout',
+    };
+    payoutRepo.findOne.mockResolvedValue(processingRow);
+    managerPayoutQueryBuilder.getOne.mockResolvedValue({ ...processingRow });
+
+    const payout = await service.cancelPayoutRequest('store-1', 'vendor-1');
+
+    expect(payout.status).toBe(PayoutStatus.FAILED);
+    expect(payout.failureReason).toBe('ร้านยกเลิกคำขอรับเงิน');
+  });
+
+  it('rejects a vendor cancel when no pending payout exists', async () => {
+    payoutRepo.findOne.mockResolvedValue(null);
+
+    await expect(service.cancelPayoutRequest('store-1', 'vendor-1')).rejects.toMatchObject({
+      response: { code: 'NO_PENDING_MANUAL_PAYOUT' },
+    });
+    expect(managerPayoutRepo.save).not.toHaveBeenCalled();
   });
 
   describe('available-balance fours identity (AC-016 / AC-D-016)', () => {

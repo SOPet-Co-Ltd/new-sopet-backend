@@ -12,7 +12,7 @@ import { Payout, PayoutSettlementRail, PayoutStatus } from '../../database/entit
 import { FulfillmentStatus, OrderItem } from '../../database/entities/order-item.entity';
 import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
 import { DataSource as OrderDataSource } from '../../database/entities/enums/data-source.enums';
-import { BankAccountVerificationStatus, Store } from '../../database/entities/store.entity';
+import { Store } from '../../database/entities/store.entity';
 import { Promotion, PromotionScope } from '../../database/entities/promotion.entity';
 import { PromotionUsage } from '../../database/entities/promotion-usage.entity';
 import { OrderStoreShipping } from '../../database/entities/order-store-shipping.entity';
@@ -41,6 +41,7 @@ import {
 
 const PAID_OUT_STATUSES = [PayoutStatus.PENDING, PayoutStatus.PROCESSING, PayoutStatus.COMPLETED];
 const PENDING_STATUSES = [PayoutStatus.PENDING, PayoutStatus.PROCESSING];
+export const VENDOR_CANCELLED_PAYOUT_REASON = 'ร้านยกเลิกคำขอรับเงิน';
 
 /**
  * Single manual settlement rail: every online method (PSP-collected) plus bank_transfer.
@@ -143,7 +144,6 @@ export class PayoutsService {
     const minimumPayoutAmount = this.getMinimumPayoutAmount();
     const canRequestPayout =
       this.hasCompleteBankAccount(store) &&
-      store.bankAccountVerificationStatus === BankAccountVerificationStatus.VERIFIED &&
       pendingPayoutAmount <= 0 &&
       availableBalance > 0 &&
       availableBalance >= minimumPayoutAmount;
@@ -170,7 +170,7 @@ export class PayoutsService {
 
   /**
    * Vendor requests settlement of all accrued revenue (single manual rail).
-   * Requires a saved and verified bank account. Creates a PENDING payout;
+   * Requires a saved bank account and an eligible balance. Creates a PENDING payout;
    * admin transfers offline then calls settleManualPayout.
    */
   async requestPayout(storeId: string, processedBy?: string): Promise<Payout> {
@@ -180,13 +180,6 @@ export class PayoutsService {
       throw new BadRequestException({
         code: 'BANK_ACCOUNT_REQUIRED',
         message: 'Bank account details must be saved before requesting a payout',
-      });
-    }
-
-    if (store.bankAccountVerificationStatus !== BankAccountVerificationStatus.VERIFIED) {
-      throw new BadRequestException({
-        code: 'BANK_ACCOUNT_NOT_VERIFIED',
-        message: 'Bank account must be verified before requesting a payout',
       });
     }
 
@@ -430,6 +423,88 @@ export class PayoutsService {
     });
 
     return payout;
+  }
+
+  /**
+   * Vendor withdraws their own payout request while it is still waiting for admin
+   * (pending or processing). The amount returns to the available balance.
+   * Admin is notified so they do not transfer it.
+   */
+  async cancelPayoutRequest(storeId: string, processedBy?: string): Promise<Payout> {
+    const store = await this.findStoreOrThrow(storeId);
+    const waiting = await this.resolveCancellablePayout(storeId);
+    const now = new Date();
+
+    const payout = await this.dataSource.transaction(async (manager) => {
+      await this.lockStoreRowForPayout(manager, storeId);
+
+      const locked = await manager
+        .getRepository(Payout)
+        .createQueryBuilder('payout')
+        .where('payout.id = :id', { id: waiting.id })
+        .setLock('pessimistic_write')
+        .getOne();
+      if (!locked || !PENDING_STATUSES.includes(locked.status)) {
+        throw new BadRequestException({
+          code: 'PAYOUT_NOT_PENDING',
+          message: 'Payout request is no longer waiting for admin',
+        });
+      }
+      if (locked.storeId !== storeId) {
+        throw new BadRequestException({
+          code: 'PAYOUT_MISMATCH',
+          message: 'Payout does not belong to this store',
+        });
+      }
+
+      locked.status = PayoutStatus.FAILED;
+      locked.processedBy = processedBy ?? locked.processedBy;
+      locked.processedAt = now;
+      locked.failureReason = VENDOR_CANCELLED_PAYOUT_REASON;
+      return manager.getRepository(Payout).save(locked);
+    });
+
+    try {
+      await this.notificationsService.notifyAdminsAboutManualPayoutCancellation({
+        payoutId: payout.id,
+        storeId,
+        storeName: store.name,
+        amount: Number(payout.amount),
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Failed to notify admins about cancelled payout ${payout.id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+
+    void this.dashboardEventsService.publish({
+      kind: DashboardActivityKind.PAYOUT,
+      entityId: payout.id,
+      storeId,
+      userIds: store.ownerId ? [store.ownerId] : undefined,
+      roles: ['admin'],
+    });
+
+    return payout;
+  }
+
+  private async resolveCancellablePayout(storeId: string): Promise<Payout> {
+    const waiting = await this.payoutRepository.findOne({
+      where: {
+        storeId,
+        status: In(PENDING_STATUSES),
+      },
+      order: { createdAt: 'ASC' },
+    });
+    if (!waiting) {
+      throw new BadRequestException({
+        code: 'NO_PENDING_MANUAL_PAYOUT',
+        message: 'No payout request is waiting for admin',
+      });
+    }
+    return waiting;
   }
 
   private async resolvePendingManualPayout(storeId: string, payoutId?: string): Promise<Payout> {
