@@ -856,7 +856,7 @@ type Mutation {
   acceptStoreInvitation(token: String!): StoreMemberType!
   acceptStoreMemberInvitation(input: AcceptStoreMemberInvitationInput!): VendorAuthPayload!
   acceptVendorInvitation(input: AcceptVendorInvitationInput!): VendorAuthPayload!
-  acknowledgeVendorOrder(orderId: String!): OrderType!
+  acknowledgeVendorOrder(orderId: String!, storeId: String): OrderType!
   addFavorite(input: FavoriteProductInput!): FavoriteType!
   addPaymentMethod(input: AddPaymentMethodInput!): SavedPaymentMethodType!
   addProductImage(input: AddProductImageInput!, productId: String!): ProductImageType!
@@ -877,7 +877,8 @@ type Mutation {
   approveStoreReactivationRequest(id: String!): StoreReactivationRequestType!
   approveStoreRequest(id: String!): StoreRequestType!
   approveTag(id: String!): TagType!
-  cancelVendorOrder(orderId: String!): OrderType!
+  cancelPayoutRequest: PayoutType!
+  cancelVendorOrder(orderId: String!, storeId: String): OrderType!
   changeCustomerPhone(input: ChangeCustomerPhoneInput!): CustomerAuthPayload!
   changePassword(input: ChangePasswordInput!): MessagePayload!
   clearLoginPageDesktopImage: LoginPageImagesType!
@@ -897,14 +898,14 @@ type Mutation {
   createPlatformAd(input: CreatePlatformAdInput!): PlatformAdType!
   createPlatformBanner(input: CreatePlatformBannerInput!): PlatformBannerType!
   createPlatformSponsor(input: CreatePlatformSponsorInput!): PlatformSponsorType!
-  createProduct(input: CreateProductInput!): ProductType!
+  createProduct(input: CreateProductInput!, storeId: String): ProductType!
   createProductVariant(input: CreateProductVariantInput!, productId: String!): ProductVariantType!
   createPromotion(input: CreatePromotionInput!): PromotionType!
   createReview(input: CreateReviewInput!): ReviewType!
   createReviewReply(input: CreateReviewReplyInput!): ReviewReplyType!
   createSaleCampaign(input: CreateSaleCampaignInput!): SaleCampaignType!
   createSearchSynonym(input: CreateSearchSynonymInput!): SearchSynonymType!
-  createShippingOption(input: CreateShippingOptionInput!): StoreShippingOptionType!
+  createShippingOption(input: CreateShippingOptionInput!, storeId: String): StoreShippingOptionType!
   createShippingProvider(input: CreateShippingProviderInput!): ShippingProviderType!
   createStoreApiKey(name: String!, storeId: String!): CreateStoreApiKeyPayload!
   createStoreAsAdmin(input: CreateStoreAsAdminInput!): AdminStoreType!
@@ -925,15 +926,15 @@ type Mutation {
   deletePromotion(id: String!): Boolean!
   deleteSaleCampaign(id: String!): Boolean!
   deleteSearchSynonym(id: String!): Boolean!
-  deleteShippingOption(id: String!): Boolean!
+  deleteShippingOption(id: String!, storeId: String): Boolean!
   deleteShippingProvider(id: String!): Boolean!
   deleteTag(id: String!): DeleteTaxonomyResultType!
   inviteAdmin(input: InviteAdminInput!): AdminInvitationType!
-  inviteStoreMember(input: InviteStoreMemberInput!): StoreMemberInvitationType!
+  inviteStoreMember(input: InviteStoreMemberInput!, storeId: String): StoreMemberInvitationType!
   inviteVendor(input: InviteVendorInput!): VendorInvitationType!
   markAllNotificationsRead: Boolean!
   markNotificationRead(id: String!): Boolean!
-  markVendorOrderPaid(orderId: String!): OrderType!
+  markVendorOrderPaid(orderId: String!, storeId: String): OrderType!
   mergeCart(sessionId: String!): CartType!
   previewEmailContentTemplate(input: PreviewEmailContentTemplateInput!): EmailPreviewResultType!
   publishProduct(id: String!): ProductType!
@@ -954,7 +955,7 @@ type Mutation {
   rejectTag(id: String!): TagType!
   removeCartItem(input: RemoveCartItemInput!): CartType!
   removeFavorite(input: FavoriteProductInput!): Boolean!
-  removeStoreMember(memberId: String!): Boolean!
+  removeStoreMember(memberId: String!, storeId: String): Boolean!
   reorderPlatformBanners(ids: [ID!]!): [PlatformBannerType!]!
   reorderPlatformSponsors(ids: [ID!]!): [PlatformSponsorType!]!
   reorderProductImages(imageIds: [ID!]!, productId: String!): [ProductImageType!]!
@@ -967,7 +968,7 @@ type Mutation {
   resetSearchAnalytics: Boolean!
   revokeAdminInvitation(invitationId: String!): AdminInvitationType!
   revokeStoreApiKey(id: String!, storeId: String!): Boolean!
-  revokeStoreInvitation(invitationId: String!): StoreMemberInvitationType!
+  revokeStoreInvitation(invitationId: String!, storeId: String): StoreMemberInvitationType!
   sendCustomerOtp(input: SendCustomerOtpInput!): SendCustomerOtpPayload!
   sendTestEmailContentTemplate(input: SendTestEmailContentTemplateInput!): Boolean!
   setAdminActive(isActive: Boolean!, userId: String!): AdminTeamMemberType!
@@ -980,7 +981,7 @@ type Mutation {
   setPetTypeImage(input: SetPetTypeImageInput!): PetTypeType!
   setProductThumbnail(imageId: String!, productId: String!): ProductImageType!
   settleManualPayout(input: SettleManualPayoutInput!): PayoutType!
-  shipVendorOrder(input: ShipVendorOrderInput!): OrderType!
+  shipVendorOrder(input: ShipVendorOrderInput!, storeId: String): OrderType!
   submitStoreReactivationRequest(input: SubmitStoreReactivationRequestInput!): StoreReactivationRequestType!
   submitStoreRequest(input: SubmitStoreRequestInput!): StoreRequestType!
   switchStore(input: SwitchStoreInput!): VendorAuthPayload!
@@ -1013,12 +1014,12 @@ type Mutation {
   updateSaleCampaign(id: String!, input: UpdateSaleCampaignInput!): SaleCampaignType!
   updateSearchRankingWeights(input: UpdateSearchRankingWeightsInput!): SearchRankingWeightsType!
   updateSearchSynonym(id: String!, input: UpdateSearchSynonymInput!): SearchSynonymType!
-  updateShippingOption(id: String!, input: UpdateShippingOptionInput!): StoreShippingOptionType!
+  updateShippingOption(id: String!, input: UpdateShippingOptionInput!, storeId: String): StoreShippingOptionType!
   updateShippingProvider(id: String!, input: UpdateShippingProviderInput!): ShippingProviderType!
-  updateStore(input: UpdateStoreSettingsInput!): MyStoreType!
+  updateStore(input: UpdateStoreSettingsInput!, storeId: String): MyStoreType!
   updateStoreAsAdmin(input: UpdateStoreAsAdminInput!): AdminStoreType!
-  updateStoreMemberRole(input: UpdateStoreMemberRoleInput!): StoreMemberType!
-  updateStorePayout(input: UpdateStorePayoutInput!): MyStoreType!
+  updateStoreMemberRole(input: UpdateStoreMemberRoleInput!, storeId: String): StoreMemberType!
+  updateStorePayout(input: UpdateStorePayoutInput!, storeId: String): MyStoreType!
   updateStorefrontMaintenance(input: UpdateStorefrontMaintenanceInput!): StorefrontMaintenanceType!
   updateTag(input: UpdateTagInput!): TagType!
   updateUserProfile(input: UpdateUserProfileInput!): UserProfile!
@@ -1551,9 +1552,9 @@ type Query {
   myPendingStoreInvitations: [MyPendingStoreInvitationType!]!
   myPetTypeProposals: [PetTypeType!]!
   myReviews(limit: Int = 50, offset: Int = 0): [CustomerReviewType!]!
-  myStore: MyStoreType!
+  myStore(storeId: String): MyStoreType!
   myStoreRequests: [StoreRequestType!]!
-  myStoreShippingOptions: [StoreShippingOptionType!]!
+  myStoreShippingOptions(storeId: String): [StoreShippingOptionType!]!
   myStores: [VendorStoreType!]!
   myTagProposals: [TagType!]!
   notifications(limit: Int = 50, page: Int = 1, unreadOnly: Boolean): [NotificationType!]!
@@ -1616,8 +1617,8 @@ type Query {
   storeApiKeys(storeId: String!): [StoreApiKeyType!]!
   storeBySlug(slug: String!): StoreType!
   storeCustomerSummary(month: Int!, storeId: String!, year: Int!): StoreCustomerSummaryType!
-  storeInvitations: [StoreMemberInvitationType!]!
-  storeMembers: [StoreMemberType!]!
+  storeInvitations(storeId: String): [StoreMemberInvitationType!]!
+  storeMembers(storeId: String): [StoreMemberType!]!
   storePayoutSummary: PayoutSummaryType!
   storePayouts(limit: Int = 20, page: Int = 1): PayoutConnection!
   storeProductReviews(limit: Int = 20, page: Int = 1, ratingFilter: String, replyFilter: String, storeId: String!): StoreProductReviewConnection!
@@ -1634,15 +1635,15 @@ type Query {
   unreadNotificationsCount: Int!
   validatePromotion(input: ValidatePromotionInput!): PromotionValidationResult!
   validatePromotions(input: ValidatePromotionsInput!): ValidatePromotionsResult!
-  vendorCustomer(id: String!): VendorCustomerType!
-  vendorCustomerDetail(id: String!): VendorCustomerDetailType!
-  vendorCustomers(limit: Int! = 20, page: Int! = 1, search: String): VendorCustomerConnection!
+  vendorCustomer(id: String!, storeId: String): VendorCustomerType!
+  vendorCustomerDetail(id: String!, storeId: String): VendorCustomerDetailType!
+  vendorCustomers(limit: Int! = 20, page: Int! = 1, search: String, storeId: String): VendorCustomerConnection!
   vendorOrder(id: String!, storeId: String!): OrderType!
   vendorOrders(limit: Int = 20, page: Int = 1, paymentMethod: String, queue: VendorOrderQueueFilter = ALL, search: String, status: String, storeId: String!): VendorOrderConnection!
   vendorProduct(id: String!): ProductType!
-  vendorProducts(brandIds: [String!], category: String, limit: Int = 20, maxPrice: Float, minPrice: Float, page: Int = 1, petTypeIds: [String!], search: String, status: String, tag: String): ProductConnection!
-  vendorPublishableProductIds(search: String): VendorPublishableProductIdsType!
-  vendorPublishableProducts(limit: Int = 20, page: Int = 1, search: String): ProductConnection!
+  vendorProducts(brandIds: [String!], category: String, limit: Int = 20, maxPrice: Float, minPrice: Float, page: Int = 1, petTypeIds: [String!], search: String, status: String, storeId: String, tag: String): ProductConnection!
+  vendorPublishableProductIds(search: String, storeId: String): VendorPublishableProductIdsType!
+  vendorPublishableProducts(limit: Int = 20, page: Int = 1, search: String, storeId: String): ProductConnection!
 }
 
 input ReactivateAccountInput {

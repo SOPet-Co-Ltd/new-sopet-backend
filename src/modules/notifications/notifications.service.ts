@@ -352,6 +352,48 @@ export class NotificationsService {
   }
 
   /**
+   * Notify platform admins that a vendor cancelled their pending manual payout request.
+   */
+  async notifyAdminsAboutManualPayoutCancellation(input: {
+    payoutId: string;
+    storeId: string;
+    storeName: string;
+    amount: number;
+  }): Promise<UserNotification | null> {
+    const admins = await this.userRepository.find({
+      where: { role: UserRole.ADMIN, isActive: true },
+    });
+    if (admins.length === 0) {
+      return null;
+    }
+
+    const amountLabel = Number(input.amount).toLocaleString('th-TH', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    const message = `ร้าน "${input.storeName}" ยกเลิกคำขอรับเงิน ฿${amountLabel}`;
+
+    const notifications: UserNotification[] = [];
+    for (const admin of admins) {
+      notifications.push(
+        await this.createUserNotification(
+          admin.id,
+          'manual_payout_cancelled',
+          message,
+          {
+            payoutId: input.payoutId,
+            storeId: input.storeId,
+            storeName: input.storeName,
+            amount: Number(input.amount),
+          },
+          ['payoutId'],
+        ),
+      );
+    }
+    return notifications[0] ?? null;
+  }
+
+  /**
    * Notify the store owner that their manual payout request was approved or rejected.
    */
   async notifyVendorAboutManualPayoutOutcome(input: {
