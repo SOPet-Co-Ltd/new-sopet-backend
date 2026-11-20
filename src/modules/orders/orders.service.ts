@@ -1,11 +1,4 @@
-import {
-  BadRequestException,
-  forwardRef,
-  Inject,
-  Injectable,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
 import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
@@ -53,7 +46,7 @@ import {
 } from './vendor-order-action-queue.util';
 import { assertOrderHasNoReviews } from './order-review-cancel.guard';
 import { assertNotManualHoldTransition } from './store-suspension-hold.service';
-import { PaymentsService } from '../payments/payments.service';
+import { BeamRefundService } from '../payments/beam-refund.service';
 import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.service';
 import { webhookEventForOrderStatus } from '../vendor-webhooks/vendor-webhook.events';
 import { SaleCampaignPricingService } from '../sale-campaigns/sale-campaign-pricing.service';
@@ -116,8 +109,7 @@ export class OrdersService {
     private vendorWebhooksService: VendorWebhooksService,
     private saleCampaignPricing: SaleCampaignPricingService,
     private orderAuditLogsService: OrderAuditLogsService,
-    @Inject(forwardRef(() => PaymentsService))
-    private paymentsService: PaymentsService,
+    private beamRefundService: BeamRefundService,
   ) {}
 
   private generateOrderNumber(): string {
@@ -1373,7 +1365,7 @@ export class OrdersService {
     const refundedPaymentIds =
       (status === OrderStatus.CANCELLED || status === OrderStatus.REFUNDED) &&
       previousStatus !== status
-        ? await this.paymentsService.refundPaidBeamCharges(
+        ? await this.beamRefundService.refundPaidBeamCharges(
             id,
             status === OrderStatus.REFUNDED
               ? 'Order refunded after payment'

@@ -1,8 +1,6 @@
 import {
   BadRequestException,
   ForbiddenException,
-  forwardRef,
-  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -24,7 +22,7 @@ import {
   validateTrackingNumber,
   VENDOR_CANCELLABLE_ORDER_STATUSES,
 } from './order-fulfillment.util';
-import { PaymentsService } from '../payments/payments.service';
+import { BeamRefundService } from '../payments/beam-refund.service';
 import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.service';
 import { webhookEventForOrderStatus } from '../vendor-webhooks/vendor-webhook.events';
 import { OrderAuditLogsService } from '../order-audit-logs/order-audit-logs.service';
@@ -47,8 +45,7 @@ export class OrderFulfillmentService {
     private readonly inventoryService: InventoryService,
     private readonly vendorWebhooksService: VendorWebhooksService,
     private readonly orderAuditLogsService: OrderAuditLogsService,
-    @Inject(forwardRef(() => PaymentsService))
-    private readonly paymentsService: PaymentsService,
+    private readonly beamRefundService: BeamRefundService,
   ) {}
 
   private async loadOrderWithItems(orderId: string): Promise<Order> {
@@ -467,7 +464,7 @@ export class OrderFulfillmentService {
 
     this.markItemsCancelled(order.items);
 
-    const refundedPaymentIds = await this.paymentsService.refundPaidBeamCharges(
+    const refundedPaymentIds = await this.beamRefundService.refundPaidBeamCharges(
       order.id,
       'Vendor cancelled order after payment',
     );

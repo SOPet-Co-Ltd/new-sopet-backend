@@ -11,6 +11,7 @@ import { UsersModule } from '../users/users.module';
 import { BeamModule } from '../beam/beam.module';
 import { PlatformModule } from '../platform/platform.module';
 import { PaymentsService } from './payments.service';
+import { BeamRefundService } from './beam-refund.service';
 import { PaymentEventsService } from './payment-events.service';
 import { PaymentsWebhookController } from './payments-webhook.controller';
 import { Payment } from '../../database/entities/payment.entity';
@@ -37,7 +38,13 @@ import { VendorWebhooksModule } from '../vendor-webhooks/vendor-webhooks.module'
     TypeOrmModule.forFeature([Payment, Order, Customer, SavedPaymentMethod]),
   ],
   controllers: [PaymentsWebhookController],
-  providers: [PaymentsService, PaymentEventsService, PaymentsResolver, PaymentExpiryScheduler],
-  exports: [PaymentsService, PaymentEventsService],
+  providers: [
+    PaymentsService,
+    BeamRefundService,
+    PaymentEventsService,
+    PaymentsResolver,
+    PaymentExpiryScheduler,
+  ],
+  exports: [PaymentsService, BeamRefundService, PaymentEventsService],
 })
 export class PaymentsModule {}
