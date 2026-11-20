@@ -45,6 +45,7 @@ const beamServiceMock = {
   hasCredentials: jest.fn().mockReturnValue(true),
   createCharge: jest.fn(),
   getCharge: jest.fn(),
+  createRefund: jest.fn(),
 };
 
 const usersServiceMock = {
@@ -3198,5 +3199,77 @@ describe('PaymentsService PromptPay late success before expiry', () => {
     expect(result.status).toBe('paid');
     expect(order.status).toBe(OrderStatus.PAID);
     expect(order.paymentReference).toBe(CHARGE_ID);
+  });
+});
+
+describe('PaymentsService refundPaidBeamCharges', () => {
+  let service: PaymentsService;
+  const paymentRepository = {
+    find: jest.fn(),
+  };
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    beamServiceMock.hasCredentials.mockReturnValue(true);
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        PaymentsService,
+        { provide: getRepositoryToken(Payment), useValue: paymentRepository },
+        { provide: getRepositoryToken(Order), useValue: {} },
+        { provide: getRepositoryToken(Customer), useValue: {} },
+        { provide: getRepositoryToken(SavedPaymentMethod), useValue: {} },
+        { provide: ConfigService, useValue: { get: jest.fn(() => '') } },
+        { provide: NotificationsService, useValue: {} },
+        { provide: DashboardEventsService, useValue: { publish: jest.fn() } },
+        { provide: PaymentEventsService, useValue: paymentEventsServiceMock },
+        { provide: InventoryService, useValue: {} },
+        { provide: PayoutsService, useValue: payoutsServiceMock },
+        { provide: StoresService, useValue: storesServiceMock },
+        { provide: VendorWebhooksService, useValue: {} },
+        { provide: OrderAuditLogsService, useValue: orderAuditLogsServiceMock },
+        { provide: BeamService, useValue: beamServiceMock },
+        { provide: UsersService, useValue: usersServiceMock },
+        { provide: BankTransferSettingsService, useValue: {} },
+      ],
+    }).compile();
+    service = module.get(PaymentsService);
+  });
+
+  it('creates a full Beam refund for each paid Beam charge', async () => {
+    paymentRepository.find.mockResolvedValue([
+      {
+        id: 'pay-1',
+        orderId: 'ord-1',
+        status: 'paid',
+        psp: 'beam',
+        pspChargeId: 'ch_paid',
+      },
+      {
+        id: 'pay-pending',
+        orderId: 'ord-1',
+        status: 'paid',
+        psp: 'beam',
+        pspChargeId: '  ',
+      },
+    ]);
+    beamServiceMock.createRefund.mockResolvedValue({ refundId: 'rf_1' });
+
+    const ids = await service.refundPaidBeamCharges('ord-1', 'Order cancelled after payment');
+
+    expect(ids).toEqual(['pay-1']);
+    expect(beamServiceMock.createRefund).toHaveBeenCalledWith(
+      { chargeId: 'ch_paid', reason: 'Order cancelled after payment' },
+      { idempotencyKey: 'refund:pay-1' },
+    );
+  });
+
+  it('does not call Beam when the order has no paid Beam charge', async () => {
+    paymentRepository.find.mockResolvedValue([]);
+
+    const ids = await service.refundPaidBeamCharges('ord-1', 'Order cancelled after payment');
+
+    expect(ids).toEqual([]);
+    expect(beamServiceMock.createRefund).not.toHaveBeenCalled();
+    expect(beamServiceMock.hasCredentials).not.toHaveBeenCalled();
   });
 });

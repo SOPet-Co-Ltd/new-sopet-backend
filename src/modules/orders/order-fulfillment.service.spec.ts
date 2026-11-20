@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { OrderFulfillmentService } from './order-fulfillment.service';
 import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
 import { FulfillmentStatus, OrderItem } from '../../database/entities/order-item.entity';
@@ -12,10 +13,17 @@ describe('OrderFulfillmentService hold guards', () => {
     notifyVendorsAboutOrderStatus: jest.Mock;
   };
   let vendorWebhooksService: { dispatchOrderEvent: jest.Mock };
+  let paymentsService: { refundPaidBeamCharges: jest.Mock };
   let dataSource: {
     transaction: jest.Mock;
     getRepository: jest.Mock;
     manager: { save: jest.Mock; findOne: jest.Mock };
+  };
+  let transactionManager: {
+    save: jest.Mock;
+    create: jest.Mock;
+    find: jest.Mock;
+    update: jest.Mock;
   };
 
   beforeEach(() => {
@@ -31,14 +39,17 @@ describe('OrderFulfillmentService hold guards', () => {
     vendorWebhooksService = {
       dispatchOrderEvent: jest.fn().mockResolvedValue(undefined),
     };
+    paymentsService = {
+      refundPaidBeamCharges: jest.fn().mockResolvedValue([]),
+    };
+    transactionManager = {
+      save: jest.fn((x: unknown) => Promise.resolve(x)),
+      create: jest.fn((_e: unknown, d: unknown) => d),
+      find: jest.fn().mockResolvedValue([]),
+      update: jest.fn().mockResolvedValue(undefined),
+    };
     dataSource = {
-      transaction: jest.fn(async (cb: (m: unknown) => Promise<unknown>) =>
-        cb({
-          save: jest.fn((x: unknown) => Promise.resolve(x)),
-          create: jest.fn((_e: unknown, d: unknown) => d),
-          find: jest.fn().mockResolvedValue([]),
-        }),
-      ),
+      transaction: jest.fn(async (cb: (m: unknown) => Promise<unknown>) => cb(transactionManager)),
       getRepository: jest.fn().mockReturnValue({
         count: jest.fn().mockResolvedValue(0),
       }),
@@ -56,6 +67,7 @@ describe('OrderFulfillmentService hold guards', () => {
       inventoryService as never,
       vendorWebhooksService as never,
       { append: jest.fn().mockResolvedValue(undefined) } as never,
+      paymentsService as never,
     );
   });
 
@@ -107,6 +119,59 @@ describe('OrderFulfillmentService hold guards', () => {
       response: { code: 'ORDER_REVIEWED_CANNOT_CANCEL' },
     });
     expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+  });
+
+  it('refunds a paid Beam charge when the vendor cancels a paid order', async () => {
+    const items = [
+      {
+        id: 'item-1',
+        orderId: 'ord-1',
+        storeId: 'store-1',
+        fulfillmentStatus: FulfillmentStatus.PENDING,
+      },
+    ] as OrderItem[];
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-1',
+      status: OrderStatus.PAID,
+      items,
+    });
+    paymentsService.refundPaidBeamCharges.mockResolvedValue(['pay-1']);
+
+    await service.cancelVendorOrder('vendor-1', 'store-1', 'ord-1');
+
+    expect(paymentsService.refundPaidBeamCharges).toHaveBeenCalledWith(
+      'ord-1',
+      'Vendor cancelled order after payment',
+    );
+    expect(transactionManager.update).toHaveBeenCalledWith(
+      expect.anything(),
+      { id: expect.anything() },
+      { status: 'refunded' },
+    );
+  });
+
+  it('does not cancel the order when the Beam refund fails', async () => {
+    const items = [
+      {
+        id: 'item-1',
+        orderId: 'ord-1',
+        storeId: 'store-1',
+        fulfillmentStatus: FulfillmentStatus.PENDING,
+      },
+    ] as OrderItem[];
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-1',
+      status: OrderStatus.PAID,
+      items,
+    });
+    paymentsService.refundPaidBeamCharges.mockRejectedValue(
+      new BadRequestException({ code: 'BEAM_ERROR', message: 'refund rejected' }),
+    );
+
+    await expect(service.cancelVendorOrder('vendor-1', 'store-1', 'ord-1')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
     expect(dataSource.transaction).not.toHaveBeenCalled();
   });
 

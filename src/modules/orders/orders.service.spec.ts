@@ -1,6 +1,7 @@
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
+import { Payment } from '../../database/entities/payment.entity';
 import { FulfillmentStatus, OrderItem } from '../../database/entities/order-item.entity';
 import { CustomerOrderListFilter } from './order-list-filter.util';
 import * as OrderMapper from './order.mapper';
@@ -36,6 +37,7 @@ describe('OrdersService', () => {
     append: jest.Mock;
     resolveCustomerActorLabel: jest.Mock;
   };
+  let paymentsService: { refundPaidBeamCharges: jest.Mock };
   let mockManager: {
     create: jest.Mock;
     save: jest.Mock;
@@ -115,6 +117,9 @@ describe('OrdersService', () => {
       append: jest.fn().mockResolvedValue(undefined),
       resolveCustomerActorLabel: jest.fn().mockResolvedValue('Guest'),
     };
+    paymentsService = {
+      refundPaidBeamCharges: jest.fn().mockResolvedValue([]),
+    };
 
     mockManager = {
       create: jest.fn((_entity: unknown, data: Record<string, unknown>) => ({ ...data })),
@@ -156,6 +161,7 @@ describe('OrdersService', () => {
       vendorWebhooksService as never,
       saleCampaignsService as never,
       orderAuditLogsService as never,
+      paymentsService as never,
     );
   });
 
@@ -907,6 +913,56 @@ describe('OrdersService', () => {
       mockManager,
       'Order status changed to cancelled',
     );
+    expect(paymentsService.refundPaidBeamCharges).toHaveBeenCalledWith(
+      'ord-1',
+      'Order cancelled after payment',
+    );
+  });
+
+  it('marks the Beam payment refunded when a paid order is cancelled', async () => {
+    const order = {
+      id: 'ord-1',
+      status: OrderStatus.PAID,
+      items: [],
+      shippingAddress: {},
+      storeShippings: [],
+      statusHistory: [],
+    };
+    orderRepository.findOne.mockResolvedValue(order);
+    paymentsService.refundPaidBeamCharges.mockResolvedValue(['pay-1']);
+
+    await service.updateStatus('ord-1', OrderStatus.CANCELLED, 'admin-1');
+
+    expect(paymentsService.refundPaidBeamCharges).toHaveBeenCalledWith(
+      'ord-1',
+      'Order cancelled after payment',
+    );
+    expect(mockManager.update).toHaveBeenCalledWith(
+      Payment,
+      { id: expect.anything() },
+      { status: 'refunded' },
+    );
+  });
+
+  it('does not cancel the order when the Beam refund fails', async () => {
+    const order = {
+      id: 'ord-1',
+      status: OrderStatus.PAID,
+      items: [],
+      shippingAddress: {},
+      storeShippings: [],
+      statusHistory: [],
+    };
+    orderRepository.findOne.mockResolvedValue(order);
+    paymentsService.refundPaidBeamCharges.mockRejectedValue(
+      new BadRequestException({ code: 'BEAM_ERROR', message: 'refund rejected' }),
+    );
+
+    await expect(
+      service.updateStatus('ord-1', OrderStatus.CANCELLED, 'admin-1'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+    expect(order.status).toBe(OrderStatus.PAID);
   });
 
   it('rejects cancel and refund when the order already has a review', async () => {

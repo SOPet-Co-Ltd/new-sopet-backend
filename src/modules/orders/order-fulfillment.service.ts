@@ -1,11 +1,13 @@
 import {
   BadRequestException,
   ForbiddenException,
+  forwardRef,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
 import { FulfillmentStatus, OrderItem } from '../../database/entities/order-item.entity';
 import { OrderStatusHistory } from '../../database/entities/order-status-history.entity';
@@ -22,6 +24,7 @@ import {
   validateTrackingNumber,
   VENDOR_CANCELLABLE_ORDER_STATUSES,
 } from './order-fulfillment.util';
+import { PaymentsService } from '../payments/payments.service';
 import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.service';
 import { webhookEventForOrderStatus } from '../vendor-webhooks/vendor-webhook.events';
 import { OrderAuditLogsService } from '../order-audit-logs/order-audit-logs.service';
@@ -44,6 +47,8 @@ export class OrderFulfillmentService {
     private readonly inventoryService: InventoryService,
     private readonly vendorWebhooksService: VendorWebhooksService,
     private readonly orderAuditLogsService: OrderAuditLogsService,
+    @Inject(forwardRef(() => PaymentsService))
+    private readonly paymentsService: PaymentsService,
   ) {}
 
   private async loadOrderWithItems(orderId: string): Promise<Order> {
@@ -462,6 +467,11 @@ export class OrderFulfillmentService {
 
     this.markItemsCancelled(order.items);
 
+    const refundedPaymentIds = await this.paymentsService.refundPaidBeamCharges(
+      order.id,
+      'Vendor cancelled order after payment',
+    );
+
     await this.dataSource.transaction(async (manager) => {
       order.status = OrderStatus.CANCELLED;
       await manager.save(Order, order);
@@ -475,6 +485,10 @@ export class OrderFulfillmentService {
       for (const payment of pendingPayments) {
         payment.status = 'failed';
         await manager.save(payment);
+      }
+
+      if (refundedPaymentIds.length > 0) {
+        await manager.update(Payment, { id: In(refundedPaymentIds) }, { status: 'refunded' });
       }
 
       await manager.save(

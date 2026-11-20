@@ -1,7 +1,15 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  forwardRef,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
 import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
+import { Payment } from '../../database/entities/payment.entity';
 import { FulfillmentStatus, OrderItem } from '../../database/entities/order-item.entity';
 import { Customer } from '../../database/entities/customer.entity';
 import { OrderShippingAddress } from '../../database/entities/order-shipping-address.entity';
@@ -45,6 +53,7 @@ import {
 } from './vendor-order-action-queue.util';
 import { assertOrderHasNoReviews } from './order-review-cancel.guard';
 import { assertNotManualHoldTransition } from './store-suspension-hold.service';
+import { PaymentsService } from '../payments/payments.service';
 import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.service';
 import { webhookEventForOrderStatus } from '../vendor-webhooks/vendor-webhook.events';
 import { SaleCampaignPricingService } from '../sale-campaigns/sale-campaign-pricing.service';
@@ -107,6 +116,8 @@ export class OrdersService {
     private vendorWebhooksService: VendorWebhooksService,
     private saleCampaignPricing: SaleCampaignPricingService,
     private orderAuditLogsService: OrderAuditLogsService,
+    @Inject(forwardRef(() => PaymentsService))
+    private paymentsService: PaymentsService,
   ) {}
 
   private generateOrderNumber(): string {
@@ -1359,6 +1370,17 @@ export class OrdersService {
       await assertOrderHasNoReviews(this.dataSource, id);
     }
 
+    const refundedPaymentIds =
+      (status === OrderStatus.CANCELLED || status === OrderStatus.REFUNDED) &&
+      previousStatus !== status
+        ? await this.paymentsService.refundPaidBeamCharges(
+            id,
+            status === OrderStatus.REFUNDED
+              ? 'Order refunded after payment'
+              : 'Order cancelled after payment',
+          )
+        : [];
+
     const isAdminHoldExit =
       (status === OrderStatus.CANCELLED || status === OrderStatus.REFUNDED) &&
       (previousStatus === OrderStatus.ON_HOLD ||
@@ -1389,6 +1411,10 @@ export class OrdersService {
       }
 
       await manager.save(order);
+
+      if (refundedPaymentIds.length > 0) {
+        await manager.update(Payment, { id: In(refundedPaymentIds) }, { status: 'refunded' });
+      }
 
       if (status === OrderStatus.CANCELLED || status === OrderStatus.REFUNDED) {
         await this.inventoryService.restoreOrderStock(

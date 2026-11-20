@@ -44,6 +44,17 @@ export interface BeamCharge {
   };
 }
 
+export interface BeamCreateRefundBody {
+  chargeId: string;
+  /** Smallest currency unit. Omit to refund the remaining amount. */
+  amount?: number;
+  reason?: string;
+}
+
+export interface BeamRefund {
+  refundId: string;
+}
+
 @Injectable()
 export class BeamService {
   private readonly logger = new Logger(BeamService.name);
@@ -114,6 +125,18 @@ export class BeamService {
 
   async getCharge(chargeId: string): Promise<BeamCharge> {
     return this.request<BeamCharge>(`/api/v1/charges/${encodeURIComponent(chargeId)}`, 'GET');
+  }
+
+  async createRefund(
+    body: BeamCreateRefundBody,
+    options?: { idempotencyKey?: string },
+  ): Promise<BeamRefund> {
+    return this.request<BeamRefund>(
+      '/api/v1/refunds',
+      'POST',
+      body as unknown as Record<string, unknown>,
+      options,
+    );
   }
 
   verifyWebhookSignature(rawBody: string | Buffer, signatureHeader: string | undefined): boolean {
