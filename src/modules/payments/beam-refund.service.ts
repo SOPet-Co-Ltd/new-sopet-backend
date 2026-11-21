@@ -1,8 +1,17 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { PaymentMethod } from '../../database/entities/enums/order.enums';
 import { Payment } from '../../database/entities/payment.entity';
 import { BeamService } from '../beam/beam.service';
+
+/** Beam Refunds API does not accept TrueMoney or ShopeePay charges. */
+export function requiresManualBeamRefund(method: string | null | undefined): boolean {
+  return method === PaymentMethod.TRUEMONEY || method === PaymentMethod.SHOPEEPAY;
+}
+
+export const MANUAL_BEAM_REFUND_NOTE =
+  'Beam does not support refunds for this payment method. Refund the customer manually.';
 
 @Injectable()
 export class BeamRefundService {
@@ -22,7 +31,10 @@ export class BeamRefundService {
     const payments = await this.paymentRepository.find({
       where: { orderId, status: 'paid', psp: 'beam' },
     });
-    const targets = payments.filter((payment) => Boolean(payment.pspChargeId?.trim()));
+    const targets = payments.filter(
+      (payment) =>
+        Boolean(payment.pspChargeId?.trim()) && !requiresManualBeamRefund(payment.paymentMethod),
+    );
     if (targets.length === 0) {
       return [];
     }

@@ -22,7 +22,11 @@ import {
   validateTrackingNumber,
   VENDOR_CANCELLABLE_ORDER_STATUSES,
 } from './order-fulfillment.util';
-import { BeamRefundService } from '../payments/beam-refund.service';
+import {
+  BeamRefundService,
+  MANUAL_BEAM_REFUND_NOTE,
+  requiresManualBeamRefund,
+} from '../payments/beam-refund.service';
 import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.service';
 import { webhookEventForOrderStatus } from '../vendor-webhooks/vendor-webhook.events';
 import { OrderAuditLogsService } from '../order-audit-logs/order-audit-logs.service';
@@ -464,6 +468,8 @@ export class OrderFulfillmentService {
 
     this.markItemsCancelled(order.items);
 
+    const manualRefund =
+      requiresManualBeamRefund(order.paymentMethod) && order.status !== OrderStatus.PENDING_PAYMENT;
     const refundedPaymentIds = await this.beamRefundService.refundPaidBeamCharges(
       order.id,
       'Vendor cancelled order after payment',
@@ -494,7 +500,9 @@ export class OrderFulfillmentService {
           orderId: order.id,
           status: OrderStatus.CANCELLED,
           changedBy: userId,
-          notes: `Vendor cancelled order (store ${storeId})`,
+          notes: manualRefund
+            ? `Vendor cancelled order (store ${storeId}). ${MANUAL_BEAM_REFUND_NOTE}`
+            : `Vendor cancelled order (store ${storeId})`,
         }),
       );
     });

@@ -46,7 +46,11 @@ import {
 } from './vendor-order-action-queue.util';
 import { assertOrderHasNoReviews } from './order-review-cancel.guard';
 import { assertNotManualHoldTransition } from './store-suspension-hold.service';
-import { BeamRefundService } from '../payments/beam-refund.service';
+import {
+  BeamRefundService,
+  MANUAL_BEAM_REFUND_NOTE,
+  requiresManualBeamRefund,
+} from '../payments/beam-refund.service';
 import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.service';
 import { webhookEventForOrderStatus } from '../vendor-webhooks/vendor-webhook.events';
 import { SaleCampaignPricingService } from '../sale-campaigns/sale-campaign-pricing.service';
@@ -1422,7 +1426,12 @@ export class OrdersService {
           orderId: id,
           status,
           changedBy: userId ?? null,
-          notes: `Status changed from ${previousStatus} to ${status}`,
+          notes:
+            (status === OrderStatus.CANCELLED || status === OrderStatus.REFUNDED) &&
+            previousStatus !== OrderStatus.PENDING_PAYMENT &&
+            requiresManualBeamRefund(order.paymentMethod)
+              ? `Status changed from ${previousStatus} to ${status}. ${MANUAL_BEAM_REFUND_NOTE}`
+              : `Status changed from ${previousStatus} to ${status}`,
         }),
       );
     });

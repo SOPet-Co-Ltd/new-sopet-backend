@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BeamService } from '../beam/beam.service';
+import { PaymentMethod } from '../../database/entities/enums/order.enums';
 import { Payment } from '../../database/entities/payment.entity';
 import { BeamRefundService } from './beam-refund.service';
 
@@ -51,6 +52,33 @@ describe('BeamRefundService', () => {
       { chargeId: 'ch_paid', reason: 'Order cancelled after payment' },
       { idempotencyKey: 'refund:pay-1' },
     );
+  });
+
+  it('leaves TrueMoney and ShopeePay charges for a manual refund', async () => {
+    paymentRepository.find.mockResolvedValue([
+      {
+        id: 'pay-tm',
+        orderId: 'ord-1',
+        status: 'paid',
+        psp: 'beam',
+        pspChargeId: 'ch_tm',
+        paymentMethod: PaymentMethod.TRUEMONEY,
+      },
+      {
+        id: 'pay-sp',
+        orderId: 'ord-1',
+        status: 'paid',
+        psp: 'beam',
+        pspChargeId: 'ch_sp',
+        paymentMethod: PaymentMethod.SHOPEEPAY,
+      },
+    ]);
+
+    const ids = await service.refundPaidBeamCharges('ord-1', 'Order cancelled after payment');
+
+    expect(ids).toEqual([]);
+    expect(beamService.createRefund).not.toHaveBeenCalled();
+    expect(beamService.hasCredentials).not.toHaveBeenCalled();
   });
 
   it('does not call Beam when the order has no paid Beam charge', async () => {
