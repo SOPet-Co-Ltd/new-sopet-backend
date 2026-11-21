@@ -661,6 +661,14 @@ type CustomerAuthPayload {
   tokens: AuthTokens
 }
 
+input CustomerExistsByPhoneInput {
+  phone: String!
+}
+
+type CustomerExistsByPhonePayload {
+  exists: Boolean!
+}
+
 enum CustomerOrderListFilter {
   ALL
   CANCELLED
@@ -1528,6 +1536,7 @@ type Query {
   brandDeleteImpact(brandId: String!): TaxonomyDeleteImpactType!
   cart(sessionId: String): CartType!
   categoryDeleteImpact(categoryId: String!): TaxonomyDeleteImpactType!
+  customerExistsByPhone(input: CustomerExistsByPhoneInput!): CustomerExistsByPhonePayload!
   customerPurchaseSummary(customerId: String!, month: Int!, year: Int!): CustomerPurchaseSummaryType!
   customerReviewableItems: [CustomerReviewableItemType!]!
   emailContainer(id: ID!): EmailContainerType

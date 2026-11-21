@@ -21,6 +21,7 @@ import { InventoryService } from '../src/modules/inventory/inventory.service';
 import { CartService } from '../src/modules/cart/cart.service';
 import { VendorWebhooksService } from '../src/modules/vendor-webhooks/vendor-webhooks.service';
 import { OrderAuditLogsService } from '../src/modules/order-audit-logs/order-audit-logs.service';
+import { mockBeamRefundProvider } from './helpers/beam-refund.mock';
 import { mockSaleCampaignPricingProvider } from './helpers/sale-campaign-pricing.mock';
 import { Order, OrderStatus, PaymentMethod } from '../src/database/entities/order.entity';
 import { OrderItem } from '../src/database/entities/order-item.entity';
@@ -143,6 +144,7 @@ describe('Promotion loggedInOnly createOrder (service-integration-e2e)', () => {
             resolveCustomerActorLabel: jest.fn().mockResolvedValue('ลูกค้า'),
           },
         },
+        mockBeamRefundProvider,
       ],
     }).compile();
 

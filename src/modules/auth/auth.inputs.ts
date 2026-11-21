@@ -18,6 +18,14 @@ export class SendCustomerOtpInput {
 }
 
 @InputType()
+export class CustomerExistsByPhoneInput {
+  @Field()
+  @IsNotEmpty()
+  @IsString()
+  phone!: string;
+}
+
+@InputType()
 export class VerifyCustomerOtpInput {
   @Field()
   @IsNotEmpty()

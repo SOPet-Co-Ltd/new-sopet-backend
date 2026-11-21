@@ -8,6 +8,7 @@ import { RolesGuard } from './guards/roles.guard';
 import { AuthRateLimitGuard } from './guards/auth-rate-limit.guard';
 import {
   CustomerAuthPayload,
+  CustomerExistsByPhonePayload,
   VendorAuthPayload,
   AuthTokens,
   MeResult,
@@ -20,6 +21,7 @@ import { mapCustomerProfile, mapUserProfile } from '../../graphql/models/mappers
 import { Customer } from '../../database/entities/customer.entity';
 import { User } from '../../database/entities/user.entity';
 import {
+  CustomerExistsByPhoneInput,
   RefreshTokenInput,
   SendCustomerOtpInput,
   VendorLoginInput,
@@ -60,6 +62,15 @@ export class AuthResolver {
     }
 
     return {};
+  }
+
+  @Query(() => CustomerExistsByPhonePayload)
+  @Public()
+  @UseGuards(AuthRateLimitGuard)
+  async customerExistsByPhone(
+    @Args('input') input: CustomerExistsByPhoneInput,
+  ): Promise<CustomerExistsByPhonePayload> {
+    return this.authService.customerExistsByPhone(input.phone);
   }
 
   @Mutation(() => SendCustomerOtpPayload)

@@ -123,6 +123,13 @@ export class SendCustomerOtpPayload {
 }
 
 @ObjectType()
+export class CustomerExistsByPhonePayload {
+  /** True when an active (non-deleted) customer account exists for the phone. No PII. */
+  @Field()
+  exists!: boolean;
+}
+
+@ObjectType()
 export class PasswordResetTokenStatusType {
   @Field()
   valid!: boolean;
