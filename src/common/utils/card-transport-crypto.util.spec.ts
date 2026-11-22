@@ -63,6 +63,13 @@ describe('card-transport-crypto', () => {
     expect(() => decryptCardTransportPayload('not-a-cipher')).toThrow(BadRequestException);
   });
 
+  it('accepts a PEM stored with literal \\n escapes', () => {
+    const escaped = privatePem.replace(/\r/g, '').replace(/\n/g, '\\n');
+    process.env.CARD_TRANSPORT_PRIVATE_KEY = escaped;
+    expect(getCardTransportPublicKeyPem()).toContain('BEGIN PUBLIC KEY');
+    process.env.CARD_TRANSPORT_PRIVATE_KEY = privatePem;
+  });
+
   it('throws when private key is missing', () => {
     const key = process.env.CARD_TRANSPORT_PRIVATE_KEY;
     delete process.env.CARD_TRANSPORT_PRIVATE_KEY;
