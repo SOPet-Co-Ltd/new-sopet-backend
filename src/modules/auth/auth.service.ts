@@ -122,6 +122,20 @@ export class AuthService {
     return Number.isNaN(expiresMs) || expiresMs <= Date.now();
   }
 
+  /**
+   * Boolean-only account existence check for checkout guest prompts.
+   * Returns no PII — only whether a non-deleted customer row matches the phone.
+   */
+  async customerExistsByPhone(phoneInput: string): Promise<{ exists: boolean }> {
+    const phone = normalizeThaiPhoneToLocal(phoneInput);
+    if (!phone) {
+      return { exists: false };
+    }
+
+    const customer = await this.customerRepo.findActiveByPhone(phone);
+    return { exists: customer != null };
+  }
+
   async sendOtp(sendOtpDto: SendOtpDto): Promise<{ message: string; referenceCode: string }> {
     const phone = normalizeThaiPhoneToLocal(sendOtpDto.phone);
 

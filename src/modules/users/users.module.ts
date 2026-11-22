@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
 import { OrdersModule } from '../orders/orders.module';
@@ -19,7 +19,7 @@ import { CustomerRepository } from '../../database/repositories/customer.reposit
   imports: [
     AuthModule,
     OrdersModule,
-    PaymentsModule,
+    forwardRef(() => PaymentsModule),
     StorageModule,
     TypeOrmModule.forFeature([
       Customer,

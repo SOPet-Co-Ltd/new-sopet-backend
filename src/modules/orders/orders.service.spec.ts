@@ -1,6 +1,7 @@
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
+import { Payment } from '../../database/entities/payment.entity';
 import { FulfillmentStatus, OrderItem } from '../../database/entities/order-item.entity';
 import { CustomerOrderListFilter } from './order-list-filter.util';
 import * as OrderMapper from './order.mapper';
@@ -12,11 +13,13 @@ describe('OrdersService', () => {
     find: jest.Mock;
     update: jest.Mock;
     createQueryBuilder: jest.Mock;
+    query: jest.Mock;
   };
+  let storeRepository: { find: jest.Mock };
   let savedAddressRepository: { findOne: jest.Mock };
   let variantRepository: { findOne: jest.Mock };
   let shippingOptionRepository: { findOne: jest.Mock };
-  let dataSource: { transaction: jest.Mock };
+  let dataSource: { transaction: jest.Mock; getRepository: jest.Mock };
   let notificationsService: {
     notifyOrderStatusChanged: jest.Mock;
     notifyVendorAboutNewOrder: jest.Mock;
@@ -25,14 +28,16 @@ describe('OrdersService', () => {
   };
   let promotionsService: { applyStackedPromotions: jest.Mock };
   let guestOrderLinkService: { mergeGuestOrders: jest.Mock };
-  let customerRepository: { findActiveByPhone: jest.Mock };
+  let customerRepository: { findActiveByPhone: jest.Mock; setEmailIfMissing: jest.Mock };
   let inventoryService: { restoreOrderStock: jest.Mock };
+  let cartService: { removeItems: jest.Mock; getCart: jest.Mock };
   let vendorWebhooksService: { dispatchOrderEvent: jest.Mock };
   let saleCampaignsService: { resolveEffectiveUnitPrices: jest.Mock };
   let orderAuditLogsService: {
     append: jest.Mock;
     resolveCustomerActorLabel: jest.Mock;
   };
+  let paymentsService: { refundPaidBeamCharges: jest.Mock };
   let mockManager: {
     create: jest.Mock;
     save: jest.Mock;
@@ -65,7 +70,9 @@ describe('OrdersService', () => {
       find: jest.fn(),
       update: jest.fn(),
       createQueryBuilder: jest.fn(),
+      query: jest.fn(),
     };
+    storeRepository = { find: jest.fn().mockResolvedValue([]) };
     savedAddressRepository = { findOne: jest.fn() };
     variantRepository = { findOne: jest.fn() };
     shippingOptionRepository = { findOne: jest.fn() };
@@ -77,8 +84,15 @@ describe('OrdersService', () => {
     };
     promotionsService = { applyStackedPromotions: jest.fn() };
     guestOrderLinkService = { mergeGuestOrders: jest.fn() };
-    customerRepository = { findActiveByPhone: jest.fn().mockResolvedValue(null) };
+    customerRepository = {
+      findActiveByPhone: jest.fn().mockResolvedValue(null),
+      setEmailIfMissing: jest.fn().mockResolvedValue(false),
+    };
     inventoryService = { restoreOrderStock: jest.fn().mockResolvedValue(true) };
+    cartService = {
+      removeItems: jest.fn(),
+      getCart: jest.fn().mockResolvedValue({ items: [] }),
+    };
     vendorWebhooksService = {
       dispatchOrderEvent: jest.fn().mockResolvedValue(undefined),
     };
@@ -103,6 +117,9 @@ describe('OrdersService', () => {
       append: jest.fn().mockResolvedValue(undefined),
       resolveCustomerActorLabel: jest.fn().mockResolvedValue('Guest'),
     };
+    paymentsService = {
+      refundPaidBeamCharges: jest.fn().mockResolvedValue([]),
+    };
 
     mockManager = {
       create: jest.fn((_entity: unknown, data: Record<string, unknown>) => ({ ...data })),
@@ -119,6 +136,10 @@ describe('OrdersService', () => {
 
     dataSource = {
       transaction: jest.fn((cb: (manager: typeof mockManager) => unknown) => cb(mockManager)),
+      getRepository: jest.fn().mockReturnValue({
+        save: jest.fn(async (entity: unknown) => entity),
+        count: jest.fn().mockResolvedValue(0),
+      }),
     };
 
     service = new OrdersService(
@@ -130,16 +151,58 @@ describe('OrdersService', () => {
       shippingOptionRepository as never,
       dataSource as never,
       notificationsService as never,
+      { publish: jest.fn().mockResolvedValue(undefined) } as never,
       promotionsService as never,
       guestOrderLinkService as never,
       customerRepository as never,
       inventoryService as never,
-      { removeItems: jest.fn() } as never,
-      {} as never,
+      cartService as never,
+      storeRepository as never,
       vendorWebhooksService as never,
       saleCampaignsService as never,
       orderAuditLogsService as never,
+      paymentsService as never,
     );
+  });
+
+  it('rejects create when cartItemIds are missing from cart (SF-CHK-112)', async () => {
+    cartService.getCart.mockResolvedValue({
+      items: [{ id: 'cart-other', variantId: 'var-1', quantity: 1 }],
+    });
+
+    await expect(
+      service.create(
+        {
+          items: [{ productId: 'p1', variantId: 'var-1', quantity: 1, price: 100 }],
+          paymentMethod: 'promptpay',
+          guestPhone: '+66812345678',
+          shippingAddress,
+          cartItemIds: ['cart-removed'],
+        },
+        'cust-1',
+      ),
+    ).rejects.toMatchObject({ response: { code: 'CART_ITEMS_STALE' } });
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects create when cart lines do not match order variants (SF-CHK-112)', async () => {
+    cartService.getCart.mockResolvedValue({
+      items: [{ id: 'cart-1', variantId: 'var-other', quantity: 1 }],
+    });
+
+    await expect(
+      service.create(
+        {
+          items: [{ productId: 'p1', variantId: 'var-1', quantity: 1, price: 100 }],
+          paymentMethod: 'promptpay',
+          guestPhone: '+66812345678',
+          shippingAddress,
+          cartItemIds: ['cart-1'],
+        },
+        'cust-1',
+      ),
+    ).rejects.toMatchObject({ response: { code: 'CART_ITEMS_MISMATCH' } });
+    expect(dataSource.transaction).not.toHaveBeenCalled();
   });
 
   it('requires guestPhone for guest checkout', async () => {
@@ -274,26 +337,80 @@ describe('OrdersService', () => {
     expect(result.guestPayToken).toBeUndefined();
   });
 
-  it('overwrites client price with campaign sale unit and snapshots catalog (AC-004/013)', async () => {
+  it('rejects create when locked catalog price changed mid-checkout (SF-CHK-114)', async () => {
     variantRepository.findOne.mockResolvedValue({
+      ...variant,
+      product: { ...variant.product, basePrice: 10 },
+    });
+    saleCampaignsService.resolveEffectiveUnitPrices
+      .mockResolvedValueOnce(
+        new Map([
+          [
+            'var-1',
+            {
+              catalogUnitPrice: 10,
+              unitPrice: 10,
+              saleCampaignId: null,
+              saleDiscountPercent: null,
+              compareAtPrice: null,
+            },
+          ],
+        ]),
+      )
+      .mockResolvedValueOnce(
+        new Map([
+          [
+            'var-1',
+            {
+              catalogUnitPrice: 12,
+              unitPrice: 12,
+              saleCampaignId: null,
+              saleDiscountPercent: null,
+              compareAtPrice: null,
+            },
+          ],
+        ]),
+      );
+    mockManager.findOne.mockResolvedValue({
+      ...variant,
+      product: { ...variant.product, basePrice: 12 },
+    });
+
+    await expect(
+      service.create(
+        {
+          items: [{ productId: 'p1', variantId: 'var-1', quantity: 1, price: 10 }],
+          paymentMethod: 'promptpay',
+          guestPhone: '+66812345678',
+          guestName: 'Guest',
+          shippingAddress,
+        },
+        undefined,
+      ),
+    ).rejects.toMatchObject({ response: { code: 'PRICE_CHANGED' } });
+  });
+
+  it('overwrites client price with campaign sale unit and snapshots catalog (AC-004/013)', async () => {
+    const saleVariant = {
       ...variant,
       priceAdjustment: 0,
       product: { ...variant.product, basePrice: 279 },
-    });
-    saleCampaignsService.resolveEffectiveUnitPrices.mockResolvedValue(
-      new Map([
-        [
-          'var-1',
-          {
-            catalogUnitPrice: 279,
-            unitPrice: 223.2,
-            saleCampaignId: 'camp-1',
-            saleDiscountPercent: 20,
-            compareAtPrice: null,
-          },
-        ],
-      ]),
-    );
+    };
+    variantRepository.findOne.mockResolvedValue(saleVariant);
+    mockManager.findOne.mockResolvedValue(saleVariant);
+    const salePriceMap = new Map([
+      [
+        'var-1',
+        {
+          catalogUnitPrice: 279,
+          unitPrice: 223.2,
+          saleCampaignId: 'camp-1',
+          saleDiscountPercent: 20,
+          compareAtPrice: null,
+        },
+      ],
+    ]);
+    saleCampaignsService.resolveEffectiveUnitPrices.mockResolvedValue(salePriceMap);
     promotionsService.applyStackedPromotions.mockResolvedValue({
       discountAmount: 22.32,
       promotions: [{ id: 'promo-1', type: 'percentage', discountValue: 10 }],
@@ -390,6 +507,93 @@ describe('OrdersService', () => {
     const payload = orderCreatePayload();
     expect(payload.customerId).toBe('member-1');
     expect(payload.guestPhone).toBe('0812345678');
+  });
+
+  it('sets customer email from checkout when linked customer has none', async () => {
+    variantRepository.findOne.mockResolvedValue(variant);
+    customerRepository.findActiveByPhone.mockResolvedValue({ id: 'member-1', email: null });
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-1',
+      orderNumber: 'ORD-TEST',
+      status: OrderStatus.PENDING_PAYMENT,
+      items: [],
+      shippingAddress: {},
+      storeShippings: [],
+      statusHistory: [],
+    });
+
+    await service.create(
+      {
+        items: [{ productId: 'p1', variantId: 'var-1', quantity: 1, price: 100 }],
+        paymentMethod: 'promptpay',
+        guestPhone: '+66812345678',
+        guestName: 'Guest',
+        guestEmail: '  new@example.com  ',
+        shippingAddress,
+      },
+      undefined,
+    );
+
+    expect(customerRepository.setEmailIfMissing).toHaveBeenCalledWith(
+      'member-1',
+      'new@example.com',
+    );
+    const payload = orderCreatePayload();
+    expect(payload.guestEmail).toBe('new@example.com');
+  });
+
+  it('sets customer email from checkout for authenticated create when present', async () => {
+    variantRepository.findOne.mockResolvedValue(variant);
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-1',
+      orderNumber: 'ORD-TEST',
+      status: OrderStatus.PENDING_PAYMENT,
+      items: [],
+      shippingAddress: {},
+      storeShippings: [],
+      statusHistory: [],
+    });
+
+    await service.create(
+      {
+        items: [{ productId: 'p1', variantId: 'var-1', quantity: 1, price: 100 }],
+        paymentMethod: 'promptpay',
+        guestEmail: 'auth@example.com',
+        shippingAddress,
+      },
+      'cust-42',
+    );
+
+    expect(customerRepository.setEmailIfMissing).toHaveBeenCalledWith(
+      'cust-42',
+      'auth@example.com',
+    );
+    const payload = orderCreatePayload();
+    expect(payload.guestEmail).toBe('auth@example.com');
+  });
+
+  it('does not call setEmailIfMissing when checkout email is empty', async () => {
+    variantRepository.findOne.mockResolvedValue(variant);
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-1',
+      orderNumber: 'ORD-TEST',
+      status: OrderStatus.PENDING_PAYMENT,
+      items: [],
+      shippingAddress: {},
+      storeShippings: [],
+      statusHistory: [],
+    });
+
+    await service.create(
+      {
+        items: [{ productId: 'p1', variantId: 'var-1', quantity: 1, price: 100 }],
+        paymentMethod: 'promptpay',
+        shippingAddress,
+      },
+      'cust-42',
+    );
+
+    expect(customerRepository.setEmailIfMissing).not.toHaveBeenCalled();
   });
 
   it('keeps guest order unlinked when no member matches the phone', async () => {
@@ -589,6 +793,27 @@ describe('OrdersService', () => {
     expect(guestOrderLinkService.mergeGuestOrders).toHaveBeenCalledWith('cust-1', '+66812345678');
   });
 
+  it('still returns the saved order when customer notification fails', async () => {
+    const order = {
+      id: 'ord-1',
+      orderNumber: 'ORD-1',
+      status: OrderStatus.PENDING_PAYMENT,
+      items: [],
+      shippingAddress: {},
+      storeShippings: [],
+      statusHistory: [],
+    };
+    orderRepository.findOne.mockResolvedValue(order);
+    notificationsService.notifyOrderStatusChanged.mockRejectedValue(
+      new Error('Failed to send email: rate limit'),
+    );
+
+    const updated = await service.updateStatus('ord-1', OrderStatus.PROCESSING, 'admin-1');
+
+    expect(updated.status).toBe(OrderStatus.PROCESSING);
+    expect(notificationsService.notifyOrderStatusChanged).toHaveBeenCalled();
+  });
+
   it('updates order status and notifies', async () => {
     const order = {
       id: 'ord-1',
@@ -605,6 +830,69 @@ describe('OrdersService', () => {
     expect(notificationsService.notifyOrderStatusChanged).toHaveBeenCalled();
     expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
     expect(updated).toBeDefined();
+  });
+
+  it('updates shipping address as admin without clearing savedAddressId', async () => {
+    const shipping = {
+      id: 'addr-1',
+      orderId: 'ord-1',
+      savedAddressId: 'saved-1',
+      fullName: 'Old Name',
+      phone: '0811111111',
+      addressLine1: 'Old Rd',
+      addressLine2: null,
+      tumbon: null,
+      amphoe: 'Old Amphoe',
+      province: 'Bangkok',
+      postalCode: '10110',
+    };
+    const order = {
+      id: 'ord-1',
+      status: OrderStatus.PAID,
+      items: [],
+      shippingAddress: shipping,
+      storeShippings: [],
+      statusHistory: [],
+    };
+    orderRepository.findOne.mockResolvedValue(order);
+
+    const updated = await service.updateShippingAddressAsAdmin('ord-1', {
+      fullName: 'New Name',
+      phone: '089-999-9999',
+      addressLine1: '9/47',
+      addressLine2: '',
+      tumbon: 'บ้านใหม่',
+      amphoe: 'ปากเกร็ด',
+      province: 'นนทบุรี',
+      postalCode: '11120',
+    });
+
+    expect(shipping.fullName).toBe('New Name');
+    expect(shipping.phone).toBe('0899999999');
+    expect(shipping.addressLine1).toBe('9/47');
+    expect(shipping.addressLine2).toBeNull();
+    expect(shipping.amphoe).toBe('ปากเกร็ด');
+    expect(shipping.savedAddressId).toBe('saved-1');
+    expect(dataSource.getRepository).toHaveBeenCalled();
+    expect(updated).toBeDefined();
+  });
+
+  it('throws when order has no shipping address', async () => {
+    orderRepository.findOne.mockResolvedValue({
+      id: 'ord-1',
+      shippingAddress: null,
+    });
+
+    await expect(
+      service.updateShippingAddressAsAdmin('ord-1', {
+        fullName: 'Name',
+        phone: '0812345678',
+        addressLine1: 'Line',
+        amphoe: 'Amphoe',
+        province: 'Bangkok',
+        postalCode: '10110',
+      }),
+    ).rejects.toMatchObject({ response: { code: 'SHIPPING_ADDRESS_NOT_FOUND' } });
   });
 
   it('restores stock when order is cancelled', async () => {
@@ -625,6 +913,82 @@ describe('OrdersService', () => {
       mockManager,
       'Order status changed to cancelled',
     );
+    expect(paymentsService.refundPaidBeamCharges).toHaveBeenCalledWith(
+      'ord-1',
+      'Order cancelled after payment',
+    );
+  });
+
+  it('marks the Beam payment refunded when a paid order is cancelled', async () => {
+    const order = {
+      id: 'ord-1',
+      status: OrderStatus.PAID,
+      items: [],
+      shippingAddress: {},
+      storeShippings: [],
+      statusHistory: [],
+    };
+    orderRepository.findOne.mockResolvedValue(order);
+    paymentsService.refundPaidBeamCharges.mockResolvedValue(['pay-1']);
+
+    await service.updateStatus('ord-1', OrderStatus.CANCELLED, 'admin-1');
+
+    expect(paymentsService.refundPaidBeamCharges).toHaveBeenCalledWith(
+      'ord-1',
+      'Order cancelled after payment',
+    );
+    expect(mockManager.update).toHaveBeenCalledWith(
+      Payment,
+      { id: expect.anything() },
+      { status: 'refunded' },
+    );
+  });
+
+  it('does not cancel the order when the Beam refund fails', async () => {
+    const order = {
+      id: 'ord-1',
+      status: OrderStatus.PAID,
+      items: [],
+      shippingAddress: {},
+      storeShippings: [],
+      statusHistory: [],
+    };
+    orderRepository.findOne.mockResolvedValue(order);
+    paymentsService.refundPaidBeamCharges.mockRejectedValue(
+      new BadRequestException({ code: 'BEAM_ERROR', message: 'refund rejected' }),
+    );
+
+    await expect(
+      service.updateStatus('ord-1', OrderStatus.CANCELLED, 'admin-1'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+    expect(order.status).toBe(OrderStatus.PAID);
+  });
+
+  it('rejects cancel and refund when the order already has a review', async () => {
+    const order = {
+      id: 'ord-1',
+      status: OrderStatus.DELIVERED,
+      items: [],
+      shippingAddress: {},
+      storeShippings: [],
+      statusHistory: [],
+    };
+    orderRepository.findOne.mockResolvedValue(order);
+    dataSource.getRepository.mockReturnValue({
+      count: jest.fn().mockResolvedValue(1),
+    });
+
+    await expect(
+      service.updateStatus('ord-1', OrderStatus.CANCELLED, 'admin-1'),
+    ).rejects.toMatchObject({ response: { code: 'ORDER_REVIEWED_CANNOT_CANCEL' } });
+    await expect(
+      service.updateStatus('ord-1', OrderStatus.REFUNDED, 'admin-1'),
+    ).rejects.toMatchObject({ response: { code: 'ORDER_REVIEWED_CANNOT_CANCEL' } });
+
+    expect(order.status).toBe(OrderStatus.DELIVERED);
+    expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
+    expect(dataSource.transaction).not.toHaveBeenCalled();
   });
 
   describe('updateStatus hold hardening (AC-013–AC-015, AC-020)', () => {
@@ -955,26 +1319,46 @@ describe('OrdersService', () => {
   });
 
   describe('findByCustomerPaginated', () => {
-    it('returns paginated orders with default page size', async () => {
-      const queryBuilder = {
+    function createCustomerListQb(overrides: Record<string, jest.Mock> = {}) {
+      return {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
-        skip: jest.fn().mockReturnThis(),
-        take: jest.fn().mockReturnThis(),
-        getManyAndCount: jest.fn().mockResolvedValue([[{ id: 'ord-1' }], 25]),
+        addOrderBy: jest.fn().mockReturnThis(),
+        offset: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        getRawOne: jest.fn().mockResolvedValue({ cnt: '0' }),
+        getRawMany: jest.fn().mockResolvedValue([]),
+        getMany: jest.fn().mockResolvedValue([]),
+        ...overrides,
       };
-      orderRepository.createQueryBuilder.mockReturnValue(queryBuilder);
+    }
+
+    it('returns paginated orders with default page size', async () => {
+      const countQb = createCustomerListQb({
+        getRawOne: jest.fn().mockResolvedValue({ cnt: '25' }),
+      });
+      const idQb = createCustomerListQb({
+        getRawMany: jest.fn().mockResolvedValue([{ id: 'ord-1' }]),
+      });
+      const hydrateQb = createCustomerListQb({
+        getMany: jest.fn().mockResolvedValue([{ id: 'ord-1' }]),
+      });
+      orderRepository.createQueryBuilder
+        .mockReturnValueOnce(countQb)
+        .mockReturnValueOnce(idQb)
+        .mockReturnValueOnce(hydrateQb);
 
       const result = await service.findByCustomerPaginated('cust-1');
 
       expect(orderRepository.createQueryBuilder).toHaveBeenCalledWith('order');
-      expect(queryBuilder.where).toHaveBeenCalledWith('order.customerId = :customerId', {
+      expect(countQb.where).toHaveBeenCalledWith('order.customerId = :customerId', {
         customerId: 'cust-1',
       });
-      expect(queryBuilder.skip).toHaveBeenCalledWith(0);
-      expect(queryBuilder.take).toHaveBeenCalledWith(10);
+      expect(idQb.offset).toHaveBeenCalledWith(0);
+      expect(idQb.limit).toHaveBeenCalledWith(10);
       expect(result.items).toHaveLength(1);
       expect(result.pagination).toEqual({
         page: 1,
@@ -985,16 +1369,13 @@ describe('OrdersService', () => {
     });
 
     it('applies status filter and caps limit at 50', async () => {
-      const queryBuilder = {
-        leftJoinAndSelect: jest.fn().mockReturnThis(),
-        where: jest.fn().mockReturnThis(),
-        andWhere: jest.fn().mockReturnThis(),
-        orderBy: jest.fn().mockReturnThis(),
-        skip: jest.fn().mockReturnThis(),
-        take: jest.fn().mockReturnThis(),
-        getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
-      };
-      orderRepository.createQueryBuilder.mockReturnValue(queryBuilder);
+      const countQb = createCustomerListQb({
+        getRawOne: jest.fn().mockResolvedValue({ cnt: '100' }),
+      });
+      const idQb = createCustomerListQb({
+        getRawMany: jest.fn().mockResolvedValue([]),
+      });
+      orderRepository.createQueryBuilder.mockReturnValueOnce(countQb).mockReturnValueOnce(idQb);
 
       await service.findByCustomerPaginated('cust-1', {
         page: 2,
@@ -1002,11 +1383,272 @@ describe('OrdersService', () => {
         filter: CustomerOrderListFilter.PENDING_PAYMENT,
       });
 
-      expect(queryBuilder.andWhere).toHaveBeenCalledWith('order.status IN (:...statuses)', {
+      expect(countQb.andWhere).toHaveBeenCalledWith('order.status IN (:...statuses)', {
         statuses: ['pending_payment'],
       });
-      expect(queryBuilder.skip).toHaveBeenCalledWith(50);
-      expect(queryBuilder.take).toHaveBeenCalledWith(50);
+      expect(idQb.offset).toHaveBeenCalledWith(50);
+      expect(idQb.limit).toHaveBeenCalledWith(50);
+    });
+  });
+
+  describe('findForAdmin', () => {
+    function createAdminListQb(overrides: Record<string, jest.Mock> = {}) {
+      return {
+        andWhere: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        addGroupBy: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        offset: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        withDeleted: jest.fn().mockReturnThis(),
+        getRawOne: jest.fn().mockResolvedValue({ cnt: '0' }),
+        getRawMany: jest.fn().mockResolvedValue([]),
+        getMany: jest.fn().mockResolvedValue([]),
+        ...overrides,
+      };
+    }
+
+    it('returns empty page when no orders match', async () => {
+      const qb = createAdminListQb();
+      orderRepository.createQueryBuilder.mockReturnValue(qb);
+
+      const result = await service.findForAdmin({ page: 1, limit: 20 });
+
+      expect(result.items).toEqual([]);
+      expect(result.pagination).toEqual({ page: 1, limit: 20, total: 0, totalPages: 1 });
+    });
+
+    it('pages newest-first, applies search/status, and resolves multi-store names plus customer', async () => {
+      const countQb = createAdminListQb({
+        getRawOne: jest.fn().mockResolvedValue({ cnt: '2' }),
+      });
+      const idQb = createAdminListQb({
+        getRawMany: jest.fn().mockResolvedValue([{ id: 'ord-2' }, { id: 'ord-1' }]),
+      });
+      const loadQb = createAdminListQb({
+        getMany: jest.fn().mockResolvedValue([
+          {
+            id: 'ord-1',
+            orderNumber: 'ORD-1',
+            customerId: 'cust-1',
+            customer: {
+              id: 'cust-1',
+              fullName: 'Somchai',
+              phone: '0811111111',
+              email: 'a@example.com',
+            },
+            items: [
+              { storeId: 'store-1', productName: 'A' },
+              { storeId: 'store-2', productName: 'B' },
+            ],
+          },
+          {
+            id: 'ord-2',
+            orderNumber: 'ORD-2',
+            customerId: null,
+            customer: null,
+            guestName: 'Guest',
+            guestPhone: '0822222222',
+            items: [{ storeId: 'store-1', productName: 'C' }],
+          },
+        ]),
+      });
+
+      orderRepository.createQueryBuilder
+        .mockReturnValueOnce(countQb)
+        .mockReturnValueOnce(idQb)
+        .mockReturnValueOnce(loadQb);
+
+      storeRepository.find.mockResolvedValue([
+        { id: 'store-1', name: 'Pet Shop A' },
+        { id: 'store-2', name: 'Pet Shop B' },
+      ]);
+
+      const result = await service.findForAdmin({
+        page: 1,
+        limit: 20,
+        search: 'ORD',
+        status: OrderStatus.PAID,
+      });
+
+      expect(countQb.andWhere).toHaveBeenCalledWith('order.orderNumber ILIKE :search', {
+        search: '%ORD%',
+      });
+      expect(countQb.andWhere).toHaveBeenCalledWith('order.status = :status', {
+        status: OrderStatus.PAID,
+      });
+      expect(idQb.orderBy).toHaveBeenCalledWith('order.createdAt', 'DESC');
+      expect(idQb.offset).toHaveBeenCalledWith(0);
+      expect(idQb.limit).toHaveBeenCalledWith(20);
+      expect(result.items.map((row) => row.order.id)).toEqual(['ord-2', 'ord-1']);
+      expect(result.items[1].stores).toEqual([
+        { id: 'store-1', name: 'Pet Shop A' },
+        { id: 'store-2', name: 'Pet Shop B' },
+      ]);
+      expect(result.items[1].customer).toEqual({
+        id: 'cust-1',
+        fullName: 'Somchai',
+        phone: '0811111111',
+        email: 'a@example.com',
+      });
+      expect(result.items[0].customer).toBeNull();
+      expect(result.pagination.total).toBe(2);
+    });
+
+    it('uses empty store name when store row is missing', async () => {
+      const countQb = createAdminListQb({
+        getRawOne: jest.fn().mockResolvedValue({ cnt: '1' }),
+      });
+      const idQb = createAdminListQb({
+        getRawMany: jest.fn().mockResolvedValue([{ id: 'ord-1' }]),
+      });
+      const loadQb = createAdminListQb({
+        getMany: jest.fn().mockResolvedValue([
+          {
+            id: 'ord-1',
+            customerId: null,
+            customer: null,
+            items: [{ storeId: 'missing-store' }],
+          },
+        ]),
+      });
+
+      orderRepository.createQueryBuilder
+        .mockReturnValueOnce(countQb)
+        .mockReturnValueOnce(idQb)
+        .mockReturnValueOnce(loadQb);
+      storeRepository.find.mockResolvedValue([]);
+
+      const result = await service.findForAdmin();
+
+      expect(result.items[0].stores).toEqual([{ id: 'missing-store', name: '' }]);
+    });
+  });
+
+  describe('findByStorePage', () => {
+    function createVendorListQb(overrides: Record<string, jest.Mock> = {}) {
+      return {
+        andWhere: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        addGroupBy: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        offset: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getRawOne: jest.fn().mockResolvedValue({ cnt: '0' }),
+        getRawMany: jest.fn().mockResolvedValue([]),
+        getMany: jest.fn().mockResolvedValue([]),
+        ...overrides,
+      };
+    }
+
+    it('returns empty page with actionableCount when no orders match', async () => {
+      const listCountQb = createVendorListQb({
+        getRawOne: jest.fn().mockResolvedValue({ cnt: '0' }),
+      });
+      const actionableQb = createVendorListQb({
+        getRawOne: jest.fn().mockResolvedValue({ cnt: '3' }),
+      });
+      orderRepository.createQueryBuilder
+        .mockReturnValueOnce(listCountQb)
+        .mockReturnValueOnce(actionableQb);
+
+      const result = await service.findByStorePage('store-1', { page: 1, limit: 20 });
+
+      expect(result.items).toEqual([]);
+      expect(result.pagination).toEqual({ page: 1, limit: 20, total: 0, totalPages: 1 });
+      expect(result.actionableCount).toBe(3);
+    });
+
+    it('pages newest-first and hydrates only the requested ids', async () => {
+      const listCountQb = createVendorListQb({
+        getRawOne: jest.fn().mockResolvedValue({ cnt: '2' }),
+      });
+      const actionableQb = createVendorListQb({
+        getRawOne: jest.fn().mockResolvedValue({ cnt: '1' }),
+      });
+      const idQb = createVendorListQb({
+        getRawMany: jest.fn().mockResolvedValue([{ id: 'ord-2' }, { id: 'ord-1' }]),
+      });
+      const loadQb = createVendorListQb({
+        getMany: jest.fn().mockResolvedValue([
+          { id: 'ord-1', orderNumber: 'ORD-1', items: [] },
+          { id: 'ord-2', orderNumber: 'ORD-2', items: [] },
+        ]),
+      });
+
+      orderRepository.createQueryBuilder
+        .mockReturnValueOnce(listCountQb)
+        .mockReturnValueOnce(actionableQb)
+        .mockReturnValueOnce(idQb)
+        .mockReturnValueOnce(loadQb);
+
+      const result = await service.findByStorePage('store-1', {
+        page: 1,
+        limit: 20,
+        search: 'ORD',
+        status: OrderStatus.PAID,
+      });
+
+      expect(listCountQb.andWhere).toHaveBeenCalledWith('order.order_number ILIKE :search', {
+        search: '%ORD%',
+      });
+      expect(listCountQb.andWhere).toHaveBeenCalledWith('order.status = :status', {
+        status: OrderStatus.PAID,
+      });
+      expect(idQb.orderBy).toHaveBeenCalledWith('order.createdAt', 'DESC');
+      expect(idQb.offset).toHaveBeenCalledWith(0);
+      expect(idQb.limit).toHaveBeenCalledWith(20);
+      expect(loadQb.leftJoinAndSelect).toHaveBeenCalledWith(
+        'order.items',
+        'items',
+        'items.storeId = :storeId',
+        { storeId: 'store-1' },
+      );
+      expect(result.items.map((order) => order.id)).toEqual(['ord-2', 'ord-1']);
+      expect(result.pagination.total).toBe(2);
+      expect(result.actionableCount).toBe(1);
+    });
+  });
+
+  describe('findOneForAdmin', () => {
+    it('returns stores and registered customer for one order', async () => {
+      orderRepository.findOne.mockResolvedValue({
+        id: 'ord-1',
+        customerId: 'cust-1',
+        customer: {
+          id: 'cust-1',
+          fullName: 'Somchai',
+          phone: '0811111111',
+          email: null,
+        },
+        items: [{ storeId: 'store-1' }, { storeId: 'store-1' }, { storeId: 'store-2' }],
+      });
+      storeRepository.find.mockResolvedValue([
+        { id: 'store-1', name: 'Alpha' },
+        { id: 'store-2', name: 'Beta' },
+      ]);
+
+      const result = await service.findOneForAdmin('ord-1');
+
+      expect(result.stores).toEqual([
+        { id: 'store-1', name: 'Alpha' },
+        { id: 'store-2', name: 'Beta' },
+      ]);
+      expect(result.customer?.id).toBe('cust-1');
+    });
+
+    it('throws ORDER_NOT_FOUND when missing', async () => {
+      orderRepository.findOne.mockResolvedValue(null);
+
+      await expect(service.findOneForAdmin('missing')).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 
@@ -1248,29 +1890,17 @@ describe('OrdersService', () => {
   });
 
   describe('findLatestPurchaseProductIds', () => {
-    it('returns unique product ids in recent order order', async () => {
-      const queryBuilder = {
-        withDeleted: jest.fn().mockReturnThis(),
-        innerJoin: jest.fn().mockReturnThis(),
-        select: jest.fn().mockReturnThis(),
-        where: jest.fn().mockReturnThis(),
-        orderBy: jest.fn().mockReturnThis(),
-        addOrderBy: jest.fn().mockReturnThis(),
-        getRawMany: jest
-          .fn()
-          .mockResolvedValue([
-            { productId: 'prod-1' },
-            { productId: 'prod-1' },
-            { productId: 'prod-2' },
-            { productId: 'prod-3' },
-          ]),
-      };
-      orderRepository.createQueryBuilder.mockReturnValue(queryBuilder);
+    it('asks SQL for distinct recent product ids with a limit', async () => {
+      orderRepository.query.mockResolvedValue([{ productId: 'prod-1' }, { productId: 'prod-2' }]);
 
       const productIds = await service.findLatestPurchaseProductIds('cust-1', 2);
 
       expect(productIds).toEqual(['prod-1', 'prod-2']);
-      expect(queryBuilder.withDeleted).toHaveBeenCalled();
+      const [sql, params] = orderRepository.query.mock.calls[0] as [string, unknown[]];
+      expect(sql).toContain('DISTINCT ON');
+      expect(sql).toContain('LIMIT');
+      expect(params).toEqual(['cust-1', 2]);
+      expect(orderRepository.createQueryBuilder).not.toHaveBeenCalled();
     });
   });
 });

@@ -106,7 +106,7 @@ export class NotificationsService {
       }
     }
 
-    const email = customer?.email ?? orderWithItems.guestEmail;
+    const email = orderWithItems.guestEmail ?? customer?.email;
     if (!email) {
       this.logger.log(`No email for order ${orderWithItems.orderNumber} — skip paid email`);
       return;
@@ -155,7 +155,7 @@ export class NotificationsService {
       }
     }
 
-    const email = customer?.email ?? orderWithItems.guestEmail;
+    const email = orderWithItems.guestEmail ?? customer?.email;
     if (!email) {
       return;
     }
@@ -229,17 +229,28 @@ export class NotificationsService {
     return qb.getOne();
   }
 
-  async findByUser(userId: string, unreadOnly?: boolean): Promise<UserNotification[]> {
+  async findByUser(
+    userId: string,
+    unreadOnly?: boolean,
+    page = 1,
+    limit = 50,
+  ): Promise<UserNotification[]> {
+    const safePage = Math.max(page, 1);
+    const safeLimit = Math.min(Math.max(limit, 1), 100);
     const qb = this.userNotificationRepository
       .createQueryBuilder('notification')
       .where('notification.user_id = :userId', { userId })
-      .orderBy('notification.created_at', 'DESC');
+      .orderBy('notification.created_at', 'DESC')
+      .addOrderBy('notification.id', 'DESC');
 
     if (unreadOnly) {
       qb.andWhere('notification.is_read = false');
     }
 
-    return qb.getMany();
+    return qb
+      .skip((safePage - 1) * safeLimit)
+      .take(safeLimit)
+      .getMany();
   }
 
   async markAsRead(id: string, userId: string): Promise<boolean> {
@@ -270,7 +281,7 @@ export class NotificationsService {
       .select('COUNT(*)', 'count')
       .where('notification.user_id = :userId', { userId })
       .andWhere('notification.is_read = false')
-      .getRawOne();
+      .getRawOne<{ count: string }>();
     return parseInt(result?.count ?? '0', 10);
   }
 
@@ -338,6 +349,91 @@ export class NotificationsService {
       );
     }
     return notifications[0] ?? null;
+  }
+
+  /**
+   * Notify platform admins that a vendor cancelled their pending manual payout request.
+   */
+  async notifyAdminsAboutManualPayoutCancellation(input: {
+    payoutId: string;
+    storeId: string;
+    storeName: string;
+    amount: number;
+  }): Promise<UserNotification | null> {
+    const admins = await this.userRepository.find({
+      where: { role: UserRole.ADMIN, isActive: true },
+    });
+    if (admins.length === 0) {
+      return null;
+    }
+
+    const amountLabel = Number(input.amount).toLocaleString('th-TH', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    const message = `ร้าน "${input.storeName}" ยกเลิกคำขอรับเงิน ฿${amountLabel}`;
+
+    const notifications: UserNotification[] = [];
+    for (const admin of admins) {
+      notifications.push(
+        await this.createUserNotification(
+          admin.id,
+          'manual_payout_cancelled',
+          message,
+          {
+            payoutId: input.payoutId,
+            storeId: input.storeId,
+            storeName: input.storeName,
+            amount: Number(input.amount),
+          },
+          ['payoutId'],
+        ),
+      );
+    }
+    return notifications[0] ?? null;
+  }
+
+  /**
+   * Notify the store owner that their manual payout request was approved or rejected.
+   */
+  async notifyVendorAboutManualPayoutOutcome(input: {
+    vendorId: string;
+    payoutId: string;
+    storeId: string;
+    storeName: string;
+    amount: number;
+    outcome: 'approved' | 'rejected';
+    notes?: string | null;
+  }): Promise<UserNotification | null> {
+    if (!input.vendorId) {
+      return null;
+    }
+
+    const amountLabel = Number(input.amount).toLocaleString('th-TH', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    const note = input.notes?.trim();
+    const baseMessage =
+      input.outcome === 'approved'
+        ? `ร้านของคุณได้รับเงิน ฿${amountLabel} แล้ว`
+        : `คำขอรับเงิน ฿${amountLabel} ถูกปฏิเสธ`;
+    const message = note ? `${baseMessage} — ${note}` : baseMessage;
+
+    return this.createUserNotification(
+      input.vendorId,
+      input.outcome === 'approved' ? 'manual_payout_approved' : 'manual_payout_rejected',
+      message,
+      {
+        payoutId: input.payoutId,
+        storeId: input.storeId,
+        storeName: input.storeName,
+        amount: Number(input.amount),
+        outcome: input.outcome,
+        notes: note ?? null,
+      },
+      ['payoutId', 'outcome'],
+    );
   }
 
   /**

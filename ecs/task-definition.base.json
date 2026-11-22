@@ -11,6 +11,7 @@
       "name": "api",
       "image": "000000000000.dkr.ecr.ap-southeast-1.amazonaws.com/sopet-backend:placeholder",
       "essential": true,
+      "stopTimeout": 30,
       "portMappings": [
         {
           "containerPort": 3002,

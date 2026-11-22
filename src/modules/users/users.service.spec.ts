@@ -15,7 +15,6 @@ import { SavedPaymentMethod } from '../../database/entities/saved-payment-method
 import { OtpCode } from '../../database/entities/otp-code.entity';
 import { CustomerRepository } from '../../database/repositories/customer.repository';
 import { OrdersService } from '../orders/orders.service';
-import { PaymentsService } from '../payments/payments.service';
 import { StorageService } from '../storage/storage.service';
 import { createHmac } from 'node:crypto';
 
@@ -56,10 +55,6 @@ describe('UsersService', () => {
   const ordersService = {
     mergeGuestOrders: jest.fn(),
   };
-  const paymentsService = {
-    saveCustomerCard: jest.fn(),
-    deleteOmiseCustomerCard: jest.fn(),
-  };
   const paymentMethodQueryBuilder = {
     where: jest.fn().mockReturnThis(),
     andWhere: jest.fn().mockReturnThis(),
@@ -90,7 +85,6 @@ describe('UsersService', () => {
         { provide: getRepositoryToken(OtpCode), useValue: otpRepo },
         { provide: CustomerRepository, useValue: customerRepository },
         { provide: OrdersService, useValue: ordersService },
-        { provide: PaymentsService, useValue: paymentsService },
         { provide: JwtService, useValue: jwtService },
         { provide: ConfigService, useValue: configService },
         {
@@ -267,21 +261,34 @@ describe('UsersService', () => {
   });
 
   describe('payment methods', () => {
-    it('marks the first saved card as default automatically', async () => {
-      paymentsService.saveCustomerCard.mockResolvedValue({
-        omiseCardId: 'card_test_1',
-        cardFingerprint: 'fp-1',
-        lastFour: '4242',
-        brand: 'visa',
-        expiryMonth: 12,
-        expiryYear: 2034,
-      });
+    const previousCardKey = process.env.CARD_DATA_ENCRYPTION_KEY;
+
+    beforeAll(() => {
+      process.env.CARD_DATA_ENCRYPTION_KEY = 'test-card-encryption-key-for-users';
+    });
+
+    afterAll(() => {
+      process.env.CARD_DATA_ENCRYPTION_KEY = previousCardKey;
+    });
+
+    it('lists only vaulted Beam cards with pan_enc', async () => {
+      paymentMethodRepo.find.mockResolvedValue([]);
+
+      await service.getPaymentMethods('cust-1');
+
+      expect(paymentMethodRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ customerId: 'cust-1', psp: 'beam' }),
+        }),
+      );
+    });
+
+    it('encrypts PAN/name/expiry and marks the first card default', async () => {
       paymentMethodRepo.find.mockResolvedValue([]);
 
       const result = await service.addPaymentMethod('cust-1', {
-        omiseCardToken: 'tokn_test_1',
-        lastFour: '4242',
-        brand: 'visa',
+        cardholderName: 'Test User',
+        pan: '4111111111111111',
         expiryMonth: 12,
         expiryYear: 2034,
         isDefault: false,
@@ -289,45 +296,68 @@ describe('UsersService', () => {
 
       expect(result.isDefault).toBe(true);
       expect(paymentMethodRepo.save).toHaveBeenCalledWith(
-        expect.objectContaining({ isDefault: true }),
+        expect.objectContaining({
+          psp: 'beam',
+          pspCardToken: null,
+          omiseCardToken: null,
+          lastFour: '1111',
+          brand: 'visa',
+          expiryMonth: 12,
+          expiryYear: 2034,
+          isDefault: true,
+          panEnc: expect.stringMatching(/^enc:v1:/),
+          cardholderNameEnc: expect.stringMatching(/^enc:v1:/),
+          expiryEnc: expect.stringMatching(/^enc:v1:/),
+        }),
       );
+      const saved = paymentMethodRepo.save.mock.calls[0][0] as {
+        panEnc: string;
+        cardholderNameEnc: string;
+      };
+      expect(saved.panEnc).not.toContain('4111111111111111');
+      expect(saved.cardholderNameEnc).not.toContain('Test User');
     });
 
-    it('restores a soft-deleted card instead of inserting a duplicate row', async () => {
-      paymentsService.saveCustomerCard.mockResolvedValue({
-        omiseCardId: 'card_test_restored',
-        cardFingerprint: 'fp-restored',
-        lastFour: '1111',
-        brand: 'visa',
+    it('soft-deletes legacy Omise cards when adding a vaulted card', async () => {
+      paymentMethodRepo.find.mockResolvedValue([]);
+
+      await service.addPaymentMethod('cust-1', {
+        cardholderName: 'Test User',
+        pan: '4111111111111111',
         expiryMonth: 12,
         expiryYear: 2034,
       });
+
+      expect(paymentMethodRepo.softDelete).toHaveBeenCalledWith(
+        expect.objectContaining({ customerId: 'cust-1', psp: 'omise' }),
+      );
+      expect(paymentMethodRepo.softDelete).toHaveBeenCalledTimes(2);
+    });
+
+    it('restores a soft-deleted Beam card instead of inserting a duplicate row', async () => {
       paymentMethodRepo.find.mockResolvedValue([]);
-      paymentMethodQueryBuilder.getOne
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce({
-          id: 'pm-deleted',
-          customerId: 'cust-1',
-          deletedAt: new Date('2026-01-01'),
-          isDefault: false,
-        });
+      paymentMethodQueryBuilder.getOne.mockResolvedValueOnce(null).mockResolvedValueOnce({
+        id: 'pm-deleted',
+        customerId: 'cust-1',
+        deletedAt: new Date('2026-01-01'),
+        isDefault: false,
+      });
 
       const result = await service.addPaymentMethod('cust-1', {
-        omiseCardToken: 'tokn_test_1',
-        lastFour: '1111',
-        brand: 'visa',
+        cardholderName: 'Test User',
+        pan: '4111111111111111',
         expiryMonth: 12,
         expiryYear: 2034,
       });
 
       expect(paymentMethodRepo.restore).toHaveBeenCalledWith('pm-deleted');
-      expect(result.omiseCardToken).toBe('card_test_restored');
+      expect(result.pspCardToken).toBeNull();
+      expect(result.panEnc).toMatch(/^enc:v1:/);
+      expect(result.psp).toBe('beam');
       expect(result.isDefault).toBe(true);
     });
 
-    it('throws ConflictException when the payment method already exists without calling Omise save', async () => {
+    it('throws ConflictException when the payment method already exists', async () => {
       paymentMethodRepo.find.mockResolvedValue([
         { id: 'pm-existing', customerId: 'cust-1', isDefault: true },
       ]);
@@ -339,46 +369,15 @@ describe('UsersService', () => {
 
       await expect(
         service.addPaymentMethod('cust-1', {
-          omiseCardToken: 'tokn_test_1',
-          lastFour: '1111',
-          brand: 'visa',
-          expiryMonth: 12,
-          expiryYear: 2034,
-        }),
-      ).rejects.toThrow(ConflictException);
-
-      expect(paymentsService.saveCustomerCard).not.toHaveBeenCalled();
-    });
-
-    it('throws ConflictException instead of inserting a duplicate payment method', async () => {
-      paymentsService.saveCustomerCard.mockResolvedValue({
-        omiseCardId: 'card_test_existing',
-        cardFingerprint: 'fp-existing',
-        lastFour: '1111',
-        brand: 'visa',
-        expiryMonth: 12,
-        expiryYear: 2034,
-      });
-      paymentMethodRepo.find.mockResolvedValue([
-        { id: 'pm-existing', customerId: 'cust-1', isDefault: true },
-      ]);
-      paymentMethodQueryBuilder.getOne.mockResolvedValue({
-        id: 'pm-existing',
-        customerId: 'cust-1',
-        isDefault: true,
-      });
-
-      await expect(
-        service.addPaymentMethod('cust-1', {
-          omiseCardToken: 'tokn_test_1',
-          lastFour: '1111',
-          brand: 'visa',
+          cardholderName: 'Test User',
+          pan: '4111111111111111',
           expiryMonth: 12,
           expiryYear: 2034,
         }),
       ).rejects.toThrow(ConflictException);
 
       expect(paymentMethodRepo.create).not.toHaveBeenCalled();
+      expect(paymentMethodRepo.softDelete).not.toHaveBeenCalled();
     });
 
     it('promotes another card when the default card is deleted', async () => {
@@ -386,7 +385,8 @@ describe('UsersService', () => {
         id: 'pm-default',
         customerId: 'cust-1',
         isDefault: true,
-        omiseCardToken: 'card_test_default',
+        psp: 'beam',
+        pspCardToken: 'beam_tok_default',
       });
       paymentMethodRepo.find.mockResolvedValue([
         {
@@ -399,10 +399,6 @@ describe('UsersService', () => {
 
       await service.deletePaymentMethod('cust-1', 'pm-default');
 
-      expect(paymentsService.deleteOmiseCustomerCard).toHaveBeenCalledWith(
-        'cust-1',
-        'card_test_default',
-      );
       expect(paymentMethodRepo.softDelete).toHaveBeenCalledWith('pm-default');
       expect(paymentMethodRepo.update).toHaveBeenCalledWith(
         { customerId: 'cust-1', isDefault: true },

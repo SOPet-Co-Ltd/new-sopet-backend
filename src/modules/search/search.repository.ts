@@ -6,6 +6,7 @@ import { ProductImage } from '../../database/entities/product-image.entity';
 import { Product, ProductStatus } from '../../database/entities/product.entity';
 import { OrderStatus } from '../../database/entities/enums/order.enums';
 import { ProductQueryDto } from '../products/dto/product-query.dto';
+import { payablePriceSortExpression } from '../products/payable-price-sort';
 import { RankingEngine } from './ranking.engine';
 import type {
   SearchProductSuggestion,
@@ -424,9 +425,15 @@ export class SearchRepository {
       return;
     }
 
+    if (sortBy === 'basePrice') {
+      queryBuilder
+        .addSelect(payablePriceSortExpression(alias), 'payable_price_sort')
+        .orderBy('payable_price_sort', sortOrder);
+      return;
+    }
+
     const allowedColumns: Record<string, string> = {
       createdAt: 'createdAt',
-      basePrice: 'basePrice',
       averageRating: 'averageRating',
       name: 'name',
     };
@@ -444,6 +451,7 @@ export class SearchRepository {
       .select('product.id', 'id')
       .addSelect('product.name', 'name')
       .addSelect('product.slug', 'slug')
+      .addSelect('store.slug', 'store_slug')
       .addSelect((subQuery) => {
         return subQuery
           .select('img.url')
@@ -473,12 +481,19 @@ export class SearchRepository {
       .orderBy('sim', 'DESC')
       .addOrderBy('product.name', 'ASC')
       .limit(limit)
-      .getRawMany<{ id: string; name: string; slug: string; thumbnail_url: string | null }>();
+      .getRawMany<{
+        id: string;
+        name: string;
+        slug: string;
+        store_slug: string;
+        thumbnail_url: string | null;
+      }>();
 
     return rows.map((row) => ({
       id: row.id,
       name: row.name,
       slug: row.slug,
+      storeSlug: row.store_slug,
       thumbnailUrl: row.thumbnail_url ?? null,
     }));
   }

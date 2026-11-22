@@ -90,6 +90,11 @@ export class ProductVariant {
   @DeleteDateColumn({ name: 'deleted_at', type: 'timestamp', nullable: true })
   deletedAt!: Date | null;
 
+  /** Set when a sold SKU is retired from the catalog; order history keeps the row. */
+  @Column({ name: 'retired_at', type: 'timestamp', nullable: true })
+  @IsOptional()
+  retiredAt!: Date | null;
+
   // Relations
   @ManyToOne(() => Product, (product) => product.variants, {
     onDelete: 'CASCADE',

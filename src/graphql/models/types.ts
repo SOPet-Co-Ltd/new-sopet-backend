@@ -1,5 +1,8 @@
 import { Field, Float, Int, ObjectType } from '@nestjs/graphql';
-import { VariantRemovalBlockReason } from '../../modules/products/variant-removal.types';
+import {
+  VariantRemovalBlockReason,
+  VariantRemovalDisposition,
+} from '../../modules/products/variant-removal.types';
 
 @ObjectType()
 export class PaginationMeta {
@@ -120,6 +123,13 @@ export class SendCustomerOtpPayload {
 }
 
 @ObjectType()
+export class CustomerExistsByPhonePayload {
+  /** True when an active (non-deleted) customer account exists for the phone. No PII. */
+  @Field()
+  exists!: boolean;
+}
+
+@ObjectType()
 export class PasswordResetTokenStatusType {
   @Field()
   valid!: boolean;
@@ -237,6 +247,9 @@ export class ProductType {
 
   @Field(() => String, { nullable: true })
   brandId?: string | null;
+
+  @Field(() => String, { nullable: true })
+  brandName?: string | null;
 
   @Field(() => [String])
   tags!: string[];
@@ -661,6 +674,63 @@ export class OrderConnection {
 }
 
 @ObjectType()
+export class VendorOrderConnection {
+  @Field(() => [OrderType])
+  items!: OrderType[];
+
+  @Field(() => PaginationMeta)
+  pagination!: PaginationMeta;
+
+  @Field(() => Int)
+  actionableCount!: number;
+}
+
+@ObjectType()
+export class AdminOrderStore {
+  @Field()
+  id!: string;
+
+  @Field()
+  name!: string;
+}
+
+@ObjectType()
+export class AdminOrderCustomer {
+  @Field()
+  id!: string;
+
+  @Field(() => String, { nullable: true })
+  fullName?: string | null;
+
+  @Field()
+  phone!: string;
+
+  @Field(() => String, { nullable: true })
+  email?: string | null;
+}
+
+@ObjectType()
+export class AdminOrder {
+  @Field(() => OrderType)
+  order!: OrderType;
+
+  @Field(() => [AdminOrderStore])
+  stores!: AdminOrderStore[];
+
+  @Field(() => AdminOrderCustomer, { nullable: true })
+  customer?: AdminOrderCustomer | null;
+}
+
+@ObjectType()
+export class AdminOrderConnection {
+  @Field(() => [AdminOrder])
+  items!: AdminOrder[];
+
+  @Field(() => PaginationMeta)
+  pagination!: PaginationMeta;
+}
+
+@ObjectType()
 export class PaymentType {
   @Field()
   id!: string;
@@ -689,8 +759,15 @@ export class PaymentType {
   @Field(() => String, { nullable: true })
   qrCodeUrl?: string | null;
 
+  @Field(() => String, { nullable: true })
+  qrCodeImage?: string | null;
+
   @Field(() => Date, { nullable: true })
   expiresAt?: Date | null;
+
+  /** Beam charge failureCode when payment failed (e.g. CH_CARD_DECLINED). */
+  @Field(() => String, { nullable: true })
+  failureCode?: string | null;
 }
 
 @ObjectType()
@@ -1063,6 +1140,75 @@ export class PlatformAnalyticsType {
 }
 
 @ObjectType()
+export class StoreCustomerSummaryType {
+  @Field(() => Int)
+  year!: number;
+
+  @Field(() => Int)
+  month!: number;
+
+  @Field(() => Float, { nullable: true })
+  lifetimeMonths?: number | null;
+
+  @Field(() => Float, { nullable: true })
+  repeatRate?: number | null;
+
+  @Field(() => Float, { nullable: true })
+  purchasesPerMonth?: number | null;
+
+  @Field(() => Float, { nullable: true })
+  averageOrderValue?: number | null;
+
+  @Field(() => Int)
+  newCustomerCount!: number;
+
+  @Field(() => Int)
+  oldCustomerCount!: number;
+
+  @Field(() => Float, { nullable: true })
+  oldCustomerPercent?: number | null;
+
+  @Field(() => Int)
+  orderCount!: number;
+
+  @Field(() => Int)
+  buyersInMonth!: number;
+
+  @Field(() => Int)
+  totalCustomers!: number;
+}
+
+@ObjectType()
+export class CustomerPurchaseSummaryType {
+  @Field(() => Int)
+  year!: number;
+
+  @Field(() => Int)
+  month!: number;
+
+  @Field(() => Int)
+  purchasesInMonth!: number;
+
+  @Field(() => Float, { nullable: true })
+  averageOrderValue?: number | null;
+
+  @Field()
+  cohortLabel!: string;
+
+  @Field()
+  cohortLabelTh!: string;
+
+  @Field(() => Date, { nullable: true })
+  lastOrderAt?: Date | null;
+
+  @Field(() => Int, { nullable: true })
+  monthsSinceLastOrder?: number | null;
+
+  @Field(() => Int, { nullable: true })
+  daysSinceLastOrder?: number | null;
+}
+
+@ObjectType()
 export class SalesTimePointType {
   @Field()
   date!: string;
@@ -1108,6 +1254,10 @@ export class SavedPaymentMethodType {
 
   @Field()
   type!: string;
+
+  /** Payment service provider (`beam` or historical `omise`). */
+  @Field(() => String, { nullable: true })
+  psp?: string | null;
 
   @Field()
   lastFour!: string;
@@ -1243,6 +1393,12 @@ export class ProductVariantSyncImpactRemovedType {
 
   @Field(() => [VariantRemovalBlockReason])
   reasons!: VariantRemovalBlockReason[];
+
+  @Field(() => VariantRemovalDisposition)
+  disposition!: VariantRemovalDisposition;
+
+  @Field(() => Int)
+  openCartCount!: number;
 }
 
 @ObjectType()
@@ -1256,6 +1412,7 @@ export class ProductVariantSyncImpactType {
   @Field(() => Int)
   removed!: number;
 
+  /** Kept for GraphQL compat; always false under retire-and-clear-carts. */
   @Field()
   blocked!: boolean;
 
@@ -1372,6 +1529,15 @@ export class PromotionType {
 
   @Field()
   updatedAt!: Date;
+}
+
+@ObjectType()
+export class PromotionConnection {
+  @Field(() => [PromotionType])
+  items!: PromotionType[];
+
+  @Field(() => PaginationMeta)
+  pagination!: PaginationMeta;
 }
 
 @ObjectType()
@@ -1630,6 +1796,12 @@ export class AdminStoreType {
   omiseRecipientFailureMessage?: string | null;
 
   @Field()
+  bankAccountVerificationStatus!: string;
+
+  @Field(() => String, { nullable: true })
+  bankAccountRejectionReason?: string | null;
+
+  @Field()
   payoutSchedule!: string;
 
   @Field()
@@ -1649,6 +1821,15 @@ export class AdminStoreType {
 
   @Field()
   updatedAt!: Date;
+}
+
+@ObjectType()
+export class AdminStoreConnection {
+  @Field(() => [AdminStoreType])
+  items!: AdminStoreType[];
+
+  @Field(() => PaginationMeta)
+  pagination!: PaginationMeta;
 }
 
 @ObjectType()
@@ -1691,6 +1872,42 @@ export class AdminVendorType {
 
   @Field(() => [AdminVendorStoreType])
   stores!: AdminVendorStoreType[];
+}
+
+@ObjectType()
+export class AdminVendorListItem {
+  @Field()
+  id!: string;
+
+  @Field()
+  email!: string;
+
+  @Field()
+  fullName!: string;
+
+  @Field()
+  role!: string;
+
+  @Field()
+  isActive!: boolean;
+
+  @Field(() => Date, { nullable: true })
+  lastLoginAt?: Date | null;
+
+  @Field()
+  createdAt!: Date;
+
+  @Field(() => Int)
+  storeCount!: number;
+}
+
+@ObjectType()
+export class AdminVendorConnection {
+  @Field(() => [AdminVendorListItem])
+  items!: AdminVendorListItem[];
+
+  @Field(() => PaginationMeta)
+  pagination!: PaginationMeta;
 }
 
 @ObjectType()
@@ -1821,8 +2038,14 @@ export class StoreProductReviewType {
   @Field(() => String, { nullable: true })
   comment?: string | null;
 
+  @Field(() => String, { nullable: true })
+  customerId?: string | null;
+
   @Field()
   customerName!: string;
+
+  @Field(() => String, { nullable: true })
+  customerProfilePhotoUrl?: string | null;
 
   @Field()
   createdAt!: Date;
@@ -1832,6 +2055,9 @@ export class StoreProductReviewType {
 
   @Field(() => ReviewReplyType, { nullable: true })
   reply?: ReviewReplyType | null;
+
+  @Field(() => String, { nullable: true })
+  variantOptions?: string | null;
 }
 
 @ObjectType()
@@ -1951,6 +2177,12 @@ export class MyStoreType {
   omiseRecipientFailureMessage?: string | null;
 
   @Field()
+  bankAccountVerificationStatus!: string;
+
+  @Field(() => String, { nullable: true })
+  bankAccountRejectionReason?: string | null;
+
+  @Field()
   status!: string;
 }
 
@@ -1976,6 +2208,10 @@ export class AdminCustomerType {
 
   @Field()
   isActive!: boolean;
+
+  /** True when this row is a guest buyer with no customer account. */
+  @Field()
+  isGuest!: boolean;
 
   @Field(() => Date, { nullable: true })
   lastLoginAt?: Date | null;

@@ -1,4 +1,4 @@
-import { Args, Field, InputType, Mutation, Query, Resolver } from '@nestjs/graphql';
+import { Args, Field, InputType, Int, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { UseGuards } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { FavoritesService } from './favorites.service';
@@ -24,11 +24,16 @@ import { ReactivateAccountInput } from '../auth/auth.inputs';
 import { IsUUID } from 'class-validator';
 import { SavedAddress } from '../../database/entities/saved-address.entity';
 import { SavedPaymentMethod } from '../../database/entities/saved-payment-method.entity';
+import {
+  decryptCardTransportPayload,
+  getCardTransportPublicKeyPem,
+} from '../../common/utils/card-transport-crypto.util';
 
 function mapPaymentMethod(method: SavedPaymentMethod): SavedPaymentMethodType {
   return {
     id: method.id,
     type: method.type,
+    psp: method.psp ?? null,
     lastFour: method.lastFour,
     brand: method.brand,
     expiryMonth: method.expiryMonth,
@@ -165,8 +170,12 @@ export class AccountResolver {
   @Query(() => [FavoriteType])
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('customer')
-  async favorites(@CurrentUser('id') customerId: string): Promise<FavoriteType[]> {
-    const favorites = await this.favoritesService.list(customerId);
+  async favorites(
+    @CurrentUser('id') customerId: string,
+    @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page = 1,
+    @Args('limit', { type: () => Int, nullable: true, defaultValue: 24 }) limit = 24,
+  ): Promise<FavoriteType[]> {
+    const favorites = await this.favoritesService.list(customerId, page, limit);
     return favorites.map((favorite) => ({
       id: favorite.id,
       productId: favorite.productId,
@@ -213,8 +222,22 @@ export class AccountResolver {
     @CurrentUser('id') customerId: string,
     @Args('input') input: AddPaymentMethodInput,
   ): Promise<SavedPaymentMethodType> {
-    const method = await this.usersService.addPaymentMethod(customerId, input);
+    const decrypted = decryptCardTransportPayload(input.cardCipher);
+    const method = await this.usersService.addPaymentMethod(customerId, {
+      cardholderName: decrypted.cardholderName,
+      pan: decrypted.pan,
+      expiryMonth: decrypted.expiryMonth,
+      expiryYear: decrypted.expiryYear,
+      isDefault: input.isDefault,
+    });
     return mapPaymentMethod(method);
+  }
+
+  /** SPKI public key for browser RSA-OAEP card transport encryption. */
+  @Query(() => String)
+  @Public()
+  cardTransportPublicKey(): string {
+    return getCardTransportPublicKeyPem();
   }
 
   @Mutation(() => Boolean)

@@ -53,6 +53,17 @@ function clampPublicProductsLimit(limit?: number): number {
   return Math.min(Math.max(limit ?? 20, 1), PUBLIC_PRODUCTS_MAX_LIMIT);
 }
 
+function resolveVendorStoreIdArg(
+  role: string,
+  argsStoreId?: string | null,
+  jwtStoreId?: string | null,
+): string | undefined {
+  if (role === 'admin') {
+    return argsStoreId?.trim() || undefined;
+  }
+  return (argsStoreId ?? jwtStoreId)?.trim() || undefined;
+}
+
 function parseVariantAttributes(attributes?: string): Record<string, string> | undefined {
   if (!attributes) {
     return undefined;
@@ -397,35 +408,46 @@ export class ProductsResolver {
   }
 
   @Query(() => ProductType)
+  @Public()
+  async productByPath(@Args('path') path: string): Promise<ProductType> {
+    const product = await this.productsService.findByPathPublished(path);
+    return mapProduct(product);
+  }
+
+  @Query(() => ProductType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async vendorProduct(
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
     @Args('id') id: string,
   ): Promise<ProductType> {
     const product = await this.productsService.findOne(id);
-    await this.productsService.resolveActiveStoreId(userId, product.storeId);
+    await this.productsService.resolveActiveStoreId(userId, product.storeId, role);
     return mapProduct(product);
   }
 
   @Query(() => ProductPublishChecklistType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async productPublishChecklist(
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
     @Args('productId') productId: string,
   ): Promise<ProductPublishChecklistType> {
     const product = await this.productsService.findOne(productId);
-    await this.productsService.resolveActiveStoreId(userId, product.storeId);
+    await this.productsService.resolveActiveStoreId(userId, product.storeId, role);
     return this.productsService.getPublishChecklist(product);
   }
 
   @Query(() => ProductConnection)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async vendorProducts(
     @CurrentUser('id') userId: string,
-    @CurrentUser('storeId') storeId: string,
+    @CurrentUser('role') role: string,
+    @CurrentUser('storeId') jwtStoreId?: string,
+    @Args('storeId', { nullable: true }) argsStoreId?: string,
     @Args('search', { nullable: true }) search?: string,
     @Args('category', { nullable: true }) category?: string,
     @Args('tag', { nullable: true }) tag?: string,
@@ -437,7 +459,11 @@ export class ProductsResolver {
     @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page?: number,
     @Args('limit', { type: () => Int, nullable: true, defaultValue: 20 }) limit?: number,
   ): Promise<ProductConnection> {
-    const activeStoreId = await this.productsService.resolveActiveStoreId(userId, storeId);
+    const activeStoreId = await this.productsService.resolveActiveStoreId(
+      userId,
+      resolveVendorStoreIdArg(role, argsStoreId, jwtStoreId),
+      role,
+    );
     const cappedLimit = clampPublicProductsLimit(limit);
 
     const result = await this.productsService.findAll({
@@ -463,15 +489,21 @@ export class ProductsResolver {
 
   @Query(() => ProductConnection)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async vendorPublishableProducts(
     @CurrentUser('id') userId: string,
-    @CurrentUser('storeId') storeId: string,
+    @CurrentUser('role') role: string,
+    @CurrentUser('storeId') jwtStoreId?: string,
+    @Args('storeId', { nullable: true }) argsStoreId?: string,
     @Args('search', { nullable: true }) search?: string,
     @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page?: number,
     @Args('limit', { type: () => Int, nullable: true, defaultValue: 20 }) limit?: number,
   ): Promise<ProductConnection> {
-    const activeStoreId = await this.productsService.resolveActiveStoreId(userId, storeId);
+    const activeStoreId = await this.productsService.resolveActiveStoreId(
+      userId,
+      resolveVendorStoreIdArg(role, argsStoreId, jwtStoreId),
+      role,
+    );
     const cappedLimit = clampPublicProductsLimit(limit);
 
     const result = await this.productsService.findPublishableForVendor(activeStoreId, {
@@ -489,152 +521,195 @@ export class ProductsResolver {
   /** IDs-only list for select-all — avoids hydrating images/variants for hundreds of products. */
   @Query(() => VendorPublishableProductIdsType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async vendorPublishableProductIds(
     @CurrentUser('id') userId: string,
-    @CurrentUser('storeId') storeId: string,
+    @CurrentUser('role') role: string,
+    @CurrentUser('storeId') jwtStoreId?: string,
+    @Args('storeId', { nullable: true }) argsStoreId?: string,
     @Args('search', { nullable: true }) search?: string,
   ): Promise<VendorPublishableProductIdsType> {
-    const activeStoreId = await this.productsService.resolveActiveStoreId(userId, storeId);
+    const activeStoreId = await this.productsService.resolveActiveStoreId(
+      userId,
+      resolveVendorStoreIdArg(role, argsStoreId, jwtStoreId),
+      role,
+    );
     return this.productsService.findPublishableIdsForVendor(activeStoreId, { search });
   }
 
   @Mutation(() => ProductType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async createProduct(
     @CurrentUser('id') userId: string,
-    @CurrentUser('storeId') storeId: string,
+    @CurrentUser('role') role: string,
     @Args('input') input: CreateProductInput,
+    @CurrentUser('storeId') jwtStoreId?: string,
+    @Args('storeId', { nullable: true }) argsStoreId?: string,
   ): Promise<ProductType> {
-    const activeStoreId = await this.productsService.resolveActiveStoreId(userId, storeId);
-    const product = await this.productsService.create(userId, activeStoreId, {
-      name: input.name,
-      description: input.description,
-      basePrice: input.basePrice,
-      compareAtPrice: input.compareAtPrice,
-      category: input.category,
-      categoryId: input.categoryId,
-      tags: input.tags,
-      tagIds: input.tagIds,
-      petTypeId: input.petTypeId,
-      brandId: input.brandId,
-      warning: input.warning,
-      expiryDate: input.expiryDate,
-    });
+    const activeStoreId = await this.productsService.resolveActiveStoreId(
+      userId,
+      resolveVendorStoreIdArg(role, argsStoreId, jwtStoreId),
+      role,
+    );
+    const product = await this.productsService.create(
+      userId,
+      activeStoreId,
+      {
+        name: input.name,
+        description: input.description,
+        basePrice: input.basePrice,
+        compareAtPrice: input.compareAtPrice,
+        category: input.category,
+        categoryId: input.categoryId,
+        tags: input.tags,
+        tagIds: input.tagIds,
+        petTypeId: input.petTypeId,
+        brandId: input.brandId,
+        warning: input.warning,
+        expiryDate: input.expiryDate,
+      },
+      role,
+    );
     return mapProduct(product);
   }
 
   @Mutation(() => ProductType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async publishProduct(
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
     @Args('id') id: string,
   ): Promise<ProductType> {
-    const product = await this.productsService.publish(id, userId);
+    const product = await this.productsService.publish(id, userId, role);
     return mapProduct(product);
   }
 
   @Mutation(() => BatchPublishProductsResultType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async publishProducts(
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
     @Args('ids', { type: () => [String] }) ids: string[],
   ): Promise<BatchPublishProductsResultType> {
-    return this.productsService.publishMany(ids, userId);
+    return this.productsService.publishMany(ids, userId, role);
   }
 
   @Mutation(() => ProductType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async updateProduct(
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
     @Args('id') id: string,
     @Args('input') input: UpdateProductInput,
   ): Promise<ProductType> {
-    const product = await this.productsService.update(id, userId, {
-      name: input.name,
-      description: input.description,
-      basePrice: input.basePrice,
-      compareAtPrice: input.compareAtPrice,
-      status: input.status as ProductStatus | undefined,
-      category: input.category,
-      categoryId: input.categoryId,
-      tags: input.tags,
-      tagIds: input.tagIds,
-      petTypeId: input.petTypeId,
-      brandId: input.brandId,
-      warning: input.warning,
-      expiryDate: input.expiryDate,
-    });
+    const product = await this.productsService.update(
+      id,
+      userId,
+      {
+        name: input.name,
+        description: input.description,
+        basePrice: input.basePrice,
+        compareAtPrice: input.compareAtPrice,
+        status: input.status as ProductStatus | undefined,
+        category: input.category,
+        categoryId: input.categoryId,
+        tags: input.tags,
+        tagIds: input.tagIds,
+        petTypeId: input.petTypeId,
+        brandId: input.brandId,
+        warning: input.warning,
+        expiryDate: input.expiryDate,
+      },
+      role,
+    );
     return mapProduct(product);
   }
 
   @Mutation(() => Boolean)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
-  async deleteProduct(@CurrentUser('id') userId: string, @Args('id') id: string): Promise<boolean> {
-    await this.productsService.remove(id, userId);
+  @Roles('admin', 'vendor')
+  async deleteProduct(
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
+    @Args('id') id: string,
+  ): Promise<boolean> {
+    await this.productsService.remove(id, userId, role);
     return true;
   }
 
   @Mutation(() => ProductVariantType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async createProductVariant(
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
     @Args('productId') productId: string,
     @Args('input') input: CreateProductVariantInput,
   ): Promise<ProductVariantType> {
-    const variant = await this.productsService.addVariant(productId, userId, {
-      name: input.name,
-      sku: input.sku,
-      priceModifier: input.priceModifier,
-      compareAtPrice: input.compareAtPrice,
-      stockQuantity: input.stockQuantity,
-      attributes: parseVariantAttributes(input.attributes),
-    });
+    const variant = await this.productsService.addVariant(
+      productId,
+      userId,
+      {
+        name: input.name,
+        sku: input.sku,
+        priceModifier: input.priceModifier,
+        compareAtPrice: input.compareAtPrice,
+        stockQuantity: input.stockQuantity,
+        attributes: parseVariantAttributes(input.attributes),
+      },
+      role,
+    );
     const product = await this.productsService.findOne(productId);
     return mapVariant(variant, product.basePrice);
   }
 
   @Mutation(() => ProductVariantType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async updateProductVariant(
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
     @Args('variantId') variantId: string,
     @Args('input') input: UpdateProductVariantInput,
   ): Promise<ProductVariantType> {
-    const variant = await this.productsService.updateVariant(variantId, userId, {
-      name: input.name,
-      sku: input.sku,
-      priceModifier: input.priceModifier,
-      compareAtPrice: input.compareAtPrice,
-      stockQuantity: input.stockQuantity,
-      attributes: parseVariantAttributes(input.attributes),
-    });
+    const variant = await this.productsService.updateVariant(
+      variantId,
+      userId,
+      {
+        name: input.name,
+        sku: input.sku,
+        priceModifier: input.priceModifier,
+        compareAtPrice: input.compareAtPrice,
+        stockQuantity: input.stockQuantity,
+        attributes: parseVariantAttributes(input.attributes),
+      },
+      role,
+    );
     return mapVariant(variant, variant.product.basePrice);
   }
 
   @Mutation(() => Boolean)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async deleteProductVariant(
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
     @Args('variantId') variantId: string,
   ): Promise<boolean> {
-    await this.productsService.removeVariant(variantId, userId);
+    await this.productsService.removeVariant(variantId, userId, role);
     return true;
   }
 
   @Query(() => ProductVariantSyncImpactType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async productVariantSyncImpact(
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
     @Args('productId') productId: string,
     @Args('variants', { type: () => [SyncProductVariantItemInput] })
     variants: SyncProductVariantItemInput[],
@@ -646,24 +721,26 @@ export class ProductsResolver {
         id: variant.id,
         sku: variant.sku,
         stockQuantity: variant.stockQuantity,
+        price: variant.price,
         priceModifier: variant.priceModifier,
         compareAtPrice: variant.compareAtPrice,
         attributes: parseVariantAttributes(variant.attributes) ?? {},
       })),
+      role,
     );
     return this.mapProductVariantSyncImpact(impact);
   }
 
   @Mutation(() => [ProductVariantType])
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async syncProductVariants(
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
     @Args('productId') productId: string,
     @Args('variants', { type: () => [SyncProductVariantItemInput] })
     variants: SyncProductVariantItemInput[],
   ): Promise<ProductVariantType[]> {
-    const product = await this.productsService.findOne(productId);
     const saved = await this.productsService.syncVariants(
       productId,
       userId,
@@ -671,11 +748,14 @@ export class ProductsResolver {
         id: variant.id,
         sku: variant.sku,
         stockQuantity: variant.stockQuantity,
+        price: variant.price,
         priceModifier: variant.priceModifier,
         compareAtPrice: variant.compareAtPrice,
         attributes: parseVariantAttributes(variant.attributes) ?? {},
       })),
+      role,
     );
+    const product = await this.productsService.findOne(productId);
     return saved.map((variant) => mapVariant(variant, product.basePrice));
   }
 
@@ -693,6 +773,8 @@ export class ProductsResolver {
         optionsJson: entry.optionsJson,
         optionKey: entry.optionKey,
         reasons: entry.reasons,
+        disposition: entry.disposition,
+        openCartCount: entry.openCartCount,
       })),
     };
     return mapped;
@@ -700,9 +782,10 @@ export class ProductsResolver {
 
   @Mutation(() => ProductImageType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async addProductImage(
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
     @Args('productId') productId: string,
     @Args('input') input: AddProductImageInput,
   ): Promise<ProductImageType> {
@@ -713,58 +796,68 @@ export class ProductsResolver {
       input.sortOrder ?? 0,
       input.altText,
       input.isThumbnail,
+      role,
     );
     return mapImage(image);
   }
 
   @Mutation(() => ProductImageType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async updateProductImage(
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
     @Args('imageId') imageId: string,
     @Args('input') input: UpdateProductImageInput,
   ): Promise<ProductImageType> {
-    const image = await this.productsService.updateImage(imageId, userId, {
-      sortOrder: input.sortOrder,
-      altText: input.altText,
-      isThumbnail: input.isThumbnail,
-    });
+    const image = await this.productsService.updateImage(
+      imageId,
+      userId,
+      {
+        sortOrder: input.sortOrder,
+        altText: input.altText,
+        isThumbnail: input.isThumbnail,
+      },
+      role,
+    );
     return mapImage(image);
   }
 
   @Mutation(() => Boolean)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async deleteProductImage(
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
     @Args('imageId') imageId: string,
   ): Promise<boolean> {
-    await this.productsService.removeImage(imageId, userId);
+    await this.productsService.removeImage(imageId, userId, role);
     return true;
   }
 
   @Mutation(() => [ProductImageType])
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async reorderProductImages(
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
     @Args('productId') productId: string,
     @Args({ name: 'imageIds', type: () => [ID] }) imageIds: string[],
   ): Promise<ProductImageType[]> {
-    const images = await this.productsService.reorderImages(productId, userId, imageIds);
+    const images = await this.productsService.reorderImages(productId, userId, imageIds, role);
     return images.map(mapImage);
   }
 
   @Mutation(() => ProductImageType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async setProductThumbnail(
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
     @Args('productId') productId: string,
     @Args('imageId') imageId: string,
   ): Promise<ProductImageType> {
-    const image = await this.productsService.setProductThumbnail(productId, imageId, userId);
+    const image = await this.productsService.setProductThumbnail(productId, imageId, userId, role);
     return mapImage(image);
   }
 }

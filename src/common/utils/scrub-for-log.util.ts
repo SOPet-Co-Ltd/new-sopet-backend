@@ -2,7 +2,7 @@
  * Redacts secrets and high-sensitivity fields before logging payment-provider payloads.
  */
 const SENSITIVE_KEY_PATTERN =
-  /(secret|token|password|authorization|card_number|security_code|cvv|cvc|pan|bank_account)/i;
+  /(secret|token|password|authorization|card_number|security_code|cvv|cvc|pan|bank_account|cardCipher|cardSecurityCodeCipher|card_cipher)/i;
 
 export function scrubForLog(value: unknown, depth = 0): unknown {
   if (depth > 6) {

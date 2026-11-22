@@ -9,7 +9,7 @@ import {
   Query,
   Resolver,
 } from '@nestjs/graphql';
-import { UseGuards, ForbiddenException } from '@nestjs/common';
+import { UseGuards } from '@nestjs/common';
 import {
   IsInt,
   IsNotEmpty,
@@ -25,6 +25,7 @@ import {
 import {
   ReviewsService,
   resolveReviewCustomerName,
+  resolveReviewCustomerProfilePhotoUrl,
   REVIEW_MAX_IMAGES,
   normalizeStoreReviewRatingFilter,
   normalizeStoreReviewReplyFilter,
@@ -113,6 +114,9 @@ export class CustomerReviewType {
 
   @Field(() => [ReviewImageType])
   images!: ReviewImageType[];
+
+  @Field(() => String, { nullable: true })
+  variantOptions?: string | null;
 }
 
 @ObjectType()
@@ -141,11 +145,17 @@ export class ReviewType {
   @Field()
   customerName!: string;
 
+  @Field(() => String, { nullable: true })
+  customerProfilePhotoUrl?: string | null;
+
   @Field(() => [ReviewImageType])
   images!: ReviewImageType[];
 
   @Field(() => ReviewReplyType, { nullable: true })
   reply?: ReviewReplyType | null;
+
+  @Field(() => String, { nullable: true })
+  variantOptions?: string | null;
 }
 
 @ObjectType()
@@ -252,6 +262,8 @@ function mapReviewToType(review: Review): ReviewType {
     status: review.status,
     createdAt: review.createdAt,
     customerName: resolveReviewCustomerName(review),
+    customerProfilePhotoUrl: resolveReviewCustomerProfilePhotoUrl(review),
+    variantOptions: review.variantOptions,
     images: (review.images ?? []).map((image) => ({
       id: image.id,
       url: image.url,
@@ -344,29 +356,28 @@ export class ReviewsResolver {
 
   @Query(() => [ReviewType])
   @Public()
-  async productReviews(@Args('productId') productId: string): Promise<ReviewType[]> {
-    const reviews = await this.reviewsService.findByProduct(productId);
+  async productReviews(
+    @Args('productId') productId: string,
+    @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page = 1,
+    @Args('limit', { type: () => Int, nullable: true, defaultValue: 100 }) limit = 100,
+  ): Promise<ReviewType[]> {
+    const reviews = await this.reviewsService.findByProduct(productId, page, limit);
     return reviews.map(mapReviewToType);
   }
 
   @Query(() => StoreProductReviewConnection)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async storeProductReviews(
     @Args('storeId') storeId: string,
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
     @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page?: number,
     @Args('limit', { type: () => Int, nullable: true, defaultValue: 20 }) limit?: number,
     @Args('replyFilter', { type: () => String, nullable: true }) replyFilter?: string,
     @Args('ratingFilter', { type: () => String, nullable: true }) ratingFilter?: string,
   ): Promise<StoreProductReviewConnection> {
-    const hasAccess = await this.storesService.userHasStoreAccess(userId, storeId);
-    if (!hasAccess) {
-      throw new ForbiddenException({
-        code: 'STORE_ACCESS_DENIED',
-        message: 'No access to this store',
-      });
-    }
+    await this.storesService.assertStoreAccessIfVendor(role, userId, storeId);
     return this.reviewsService.findByStorePaginated({
       storeId,
       page,
@@ -378,8 +389,12 @@ export class ReviewsResolver {
 
   @Query(() => [StoreProductReviewType])
   @Public()
-  async storeReviews(@Args('storeId') storeId: string): Promise<StoreProductReviewType[]> {
-    return this.reviewsService.findByStore(storeId);
+  async storeReviews(
+    @Args('storeId') storeId: string,
+    @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page = 1,
+    @Args('limit', { type: () => Int, nullable: true, defaultValue: 100 }) limit = 100,
+  ): Promise<StoreProductReviewType[]> {
+    return this.reviewsService.findByStore(storeId, page, limit);
   }
 
   @Query(() => StoreReviewSummaryType)
@@ -408,13 +423,15 @@ export class ReviewsResolver {
 
   @Mutation(() => ReviewReplyType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async createReviewReply(
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
     @Args('input') input: CreateReviewReplyInput,
   ): Promise<ReviewReplyType> {
     const reply = await this.reviewsService.createReviewReply({
       userId,
+      role,
       reviewId: input.reviewId,
       body: input.body,
     });
@@ -428,13 +445,15 @@ export class ReviewsResolver {
 
   @Mutation(() => ReviewReplyType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async updateReviewReply(
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
     @Args('input') input: UpdateReviewReplyInput,
   ): Promise<ReviewReplyType> {
     const reply = await this.reviewsService.updateReviewReply({
       userId,
+      role,
       replyId: input.replyId,
       body: input.body,
     });

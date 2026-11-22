@@ -6,7 +6,6 @@
 // Promoted from test/store-commission.int.test.ts
 //
 // Harness: Nest TestingModule + real GraphQLModule (ApolloDriver) + supertest POST; seeded PostgreSQL
-// Mock: Omise HTTP only (createTransfer still receives Math.round(netAmount * 100))
 // @real-dependency: payout-commission.calculator
 // @real-dependency: PostgreSQL
 //
@@ -27,8 +26,8 @@ import { StoresService } from '../src/modules/stores/stores.service';
 import { JwtAuthGuard } from '../src/modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../src/modules/auth/guards/roles.guard';
 import { AuditLogsService } from '../src/modules/audit-logs/audit-logs.service';
-import { OmiseService } from '../src/modules/omise/omise.service';
 import { NotificationsService } from '../src/modules/notifications/notifications.service';
+import { DashboardEventsService } from '../src/modules/dashboard-events/dashboard-events.service';
 import { StorageService } from '../src/modules/storage/storage.service';
 import { StoreSuspensionHoldService } from '../src/modules/orders/store-suspension-hold.service';
 import { EmailDeliveryService } from '../src/modules/email/email-delivery.service';
@@ -58,6 +57,7 @@ import {
   isPostgresAvailable,
 } from './helpers';
 import { createTypeOrmTestOptions } from './helpers/typeorm-test.config';
+import { STORE_COMMISSION_E2E_BANK_ACCOUNT } from './helpers/store-commission-e2e.seed';
 
 const GO_LIVE_AT = new Date('2026-06-01T00:00:00.000Z');
 const PRE_PAID_AT = new Date('2026-05-01T00:00:00.000Z');
@@ -81,14 +81,19 @@ const TRIGGER_PAYOUT = `
 
 const ADMIN_STORE_PAYOUTS = `
   query AdminStorePayouts($storeId: String!) {
-    adminStorePayouts(storeId: $storeId) {
-      id
-      amount
-      netAmount
-      productSold
-      shippingFees
-      commissionAmount
-      commissionRate
+    adminStorePayouts(storeId: $storeId, page: 1, limit: 20) {
+      items {
+        id
+        amount
+        netAmount
+        productSold
+        shippingFees
+        commissionAmount
+        commissionRate
+      }
+      pagination {
+        total
+      }
     }
   }
 `;
@@ -137,8 +142,6 @@ describe('store commission — mixed-cutoff payout create [integration]', () => 
     promotionIds: [] as string[],
     promotionUsageIds: [] as string[],
   };
-
-  const omiseCreateTransfer = jest.fn();
 
   beforeAll(async () => {
     postgresAvailable = await isPostgresAvailable();
@@ -204,20 +207,12 @@ describe('store commission — mixed-cutoff payout create [integration]', () => 
           },
         },
         {
-          provide: OmiseService,
-          useValue: {
-            hasCredentials: jest.fn().mockReturnValue(true),
-            getRecipient: jest.fn().mockResolvedValue({
-              id: 'recp_int1',
-              verified: true,
-              active: true,
-            }),
-            createTransfer: omiseCreateTransfer,
-          },
-        },
-        {
           provide: NotificationsService,
           useValue: { notifyAdminsAboutManualPayoutRequest: jest.fn() },
+        },
+        {
+          provide: DashboardEventsService,
+          useValue: { publish: jest.fn().mockResolvedValue(undefined) },
         },
         { provide: StorageService, useValue: {} },
         {
@@ -262,7 +257,6 @@ describe('store commission — mixed-cutoff payout create [integration]', () => 
   });
 
   afterEach(async () => {
-    omiseCreateTransfer.mockReset();
     if (dataSource?.isInitialized) {
       await cleanupTracked();
     }
@@ -321,11 +315,12 @@ describe('store commission — mixed-cutoff payout create [integration]', () => 
       status: StoreStatus.APPROVED,
       approvedBy: owner.id,
     });
+    Object.assign(store, STORE_COMMISSION_E2E_BANK_ACCOUNT);
     if (rail === 'omise') {
       store.omiseRecipientId = `recp_${suffix}`;
       store.omiseRecipientStatus = OmiseRecipientStatus.ACTIVE;
-      await storeRepo.save(store);
     }
+    await storeRepo.save(store);
     return store;
   }
 
@@ -485,7 +480,6 @@ describe('store commission — mixed-cutoff payout create [integration]', () => 
     const manualStore = await seedStore('int1-manual', 'manual');
     await seedMixedCutoffUnpaid(omiseStore, PaymentMethod.PROMPTPAY, 'omise');
     await seedMixedCutoffUnpaid(manualStore, PaymentMethod.BANK_TRANSFER, 'manual');
-    omiseCreateTransfer.mockResolvedValue({ id: 'trsf_int1', paid: false });
 
     const gqlRes = await request(app!.getHttpServer())
       .post('/graphql')
@@ -515,13 +509,12 @@ describe('store commission — mixed-cutoff payout create [integration]', () => 
     expect(Number(omiseRow.shippingFees)).toBe(80);
     expect(Number(omiseRow.commissionAmount)).toBe(70);
     expect(omiseRow.commissionRate).toBe(7);
-    expect(omiseCreateTransfer).toHaveBeenCalledWith(omiseStore.omiseRecipientId, 141000);
 
     const listRes = await request(app!.getHttpServer())
       .post('/graphql')
       .send({ query: ADMIN_STORE_PAYOUTS, variables: { storeId: omiseStore.id } })
       .expect(200);
-    expect(listRes.body.data.adminStorePayouts[0].amount).toBe(1410);
+    expect(listRes.body.data.adminStorePayouts.items[0].amount).toBe(1410);
 
     const manual = await payoutsService.requestManualPayout(
       manualStore.id,
@@ -620,16 +613,12 @@ describe('store commission — admin rate edit and snapshot immutability [integr
           },
         },
         {
-          provide: OmiseService,
-          useValue: {
-            hasCredentials: jest.fn().mockReturnValue(false),
-            createTransfer: jest.fn(),
-            getRecipient: jest.fn(),
-          },
-        },
-        {
           provide: NotificationsService,
           useValue: { notifyAdminsAboutManualPayoutRequest: jest.fn() },
+        },
+        {
+          provide: DashboardEventsService,
+          useValue: { publish: jest.fn().mockResolvedValue(undefined) },
         },
         { provide: StorageService, useValue: {} },
         {
@@ -942,16 +931,12 @@ describe('store commission — hold exclusion [integration]', () => {
           },
         },
         {
-          provide: OmiseService,
-          useValue: {
-            hasCredentials: jest.fn().mockReturnValue(false),
-            createTransfer: jest.fn(),
-            getRecipient: jest.fn(),
-          },
-        },
-        {
           provide: NotificationsService,
           useValue: { notifyAdminsAboutManualPayoutRequest: jest.fn() },
+        },
+        {
+          provide: DashboardEventsService,
+          useValue: { publish: jest.fn().mockResolvedValue(undefined) },
         },
       ],
     }).compile();
@@ -1169,9 +1154,9 @@ describe('store commission — hold exclusion [integration]', () => {
     expect(summary.commissionAmount).toBe(70);
     expect(summary.commissionRate).toBe(7);
     expect(summary.availableBalance).toBe(1010);
-    expect(summary.omise.productSold).toBe(1000);
-    expect(summary.omise.shippingFees).toBe(80);
-    expect(summary.omise.commissionAmount).toBe(70);
+    expect(summary.productSold).toBe(1000);
+    expect(summary.shippingFees).toBe(80);
+    expect(summary.commissionAmount).toBe(70);
     expect(summary.availableBalance).toBe(
       summary.productSold - summary.commissionAmount + summary.shippingFees,
     );

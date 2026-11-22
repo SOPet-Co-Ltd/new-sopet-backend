@@ -59,6 +59,10 @@ export class Review {
   @IsOptional()
   comment!: string | null;
 
+  @Column({ name: 'variant_options', type: 'varchar', nullable: true })
+  @IsOptional()
+  variantOptions!: string | null;
+
   @Column({
     name: 'status',
     type: 'enum',

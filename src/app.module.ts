@@ -7,7 +7,7 @@ import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
 import appConfig from './config/app.config';
 import jwtConfig from './config/jwt.config';
 import otpConfig from './config/otp.config';
-import omiseConfig from './config/omise.config';
+import beamConfig from './config/beam.config';
 import storageConfig from './config/storage.config';
 import twilioConfig from './config/twilio.config';
 import resendConfig from './config/resend.config';
@@ -21,6 +21,7 @@ import emailConfig from './config/email.config';
 // Filters, Interceptors, Pipes
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
+import { RequestIdInterceptor } from './common/interceptors/request-id.interceptor';
 import { ValidationPipe } from './common/pipes/validation.pipe';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from './modules/auth/guards/roles.guard';
@@ -48,6 +49,7 @@ import { SearchModule } from './modules/search/search.module';
 import { HealthModule } from './modules/health/health.module';
 import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
 import { OrderAuditLogsModule } from './modules/order-audit-logs/order-audit-logs.module';
+import { McpModule } from './modules/mcp/mcp.module';
 import { getPostgresSslOptions } from './database/postgres-ssl.util';
 
 @Module({
@@ -59,7 +61,7 @@ import { getPostgresSslOptions } from './database/postgres-ssl.util';
         appConfig,
         jwtConfig,
         otpConfig,
-        omiseConfig,
+        beamConfig,
         storageConfig,
         twilioConfig,
         thaibulksmsConfig,
@@ -119,6 +121,7 @@ import { getPostgresSslOptions } from './database/postgres-ssl.util';
     HealthModule,
     AuditLogsModule,
     OrderAuditLogsModule,
+    McpModule,
   ],
   providers: [
     // Global exception filter
@@ -126,7 +129,11 @@ import { getPostgresSslOptions } from './database/postgres-ssl.util';
       provide: APP_FILTER,
       useClass: HttpExceptionFilter,
     },
-    // Global interceptors
+    // Global interceptors (request id before logging)
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: RequestIdInterceptor,
+    },
     {
       provide: APP_INTERCEPTOR,
       useClass: LoggingInterceptor,

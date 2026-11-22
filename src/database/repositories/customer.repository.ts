@@ -102,6 +102,28 @@ export class CustomerRepository {
     await this.repository.update(id, data);
   }
 
+  /**
+   * Sets customer.email only when the account has no email yet.
+   * Returns true when the email was written.
+   */
+  async setEmailIfMissing(customerId: string, email: string | null | undefined): Promise<boolean> {
+    const trimmed = email?.trim();
+    if (!trimmed || trimmed.length > 254 || /[<>]/.test(trimmed)) {
+      return false;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      return false;
+    }
+
+    const customer = await this.findById(customerId);
+    if (!customer || customer.email?.trim()) {
+      return false;
+    }
+
+    await this.repository.update(customerId, { email: trimmed });
+    return true;
+  }
+
   async softDelete(id: string): Promise<void> {
     await this.repository.softDelete(id);
   }

@@ -2,12 +2,14 @@ import { Args, Int, Query, Resolver } from '@nestjs/graphql';
 import { BadRequestException, UseGuards } from '@nestjs/common';
 import { AnalyticsService } from './analytics.service';
 import {
+  CustomerPurchaseSummaryType,
   PlatformAnalyticsType,
   SalesBreakdownItemType,
   SalesTimePointType,
   StoreAnalyticsType,
   TopProductType,
   TopStoreType,
+  StoreCustomerSummaryType,
 } from '../../graphql/models/types';
 import { CurrentUser, Roles } from '../../common/decorators';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -126,5 +128,39 @@ export class AnalyticsResolver {
     @Args('limit', { nullable: true, type: () => Int }) limit?: number,
   ): Promise<TopStoreType[]> {
     return this.analyticsService.getPlatformTopStores(limit ?? 10);
+  }
+
+  @Query(() => StoreCustomerSummaryType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async storeCustomerSummary(
+    @Args('storeId') storeId: string,
+    @Args('year', { type: () => Int }) year: number,
+    @Args('month', { type: () => Int }) month: number,
+  ): Promise<StoreCustomerSummaryType> {
+    if (!storeId) {
+      throw new BadRequestException({
+        code: 'STORE_ID_REQUIRED',
+        message: 'Store ID is required',
+      });
+    }
+    return this.analyticsService.getStoreCustomerSummary(storeId, year, month);
+  }
+
+  @Query(() => CustomerPurchaseSummaryType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async customerPurchaseSummary(
+    @Args('customerId') customerId: string,
+    @Args('year', { type: () => Int }) year: number,
+    @Args('month', { type: () => Int }) month: number,
+  ): Promise<CustomerPurchaseSummaryType> {
+    if (!customerId) {
+      throw new BadRequestException({
+        code: 'CUSTOMER_ID_REQUIRED',
+        message: 'Customer ID is required',
+      });
+    }
+    return this.analyticsService.getCustomerPurchaseSummary(customerId, year, month);
   }
 }

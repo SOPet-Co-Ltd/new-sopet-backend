@@ -1,5 +1,23 @@
-import { IsNotEmpty, IsString, IsNumber, IsEnum, Min, IsOptional, IsUUID } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import {
+  IsNotEmpty,
+  IsString,
+  IsNumber,
+  IsEnum,
+  Min,
+  IsOptional,
+  IsUUID,
+  IsIn,
+} from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
+const PAYMENT_METHODS = [
+  'promptpay',
+  'credit_card',
+  'cod',
+  'bank_transfer',
+  'truemoney',
+  'shopeepay',
+] as const;
 
 export class CreateChargeDto {
   @ApiProperty({
@@ -10,24 +28,25 @@ export class CreateChargeDto {
   @IsString()
   orderId!: string;
 
-  @ApiProperty({
-    description: 'Amount to charge in the smallest currency unit expected by the provider',
+  @ApiPropertyOptional({
+    description:
+      'Ignored — the service always charges the locked order total. Kept for client compatibility.',
     example: 700,
     minimum: 0,
   })
-  @IsNotEmpty()
+  @IsOptional()
   @IsNumber()
   @Min(0)
-  amount!: number;
+  amount?: number;
 
   @ApiProperty({
     description: 'Payment method used for the charge',
-    enum: ['promptpay', 'credit_card', 'cod', 'bank_transfer'],
+    enum: PAYMENT_METHODS,
     example: 'credit_card',
   })
   @IsNotEmpty()
-  @IsEnum(['promptpay', 'credit_card', 'cod', 'bank_transfer'])
-  paymentMethod!: 'promptpay' | 'credit_card' | 'cod' | 'bank_transfer';
+  @IsEnum(PAYMENT_METHODS)
+  paymentMethod!: (typeof PAYMENT_METHODS)[number];
 
   @ApiProperty({
     description: 'ISO 4217 currency code',
@@ -38,10 +57,18 @@ export class CreateChargeDto {
   @IsNotEmpty()
   currency: string = 'THB';
 
-  @ApiProperty({ required: false, description: 'Omise card token from client' })
+  @ApiProperty({ required: false, description: 'Beam card token id from client tokenization' })
   @IsOptional()
   @IsString()
-  omiseToken?: string;
+  cardToken?: string;
+
+  @ApiProperty({
+    required: false,
+    description: 'Card CVV / security code — never persisted; required for card charges',
+  })
+  @IsOptional()
+  @IsString()
+  cardSecurityCode?: string;
 
   @ApiProperty({ required: false, description: 'Saved payment method ID' })
   @IsOptional()
@@ -57,4 +84,24 @@ export class CreateChargeDto {
   @IsOptional()
   @IsString()
   guestPayToken?: string;
+
+  @ApiPropertyOptional({
+    description: 'Optional client platform hint (IOS / ANDROID / WEB)',
+    enum: ['IOS', 'ANDROID', 'WEB'],
+  })
+  @IsOptional()
+  @IsIn(['IOS', 'ANDROID', 'WEB'])
+  platformType?: 'IOS' | 'ANDROID' | 'WEB';
+
+  @ApiPropertyOptional({
+    description: 'Save card after successful charge (applied in markOrderPaid)',
+  })
+  @IsOptional()
+  saveCard?: {
+    cardholderName: string;
+    pan: string;
+    expiryMonth: number;
+    expiryYear: number;
+    isDefault?: boolean;
+  };
 }

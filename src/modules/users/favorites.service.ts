@@ -4,6 +4,18 @@ import { Repository } from 'typeorm';
 import { Favorite } from '../../database/entities/favorite.entity';
 import { Product } from '../../database/entities/product.entity';
 
+const FAVORITES_DEFAULT_LIMIT = 24;
+const FAVORITES_MAX_LIMIT = 100;
+
+/** One image per product: thumbnail flag, then sort order. Product has no stored thumbnailUrl. */
+const THUMBNAIL_IMAGE_JOIN = `image.id = (
+  SELECT pi.id
+  FROM product_images pi
+  WHERE pi.product_id = product.id
+  ORDER BY pi.is_thumbnail DESC, pi.sort_order ASC, pi.created_at ASC, pi.id ASC
+  LIMIT 1
+)`;
+
 @Injectable()
 export class FavoritesService {
   constructor(
@@ -13,12 +25,21 @@ export class FavoritesService {
     private readonly productRepository: Repository<Product>,
   ) {}
 
-  async list(customerId: string): Promise<Favorite[]> {
-    return this.favoriteRepository.find({
-      where: { customerId },
-      relations: ['product', 'product.images', 'product.variants', 'product.store'],
-      order: { createdAt: 'DESC' },
-    });
+  async list(customerId: string, page = 1, limit = FAVORITES_DEFAULT_LIMIT): Promise<Favorite[]> {
+    const safePage = Math.max(page, 1);
+    const safeLimit = Math.min(Math.max(limit, 1), FAVORITES_MAX_LIMIT);
+
+    return this.favoriteRepository
+      .createQueryBuilder('favorite')
+      .leftJoinAndSelect('favorite.product', 'product')
+      .leftJoinAndSelect('product.store', 'store')
+      .leftJoinAndSelect('product.images', 'image', THUMBNAIL_IMAGE_JOIN)
+      .where('favorite.customerId = :customerId', { customerId })
+      .orderBy('favorite.createdAt', 'DESC')
+      .addOrderBy('favorite.id', 'DESC')
+      .skip((safePage - 1) * safeLimit)
+      .take(safeLimit)
+      .getMany();
   }
 
   async add(customerId: string, productId: string): Promise<Favorite> {

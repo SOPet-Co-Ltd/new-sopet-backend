@@ -1,6 +1,6 @@
 export * from './app.config';
 export * from './jwt.config';
-export * from './omise.config';
+export { default as beamConfig } from './beam.config';
 export * from './storage.config';
 export * from './twilio.config';
 export * from './resend.config';

@@ -252,6 +252,35 @@ describe('StorageService', () => {
     });
   });
 
+  describe('isOurPublicFolderUrl', () => {
+    it('returns true for configured public URL under reviews/', () => {
+      expect(
+        service.isOurPublicFolderUrl(
+          'http://localhost:9000/sopet-ecommerce-files/reviews/a1b2c3d4-e5f6-7890-abcd-ef1234567890.webp',
+          'reviews',
+        ),
+      ).toBe(true);
+    });
+
+    it('returns false for foreign hosts even if path contains reviews/', () => {
+      expect(
+        service.isOurPublicFolderUrl(
+          'https://unusual-vendor.example/foo/reviews/photo.jpg',
+          'reviews',
+        ),
+      ).toBe(false);
+    });
+
+    it('returns false for our host under a different folder', () => {
+      expect(
+        service.isOurPublicFolderUrl(
+          'http://localhost:9000/sopet-ecommerce-files/products/a1b2c3d4-e5f6-7890-abcd-ef1234567890.webp',
+          'reviews',
+        ),
+      ).toBe(false);
+    });
+  });
+
   it('builds object keys under categories folder', () => {
     const key = service.buildObjectKey('categories', 'image/webp');
     expect(key).toMatch(/^categories\/[0-9a-f-]+\.webp$/);

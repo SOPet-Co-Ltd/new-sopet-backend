@@ -1,4 +1,4 @@
-import { Args, Context, Field, InputType, Mutation, Query, Resolver } from '@nestjs/graphql';
+import { Args, Context, Field, InputType, Int, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { BadRequestException, Inject, UseGuards, forwardRef } from '@nestjs/common';
 import { StoresService } from './stores.service';
 import { StoreTeamService } from './store-team.service';
@@ -30,7 +30,10 @@ import {
   StoreReactivationRequestType,
   VendorInvitationType,
   AdminStoreType,
+  AdminStoreConnection,
   AdminVendorType,
+  AdminVendorListItem,
+  AdminVendorConnection,
   AdminVendorDetailType,
 } from '../../graphql/models/types';
 import {
@@ -133,6 +136,20 @@ function mapMyPendingStoreInvitation(
   };
 }
 
+function mapAdminVendorListItem(record: { user: User; storeCount: number }): AdminVendorListItem {
+  const vendor = record.user;
+  return {
+    id: vendor.id,
+    email: vendor.email,
+    fullName: vendor.fullName,
+    role: vendor.role,
+    isActive: vendor.isActive,
+    lastLoginAt: vendor.lastLoginAt,
+    createdAt: vendor.createdAt,
+    storeCount: record.storeCount,
+  };
+}
+
 function mapAdminVendor(vendor: User): AdminVendorType {
   return {
     id: vendor.id,
@@ -169,6 +186,8 @@ function mapMyStore(store: Store, includePayout: boolean): MyStoreType {
     omiseRecipientId: includePayout ? store.omiseRecipientId : null,
     omiseRecipientStatus: store.omiseRecipientStatus,
     omiseRecipientFailureMessage: includePayout ? store.omiseRecipientFailureMessage : null,
+    bankAccountVerificationStatus: store.bankAccountVerificationStatus,
+    bankAccountRejectionReason: includePayout ? (store.bankAccountRejectionReason ?? null) : null,
     status: store.status,
   };
 }
@@ -467,12 +486,21 @@ export class StoresResolver {
     }));
   }
 
-  @Query(() => [AdminStoreType])
+  @Query(() => AdminStoreConnection)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
-  async adminStores(): Promise<AdminStoreType[]> {
-    const stores = await this.storesService.findAllForAdmin();
-    return stores.map(mapAdminStore);
+  async adminStores(
+    @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page?: number,
+    @Args('limit', { type: () => Int, nullable: true, defaultValue: 20 }) limit?: number,
+    @Args('search', { type: () => String, nullable: true }) search?: string,
+    @Args('status', { type: () => String, nullable: true }) status?: string,
+    @Args('sort', { type: () => String, nullable: true }) sort?: string,
+  ): Promise<AdminStoreConnection> {
+    const result = await this.storesService.findAllForAdmin({ page, limit, search, status, sort });
+    return {
+      items: result.items.map(mapAdminStore),
+      pagination: result.pagination,
+    };
   }
 
   @Query(() => AdminStoreType)
@@ -591,14 +619,21 @@ export class StoresResolver {
     return mapAdminStore(store);
   }
 
-  @Query(() => [AdminVendorType])
+  @Query(() => AdminVendorConnection)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   async adminVendors(
-    @Args('search', { nullable: true }) search?: string,
-  ): Promise<AdminVendorType[]> {
-    const vendors = await this.storesService.findVendors(search);
-    return vendors.map(mapAdminVendor);
+    @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page?: number,
+    @Args('limit', { type: () => Int, nullable: true, defaultValue: 20 }) limit?: number,
+    @Args('search', { type: () => String, nullable: true }) search?: string,
+    @Args('status', { type: () => String, nullable: true }) status?: string,
+    @Args('sort', { type: () => String, nullable: true }) sort?: string,
+  ): Promise<AdminVendorConnection> {
+    const result = await this.storesService.findVendors({ page, limit, search, status, sort });
+    return {
+      items: result.items.map(mapAdminVendorListItem),
+      pagination: result.pagination,
+    };
   }
 
   @Query(() => AdminVendorType)
@@ -674,12 +709,20 @@ export class StoresResolver {
 
   @Query(() => [StoreShippingOptionType])
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async myStoreShippingOptions(
     @CurrentUser('id') userId: string,
-    @CurrentUser('storeId') storeId: string,
+    @CurrentUser('role') role: string,
+    @CurrentUser('storeId') jwtStoreId?: string,
+    @Args('storeId', { nullable: true }) argsStoreId?: string,
   ): Promise<StoreShippingOptionType[]> {
-    await this.storesService.assertStoreAccess(userId, storeId);
+    const storeId = await this.storesService.resolveActorStoreId(
+      role,
+      userId,
+      jwtStoreId,
+      argsStoreId,
+    );
+    await this.storesService.assertStoreAccessIfVendor(role, userId, storeId);
     const options = await this.shippingOptionsService.findByStore(storeId, false);
     return options.map(mapStoreShippingOption);
   }
@@ -789,24 +832,40 @@ export class StoresResolver {
 
   @Query(() => [StoreMemberType])
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async storeMembers(
     @CurrentUser('id') userId: string,
-    @CurrentUser('storeId') storeId: string,
+    @CurrentUser('role') role: string,
+    @CurrentUser('storeId') jwtStoreId?: string,
+    @Args('storeId', { nullable: true }) argsStoreId?: string,
   ): Promise<StoreMemberType[]> {
-    await this.storesService.assertStoreOwner(userId, storeId);
+    const storeId = await this.storesService.resolveActorStoreId(
+      role,
+      userId,
+      jwtStoreId,
+      argsStoreId,
+    );
+    await this.storesService.assertStoreOwnerIfVendor(role, userId, storeId);
     const members = await this.storeTeamService.listMembers(storeId);
     return members.map(mapStoreMember);
   }
 
   @Query(() => [StoreMemberInvitationType])
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async storeInvitations(
     @CurrentUser('id') userId: string,
-    @CurrentUser('storeId') storeId: string,
+    @CurrentUser('role') role: string,
+    @CurrentUser('storeId') jwtStoreId?: string,
+    @Args('storeId', { nullable: true }) argsStoreId?: string,
   ): Promise<StoreMemberInvitationType[]> {
-    await this.storesService.assertStoreOwner(userId, storeId);
+    const storeId = await this.storesService.resolveActorStoreId(
+      role,
+      userId,
+      jwtStoreId,
+      argsStoreId,
+    );
+    await this.storesService.assertStoreOwnerIfVendor(role, userId, storeId);
     const invitations = await this.storeTeamService.listPendingInvitations(storeId);
     return invitations.map(mapStoreMemberInvitation);
   }
@@ -827,37 +886,43 @@ export class StoresResolver {
 
   @Query(() => MyStoreType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async myStore(
     @CurrentUser('id') userId: string,
-    @CurrentUser('storeId') storeId?: string,
+    @CurrentUser('role') role: string,
+    @CurrentUser('storeId') jwtStoreId?: string,
+    @Args('storeId', { nullable: true }) argsStoreId?: string,
   ): Promise<MyStoreType> {
-    if (!storeId) {
-      throw new BadRequestException({
-        code: 'NO_STORE_SELECTED',
-        message: 'No store selected. Use switchStore first.',
-      });
-    }
-
-    await this.storesService.assertStoreAccess(userId, storeId);
-    const includePayout = await this.storesService.isStoreOwner(userId, storeId);
-    // Refresh Omise recipient status so dashboard activations show up without
-    // requiring the vendor to re-save bank details.
-    const store = includePayout
-      ? await this.storesService.refreshOmiseRecipientStatus(storeId)
-      : await this.storesService.findOne(storeId);
+    const storeId = await this.storesService.resolveActorStoreId(
+      role,
+      userId,
+      jwtStoreId,
+      argsStoreId,
+    );
+    await this.storesService.assertStoreAccessIfVendor(role, userId, storeId);
+    const includePayout =
+      role === 'admin' || (await this.storesService.isStoreOwner(userId, storeId));
+    const store = await this.storesService.findOne(storeId);
     return mapMyStore(store, includePayout);
   }
 
   @Mutation(() => StoreMemberInvitationType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async inviteStoreMember(
     @Args('input') input: InviteStoreMemberInput,
-    @CurrentUser('storeId') storeId: string,
+    @CurrentUser('role') role: string,
     @CurrentUser('id') userId: string,
+    @CurrentUser('storeId') jwtStoreId?: string,
+    @Args('storeId', { nullable: true }) argsStoreId?: string,
   ): Promise<StoreMemberInvitationType> {
-    await this.storesService.assertStoreOwner(userId, storeId);
+    const storeId = await this.storesService.resolveActorStoreId(
+      role,
+      userId,
+      jwtStoreId,
+      argsStoreId,
+    );
+    await this.storesService.assertStoreOwnerIfVendor(role, userId, storeId);
     const invitation = await this.storeTeamService.inviteMember(
       storeId,
       userId,
@@ -934,26 +999,42 @@ export class StoresResolver {
 
   @Mutation(() => Boolean)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async removeStoreMember(
     @Args('memberId') memberId: string,
-    @CurrentUser('storeId') storeId: string,
+    @CurrentUser('role') role: string,
     @CurrentUser('id') userId: string,
+    @CurrentUser('storeId') jwtStoreId?: string,
+    @Args('storeId', { nullable: true }) argsStoreId?: string,
   ): Promise<boolean> {
-    await this.storesService.assertStoreOwner(userId, storeId);
+    const storeId = await this.storesService.resolveActorStoreId(
+      role,
+      userId,
+      jwtStoreId,
+      argsStoreId,
+    );
+    await this.storesService.assertStoreOwnerIfVendor(role, userId, storeId);
     await this.storeTeamService.removeMember(storeId, memberId);
     return true;
   }
 
   @Mutation(() => StoreMemberType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async updateStoreMemberRole(
     @Args('input') input: UpdateStoreMemberRoleInput,
-    @CurrentUser('storeId') storeId: string,
+    @CurrentUser('role') role: string,
     @CurrentUser('id') userId: string,
+    @CurrentUser('storeId') jwtStoreId?: string,
+    @Args('storeId', { nullable: true }) argsStoreId?: string,
   ): Promise<StoreMemberType> {
-    await this.storesService.assertStoreOwner(userId, storeId);
+    const storeId = await this.storesService.resolveActorStoreId(
+      role,
+      userId,
+      jwtStoreId,
+      argsStoreId,
+    );
+    await this.storesService.assertStoreOwnerIfVendor(role, userId, storeId);
     const member = await this.storeTeamService.updateMemberRole(
       storeId,
       input.memberId,
@@ -964,13 +1045,21 @@ export class StoresResolver {
 
   @Mutation(() => StoreMemberInvitationType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async revokeStoreInvitation(
     @Args('invitationId') invitationId: string,
-    @CurrentUser('storeId') storeId: string,
+    @CurrentUser('role') role: string,
     @CurrentUser('id') userId: string,
+    @CurrentUser('storeId') jwtStoreId?: string,
+    @Args('storeId', { nullable: true }) argsStoreId?: string,
   ): Promise<StoreMemberInvitationType> {
-    await this.storesService.assertStoreOwner(userId, storeId);
+    const storeId = await this.storesService.resolveActorStoreId(
+      role,
+      userId,
+      jwtStoreId,
+      argsStoreId,
+    );
+    await this.storesService.assertStoreOwnerIfVendor(role, userId, storeId);
     const invitation = await this.storeTeamService.revokeInvitation(storeId, invitationId);
     return mapStoreMemberInvitation(invitation);
   }
@@ -989,103 +1078,136 @@ export class StoresResolver {
 
   @Mutation(() => MyStoreType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async updateStore(
     @Args('input') input: UpdateStoreSettingsInput,
-    @CurrentUser('storeId') storeId: string,
+    @CurrentUser('role') role: string,
     @CurrentUser('id') userId: string,
+    @CurrentUser('storeId') jwtStoreId?: string,
+    @Args('storeId', { nullable: true }) argsStoreId?: string,
   ): Promise<MyStoreType> {
-    await this.storesService.assertStoreOwner(userId, storeId);
+    const storeId = await this.storesService.resolveActorStoreId(
+      role,
+      userId,
+      jwtStoreId,
+      argsStoreId,
+    );
+    await this.storesService.assertStoreOwnerIfVendor(role, userId, storeId);
     const store = await this.storesService.updateStoreSettings(storeId, input);
     return mapMyStore(store, true);
   }
 
   @Mutation(() => MyStoreType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async updateStorePayout(
     @Args('input') input: UpdateStorePayoutInput,
-    @CurrentUser('storeId') storeId: string,
+    @CurrentUser('role') role: string,
     @CurrentUser('id') userId: string,
+    @CurrentUser('storeId') jwtStoreId?: string,
+    @Args('storeId', { nullable: true }) argsStoreId?: string,
   ): Promise<MyStoreType> {
-    await this.storesService.assertStoreOwner(userId, storeId);
+    const storeId = await this.storesService.resolveActorStoreId(
+      role,
+      userId,
+      jwtStoreId,
+      argsStoreId,
+    );
+    await this.storesService.assertStoreOwnerIfVendor(role, userId, storeId);
     const store = await this.storesService.updateStorePayout(storeId, input);
-    return mapMyStore(store, true);
-  }
-
-  @Mutation(() => MyStoreType)
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
-  async linkStoreOmiseRecipient(
-    @CurrentUser('storeId') storeId: string,
-    @CurrentUser('id') userId: string,
-  ): Promise<MyStoreType> {
-    await this.storesService.assertStoreOwner(userId, storeId);
-    const store = await this.storesService.linkStoreOmiseRecipient(storeId);
     return mapMyStore(store, true);
   }
 
   @Mutation(() => AdminStoreType)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
-  async linkStoreOmiseRecipientAsAdmin(
+  async verifyStoreBankAccount(
     @Args('storeId') storeId: string,
     @CurrentUser('id') adminId: string,
-    @CurrentUser('email') adminEmail?: string,
     @Context() context?: GraphqlContext,
   ): Promise<AdminStoreType> {
-    const store = await this.storesService.linkStoreOmiseRecipient(storeId);
-    await this.auditLogsService.log({
-      ...this.adminActor(adminId, adminEmail),
-      action: AuditAction.STORE_UPDATED,
-      resourceType: AuditResourceType.STORE,
-      resourceId: store.id,
-      metadata: {
-        storeName: store.name,
-        omiseRecipientStatus: store.omiseRecipientStatus,
-        action: 'link_omise_recipient',
-      },
-      ...getAuditRequestContext(context?.req),
-    });
+    const store = await this.storesService.verifyStoreBankAccount(storeId, adminId, context?.req);
+    return mapAdminStore(store);
+  }
+
+  @Mutation(() => AdminStoreType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  async rejectStoreBankAccount(
+    @Args('storeId') storeId: string,
+    @Args('reason') reason: string,
+    @CurrentUser('id') adminId: string,
+    @Context() context?: GraphqlContext,
+  ): Promise<AdminStoreType> {
+    const store = await this.storesService.rejectStoreBankAccount(
+      storeId,
+      reason,
+      adminId,
+      context?.req,
+    );
     return mapAdminStore(store);
   }
 
   @Mutation(() => StoreShippingOptionType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async createShippingOption(
     @Args('input') input: CreateShippingOptionInput,
-    @CurrentUser('storeId') storeId: string,
+    @CurrentUser('role') role: string,
     @CurrentUser('id') userId: string,
+    @CurrentUser('storeId') jwtStoreId?: string,
+    @Args('storeId', { nullable: true }) argsStoreId?: string,
   ): Promise<StoreShippingOptionType> {
-    await this.storesService.assertStoreOwner(userId, storeId);
+    const storeId = await this.storesService.resolveActorStoreId(
+      role,
+      userId,
+      jwtStoreId,
+      argsStoreId,
+    );
+    await this.storesService.assertStoreOwnerIfVendor(role, userId, storeId);
     const option = await this.shippingOptionsService.create(storeId, input);
     return mapStoreShippingOption(option);
   }
 
   @Mutation(() => StoreShippingOptionType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async updateShippingOption(
     @Args('id') id: string,
     @Args('input') input: UpdateShippingOptionInput,
-    @CurrentUser('storeId') storeId: string,
+    @CurrentUser('role') role: string,
     @CurrentUser('id') userId: string,
+    @CurrentUser('storeId') jwtStoreId?: string,
+    @Args('storeId', { nullable: true }) argsStoreId?: string,
   ): Promise<StoreShippingOptionType> {
-    await this.storesService.assertStoreOwner(userId, storeId);
+    const storeId = await this.storesService.resolveActorStoreId(
+      role,
+      userId,
+      jwtStoreId,
+      argsStoreId,
+    );
+    await this.storesService.assertStoreOwnerIfVendor(role, userId, storeId);
     const option = await this.shippingOptionsService.update(id, storeId, input);
     return mapStoreShippingOption(option);
   }
 
   @Mutation(() => Boolean)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   async deleteShippingOption(
     @Args('id') id: string,
-    @CurrentUser('storeId') storeId: string,
+    @CurrentUser('role') role: string,
     @CurrentUser('id') userId: string,
+    @CurrentUser('storeId') jwtStoreId?: string,
+    @Args('storeId', { nullable: true }) argsStoreId?: string,
   ): Promise<boolean> {
-    await this.storesService.assertStoreOwner(userId, storeId);
+    const storeId = await this.storesService.resolveActorStoreId(
+      role,
+      userId,
+      jwtStoreId,
+      argsStoreId,
+    );
+    await this.storesService.assertStoreOwnerIfVendor(role, userId, storeId);
     await this.shippingOptionsService.delete(id, storeId);
     return true;
   }
@@ -1109,13 +1231,14 @@ export class StoresResolver {
 
   @Query(() => [StoreReactivationRequestType])
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
   @AllowSuspendedStore()
   async storeReactivationRequests(
     @Args('storeId') storeId: string,
     @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
   ): Promise<StoreReactivationRequestType[]> {
-    await this.storesService.assertStoreManager(userId, storeId);
+    await this.storesService.assertStoreManagerIfVendor(role, userId, storeId);
     const requests = await this.storeReactivationRequestService.findByStore(storeId);
     return requests.map(mapStoreReactivationRequest);
   }

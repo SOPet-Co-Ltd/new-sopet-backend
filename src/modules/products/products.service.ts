@@ -2,7 +2,6 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
-  ForbiddenException,
   Logger,
   Optional,
 } from '@nestjs/common';
@@ -33,21 +32,24 @@ import {
   getProductPublishChecklist,
   ProductPublishChecklist,
 } from './product-publish.validation';
+import { payablePriceSortExpression } from './payable-price-sort';
 import { SearchService } from '../search/search.service';
 import { SearchEmbeddingQueueService } from '../search/embedding/search-embedding-queue.service';
 import { StorageService } from '../storage/storage.service';
 import { PUBLIC_API_MAX_PRODUCT_IMAGES } from '../storage/upload.rules';
 import {
-  BlockedVariantPayload,
   ProductVariantSyncImpact,
   VariantRemovalBlockReason,
   VariantRemovalBlockerFlags,
+  VariantRemovalDisposition,
 } from './variant-removal.types';
 
 type SyncVariantItem = {
   id?: string;
   sku: string;
   stockQuantity: number;
+  /** Absolute THB sell price. When set, sync recomputes product.basePrice. */
+  price?: number;
   priceModifier?: number;
   compareAtPrice?: number | null;
   attributes: Record<string, string>;
@@ -136,33 +138,30 @@ export class ProductsService {
     storeId: string,
     action: string,
     requireActive = true,
+    role?: string,
   ): Promise<void> {
-    const hasAccess = await this.storesService.userHasStoreAccess(userId, storeId);
-    if (!hasAccess) {
-      throw new ForbiddenException({
-        code: 'FORBIDDEN',
-        message: `You do not have permission to ${action} for this store`,
-      });
-    }
-
-    // Suspension is enforced live (not just via the JWT's cached storeId), so a
-    // vendor with access to another active store can't keep managing a
-    // suspended one's products/variants/images through it.
-    if (requireActive && (await this.storesService.isStoreSuspended(storeId))) {
-      throw new ForbiddenException({
-        code: 'STORE_SUSPENDED',
-        message: `Cannot ${action} — this store is suspended`,
-      });
-    }
+    // Admin may act on any existing store (including suspended). Vendors keep
+    // membership + live suspension checks.
+    await this.storesService.assertActorStoreAccess(role, userId, storeId, {
+      requireActive: role === 'admin' ? false : requireActive,
+      action,
+    });
   }
 
-  async resolveActiveStoreId(userId: string, storeId?: string): Promise<string> {
+  async resolveActiveStoreId(userId: string, storeId?: string, role?: string): Promise<string> {
     if (storeId) {
       // Read-only resolution (viewing own products/checklist) stays allowed even
       // while suspended; mutations re-assert with requireActive via the
       // dedicated assertStoreAccess calls in create/update/delete/publish below.
-      await this.assertStoreAccess(userId, storeId, 'access', false);
+      await this.assertStoreAccess(userId, storeId, 'access', false, role);
       return storeId;
+    }
+
+    if (role === 'admin') {
+      throw new BadRequestException({
+        code: 'STORE_ID_REQUIRED',
+        message: 'Store ID is required for admin store operations',
+      });
     }
 
     const defaultStoreId = await this.storesService.resolveDefaultStoreId(userId);
@@ -259,8 +258,9 @@ export class ProductsService {
     userId: string,
     storeId: string,
     createProductDto: CreateProductDto,
+    role?: string,
   ): Promise<Product> {
-    await this.assertStoreAccess(userId, storeId, 'create products');
+    await this.assertStoreAccess(userId, storeId, 'create products', true, role);
     const { name, categoryId, tagIds, petTypeId, brandId, category, tags, ...productData } =
       createProductDto;
     const taxonomy = await this.resolveTaxonomyFields({
@@ -335,8 +335,9 @@ export class ProductsService {
         options: Record<string, string>;
       }>;
     },
+    role?: string,
   ): Promise<Product> {
-    await this.assertStoreAccess(userId, storeId, 'create products');
+    await this.assertStoreAccess(userId, storeId, 'create products', true, role);
 
     // Normalize + validate option groups (parent "variants")
     const groups = (input.variants ?? []).map((group) => ({
@@ -600,18 +601,7 @@ export class ProductsService {
       };
     }
 
-    const items = await this.productRepository
-      .createQueryBuilder('product')
-      .leftJoinAndSelect('product.store', 'store')
-      .leftJoinAndSelect('product.images', 'images')
-      .leftJoinAndSelect('product.variants', 'variants')
-      .leftJoinAndSelect('product.categoryRelation', 'categoryRelation')
-      .leftJoinAndSelect('product.petTypeRelation', 'petTypeRelation')
-      .leftJoinAndSelect('product.brandRelation', 'brandRelation')
-      .leftJoinAndSelect('product.taxonomyTags', 'taxonomyTags')
-      .where('product.id IN (:...ids)', { ids })
-      .orderBy('array_position(ARRAY[:...ids]::uuid[], product.id)')
-      .getMany();
+    const items = await this.hydrateProductsByIds(ids);
 
     return {
       items,
@@ -622,6 +612,33 @@ export class ProductsService {
         totalPages: Math.ceil(total / limit),
       },
     };
+  }
+
+  /**
+   * Load list/card relations without a images×variants×tags cartesian join.
+   * Uses TypeORM query-per-relation strategy, then restores caller id order.
+   */
+  async hydrateProductsByIds(ids: string[]): Promise<Product[]> {
+    if (ids.length === 0) {
+      return [];
+    }
+
+    const products = await this.productRepository.find({
+      where: { id: In(ids) },
+      relations: [
+        'store',
+        'images',
+        'variants',
+        'categoryRelation',
+        'petTypeRelation',
+        'brandRelation',
+        'taxonomyTags',
+      ],
+      relationLoadStrategy: 'query',
+    });
+
+    const byId = new Map(products.map((product) => [product.id, product]));
+    return ids.map((id) => byId.get(id)).filter((product): product is Product => Boolean(product));
   }
 
   private applyProductListFilters(
@@ -735,6 +752,13 @@ export class ProductsService {
       return;
     }
 
+    if (sortBy === 'basePrice') {
+      queryBuilder
+        .addSelect(payablePriceSortExpression('product'), 'payable_price_sort')
+        .orderBy('payable_price_sort', sortOrder);
+      return;
+    }
+
     if (sortBy === 'relevance') {
       if (search) {
         queryBuilder
@@ -754,7 +778,6 @@ export class ProductsService {
 
     const allowedColumns: Record<string, string> = {
       createdAt: 'createdAt',
-      basePrice: 'basePrice',
       averageRating: 'averageRating',
       name: 'name',
     };
@@ -773,7 +796,6 @@ export class ProductsService {
         'store',
         'images',
         'variants',
-        'reviews',
         'categoryRelation',
         'petTypeRelation',
         'brandRelation',
@@ -814,12 +836,12 @@ export class ProductsService {
         'store',
         'images',
         'variants',
-        'reviews',
         'categoryRelation',
         'petTypeRelation',
         'brandRelation',
         'taxonomyTags',
       ],
+      relationLoadStrategy: 'query',
     });
 
     const byId = new Map(
@@ -838,7 +860,6 @@ export class ProductsService {
         'store',
         'images',
         'variants',
-        'reviews',
         'categoryRelation',
         'petTypeRelation',
         'brandRelation',
@@ -858,6 +879,54 @@ export class ProductsService {
 
   async findBySlugPublished(storeId: string, slug: string): Promise<Product> {
     const product = await this.findBySlug(storeId, slug);
+    if (product.status !== ProductStatus.PUBLISHED) {
+      throw new NotFoundException({
+        code: 'PRODUCT_NOT_FOUND',
+        message: 'Product not found',
+      });
+    }
+    this.assertPublishedStoreApproved(product);
+    return product;
+  }
+
+  /**
+   * Public SEO path: `{product.slug}-{store.slug}` as a single URL segment.
+   * Matched via concat so hyphens inside either slug do not require client-side splits.
+   */
+  async findByPath(path: string): Promise<Product> {
+    const normalizedPath = path.trim();
+    if (!normalizedPath) {
+      throw new NotFoundException({
+        code: 'PRODUCT_NOT_FOUND',
+        message: 'Product not found',
+      });
+    }
+
+    const product = await this.productRepository
+      .createQueryBuilder('product')
+      .innerJoinAndSelect('product.store', 'store')
+      .leftJoinAndSelect('product.images', 'images')
+      .leftJoinAndSelect('product.variants', 'variants')
+      .leftJoinAndSelect('product.categoryRelation', 'categoryRelation')
+      .leftJoinAndSelect('product.petTypeRelation', 'petTypeRelation')
+      .leftJoinAndSelect('product.brandRelation', 'brandRelation')
+      .leftJoinAndSelect('product.taxonomyTags', 'taxonomyTags')
+      .where("product.slug || '-' || store.slug = :path", { path: normalizedPath })
+      .andWhere('product.deleted_at IS NULL')
+      .getOne();
+
+    if (!product) {
+      throw new NotFoundException({
+        code: 'PRODUCT_NOT_FOUND',
+        message: 'Product not found',
+      });
+    }
+
+    return product;
+  }
+
+  async findByPathPublished(path: string): Promise<Product> {
+    const product = await this.findByPath(path);
     if (product.status !== ProductStatus.PUBLISHED) {
       throw new NotFoundException({
         code: 'PRODUCT_NOT_FOUND',
@@ -896,9 +965,9 @@ export class ProductsService {
     }
   }
 
-  async publish(id: string, userId: string): Promise<Product> {
+  async publish(id: string, userId: string, role?: string): Promise<Product> {
     const product = await this.findOne(id);
-    await this.assertStoreAccess(userId, product.storeId, 'publish products');
+    await this.assertStoreAccess(userId, product.storeId, 'publish products', true, role);
     await this.assertPublishable(product);
     product.status = ProductStatus.PUBLISHED;
     const saved = await this.productRepository.save(product);
@@ -908,7 +977,11 @@ export class ProductsService {
 
   static readonly BATCH_PUBLISH_MAX_IDS = 50;
 
-  async publishMany(ids: string[], userId: string): Promise<BatchPublishProductsResult> {
+  async publishMany(
+    ids: string[],
+    userId: string,
+    role?: string,
+  ): Promise<BatchPublishProductsResult> {
     const startedAt = Date.now();
 
     if (ids.length === 0) {
@@ -938,7 +1011,7 @@ export class ProductsService {
 
     const storeIds = [...new Set(products.map((product) => product.storeId))];
     for (const storeId of storeIds) {
-      await this.assertStoreAccess(userId, storeId, 'publish products');
+      await this.assertStoreAccess(userId, storeId, 'publish products', true, role);
     }
 
     const shippingByStore = new Map<string, boolean>();
@@ -1220,11 +1293,16 @@ export class ProductsService {
   }
 
   // Update product
-  async update(id: string, userId: string, updateProductDto: UpdateProductDto): Promise<Product> {
+  async update(
+    id: string,
+    userId: string,
+    updateProductDto: UpdateProductDto,
+    role?: string,
+  ): Promise<Product> {
     const product = await this.findOne(id);
     const previousStatus = product.status;
 
-    await this.assertStoreAccess(userId, product.storeId, 'update products');
+    await this.assertStoreAccess(userId, product.storeId, 'update products', true, role);
 
     const { categoryId, tagIds, petTypeId, brandId, category, tags, ...rest } = updateProductDto;
     const taxonomy = await this.resolveTaxonomyFields({
@@ -1276,10 +1354,10 @@ export class ProductsService {
   }
 
   // Delete product (soft delete)
-  async remove(id: string, userId: string): Promise<void> {
+  async remove(id: string, userId: string, role?: string): Promise<void> {
     const product = await this.findOne(id);
 
-    await this.assertStoreAccess(userId, product.storeId, 'delete products');
+    await this.assertStoreAccess(userId, product.storeId, 'delete products', true, role);
 
     await this.productRepository.softDelete(id);
   }
@@ -1321,10 +1399,11 @@ export class ProductsService {
     productId: string,
     userId: string,
     createVariantDto: CreateVariantDto,
+    role?: string,
   ): Promise<ProductVariant> {
     const product = await this.findOne(productId);
 
-    await this.assertStoreAccess(userId, product.storeId, 'manage product variants');
+    await this.assertStoreAccess(userId, product.storeId, 'manage product variants', true, role);
 
     // Check SKU uniqueness
     const existingVariant = await this.variantRepository.findOne({
@@ -1358,6 +1437,7 @@ export class ProductsService {
     variantId: string,
     userId: string,
     updateVariantDto: UpdateVariantDto,
+    role?: string,
   ): Promise<ProductVariant> {
     const variant = await this.variantRepository.findOne({
       where: { id: variantId },
@@ -1371,7 +1451,13 @@ export class ProductsService {
       });
     }
 
-    await this.assertStoreAccess(userId, variant.product.storeId, 'manage product variants');
+    await this.assertStoreAccess(
+      userId,
+      variant.product.storeId,
+      'manage product variants',
+      true,
+      role,
+    );
 
     const { name, attributes, priceModifier, sku, stockQuantity, compareAtPrice } =
       updateVariantDto;
@@ -1583,33 +1669,38 @@ export class ProductsService {
     return variant;
   }
 
-  // Delete variant
-  async removeVariant(variantId: string, userId: string): Promise<void> {
+  // Delete / retire variant
+  async removeVariant(variantId: string, userId: string, role?: string): Promise<void> {
     const variant = await this.variantRepository.findOne({
       where: { id: variantId },
       relations: ['product'],
     });
 
-    if (!variant) {
+    if (!variant || variant.retiredAt) {
       throw new NotFoundException({
         code: 'VARIANT_NOT_FOUND',
         message: 'Variant not found',
       });
     }
 
-    await this.assertStoreAccess(userId, variant.product.storeId, 'manage product variants');
-    await this.assertRemovalsAllowed([variant]);
-
-    await this.variantRepository.softDelete(variantId);
+    await this.assertStoreAccess(
+      userId,
+      variant.product.storeId,
+      'manage product variants',
+      true,
+      role,
+    );
+    await this.applyRemovals([variant]);
   }
 
   async getProductVariantSyncImpact(
     productId: string,
     userId: string,
     items: SyncVariantItem[],
+    role?: string,
   ): Promise<ProductVariantSyncImpact> {
     const product = await this.findOne(productId);
-    await this.assertStoreAccess(userId, product.storeId, 'manage product variants');
+    await this.assertStoreAccess(userId, product.storeId, 'manage product variants', true, role);
 
     if (!items.length) {
       throw new BadRequestException({
@@ -1618,19 +1709,24 @@ export class ProductsService {
       });
     }
 
-    const existingVariants = product.variants ?? [];
+    const existingVariants = this.activeVariants(product.variants ?? []);
     const plan = this.classifySyncPlan(existingVariants, items);
     const blockers = await this.evaluateRemovalBlockers(plan.remove.map((variant) => variant.id));
 
     const removedVariants = plan.remove.map((variant) => {
-      const flags = blockers.get(variant.id) ?? { hasOrders: false, hasOpenCarts: false };
-      const reasons = this.reasonsFromFlags(flags);
+      const flags = blockers.get(variant.id) ?? {
+        hasOrders: false,
+        hasOpenCarts: false,
+        openCartCount: 0,
+      };
       return {
         id: variant.id,
         sku: variant.sku,
         optionsJson: variant.options ? JSON.stringify(variant.options) : null,
         optionKey: this.variantOptionKey(variant.options ?? {}),
-        reasons,
+        reasons: this.reasonsFromFlags(flags),
+        disposition: this.dispositionFromFlags(flags),
+        openCartCount: flags.openCartCount,
       };
     });
 
@@ -1638,7 +1734,7 @@ export class ProductsService {
       kept: plan.kept,
       new: plan.createCount,
       removed: plan.remove.length,
-      blocked: removedVariants.some((entry) => entry.reasons.length > 0),
+      blocked: false,
       removedVariants,
     };
   }
@@ -1647,10 +1743,11 @@ export class ProductsService {
     productId: string,
     userId: string,
     items: SyncVariantItem[],
+    role?: string,
   ): Promise<ProductVariant[]> {
     const product = await this.findOne(productId);
 
-    await this.assertStoreAccess(userId, product.storeId, 'manage product variants');
+    await this.assertStoreAccess(userId, product.storeId, 'manage product variants', true, role);
 
     if (!items.length) {
       throw new BadRequestException({
@@ -1659,66 +1756,99 @@ export class ProductsService {
       });
     }
 
-    const existingVariants = product.variants ?? [];
-    const plan = this.classifySyncPlan(existingVariants, items);
-    await this.assertRemovalsAllowed(plan.remove);
+    const allVariants = await this.variantRepository.find({ where: { productId } });
+    const activeVariants = this.activeVariants(allVariants);
+    const plan = this.classifySyncPlan(activeVariants, items);
+
+    const absolutePrices = items
+      .map((item) => item.price)
+      .filter((price): price is number => price !== undefined && Number.isFinite(price));
+    const useAbsolutePrices = absolutePrices.length === items.length;
+    let syncBasePrice = Number(product.basePrice ?? 0);
+
+    if (useAbsolutePrices) {
+      syncBasePrice = Math.min(...absolutePrices);
+      if (Number(product.basePrice) !== syncBasePrice) {
+        product.basePrice = syncBasePrice;
+        await this.productRepository.save(product);
+      }
+    }
 
     const keepIds = new Set<string>();
     const savedVariants: ProductVariant[] = [];
 
     for (const item of items) {
+      const sku = item.sku.trim();
+      if (!sku || sku.length > 100) {
+        throw new BadRequestException({
+          code: 'SKU_TOO_LONG',
+          message: 'SKU must be between 1 and 100 characters',
+        });
+      }
+
       const options = this.buildVariantOptions(undefined, item.attributes);
       const optionKey = this.variantOptionKey(options);
+      const priceAdjustment = useAbsolutePrices
+        ? Number(item.price) - syncBasePrice
+        : (item.priceModifier ?? 0);
 
-      const variant: ProductVariant | undefined = item.id
-        ? existingVariants.find((existing) => existing.id === item.id)
-        : existingVariants.find(
-            (existing) => this.variantOptionKey(existing.options) === optionKey,
-          );
+      let variant: ProductVariant | undefined = item.id
+        ? allVariants.find((existing) => existing.id === item.id)
+        : activeVariants.find((existing) => this.variantOptionKey(existing.options) === optionKey);
+
+      if (!variant) {
+        variant = allVariants.find(
+          (existing) =>
+            !!existing.retiredAt && this.variantOptionKey(existing.options) === optionKey,
+        );
+      }
 
       if (variant) {
-        variant.sku = item.sku;
+        variant.sku = sku;
         variant.stockQuantity = item.stockQuantity;
-        variant.priceAdjustment = item.priceModifier ?? 0;
+        variant.priceAdjustment = priceAdjustment;
         if (item.compareAtPrice !== undefined) {
           variant.compareAtPrice = item.compareAtPrice;
         }
         variant.options = options;
+        variant.retiredAt = null;
         savedVariants.push(await this.variantRepository.save(variant));
         keepIds.add(variant.id);
         continue;
       }
 
       const duplicateSku = await this.variantRepository.findOne({
-        where: { sku: item.sku, productId },
+        where: { sku, productId },
       });
       if (duplicateSku) {
         throw new BadRequestException({
           code: 'SKU_EXISTS',
-          message: `SKU "${item.sku}" is already in use`,
+          message: `SKU "${sku}" is already in use`,
         });
       }
 
       const created = this.variantRepository.create({
         productId,
-        sku: item.sku,
+        sku,
         stockQuantity: item.stockQuantity,
-        priceAdjustment: item.priceModifier ?? 0,
+        priceAdjustment,
         compareAtPrice: item.compareAtPrice ?? null,
         options,
+        retiredAt: null,
       });
       const saved = await this.variantRepository.save(created);
       savedVariants.push(saved);
       keepIds.add(saved.id);
     }
 
-    for (const existing of plan.remove) {
-      if (!keepIds.has(existing.id)) {
-        await this.variantRepository.softDelete(existing.id);
-      }
-    }
+    const toRemove = plan.remove.filter((existing) => !keepIds.has(existing.id));
+    await this.applyRemovals(toRemove);
 
     return savedVariants;
+  }
+
+  private activeVariants(variants: ProductVariant[]): ProductVariant[] {
+    return variants.filter((variant) => !variant.retiredAt);
   }
 
   private classifySyncPlan(
@@ -1759,7 +1889,7 @@ export class ProductsService {
   ): Promise<Map<string, VariantRemovalBlockerFlags>> {
     const blockers = new Map<string, VariantRemovalBlockerFlags>();
     for (const variantId of variantIds) {
-      blockers.set(variantId, { hasOrders: false, hasOpenCarts: false });
+      blockers.set(variantId, { hasOrders: false, hasOpenCarts: false, openCartCount: 0 });
     }
 
     if (!variantIds.length) {
@@ -1788,6 +1918,7 @@ export class ProductsService {
       const flags = blockers.get(row.variantId);
       if (flags) {
         flags.hasOpenCarts = true;
+        flags.openCartCount += 1;
       }
     }
 
@@ -1805,35 +1936,46 @@ export class ProductsService {
     return reasons;
   }
 
-  private async assertRemovalsAllowed(variants: ProductVariant[]): Promise<void> {
+  private dispositionFromFlags(flags: VariantRemovalBlockerFlags): VariantRemovalDisposition {
+    if (flags.hasOrders) {
+      return VariantRemovalDisposition.RETIRE;
+    }
+    if (flags.hasOpenCarts) {
+      return VariantRemovalDisposition.CLEAR_CART_AND_DELETE;
+    }
+    return VariantRemovalDisposition.DELETE;
+  }
+
+  /** Clear cart lines, then soft-delete unreferenced SKUs or retire sold ones. */
+  private async applyRemovals(variants: ProductVariant[]): Promise<void> {
     if (!variants.length) {
       return;
     }
 
-    const blockers = await this.evaluateRemovalBlockers(variants.map((variant) => variant.id));
-    const blockedVariants: BlockedVariantPayload[] = [];
+    const variantIds = variants.map((variant) => variant.id);
+    const blockers = await this.evaluateRemovalBlockers(variantIds);
 
+    const withCarts = variants.filter((variant) => blockers.get(variant.id)?.hasOpenCarts);
+    if (withCarts.length) {
+      await this.cartItemRepository.delete({
+        variantId: In(withCarts.map((variant) => variant.id)),
+      });
+    }
+
+    const now = new Date();
     for (const variant of variants) {
-      const flags = blockers.get(variant.id) ?? { hasOrders: false, hasOpenCarts: false };
-      const reasons = this.reasonsFromFlags(flags);
-      if (reasons.length) {
-        blockedVariants.push({
-          id: variant.id,
-          sku: variant.sku,
-          reasons,
-        });
+      const flags = blockers.get(variant.id) ?? {
+        hasOrders: false,
+        hasOpenCarts: false,
+        openCartCount: 0,
+      };
+      if (flags.hasOrders) {
+        variant.retiredAt = now;
+        await this.variantRepository.save(variant);
+      } else {
+        await this.variantRepository.softDelete(variant.id);
       }
     }
-
-    if (!blockedVariants.length) {
-      return;
-    }
-
-    throw new BadRequestException({
-      code: 'VARIANT_REMOVAL_BLOCKED',
-      message: 'One or more variants cannot be removed because they appear in orders or open carts',
-      blockedVariants,
-    });
   }
 
   private variantOptionKey(options: Record<string, string>): string {
@@ -1873,10 +2015,11 @@ export class ProductsService {
     sortOrder: number = 0,
     altText?: string,
     isThumbnail?: boolean,
+    role?: string,
   ): Promise<ProductImage> {
     const product = await this.findOne(productId);
 
-    await this.assertStoreAccess(userId, product.storeId, 'manage product images');
+    await this.assertStoreAccess(userId, product.storeId, 'manage product images', true, role);
 
     const existingImages = await this.imageRepository.find({
       where: { productId },
@@ -1907,6 +2050,7 @@ export class ProductsService {
     imageId: string,
     userId: string,
     updates: { sortOrder?: number; altText?: string; isThumbnail?: boolean },
+    role?: string,
   ): Promise<ProductImage> {
     const image = await this.imageRepository.findOne({
       where: { id: imageId },
@@ -1920,7 +2064,13 @@ export class ProductsService {
       });
     }
 
-    await this.assertStoreAccess(userId, image.product.storeId, 'manage product images');
+    await this.assertStoreAccess(
+      userId,
+      image.product.storeId,
+      'manage product images',
+      true,
+      role,
+    );
 
     if (updates.sortOrder !== undefined) {
       image.sortOrder = updates.sortOrder;
@@ -1944,10 +2094,11 @@ export class ProductsService {
     productId: string,
     imageId: string,
     userId: string,
+    role?: string,
   ): Promise<ProductImage> {
     const product = await this.findOne(productId);
 
-    await this.assertStoreAccess(userId, product.storeId, 'manage product images');
+    await this.assertStoreAccess(userId, product.storeId, 'manage product images', true, role);
 
     const image = await this.imageRepository.findOne({
       where: { id: imageId, productId },
@@ -1970,10 +2121,11 @@ export class ProductsService {
     productId: string,
     userId: string,
     imageIds: string[],
+    role?: string,
   ): Promise<ProductImage[]> {
     const product = await this.findOne(productId);
 
-    await this.assertStoreAccess(userId, product.storeId, 'manage product images');
+    await this.assertStoreAccess(userId, product.storeId, 'manage product images', true, role);
 
     const images = await this.imageRepository.find({ where: { productId } });
     const validIds = new Set(images.map((img) => img.id));
@@ -2001,7 +2153,7 @@ export class ProductsService {
   }
 
   // Delete image
-  async removeImage(imageId: string, userId: string): Promise<void> {
+  async removeImage(imageId: string, userId: string, role?: string): Promise<void> {
     const image = await this.imageRepository.findOne({
       where: { id: imageId },
       relations: ['product'],
@@ -2014,7 +2166,13 @@ export class ProductsService {
       });
     }
 
-    await this.assertStoreAccess(userId, image.product.storeId, 'manage product images');
+    await this.assertStoreAccess(
+      userId,
+      image.product.storeId,
+      'manage product images',
+      true,
+      role,
+    );
 
     const productId = image.productId;
     const wasThumbnail = image.isThumbnail;

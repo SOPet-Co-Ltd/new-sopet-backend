@@ -5,25 +5,14 @@ export interface PayoutBreakdownFours {
   commissionRate: number;
 }
 
-export interface PayoutRailSummary extends PayoutBreakdownFours {
-  grossRevenue: number;
-  totalPaidOut: number;
-  availableBalance: number;
-  pendingPayoutAmount: number;
-  canRequestPayout: boolean;
-}
-
 export interface PayoutSummary extends PayoutBreakdownFours {
   storeId: string;
-  /** @deprecated Prefer omise.* — kept for GraphQL backward compatibility (Omise rail). */
   grossRevenue: number;
   totalPaidOut: number;
   availableBalance: number;
   pendingPayoutAmount: number;
   minimumPayoutAmount: number;
   canRequestPayout: boolean;
-  omise: PayoutRailSummary;
-  manual: PayoutRailSummary;
 }
 
 export interface CreatePayoutOptions {

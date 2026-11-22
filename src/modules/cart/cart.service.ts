@@ -63,21 +63,64 @@ export class CartService {
     return item.productVariant?.product?.store?.status === StoreStatus.SUSPENDED;
   }
 
-  /** Remove suspended-store lines and attach ephemeral warnings (not persisted). */
-  private async purgeSuspendedStoreItems(cart: Cart): Promise<CartWithWarnings> {
+  private isRetiredVariantItem(item: CartItem): boolean {
+    return !!item.productVariant?.retiredAt;
+  }
+
+  /** Remove suspended-store and retired-SKU lines; attach ephemeral warnings. */
+  private async purgeUnavailableItems(cart: Cart): Promise<CartWithWarnings> {
     const items = cart.items ?? [];
     const suspended = items.filter((item) => this.isSuspendedStoreItem(item));
-    const warnings: CartWarning[] = suspended.map((item) => ({
-      code: 'SUSPENDED_STORE_ITEM_REMOVED',
-      message: 'An item from a suspended store was removed from your cart',
-      variantId: item.variantId,
-    }));
+    const retired = items.filter(
+      (item) => !this.isSuspendedStoreItem(item) && this.isRetiredVariantItem(item),
+    );
+    const warnings: CartWarning[] = [
+      ...suspended.map((item) => ({
+        code: 'SUSPENDED_STORE_ITEM_REMOVED',
+        message: 'An item from a suspended store was removed from your cart',
+        variantId: item.variantId,
+      })),
+      ...retired.map((item) => ({
+        code: 'RETIRED_VARIANT_REMOVED',
+        message: 'A discontinued product option was removed from your cart',
+        variantId: item.variantId,
+      })),
+    ];
 
-    if (suspended.length > 0) {
+    const toRemove = [...suspended, ...retired];
+    if (toRemove.length > 0) {
       await this.cartItemRepository.delete({
-        id: In(suspended.map((item) => item.id)),
+        id: In(toRemove.map((item) => item.id)),
       });
-      cart.items = items.filter((item) => !this.isSuspendedStoreItem(item));
+    }
+    cart.items = items.filter(
+      (item) => !this.isSuspendedStoreItem(item) && !this.isRetiredVariantItem(item),
+    );
+
+    return Object.assign(cart, { warnings });
+  }
+
+  /**
+   * Persist qty ≤ remaining stock when stock dropped below cart qty (stock > 0).
+   * Stock 0 lines are left for the client to flag as out of stock.
+   */
+  private async capQuantitiesToStock(cart: CartWithWarnings): Promise<CartWithWarnings> {
+    const warnings = [...(cart.warnings ?? [])];
+    const items = cart.items ?? [];
+
+    for (const item of items) {
+      const stock = item.productVariant?.stockQuantity;
+      if (stock == null || stock <= 0 || item.quantity <= stock) {
+        continue;
+      }
+
+      item.quantity = stock;
+      await this.cartItemRepository.save(item);
+      warnings.push({
+        code: 'QUANTITY_CAPPED',
+        message: `Quantity reduced to available stock (${stock})`,
+        variantId: item.variantId,
+      });
     }
 
     return Object.assign(cart, { warnings });
@@ -85,7 +128,8 @@ export class CartService {
 
   async getCart(customerId?: string, sessionId?: string): Promise<CartWithWarnings> {
     const cart = await this.resolveCart(customerId, sessionId);
-    return this.purgeSuspendedStoreItems(cart);
+    const purged = await this.purgeUnavailableItems(cart);
+    return this.capQuantitiesToStock(purged);
   }
 
   async addItem(
@@ -106,7 +150,7 @@ export class CartService {
         lock: { mode: 'pessimistic_write' },
       });
 
-      if (!variant) {
+      if (!variant || variant.retiredAt) {
         throw new NotFoundException({
           code: 'VARIANT_NOT_FOUND',
           message: 'Product variant not found',
@@ -158,6 +202,7 @@ export class CartService {
     const cart = await this.resolveCart(customerId, sessionId);
     const item = await this.cartItemRepository.findOne({
       where: { id: itemId, cartId: cart.id },
+      relations: ['productVariant'],
     });
 
     if (!item) {
@@ -170,7 +215,9 @@ export class CartService {
     if (quantity <= 0) {
       await this.cartItemRepository.delete(item.id);
     } else {
-      item.quantity = quantity;
+      const stock = item.productVariant?.stockQuantity;
+      const capped = stock != null && stock > 0 && quantity > stock ? stock : quantity;
+      item.quantity = capped;
       await this.cartItemRepository.save(item);
     }
 

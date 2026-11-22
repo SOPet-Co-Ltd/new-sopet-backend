@@ -14,12 +14,14 @@ import { DataSource, Repository } from 'typeorm';
 import { OrdersService } from '../src/modules/orders/orders.service';
 import { PromotionsService } from '../src/modules/promotions/promotions.service';
 import { NotificationsService } from '../src/modules/notifications/notifications.service';
+import { DashboardEventsService } from '../src/modules/dashboard-events/dashboard-events.service';
 import { GuestOrderLinkService } from '../src/modules/orders/guest-order-link.service';
 import { CustomerRepository } from '../src/database/repositories/customer.repository';
 import { InventoryService } from '../src/modules/inventory/inventory.service';
 import { CartService } from '../src/modules/cart/cart.service';
 import { VendorWebhooksService } from '../src/modules/vendor-webhooks/vendor-webhooks.service';
 import { OrderAuditLogsService } from '../src/modules/order-audit-logs/order-audit-logs.service';
+import { mockBeamRefundProvider } from './helpers/beam-refund.mock';
 import { mockSaleCampaignPricingProvider } from './helpers/sale-campaign-pricing.mock';
 import { Order, OrderStatus, PaymentMethod } from '../src/database/entities/order.entity';
 import { OrderItem } from '../src/database/entities/order-item.entity';
@@ -122,6 +124,10 @@ describe('Promotion loggedInOnly createOrder (service-integration-e2e)', () => {
             notifyVendorsAboutOrderStatus: jest.fn(),
           },
         },
+        {
+          provide: DashboardEventsService,
+          useValue: { publish: jest.fn().mockResolvedValue(undefined) },
+        },
         { provide: GuestOrderLinkService, useValue: { mergeGuestOrders: jest.fn() } },
         CustomerRepository,
         { provide: InventoryService, useValue: { restoreOrderStock: jest.fn() } },
@@ -138,6 +144,7 @@ describe('Promotion loggedInOnly createOrder (service-integration-e2e)', () => {
             resolveCustomerActorLabel: jest.fn().mockResolvedValue('ลูกค้า'),
           },
         },
+        mockBeamRefundProvider,
       ],
     }).compile();
 

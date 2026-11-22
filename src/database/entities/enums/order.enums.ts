@@ -14,4 +14,6 @@ export enum PaymentMethod {
   CREDIT_CARD = 'credit_card',
   COD = 'cod',
   BANK_TRANSFER = 'bank_transfer',
+  TRUEMONEY = 'truemoney',
+  SHOPEEPAY = 'shopeepay',
 }

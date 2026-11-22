@@ -37,6 +37,7 @@
     "schema:drop": "yarn typeorm schema:drop -d ormconfig.ts",
     "graphql:schema": "node scripts/ensure-graphql-schema.mjs",
     "email:previews": "ts-node -r tsconfig-paths/register scripts/generate-email-previews.ts",
+    "backfill:review-images": "ts-node -r tsconfig-paths/register scripts/backfill-review-images-to-storage.ts",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f",
@@ -48,6 +49,7 @@
     "@apollo/server": "^5.5.1",
     "@as-integrations/express5": "^1.1.2",
     "@aws-sdk/client-s3": "^3.1078.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@nestjs/apollo": "^13.0.0",
     "@nestjs/axios": "^4.0.1",
     "@nestjs/bullmq": "^11.0.4",
@@ -71,6 +73,8 @@
     "dataloader": "^2.2.3",
     "dotenv": "^16.3.1",
     "graphql": "^16.11.0",
+    "graphql-depth-limit": "^1.1.0",
+    "graphql-query-complexity": "^2.0.0",
     "graphql-subscriptions": "^3.0.0",
     "helmet": "^8.3.0",
     "ioredis": "^5.11.1",
@@ -81,7 +85,8 @@
     "resend": "^6.16.0",
     "rxjs": "^7.8.1",
     "sharp": "^0.35.3",
-    "typeorm": "^0.3.17"
+    "typeorm": "^0.3.17",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
@@ -91,6 +96,7 @@
     "@nestjs/testing": "^11.0.1",
     "@types/bcrypt": "^5.0.2",
     "@types/express": "^5.0.0",
+    "@types/graphql-depth-limit": "^1.1.6",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.0.0",
     "@types/passport-jwt": "^4.0.0",

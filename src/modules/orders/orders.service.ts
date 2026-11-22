@@ -1,8 +1,10 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
+import { Payment } from '../../database/entities/payment.entity';
 import { FulfillmentStatus, OrderItem } from '../../database/entities/order-item.entity';
+import { Customer } from '../../database/entities/customer.entity';
 import { OrderShippingAddress } from '../../database/entities/order-shipping-address.entity';
 import { OrderStoreShipping } from '../../database/entities/order-store-shipping.entity';
 import { OrderStatusHistory } from '../../database/entities/order-status-history.entity';
@@ -18,6 +20,8 @@ import {
 } from '../../database/entities/inventory-transaction.entity';
 import { CreateOrderDto, ShippingAddressDto } from './dto';
 import { NotificationsService } from '../notifications/notifications.service';
+import { DashboardEventsService } from '../dashboard-events/dashboard-events.service';
+import { DashboardActivityKind } from '../dashboard-events/dashboard-activity.constants';
 import { PromotionsService, PromotionCartLine } from '../promotions/promotions.service';
 import { GuestOrderLinkService } from './guest-order-link.service';
 import { CustomerRepository } from '../../database/repositories/customer.repository';
@@ -34,7 +38,19 @@ import {
   normalizeCustomerOrdersLimit,
   normalizeCustomerOrdersPage,
 } from './order-list-filter.util';
+import {
+  applyVendorActionQueueFilter,
+  normalizeVendorOrdersLimit,
+  normalizeVendorOrdersPage,
+  VendorOrderQueueFilter,
+} from './vendor-order-action-queue.util';
+import { assertOrderHasNoReviews } from './order-review-cancel.guard';
 import { assertNotManualHoldTransition } from './store-suspension-hold.service';
+import {
+  BeamRefundService,
+  MANUAL_BEAM_REFUND_NOTE,
+  requiresManualBeamRefund,
+} from '../payments/beam-refund.service';
 import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.service';
 import { webhookEventForOrderStatus } from '../vendor-webhooks/vendor-webhook.events';
 import { SaleCampaignPricingService } from '../sale-campaigns/sale-campaign-pricing.service';
@@ -50,8 +66,27 @@ export interface StoreShippingSelection {
   shippingOptionId: string;
 }
 
+export interface AdminOrderStoreSummary {
+  id: string;
+  name: string;
+}
+
+export interface AdminOrderCustomerSummary {
+  id: string;
+  fullName: string | null;
+  phone: string;
+  email: string | null;
+}
+
+export interface AdminOrderRecord {
+  order: Order;
+  stores: AdminOrderStoreSummary[];
+  customer: AdminOrderCustomerSummary | null;
+}
+
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
   constructor(
     @InjectRepository(Order)
     private orderRepository: Repository<Order>,
@@ -67,6 +102,7 @@ export class OrdersService {
     private shippingOptionRepository: Repository<StoreShippingOption>,
     private dataSource: DataSource,
     private notificationsService: NotificationsService,
+    private dashboardEventsService: DashboardEventsService,
     private promotionsService: PromotionsService,
     private guestOrderLinkService: GuestOrderLinkService,
     private customerRepository: CustomerRepository,
@@ -77,6 +113,7 @@ export class OrdersService {
     private vendorWebhooksService: VendorWebhooksService,
     private saleCampaignPricing: SaleCampaignPricingService,
     private orderAuditLogsService: OrderAuditLogsService,
+    private beamRefundService: BeamRefundService,
   ) {}
 
   private generateOrderNumber(): string {
@@ -198,6 +235,56 @@ export class OrdersService {
     return { fee, records };
   }
 
+  /**
+   * When checkout submits cartItemIds, require those lines still exist on the cart
+   * and cover the same variantIds as the order items (SF-CHK-112 concurrency).
+   */
+  private async assertCartLinesStillPresent(
+    createOrderDto: CreateOrderDto,
+    customerId?: string,
+  ): Promise<void> {
+    const cartItemIds = createOrderDto.cartItemIds;
+    if (!cartItemIds?.length) {
+      return;
+    }
+
+    const cart = await this.cartService.getCart(customerId, createOrderDto.sessionId);
+    const cartItems = cart.items ?? [];
+    const byId = new Map(cartItems.map((item) => [item.id, item]));
+
+    const missingIds = cartItemIds.filter((id) => !byId.has(id));
+    if (missingIds.length > 0) {
+      throw new BadRequestException({
+        code: 'CART_ITEMS_STALE',
+        message: 'One or more cart items are no longer in the cart',
+      });
+    }
+
+    const cartVariantIds = new Set(
+      cartItemIds.map((id) => byId.get(id)!.variantId).filter(Boolean),
+    );
+    const orderVariantIds = new Set(
+      createOrderDto.items.map((item) => item.variantId).filter(Boolean),
+    );
+
+    for (const variantId of orderVariantIds) {
+      if (!cartVariantIds.has(variantId as string)) {
+        throw new BadRequestException({
+          code: 'CART_ITEMS_MISMATCH',
+          message: 'Order items do not match the submitted cart lines',
+        });
+      }
+    }
+    for (const variantId of cartVariantIds) {
+      if (!orderVariantIds.has(variantId)) {
+        throw new BadRequestException({
+          code: 'CART_ITEMS_MISMATCH',
+          message: 'Order items do not match the submitted cart lines',
+        });
+      }
+    }
+  }
+
   async create(createOrderDto: CreateOrderDto, customerId?: string): Promise<Order> {
     const {
       items,
@@ -222,6 +309,8 @@ export class OrdersService {
       });
     }
 
+    await this.assertCartLinesStillPresent(createOrderDto, customerId);
+
     // Link guest checkouts to an existing member when the supplied phone already
     // belongs to an active customer, so the order shows in their history immediately
     // (instead of only after their next OTP login) and the customer-facing order
@@ -232,6 +321,11 @@ export class OrdersService {
       const existingCustomer =
         await this.customerRepository.findActiveByPhone(normalizedGuestPhone);
       linkedCustomerId = existingCustomer?.id ?? null;
+    }
+
+    const normalizedGuestEmail = guestEmail?.trim() || null;
+    if (linkedCustomerId && normalizedGuestEmail) {
+      await this.customerRepository.setEmailIfMissing(linkedCustomerId, normalizedGuestEmail);
     }
 
     const shippingSnapshot = await this.resolveShippingSnapshot(customerId, createOrderDto);
@@ -257,7 +351,7 @@ export class OrdersService {
         where: { id: item.variantId },
         relations: ['product', 'product.store'],
       });
-      if (!variant?.product) {
+      if (!variant?.product || variant.retiredAt) {
         throw new BadRequestException({
           code: 'VARIANT_NOT_FOUND',
           message: `Variant ${item.variantId} not found`,
@@ -365,7 +459,7 @@ export class OrdersService {
         customerId: linkedCustomerId,
         guestPhone: normalizedGuestPhone ?? null,
         guestName: guestName ?? null,
-        guestEmail: guestEmail ?? null,
+        guestEmail: normalizedGuestEmail,
         guestPayTokenHash: guestPayTokenIssue?.hash ?? null,
         guestPayTokenExpiresAt: guestPayTokenIssue?.expiresAt ?? null,
         status: OrderStatus.PENDING_PAYMENT,
@@ -404,10 +498,47 @@ export class OrdersService {
           lock: { mode: 'pessimistic_write' },
         });
 
-        if (!variant) {
+        if (!variant || variant.retiredAt) {
           throw new BadRequestException({
             code: 'VARIANT_NOT_FOUND',
             message: `Variant ${line.variant.id} not found`,
+          });
+        }
+
+        const product =
+          variant.product ??
+          (await manager.findOne(Product, {
+            where: { id: variant.productId },
+          }));
+
+        if (!product) {
+          throw new BadRequestException({
+            code: 'VARIANT_NOT_FOUND',
+            message: `Variant ${line.variant.id} not found`,
+          });
+        }
+
+        // Re-read catalog under the same lock so a vendor price change mid-checkout
+        // cannot persist a stale unitPrice (SF-CHK-114).
+        const liveCatalog = roundMoney(
+          Number(product.basePrice) + Number(variant.priceAdjustment ?? 0),
+        );
+        const liveResolved = await this.saleCampaignPricing.resolveEffectiveUnitPrices([
+          {
+            productId: product.id,
+            variantId: variant.id,
+            catalogUnit: liveCatalog,
+          },
+        ]);
+        const livePrice = liveResolved.get(variant.id);
+        const liveUnit = livePrice?.unitPrice ?? liveCatalog;
+        if (
+          Math.abs(liveCatalog - line.catalogUnit) > 0.009 ||
+          Math.abs(liveUnit - line.unitPrice) > 0.009
+        ) {
+          throw new BadRequestException({
+            code: 'PRICE_CHANGED',
+            message: 'Product price changed since checkout started',
           });
         }
 
@@ -434,12 +565,6 @@ export class OrdersService {
             referenceType: 'order',
           }),
         );
-
-        const product =
-          variant.product ??
-          (await manager.findOne(Product, {
-            where: { id: variant.productId },
-          }));
 
         orderItems.push(
           manager.create(OrderItem, {
@@ -498,6 +623,7 @@ export class OrdersService {
       savedOrder.items = orderItems;
       this.notificationsService.notifyVendorsAboutNewOrder(savedOrder).catch(() => {});
       this.vendorWebhooksService.dispatchOrderEvent(savedOrder.id, 'order.create').catch(() => {});
+      this.publishOrderActivity(savedOrder).catch(() => {});
 
       return savedOrder.id;
     });
@@ -573,15 +699,55 @@ export class OrdersService {
     const filter = options.filter ?? CustomerOrderListFilter.ALL;
     const offset = (page - 1) * limit;
 
-    const query = this.orderRepository
+    const applyScope = (qb: ReturnType<Repository<Order>['createQueryBuilder']>) => {
+      qb.where('order.customerId = :customerId', { customerId });
+      applyCustomerOrderListFilter(qb, filter);
+      return qb;
+    };
+
+    const countRow = await applyScope(this.orderRepository.createQueryBuilder('order'))
+      .select('COUNT(order.id)', 'cnt')
+      .getRawOne<{ cnt: string }>();
+    const total = Number(countRow?.cnt ?? 0);
+
+    if (total === 0) {
+      return {
+        items: [],
+        pagination: { page, limit, total: 0, totalPages: 1 },
+      };
+    }
+
+    const idRows = await applyScope(this.orderRepository.createQueryBuilder('order'))
+      .select('order.id', 'id')
+      .orderBy('order.createdAt', 'DESC')
+      .addOrderBy('order.id', 'DESC')
+      .offset(offset)
+      .limit(limit)
+      .getRawMany<{ id: string }>();
+
+    const ids = idRows.map((row) => row.id);
+    if (ids.length === 0) {
+      return {
+        items: [],
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.max(1, Math.ceil(total / limit)),
+        },
+      };
+    }
+
+    const orders = await this.orderRepository
       .createQueryBuilder('order')
       .leftJoinAndSelect('order.items', 'items')
-      .where('order.customerId = :customerId', { customerId })
-      .orderBy('order.createdAt', 'DESC');
+      .where('order.id IN (:...ids)', { ids })
+      .orderBy('order.createdAt', 'DESC')
+      .addOrderBy('order.id', 'DESC')
+      .getMany();
 
-    applyCustomerOrderListFilter(query, filter);
-
-    const [items, total] = await query.skip(offset).take(limit).getManyAndCount();
+    const byId = new Map(orders.map((order) => [order.id, order]));
+    const items = ids.map((id) => byId.get(id)).filter((order): order is Order => Boolean(order));
 
     return {
       items,
@@ -589,7 +755,7 @@ export class OrdersService {
         page,
         limit,
         total,
-        totalPages: Math.ceil(total / limit) || 1,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
       },
     };
   }
@@ -611,31 +777,35 @@ export class OrdersService {
   }
 
   async findLatestPurchaseProductIds(customerId: string, limit: number): Promise<string[]> {
-    const rows = await this.orderRepository
-      .createQueryBuilder('order')
-      .withDeleted()
-      .innerJoin('order.items', 'item')
-      .innerJoin('item.productVariant', 'variant')
-      .select('variant.productId', 'productId')
-      .where('order.customerId = :customerId', { customerId })
-      .orderBy('order.createdAt', 'DESC')
-      .addOrderBy('item.createdAt', 'ASC')
-      .getRawMany<{ productId: string }>();
-
-    const productIds: string[] = [];
-    const seen = new Set<string>();
-
-    for (const row of rows) {
-      if (row.productId && !seen.has(row.productId)) {
-        seen.add(row.productId);
-        productIds.push(row.productId);
-        if (productIds.length >= limit) {
-          break;
-        }
-      }
+    const safeLimit = Math.max(Math.trunc(limit) || 0, 0);
+    if (safeLimit === 0) {
+      return [];
     }
 
-    return productIds;
+    // Raw SQL matches the previous withDeleted() join: soft-deleted variants stay included.
+    // DISTINCT ON keeps the newest order line per product, then the outer query restores recency.
+    const rows: Array<{ productId: string | null }> = await this.orderRepository.query(
+      `
+      SELECT product_id AS "productId"
+      FROM (
+        SELECT DISTINCT ON (variant.product_id)
+          variant.product_id AS product_id,
+          "order".created_at AS order_created_at,
+          item.created_at AS item_created_at
+        FROM "orders" "order"
+        INNER JOIN "order_items" item ON item.order_id = "order".id
+        INNER JOIN "product_variants" variant ON variant.id = item.variant_id
+        WHERE "order".customer_id = $1
+          AND variant.product_id IS NOT NULL
+        ORDER BY variant.product_id ASC, "order".created_at DESC, item.created_at ASC
+      ) deduped
+      ORDER BY order_created_at DESC, item_created_at ASC
+      LIMIT $2
+      `,
+      [customerId, safeLimit],
+    );
+
+    return rows.flatMap((row) => (row.productId ? [row.productId] : []));
   }
 
   async findByOrderNumber(orderNumber: string): Promise<Order> {
@@ -674,16 +844,177 @@ export class OrdersService {
     return this.guestOrderLinkService.mergeGuestOrders(customerId, phone);
   }
 
-  async findByStore(storeId: string): Promise<Order[]> {
-    return this.orderRepository
-      .createQueryBuilder('order')
-      .innerJoin('order.items', 'item', 'item.storeId = :storeId', { storeId })
-      .leftJoinAndSelect('order.items', 'items')
-      .leftJoinAndSelect('order.shippingAddress', 'shippingAddress')
-      .leftJoinAndSelect('order.customer', 'customer')
-      .leftJoinAndSelect('order.storeShippings', 'storeShippings')
+  /**
+   * Paginated store-scoped vendor orders. List hydration is slim (order scalars +
+   * this store's item fulfillment rows only) — detail uses {@link findOneForVendor}.
+   */
+  async findByStorePage(
+    storeId: string,
+    options: {
+      page?: number;
+      limit?: number;
+      queue?: VendorOrderQueueFilter;
+      status?: OrderStatus;
+      paymentMethod?: PaymentMethod;
+      search?: string;
+    } = {},
+  ): Promise<PaginatedResponse<Order> & { actionableCount: number }> {
+    const page = normalizeVendorOrdersPage(options.page);
+    const limit = normalizeVendorOrdersLimit(options.limit);
+    const offset = (page - 1) * limit;
+    const search = options.search?.trim();
+    const queue = options.queue ?? VendorOrderQueueFilter.ALL;
+
+    const applyStoreScope = (qb: ReturnType<Repository<Order>['createQueryBuilder']>) => {
+      qb.andWhere(
+        `EXISTS (
+          SELECT 1 FROM order_items store_item
+          WHERE store_item.order_id = "order"."id"
+            AND store_item.store_id = :storeId
+        )`,
+        { storeId },
+      );
+      return qb;
+    };
+
+    const applyListFilters = (qb: ReturnType<Repository<Order>['createQueryBuilder']>) => {
+      applyStoreScope(qb);
+      if (queue === VendorOrderQueueFilter.ACTION) {
+        applyVendorActionQueueFilter(qb, storeId);
+      }
+      if (options.status) {
+        qb.andWhere('order.status = :status', { status: options.status });
+      }
+      if (options.paymentMethod) {
+        qb.andWhere('order.payment_method = :paymentMethod', {
+          paymentMethod: options.paymentMethod,
+        });
+      }
+      if (search) {
+        qb.andWhere('order.order_number ILIKE :search', { search: `%${search}%` });
+      }
+      return qb;
+    };
+
+    const listCountQb = applyListFilters(this.orderRepository.createQueryBuilder('order')).select(
+      'COUNT(DISTINCT order.id)',
+      'cnt',
+    );
+    const actionableQb = applyStoreScope(this.orderRepository.createQueryBuilder('order'));
+    applyVendorActionQueueFilter(actionableQb, storeId);
+    actionableQb.select('COUNT(DISTINCT order.id)', 'cnt');
+
+    const [countRow, actionableCountRow] = await Promise.all([
+      listCountQb.getRawOne<{ cnt: string }>(),
+      actionableQb.getRawOne<{ cnt: string }>(),
+    ]);
+
+    const actionableCount = Number(actionableCountRow?.cnt ?? 0);
+    const total = Number(countRow?.cnt ?? 0);
+
+    if (total === 0) {
+      return {
+        items: [],
+        pagination: { page, limit, total: 0, totalPages: 1 },
+        actionableCount,
+      };
+    }
+
+    const idRows = await applyListFilters(this.orderRepository.createQueryBuilder('order'))
+      .select('order.id', 'id')
+      .addSelect('order.createdAt', 'createdAt')
+      .groupBy('order.id')
+      .addGroupBy('order.createdAt')
       .orderBy('order.createdAt', 'DESC')
+      .offset(offset)
+      .limit(limit)
+      .getRawMany<{ id: string }>();
+
+    const ids = idRows.map((row) => row.id);
+    if (ids.length === 0) {
+      return {
+        items: [],
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.max(1, Math.ceil(total / limit)),
+        },
+        actionableCount,
+      };
+    }
+
+    const orders = await this.orderRepository
+      .createQueryBuilder('order')
+      .leftJoinAndSelect('order.items', 'items', 'items.storeId = :storeId', { storeId })
+      .where('order.id IN (:...ids)', { ids })
+      .select([
+        'order.id',
+        'order.orderNumber',
+        'order.status',
+        'order.createdAt',
+        'order.subtotal',
+        'order.shippingFee',
+        'order.discountAmount',
+        'order.total',
+        'order.paymentMethod',
+        'order.guestPhone',
+        'order.guestName',
+        'order.guestEmail',
+        'items.id',
+        'items.storeId',
+        'items.fulfillmentStatus',
+        'items.trackingNumber',
+        'items.fulfillmentProvider',
+        'items.trackingUrl',
+      ])
       .getMany();
+
+    const byId = new Map(orders.map((order) => [order.id, order]));
+    const items = ids.map((id) => byId.get(id)).filter((order): order is Order => Boolean(order));
+
+    return {
+      items,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+      actionableCount,
+    };
+  }
+
+  /** Full order for vendor detail, scoped to a store that owns at least one line. */
+  async findOneForVendor(storeId: string, orderId: string): Promise<Order> {
+    const order = await this.orderRepository
+      .createQueryBuilder('order')
+      .leftJoinAndSelect('order.items', 'items')
+      .leftJoinAndSelect('items.productVariant', 'productVariant')
+      .leftJoinAndSelect('productVariant.product', 'product')
+      .leftJoinAndSelect('product.images', 'productImages')
+      .leftJoinAndSelect('order.shippingAddress', 'shippingAddress')
+      .leftJoinAndSelect('order.storeShippings', 'storeShippings')
+      .where('order.id = :orderId', { orderId })
+      .andWhere(
+        `EXISTS (
+          SELECT 1 FROM order_items store_item
+          WHERE store_item.order_id = "order"."id"
+            AND store_item.store_id = :storeId
+        )`,
+        { storeId },
+      )
+      .withDeleted()
+      .getOne();
+
+    if (!order) {
+      throw new NotFoundException({
+        code: 'ORDER_NOT_FOUND',
+        message: 'Order not found',
+      });
+    }
+
+    return order;
   }
 
   /**
@@ -796,6 +1127,160 @@ export class OrdersService {
     };
   }
 
+  private collectStoreIds(orders: Order[]): string[] {
+    const ids = new Set<string>();
+    for (const order of orders) {
+      for (const item of order.items ?? []) {
+        if (item.storeId) {
+          ids.add(item.storeId);
+        }
+      }
+    }
+    return [...ids];
+  }
+
+  private async loadStoreNameMap(storeIds: string[]): Promise<Map<string, string>> {
+    if (storeIds.length === 0) {
+      return new Map();
+    }
+
+    const stores = await this.storeRepository.find({
+      where: { id: In(storeIds) },
+      select: ['id', 'name'],
+    });
+
+    return new Map(stores.map((store) => [store.id, store.name]));
+  }
+
+  private mapCustomerSummary(
+    customer: Customer | null | undefined,
+  ): AdminOrderCustomerSummary | null {
+    if (!customer) {
+      return null;
+    }
+
+    return {
+      id: customer.id,
+      fullName: customer.fullName ?? null,
+      phone: customer.phone,
+      email: customer.email ?? null,
+    };
+  }
+
+  private toAdminOrderRecord(order: Order, storeNames: Map<string, string>): AdminOrderRecord {
+    const seen = new Set<string>();
+    const stores: AdminOrderStoreSummary[] = [];
+
+    for (const item of order.items ?? []) {
+      if (!item.storeId || seen.has(item.storeId)) {
+        continue;
+      }
+      seen.add(item.storeId);
+      stores.push({
+        id: item.storeId,
+        name: storeNames.get(item.storeId) ?? '',
+      });
+    }
+
+    return {
+      order,
+      stores,
+      customer: this.mapCustomerSummary(order.customer),
+    };
+  }
+
+  async findForAdmin(
+    options: {
+      page?: number;
+      limit?: number;
+      search?: string;
+      status?: OrderStatus;
+    } = {},
+  ): Promise<PaginatedResponse<AdminOrderRecord>> {
+    const page = normalizeCustomerOrdersPage(options.page);
+    const limit = normalizeCustomerOrdersLimit(options.limit);
+    const offset = (page - 1) * limit;
+    const search = options.search?.trim();
+
+    const applyFilters = (qb: ReturnType<Repository<Order>['createQueryBuilder']>) => {
+      if (search) {
+        qb.andWhere('order.orderNumber ILIKE :search', { search: `%${search}%` });
+      }
+      if (options.status) {
+        qb.andWhere('order.status = :status', { status: options.status });
+      }
+      return qb;
+    };
+
+    const countRow = await applyFilters(this.orderRepository.createQueryBuilder('order'))
+      .select('COUNT(DISTINCT order.id)', 'cnt')
+      .getRawOne<{ cnt: string }>();
+    const total = Number(countRow?.cnt ?? 0);
+
+    if (total === 0) {
+      return {
+        items: [],
+        pagination: { page, limit, total: 0, totalPages: 1 },
+      };
+    }
+
+    const idRows = await applyFilters(this.orderRepository.createQueryBuilder('order'))
+      .select('order.id', 'id')
+      .addSelect('order.createdAt', 'createdAt')
+      .groupBy('order.id')
+      .addGroupBy('order.createdAt')
+      .orderBy('order.createdAt', 'DESC')
+      .offset(offset)
+      .limit(limit)
+      .getRawMany<{ id: string }>();
+
+    const ids = idRows.map((row) => row.id);
+    if (ids.length === 0) {
+      return {
+        items: [],
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.max(1, Math.ceil(total / limit)),
+        },
+      };
+    }
+
+    const orders = await this.orderRepository
+      .createQueryBuilder('order')
+      .leftJoinAndSelect('order.items', 'items')
+      .leftJoinAndSelect('items.productVariant', 'productVariant')
+      .leftJoinAndSelect('productVariant.product', 'product')
+      .leftJoinAndSelect('product.images', 'productImages')
+      .leftJoinAndSelect('order.shippingAddress', 'shippingAddress')
+      .leftJoinAndSelect('order.customer', 'customer')
+      .leftJoinAndSelect('order.storeShippings', 'storeShippings')
+      .where('order.id IN (:...ids)', { ids })
+      .withDeleted()
+      .getMany();
+
+    const byId = new Map(orders.map((order) => [order.id, order]));
+    const ordered = ids.map((id) => byId.get(id)).filter((order): order is Order => Boolean(order));
+    const storeNames = await this.loadStoreNameMap(this.collectStoreIds(ordered));
+
+    return {
+      items: ordered.map((order) => this.toAdminOrderRecord(order, storeNames)),
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+    };
+  }
+
+  async findOneForAdmin(id: string): Promise<AdminOrderRecord> {
+    const order = await this.findOne(id);
+    const storeNames = await this.loadStoreNameMap(this.collectStoreIds([order]));
+    return this.toAdminOrderRecord(order, storeNames);
+  }
+
   async findPendingBankTransferOrders(options?: {
     page?: number;
     limit?: number;
@@ -825,6 +1310,41 @@ export class OrdersService {
     };
   }
 
+  async updateShippingAddressAsAdmin(
+    orderId: string,
+    input: {
+      fullName: string;
+      phone: string;
+      addressLine1: string;
+      addressLine2?: string | null;
+      tumbon?: string | null;
+      amphoe: string;
+      province: string;
+      postalCode: string;
+    },
+  ): Promise<Order> {
+    const order = await this.findOne(orderId);
+    if (!order.shippingAddress) {
+      throw new NotFoundException({
+        code: 'SHIPPING_ADDRESS_NOT_FOUND',
+        message: 'Order shipping address not found',
+      });
+    }
+
+    const address = order.shippingAddress;
+    address.fullName = input.fullName.trim();
+    address.phone = normalizeThaiPhoneToLocal(input.phone);
+    address.addressLine1 = input.addressLine1.trim();
+    address.addressLine2 = input.addressLine2?.trim() || null;
+    address.tumbon = input.tumbon?.trim() || null;
+    address.amphoe = input.amphoe.trim();
+    address.province = input.province.trim();
+    address.postalCode = input.postalCode.trim();
+
+    await this.dataSource.getRepository(OrderShippingAddress).save(address);
+    return this.findOne(orderId);
+  }
+
   async updateStatus(id: string, status: OrderStatus, userId?: string): Promise<Order> {
     const order = await this.findOne(id);
     const previousStatus = order.status;
@@ -841,6 +1361,21 @@ export class OrdersService {
     }
 
     assertNotManualHoldTransition(previousStatus, status);
+
+    if (status === OrderStatus.CANCELLED || status === OrderStatus.REFUNDED) {
+      await assertOrderHasNoReviews(this.dataSource, id);
+    }
+
+    const refundedPaymentIds =
+      (status === OrderStatus.CANCELLED || status === OrderStatus.REFUNDED) &&
+      previousStatus !== status
+        ? await this.beamRefundService.refundPaidBeamCharges(
+            id,
+            status === OrderStatus.REFUNDED
+              ? 'Order refunded after payment'
+              : 'Order cancelled after payment',
+          )
+        : [];
 
     const isAdminHoldExit =
       (status === OrderStatus.CANCELLED || status === OrderStatus.REFUNDED) &&
@@ -873,6 +1408,10 @@ export class OrdersService {
 
       await manager.save(order);
 
+      if (refundedPaymentIds.length > 0) {
+        await manager.update(Payment, { id: In(refundedPaymentIds) }, { status: 'refunded' });
+      }
+
       if (status === OrderStatus.CANCELLED || status === OrderStatus.REFUNDED) {
         await this.inventoryService.restoreOrderStock(
           id,
@@ -887,14 +1426,29 @@ export class OrdersService {
           orderId: id,
           status,
           changedBy: userId ?? null,
-          notes: `Status changed from ${previousStatus} to ${status}`,
+          notes:
+            (status === OrderStatus.CANCELLED || status === OrderStatus.REFUNDED) &&
+            previousStatus !== OrderStatus.PENDING_PAYMENT &&
+            requiresManualBeamRefund(order.paymentMethod)
+              ? `Status changed from ${previousStatus} to ${status}. ${MANUAL_BEAM_REFUND_NOTE}`
+              : `Status changed from ${previousStatus} to ${status}`,
         }),
       );
     });
 
     const saved = await this.findOne(id);
-    await this.notificationsService.notifyOrderStatusChanged(saved, status);
+    try {
+      await this.notificationsService.notifyOrderStatusChanged(saved, status);
+    } catch (error) {
+      // Status is already committed. A mail-provider failure must not turn the
+      // admin mutation into INTERNAL_SERVER_ERROR after the write succeeded.
+      const detail = error instanceof Error ? error.message : 'unknown';
+      this.logger.warn(
+        `Order ${saved.orderNumber} status saved; customer notification failed: ${detail}`,
+      );
+    }
     this.notificationsService.notifyVendorsAboutOrderStatus(saved, status).catch(() => {});
+    this.publishOrderActivity(saved).catch(() => {});
     if (previousStatus !== status) {
       const webhookEvent = webhookEventForOrderStatus(status);
       if (webhookEvent) {
@@ -903,5 +1457,25 @@ export class OrdersService {
     }
 
     return saved;
+  }
+
+  private async publishOrderActivity(order: Order): Promise<void> {
+    const storeIds = [...new Set((order.items ?? []).map((item) => item.storeId).filter(Boolean))];
+    let ownerIds: string[] = [];
+    if (storeIds.length > 0) {
+      const stores = await this.storeRepository.find({
+        where: { id: In(storeIds) },
+        select: ['ownerId'],
+      });
+      ownerIds = stores.map((store) => store.ownerId).filter(Boolean);
+    }
+
+    await this.dashboardEventsService.publish({
+      kind: DashboardActivityKind.ORDER,
+      entityId: order.id,
+      storeId: storeIds[0] ?? null,
+      userIds: ownerIds,
+      roles: ['admin'],
+    });
   }
 }

@@ -5,11 +5,11 @@ import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 import { PayoutsService } from './payouts.service';
 import { Payout, PayoutSettlementRail, PayoutStatus } from '../../database/entities/payout.entity';
-import { PaymentMethod } from '../../database/entities/order.entity';
-import { Store, OmiseRecipientStatus } from '../../database/entities/store.entity';
-import { OrderItem } from '../../database/entities/order-item.entity';
-import { OmiseService } from '../omise/omise.service';
+import { OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
+import { BankAccountVerificationStatus, Store } from '../../database/entities/store.entity';
+import { FulfillmentStatus, OrderItem } from '../../database/entities/order-item.entity';
 import { NotificationsService } from '../notifications/notifications.service';
+import { DashboardEventsService } from '../dashboard-events/dashboard-events.service';
 import * as payoutCommissionCalculator from './payout-commission.calculator';
 
 function createQueryBuilderMock(result: Record<string, string>) {
@@ -40,6 +40,7 @@ describe('PayoutsService', () => {
     save: jest.fn(async (x) => ({ ...x, id: 'payout-1', createdAt: new Date('2026-07-01') })),
     find: jest.fn(),
     findOne: jest.fn(),
+    findAndCount: jest.fn(),
     createQueryBuilder: jest.fn(),
   };
   const storeRepo = {
@@ -81,14 +82,13 @@ describe('PayoutsService', () => {
     transaction: jest.fn(async (cb: (m: unknown) => Promise<unknown>) => cb(manager)),
     createQueryBuilder: jest.fn(),
   };
-  const omiseService = {
-    hasCredentials: jest.fn().mockReturnValue(false),
-    createTransfer: jest.fn(),
-    getRecipient: jest.fn(),
-    getTransfer: jest.fn(),
-  };
   const notificationsService = {
     notifyAdminsAboutManualPayoutRequest: jest.fn().mockResolvedValue(null),
+    notifyAdminsAboutManualPayoutCancellation: jest.fn().mockResolvedValue(null),
+    notifyVendorAboutManualPayoutOutcome: jest.fn().mockResolvedValue(null),
+  };
+  const dashboardEventsService = {
+    publish: jest.fn().mockResolvedValue(undefined),
   };
   const configService = {
     get: jest.fn((key: string): number | Date | undefined => {
@@ -119,13 +119,6 @@ describe('PayoutsService', () => {
       commissionAmount?: number;
       commissionRate?: number;
       availableBalance: number;
-      omise: {
-        productSold?: number;
-        shippingFees?: number;
-        commissionAmount?: number;
-        commissionRate?: number;
-        availableBalance: number;
-      };
     },
     expected: {
       productSold: number;
@@ -140,18 +133,11 @@ describe('PayoutsService', () => {
     expect(summary.commissionAmount).toBe(expected.commissionAmount);
     expect(summary.commissionRate).toBe(expected.commissionRate);
     expect(summary.availableBalance).toBe(expected.availableBalance);
-    expect(summary.omise.productSold).toBe(expected.productSold);
-    expect(summary.omise.shippingFees).toBe(expected.shippingFees);
-    expect(summary.omise.commissionAmount).toBe(expected.commissionAmount);
-    expect(summary.omise.commissionRate).toBe(expected.commissionRate);
-    expect(summary.omise.availableBalance).toBe(expected.availableBalance);
     expect(summary.availableBalance).toBe(
       expected.productSold - expected.commissionAmount + expected.shippingFees,
     );
     expect(summary).not.toHaveProperty('pre_productSold');
     expect(summary).not.toHaveProperty('post_productSold');
-    expect(summary.omise).not.toHaveProperty('pre_productSold');
-    expect(summary.omise).not.toHaveProperty('post_productSold');
   }
 
   function createCutoffAwareQb(pre: string, post: string) {
@@ -226,11 +212,16 @@ describe('PayoutsService', () => {
       if (key === 'commission.defaultRatePercent') return 7;
       return undefined;
     });
-    omiseService.hasCredentials.mockReturnValue(false);
     storeRepo.findOne.mockResolvedValue({
       id: 'store-1',
       name: 'Test Store',
+      ownerId: 'vendor-owner-1',
       commissionRate: null,
+      bankAccountName: 'Test Account',
+      bankAccountNumber: '1234567890',
+      bankName: 'ธนาคารกสิกรไทย',
+      bankCode: 'kbank',
+      bankAccountVerificationStatus: BankAccountVerificationStatus.VERIFIED,
     });
     payoutRepo.findOne.mockResolvedValue(null);
     payoutRepo.find.mockResolvedValue([]);
@@ -257,13 +248,17 @@ describe('PayoutsService', () => {
         { provide: getRepositoryToken(Store), useValue: storeRepo },
         { provide: getRepositoryToken(OrderItem), useValue: orderItemRepo },
         { provide: DataSource, useValue: dataSource },
-        { provide: OmiseService, useValue: omiseService },
         { provide: ConfigService, useValue: configService },
         { provide: NotificationsService, useValue: notificationsService },
+        {
+          provide: DashboardEventsService,
+          useValue: dashboardEventsService,
+        },
       ],
     }).compile();
 
     service = module.get(PayoutsService);
+    dashboardEventsService.publish.mockClear();
   });
 
   it('creates manual payout for existing store', async () => {
@@ -280,131 +275,10 @@ describe('PayoutsService', () => {
         commissionAmount: 112.9,
         commissionRate: 7,
         status: PayoutStatus.PENDING,
-        settlementRail: 'omise',
+        settlementRail: 'manual',
       }),
     );
     expect(payout.id).toBe('payout-1');
-  });
-
-  it('creates an Omise transfer for stores with an active recipient', async () => {
-    storeRepo.findOne.mockResolvedValue({
-      id: 'store-1',
-      omiseRecipientId: 'recp_test_1',
-      omiseRecipientStatus: OmiseRecipientStatus.ACTIVE,
-    });
-    omiseService.hasCredentials.mockReturnValue(true);
-    omiseService.getRecipient.mockResolvedValue({
-      id: 'recp_test_1',
-      verified: true,
-      active: true,
-    });
-    omiseService.createTransfer.mockResolvedValue({ id: 'trsf_test_1', paid: false });
-
-    const payout = await service.createManualPayout('store-1', 1500);
-
-    expect(omiseService.createTransfer).toHaveBeenCalledWith('recp_test_1', 150000);
-    expect(payout.transferReference).toBe('trsf_test_1');
-    expect(payout.status).toBe(PayoutStatus.PROCESSING);
-  });
-
-  it('refreshes pending recipient and creates transfer when Omise has activated it', async () => {
-    storeRepo.findOne.mockResolvedValue({
-      id: 'store-1',
-      omiseRecipientId: 'recp_test_1',
-      omiseRecipientStatus: OmiseRecipientStatus.PENDING,
-    });
-    omiseService.hasCredentials.mockReturnValue(true);
-    omiseService.getRecipient.mockResolvedValue({
-      id: 'recp_test_1',
-      verified: true,
-      active: true,
-    });
-    omiseService.createTransfer.mockResolvedValue({ id: 'trsf_test_2', paid: false });
-
-    const payout = await service.createManualPayout('store-1', 1500);
-
-    expect(storeRepo.save).toHaveBeenCalledWith(
-      expect.objectContaining({ omiseRecipientStatus: OmiseRecipientStatus.ACTIVE }),
-    );
-    expect(omiseService.createTransfer).toHaveBeenCalledWith('recp_test_1', 150000);
-    expect(payout.status).toBe(PayoutStatus.PROCESSING);
-  });
-
-  it('rejects payout when Omise recipient is still pending after refresh', async () => {
-    storeRepo.findOne.mockResolvedValue({
-      id: 'store-1',
-      omiseRecipientId: 'recp_test_1',
-      omiseRecipientStatus: OmiseRecipientStatus.PENDING,
-    });
-    omiseService.hasCredentials.mockReturnValue(true);
-    omiseService.getRecipient.mockResolvedValue({
-      id: 'recp_test_1',
-      verified: false,
-      active: false,
-    });
-
-    await expect(service.createManualPayout('store-1', 1500)).rejects.toThrow(BadRequestException);
-    expect(omiseService.createTransfer).not.toHaveBeenCalled();
-  });
-
-  it('retries Omise transfer for orphan pending payouts', async () => {
-    const orphan = {
-      id: 'payout-orphan',
-      storeId: 'store-1',
-      amount: 2050,
-      netAmount: 2050,
-      status: PayoutStatus.PENDING,
-      transferReference: null,
-      failureReason: null,
-    };
-    payoutRepo.findOne.mockResolvedValue(orphan);
-    managerPayoutQueryBuilder.getOne.mockResolvedValue({ ...orphan });
-    storeRepo.findOne.mockResolvedValue({
-      id: 'store-1',
-      omiseRecipientId: 'recp_test_1',
-      omiseRecipientStatus: OmiseRecipientStatus.ACTIVE,
-    });
-    omiseService.hasCredentials.mockReturnValue(true);
-    omiseService.getRecipient.mockResolvedValue({
-      id: 'recp_test_1',
-      verified: true,
-      active: true,
-    });
-    omiseService.createTransfer.mockResolvedValue({ id: 'trsf_retry_1', paid: false });
-
-    const payout = await service.requestPayout('store-1', 'vendor-1');
-
-    expect(omiseService.createTransfer).toHaveBeenCalledWith('recp_test_1', 205000);
-    expect(payout.transferReference).toBe('trsf_retry_1');
-    expect(payout.status).toBe(PayoutStatus.PROCESSING);
-  });
-
-  it('marks payout completed on transfer.pay webhook', async () => {
-    const payout = {
-      id: 'payout-1',
-      status: PayoutStatus.PROCESSING,
-      transferReference: 'trsf_1',
-      failureReason: null,
-      processedAt: null,
-    };
-    payoutRepo.findOne.mockResolvedValue(payout);
-    omiseService.hasCredentials.mockReturnValue(true);
-    omiseService.getTransfer.mockResolvedValue({
-      id: 'trsf_1',
-      paid: true,
-      sent: true,
-      amount: 100,
-      currency: 'thb',
-    });
-
-    await service.handleOmiseTransferWebhook({
-      key: 'transfer.pay',
-      data: { object: 'transfer', id: 'trsf_1', paid: true },
-    });
-
-    expect(payoutRepo.save).toHaveBeenCalledWith(
-      expect.objectContaining({ status: PayoutStatus.COMPLETED }),
-    );
   });
 
   it('throws when store not found', async () => {
@@ -414,10 +288,25 @@ describe('PayoutsService', () => {
   });
 
   it('lists payouts by store', async () => {
-    payoutRepo.find.mockResolvedValue([{ id: 'payout-1' }]);
+    payoutRepo.findAndCount.mockResolvedValue([[{ id: 'payout-1' }], 1]);
 
     const payouts = await service.findByStore('store-1');
-    expect(payouts).toHaveLength(1);
+    expect(payouts.items).toHaveLength(1);
+    expect(payouts.pagination).toEqual({ page: 1, limit: 20, total: 1, totalPages: 1 });
+    expect(payoutRepo.findAndCount).toHaveBeenCalledWith(
+      expect.objectContaining({ skip: 0, take: 20 }),
+    );
+  });
+
+  it('caps store payout page size at 100', async () => {
+    payoutRepo.findAndCount.mockResolvedValue([[], 0]);
+
+    const payouts = await service.findByStore('store-1', { page: 0, limit: 500 });
+
+    expect(payouts.pagination).toEqual({ page: 1, limit: 100, total: 0, totalPages: 1 });
+    expect(payoutRepo.findAndCount).toHaveBeenCalledWith(
+      expect.objectContaining({ skip: 0, take: 100 }),
+    );
   });
 
   it('calculates payout summary with available balance', async () => {
@@ -448,8 +337,6 @@ describe('PayoutsService', () => {
     expect(summary.totalPaidOut).toBe(1500);
     expect(summary.availableBalance).toBe(3255);
     expect(summary.canRequestPayout).toBe(true);
-    expect(summary.omise.availableBalance).toBe(3255);
-    expect(summary.manual.grossRevenue).toBe(5000);
   });
 
   it('excludes on_hold item portions from gross revenue eligibility', async () => {
@@ -601,21 +488,6 @@ describe('PayoutsService', () => {
     });
   });
 
-  it('allows retry when orphan pending payout exists', async () => {
-    orderItemRepo.createQueryBuilder.mockReturnValue(createQueryBuilderMock({ total: '2050' }));
-    payoutRepo.createQueryBuilder
-      .mockImplementationOnce(() => createQueryBuilderMock({ total: '0' }))
-      .mockImplementationOnce(() => createQueryBuilderMock({ total: '2050' }));
-    payoutRepo.findOne.mockResolvedValue({
-      id: 'orphan',
-      status: PayoutStatus.PENDING,
-      transferReference: null,
-    });
-
-    const summary = await service.getPayoutSummary('store-1');
-    expect(summary.canRequestPayout).toBe(true);
-  });
-
   it('blocks vendor request when balance is below minimum', async () => {
     orderItemRepo.createQueryBuilder.mockReturnValue(createQueryBuilderMock({ total: '400' }));
     payoutRepo.createQueryBuilder
@@ -658,6 +530,188 @@ describe('PayoutsService', () => {
     expect(payout.amount).toBe(200);
   });
 
+  describe('single manual rail', () => {
+    it('accrues all online methods plus bank_transfer on the manual rail and excludes COD', async () => {
+      const itemQb = createQueryBuilderMock({ total: '2000' });
+      orderItemRepo.createQueryBuilder.mockReturnValue(itemQb);
+
+      await service.getPayoutSummary('store-1');
+
+      const methodCalls = itemQb.andWhere.mock.calls.filter(
+        ([clause]) => typeof clause === 'string' && /payment_method IN/.test(clause),
+      );
+      expect(methodCalls.length).toBeGreaterThan(0);
+      for (const [, params] of methodCalls) {
+        expect([...params.paymentMethods].sort()).toEqual(
+          [
+            PaymentMethod.PROMPTPAY,
+            PaymentMethod.CREDIT_CARD,
+            PaymentMethod.TRUEMONEY,
+            PaymentMethod.SHOPEEPAY,
+            PaymentMethod.BANK_TRANSFER,
+          ].sort(),
+        );
+        expect(params.paymentMethods).not.toContain(PaymentMethod.COD);
+      }
+    });
+
+    it('blocks requestPayout when bank account details are missing', async () => {
+      storeRepo.findOne.mockResolvedValue({
+        id: 'store-1',
+        name: 'Test Store',
+        commissionRate: null,
+        bankAccountName: null,
+        bankAccountNumber: null,
+        bankName: null,
+        bankCode: null,
+      });
+      orderItemRepo.createQueryBuilder.mockReturnValue(createQueryBuilderMock({ total: '5000' }));
+
+      await expect(service.requestPayout('store-1', 'vendor-1')).rejects.toMatchObject({
+        response: { code: 'BANK_ACCOUNT_REQUIRED' },
+      });
+      expect(managerPayoutRepo.create).not.toHaveBeenCalled();
+      expect(notificationsService.notifyAdminsAboutManualPayoutRequest).not.toHaveBeenCalled();
+    });
+
+    it('requestPayout creates a pending manual payout and notifies admins when bank account is saved', async () => {
+      orderItemRepo.createQueryBuilder.mockReturnValue(createQueryBuilderMock({ total: '2000' }));
+      payoutRepo.createQueryBuilder.mockImplementation(() =>
+        createQueryBuilderMock({ total: '0' }),
+      );
+
+      const payout = await service.requestPayout('store-1', 'vendor-1');
+
+      expect(payout.settlementRail).toBe(PayoutSettlementRail.MANUAL);
+      expect(notificationsService.notifyAdminsAboutManualPayoutRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ storeId: 'store-1', storeName: 'Test Store' }),
+      );
+    });
+
+    it('reports canRequestPayout=false when bank account details are missing', async () => {
+      storeRepo.findOne.mockResolvedValue({
+        id: 'store-1',
+        name: 'Test Store',
+        commissionRate: null,
+        bankAccountName: null,
+        bankAccountNumber: null,
+        bankName: null,
+        bankCode: null,
+      });
+      orderItemRepo.createQueryBuilder.mockReturnValue(createQueryBuilderMock({ total: '5000' }));
+      payoutRepo.createQueryBuilder.mockImplementation(() =>
+        createQueryBuilderMock({ total: '0' }),
+      );
+
+      const summary = await service.getPayoutSummary('store-1');
+
+      expect(summary.availableBalance).toBeGreaterThan(0);
+      expect(summary.canRequestPayout).toBe(false);
+    });
+
+    it('allows canRequestPayout and requestPayout when bank account is saved and balance is eligible', async () => {
+      orderItemRepo.createQueryBuilder.mockReturnValue(createQueryBuilderMock({ total: '2000' }));
+      payoutRepo.createQueryBuilder.mockImplementation(() =>
+        createQueryBuilderMock({ total: '0' }),
+      );
+
+      const summary = await service.getPayoutSummary('store-1');
+      expect(summary.canRequestPayout).toBe(true);
+
+      const payout = await service.requestPayout('store-1', 'vendor-1');
+
+      expect(payout.settlementRail).toBe(PayoutSettlementRail.MANUAL);
+      expect(payout.status).toBe(PayoutStatus.PENDING);
+      expect(managerPayoutRepo.create).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      BankAccountVerificationStatus.UNVERIFIED,
+      BankAccountVerificationStatus.PENDING_REVIEW,
+      BankAccountVerificationStatus.REJECTED,
+      BankAccountVerificationStatus.VERIFIED,
+    ])(
+      'allows canRequestPayout and requestPayout when bank details are saved and status is %s',
+      async (status) => {
+        storeRepo.findOne.mockResolvedValue({
+          id: 'store-1',
+          name: 'Test Store',
+          ownerId: 'vendor-owner-1',
+          commissionRate: null,
+          bankAccountName: 'Test Account',
+          bankAccountNumber: '1234567890',
+          bankName: 'ธนาคารกสิกรไทย',
+          bankCode: 'kbank',
+          bankAccountVerificationStatus: status,
+        });
+        orderItemRepo.createQueryBuilder.mockReturnValue(createQueryBuilderMock({ total: '5000' }));
+        payoutRepo.createQueryBuilder.mockImplementation(() =>
+          createQueryBuilderMock({ total: '0' }),
+        );
+
+        const summary = await service.getPayoutSummary('store-1');
+        expect(summary.availableBalance).toBeGreaterThan(0);
+        expect(summary.canRequestPayout).toBe(true);
+
+        const payout = await service.requestPayout('store-1', 'vendor-1');
+        expect(payout.status).toBe(PayoutStatus.PENDING);
+        expect(managerPayoutRepo.create).toHaveBeenCalled();
+      },
+    );
+
+    it('settleManualPayout still succeeds when the store bank account is not verified', async () => {
+      storeRepo.findOne.mockResolvedValue({
+        id: 'store-1',
+        name: 'Test Store',
+        ownerId: 'vendor-owner-1',
+        commissionRate: null,
+        bankAccountName: 'Test Account',
+        bankAccountNumber: '1234567890',
+        bankName: 'ธนาคารกสิกรไทย',
+        bankCode: 'kbank',
+        bankAccountVerificationStatus: BankAccountVerificationStatus.PENDING_REVIEW,
+      });
+
+      const pendingRow = {
+        id: 'payout-manual-unverified',
+        storeId: 'store-1',
+        amount: 1860,
+        netAmount: 1860,
+        fee: 0,
+        productSold: 2000,
+        shippingFees: 0,
+        commissionAmount: 140,
+        commissionRate: 7,
+        status: PayoutStatus.PENDING,
+        settlementRail: 'manual',
+        processedBy: 'vendor-1',
+        notes: 'Vendor requested payout',
+      };
+      payoutRepo.findOne.mockResolvedValue(pendingRow);
+      managerPayoutQueryBuilder.getOne.mockResolvedValue({ ...pendingRow });
+
+      const payout = await service.settleManualPayout('store-1', {
+        processedBy: 'admin-1',
+        notes: 'Transferred via SCB',
+      });
+
+      expect(payout.status).toBe(PayoutStatus.COMPLETED);
+      expect(managerPayoutRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'payout-manual-unverified',
+          status: PayoutStatus.COMPLETED,
+        }),
+      );
+    });
+
+    it('consumes historical payouts from any rail so legacy Omise payouts are not paid twice', async () => {
+      await service.getPayoutSummary('store-1');
+
+      const where = payoutRepo.find.mock.calls[0][0].where;
+      expect(where).not.toHaveProperty('settlementRail');
+    });
+  });
+
   describe('concurrent payout requests (QA-hunt: double-payment race condition)', () => {
     it('rejects createManualPayout when a concurrent request already inserted a pending payout inside the lock', async () => {
       // Simulates two racing requestPayout/triggerPayout calls: both pass the outer
@@ -672,39 +726,6 @@ describe('PayoutsService', () => {
         response: { code: 'PAYOUT_ALREADY_PENDING' },
       });
       expect(managerPayoutRepo.create).not.toHaveBeenCalled();
-    });
-
-    it('does not double-submit to Omise when a concurrent call already claimed the same orphan payout', async () => {
-      const orphan = {
-        id: 'payout-orphan',
-        storeId: 'store-1',
-        amount: 2050,
-        netAmount: 2050,
-        status: PayoutStatus.PENDING,
-        transferReference: null,
-        failureReason: null,
-      };
-      payoutRepo.findOne
-        .mockResolvedValueOnce(orphan) // findOrphanPendingPayout
-        .mockResolvedValueOnce({ ...orphan, status: PayoutStatus.PROCESSING }); // post-claim refetch
-      // The row lock sees the racer already flipped it to PROCESSING/claimed it first.
-      managerPayoutQueryBuilder.getOne.mockResolvedValue(null);
-      storeRepo.findOne.mockResolvedValue({
-        id: 'store-1',
-        omiseRecipientId: 'recp_test_1',
-        omiseRecipientStatus: OmiseRecipientStatus.ACTIVE,
-      });
-      omiseService.hasCredentials.mockReturnValue(true);
-      omiseService.getRecipient.mockResolvedValue({
-        id: 'recp_test_1',
-        verified: true,
-        active: true,
-      });
-
-      const payout = await service.requestPayout('store-1', 'vendor-1');
-
-      expect(omiseService.createTransfer).not.toHaveBeenCalled();
-      expect(payout.status).toBe(PayoutStatus.PROCESSING);
     });
   });
 
@@ -723,7 +744,7 @@ describe('PayoutsService', () => {
     expect(managerPayoutRepo.create).not.toHaveBeenCalled();
   });
 
-  it('requests then settles manual bank-transfer payout without Omise', async () => {
+  it('requests then settles manual payout', async () => {
     orderItemRepo.createQueryBuilder.mockReturnValue(createQueryBuilderMock({ total: '2000' }));
     payoutRepo.createQueryBuilder.mockImplementation(() => createQueryBuilderMock({ total: '0' }));
 
@@ -741,7 +762,14 @@ describe('PayoutsService', () => {
         settlementRail: 'manual',
         status: PayoutStatus.PENDING,
         processedBy: 'vendor-1',
-        notes: 'Vendor requested manual payout',
+        notes: 'Vendor requested payout',
+      }),
+    );
+    expect(dashboardEventsService.publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'PAYOUT',
+        storeId: 'store-1',
+        roles: ['admin'],
       }),
     );
     expect(requested.status).toBe(PayoutStatus.PENDING);
@@ -784,8 +812,16 @@ describe('PayoutsService', () => {
         commissionRate: 7,
       }),
     );
-    expect(omiseService.createTransfer).not.toHaveBeenCalled();
     expect(payout.status).toBe(PayoutStatus.COMPLETED);
+    expect(notificationsService.notifyVendorAboutManualPayoutOutcome).toHaveBeenCalledWith({
+      vendorId: 'vendor-owner-1',
+      payoutId: 'payout-manual-1',
+      storeId: 'store-1',
+      storeName: 'Test Store',
+      amount: 1860,
+      outcome: 'approved',
+      notes: 'Transferred via SCB',
+    });
   });
 
   it('rejects settle when vendor has not requested manual payout', async () => {
@@ -819,10 +855,75 @@ describe('PayoutsService', () => {
 
     expect(payout.status).toBe(PayoutStatus.FAILED);
     expect(payout.failureReason).toBe('Bank details incomplete');
+    expect(notificationsService.notifyVendorAboutManualPayoutOutcome).toHaveBeenCalledWith({
+      vendorId: 'vendor-owner-1',
+      payoutId: 'payout-manual-2',
+      storeId: 'store-1',
+      storeName: 'Test Store',
+      amount: 2000,
+      outcome: 'rejected',
+      notes: 'Bank details incomplete',
+    });
+  });
+
+  it('lets the vendor cancel a pending payout and notifies admins', async () => {
+    const pendingRow = {
+      id: 'payout-manual-cancel',
+      storeId: 'store-1',
+      amount: 2927.16,
+      netAmount: 2927.16,
+      status: PayoutStatus.PENDING,
+      settlementRail: 'manual',
+      processedBy: 'vendor-1',
+      notes: 'Vendor requested payout',
+    };
+    payoutRepo.findOne.mockResolvedValue(pendingRow);
+    managerPayoutQueryBuilder.getOne.mockResolvedValue({ ...pendingRow });
+
+    const payout = await service.cancelPayoutRequest('store-1', 'vendor-1');
+
+    expect(payout.status).toBe(PayoutStatus.FAILED);
+    expect(payout.failureReason).toBe('ร้านยกเลิกคำขอรับเงิน');
+    expect(notificationsService.notifyAdminsAboutManualPayoutCancellation).toHaveBeenCalledWith({
+      payoutId: 'payout-manual-cancel',
+      storeId: 'store-1',
+      storeName: 'Test Store',
+      amount: 2927.16,
+    });
+    expect(notificationsService.notifyVendorAboutManualPayoutOutcome).not.toHaveBeenCalled();
+  });
+
+  it('lets the vendor cancel a processing payout that is still waiting for admin', async () => {
+    const processingRow = {
+      id: 'payout-manual-processing',
+      storeId: 'store-1',
+      amount: 2927.16,
+      netAmount: 2927.16,
+      status: PayoutStatus.PROCESSING,
+      settlementRail: 'manual',
+      processedBy: 'vendor-1',
+      notes: 'Vendor requested payout',
+    };
+    payoutRepo.findOne.mockResolvedValue(processingRow);
+    managerPayoutQueryBuilder.getOne.mockResolvedValue({ ...processingRow });
+
+    const payout = await service.cancelPayoutRequest('store-1', 'vendor-1');
+
+    expect(payout.status).toBe(PayoutStatus.FAILED);
+    expect(payout.failureReason).toBe('ร้านยกเลิกคำขอรับเงิน');
+  });
+
+  it('rejects a vendor cancel when no pending payout exists', async () => {
+    payoutRepo.findOne.mockResolvedValue(null);
+
+    await expect(service.cancelPayoutRequest('store-1', 'vendor-1')).rejects.toMatchObject({
+      response: { code: 'NO_PENDING_MANUAL_PAYOUT' },
+    });
+    expect(managerPayoutRepo.save).not.toHaveBeenCalled();
   });
 
   describe('available-balance fours identity (AC-016 / AC-D-016)', () => {
-    it('returns identity fours on each rail and top-level Omise mirror, including post-cutoff shipping', async () => {
+    it('returns identity fours on the single manual rail, including post-cutoff shipping', async () => {
       configService.get.mockImplementation((key: string) => {
         if (key === 'payout.minPayoutAmount') return 500;
         if (key === 'commission.defaultRatePercent') return 7;
@@ -840,11 +941,6 @@ describe('PayoutsService', () => {
         commissionRate: 7,
         availableBalance: 1010,
       });
-      expect(summary.manual.productSold).toBe(1000);
-      expect(summary.manual.shippingFees).toBe(80);
-      expect(summary.manual.commissionAmount).toBe(70);
-      expect(summary.manual.commissionRate).toBe(7);
-      expect(summary.manual.availableBalance).toBe(1010);
     });
 
     it('applies default commission to product only and pays all shipping when goLiveAt is unset', async () => {
@@ -974,9 +1070,7 @@ describe('PayoutsService', () => {
       storeRepo.findOne.mockResolvedValue(null);
 
       await expect(
-        service.computeUnpaidBreakdown('missing', PayoutSettlementRail.OMISE, [
-          PaymentMethod.PROMPTPAY,
-        ]),
+        service.computeUnpaidBreakdown('missing', [PaymentMethod.PROMPTPAY]),
       ).rejects.toThrow(NotFoundException);
     });
   });
@@ -1051,7 +1145,7 @@ describe('PayoutsService', () => {
   });
 
   describe('create-path snapshot (AC-007/008/018, AC-D-011, AC-D-029)', () => {
-    it('writes fee===0 and already-net snapshot on both rails for the same unpaid set', async () => {
+    it('writes fee===0 and already-net snapshot on for create and request paths on the same unpaid set', async () => {
       configService.get.mockImplementation((key: string) => {
         if (key === 'payout.minPayoutAmount') return 500;
         if (key === 'commission.defaultRatePercent') return 7;
@@ -1060,14 +1154,14 @@ describe('PayoutsService', () => {
       });
       mockCutoffQueries({ preTotal: '400', postTotal: '1000', shipping: '80' });
 
-      const omise = await service.createOmisePayout('store-1', 1410);
-      expect(omise.amount).toBe(1410);
-      expect(omise.netAmount).toBe(1410);
-      expect(omise.fee).toBe(0);
-      expect(omise.productSold).toBe(1400);
-      expect(omise.shippingFees).toBe(80);
-      expect(omise.commissionAmount).toBe(70);
-      expect(omise.commissionRate).toBe(7);
+      const created = await service.createManualPayout('store-1', 1410);
+      expect(created.amount).toBe(1410);
+      expect(created.netAmount).toBe(1410);
+      expect(created.fee).toBe(0);
+      expect(created.productSold).toBe(1400);
+      expect(created.shippingFees).toBe(80);
+      expect(created.commissionAmount).toBe(70);
+      expect(created.commissionRate).toBe(7);
 
       mockCutoffQueries({ preTotal: '400', postTotal: '1000', shipping: '80' });
       const manual = await service.requestManualPayout('store-1', 'vendor-1');
@@ -1117,7 +1211,7 @@ describe('PayoutsService', () => {
       logSpy.mockRestore();
     });
 
-    it('rejects createOmisePayout amount <= 0 or above unpaid net without inserting', async () => {
+    it('rejects createManualPayout amount <= 0 or above unpaid net without inserting', async () => {
       configService.get.mockImplementation((key: string) => {
         if (key === 'payout.minPayoutAmount') return 500;
         if (key === 'commission.defaultRatePercent') return 7;
@@ -1126,7 +1220,7 @@ describe('PayoutsService', () => {
       });
       mockCutoffQueries({ preTotal: '400', postTotal: '1000', shipping: '80' });
 
-      await expect(service.createOmisePayout('store-1', 0)).rejects.toMatchObject({
+      await expect(service.createManualPayout('store-1', 0)).rejects.toMatchObject({
         response: { code: 'INVALID_PAYOUT_AMOUNT' },
       });
       expect(managerPayoutRepo.create).not.toHaveBeenCalled();
@@ -1147,7 +1241,7 @@ describe('PayoutsService', () => {
       });
       const errorSpy = jest.spyOn(service['logger'], 'error').mockImplementation();
 
-      await expect(service.createOmisePayout('store-1', 1500)).rejects.toMatchObject({
+      await expect(service.createManualPayout('store-1', 1500)).rejects.toMatchObject({
         response: { code: 'COMMISSION_FORMULA_MISMATCH' },
       });
       expect(managerPayoutRepo.create).not.toHaveBeenCalled();
@@ -1156,43 +1250,274 @@ describe('PayoutsService', () => {
       errorSpy.mockRestore();
     });
 
-    it('does not rewrite snapshot when retrying an orphan pending payout', async () => {
-      const orphan = {
-        id: 'payout-orphan',
-        storeId: 'store-1',
-        amount: 1410,
-        netAmount: 1410,
-        fee: 0,
-        productSold: 1400,
-        shippingFees: 80,
-        commissionAmount: 70,
-        commissionRate: 7,
-        status: PayoutStatus.PENDING,
-        transferReference: null,
-        failureReason: null,
-      };
-      payoutRepo.findOne.mockResolvedValue(orphan);
-      managerPayoutQueryBuilder.getOne.mockResolvedValue({ ...orphan });
-      storeRepo.findOne.mockResolvedValue({
-        id: 'store-1',
-        omiseRecipientId: 'recp_test_1',
-        omiseRecipientStatus: OmiseRecipientStatus.ACTIVE,
-      });
-      omiseService.hasCredentials.mockReturnValue(true);
-      omiseService.getRecipient.mockResolvedValue({
-        id: 'recp_test_1',
-        verified: true,
-        active: true,
-      });
-      omiseService.createTransfer.mockResolvedValue({ id: 'trsf_retry_snap', paid: false });
+    it('request path writes a single pending MANUAL snapshot without any transfer reference', async () => {
+      mockCutoffQueries({ preTotal: '0', postTotal: '1000', shipping: '0' });
 
       const payout = await service.requestPayout('store-1', 'vendor-1');
 
-      expect(managerPayoutRepo.create).not.toHaveBeenCalled();
-      expect(payout.productSold).toBe(1400);
-      expect(payout.commissionAmount).toBe(70);
-      expect(payout.amount).toBe(1410);
-      expect(omiseService.createTransfer).toHaveBeenCalledWith('recp_test_1', 141000);
+      expect(managerPayoutRepo.create).toHaveBeenCalledTimes(1);
+      expect(managerPayoutRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          settlementRail: PayoutSettlementRail.MANUAL,
+          status: PayoutStatus.PENDING,
+          transferReference: null,
+        }),
+      );
+      expect(payout.transferReference).toBeNull();
+    });
+  });
+
+  describe('fulfillment-status payout eligibility (ADR-0016)', () => {
+    type EligibilityFixture = {
+      id: string;
+      status: OrderStatus;
+      paymentMethod: PaymentMethod;
+      product: number;
+      shipping: number;
+      promoDiscount?: number;
+      fulfillmentStatus?: FulfillmentStatus;
+      source?: string;
+    };
+
+    type EligibilityQbState = {
+      statuses?: OrderStatus[];
+      paymentMethods?: PaymentMethod[];
+      heldFulfillment?: string;
+      heldOrderStatus?: string;
+      vendorImportSource?: string;
+    };
+
+    const EXCLUDED_STATUSES = [
+      OrderStatus.ON_HOLD,
+      OrderStatus.PENDING_PAYMENT,
+      OrderStatus.CANCELLED,
+      OrderStatus.REFUNDED,
+    ];
+
+    function isEligible(
+      fixture: EligibilityFixture,
+      state: EligibilityQbState,
+      forPromo: boolean,
+    ): boolean {
+      if (!state.statuses?.includes(fixture.status)) return false;
+      if (state.paymentMethods && !state.paymentMethods.includes(fixture.paymentMethod))
+        return false;
+      if (state.heldOrderStatus && fixture.status === (state.heldOrderStatus as OrderStatus))
+        return false;
+      if (state.vendorImportSource && (fixture.source ?? 'checkout') === state.vendorImportSource) {
+        return false;
+      }
+      if (
+        !forPromo &&
+        state.heldFulfillment &&
+        (fixture.fulfillmentStatus ?? FulfillmentStatus.PENDING) === state.heldFulfillment
+      ) {
+        return false;
+      }
+      return true;
+    }
+
+    function mockEligibilityFixtures(fixtures: EligibilityFixture[]) {
+      const capturedStatuses: OrderStatus[][] = [];
+
+      function trackStatuses(state: EligibilityQbState, params?: { statuses?: OrderStatus[] }) {
+        if (params?.statuses) {
+          state.statuses = params.statuses;
+          capturedStatuses.push([...params.statuses]);
+        }
+      }
+
+      function createEligibilityQb(mode: 'item' | 'promo' | 'slice') {
+        const state: EligibilityQbState = {};
+        const qb = createQueryBuilderMock({ total: '0' });
+        qb.andWhere.mockImplementation((clause: string, params?: Record<string, unknown>) => {
+          if (params && 'statuses' in params) {
+            trackStatuses(state, params);
+          }
+          if (params && 'paymentMethods' in params) {
+            state.paymentMethods = params.paymentMethods as PaymentMethod[];
+          }
+          if (params && 'heldFulfillment' in params) {
+            state.heldFulfillment = params.heldFulfillment as string;
+          }
+          if (params && 'heldOrderStatus' in params) {
+            state.heldOrderStatus = params.heldOrderStatus as string;
+          }
+          if (params && 'vendorImportSource' in params) {
+            state.vendorImportSource = params.vendorImportSource as string;
+          }
+          return qb;
+        });
+
+        qb.getRawOne.mockImplementation(async () => {
+          const eligible = fixtures.filter((f) => isEligible(f, state, mode === 'promo'));
+          if (mode === 'promo') {
+            const total = eligible.reduce((sum, f) => sum + (f.promoDiscount ?? 0), 0);
+            return { total: String(total) };
+          }
+          const total = eligible.reduce((sum, f) => sum + f.product, 0);
+          return { total: String(total) };
+        });
+
+        qb.getRawMany.mockImplementation(async () => {
+          const eligible = fixtures.filter((f) => isEligible(f, state, false));
+          return eligible.map((f) => ({
+            product: String(f.product),
+            shipping: String(f.shipping),
+          }));
+        });
+
+        return qb;
+      }
+
+      orderItemRepo.createQueryBuilder.mockImplementation(() => createEligibilityQb('item'));
+      payoutRepo.createQueryBuilder.mockImplementation(() =>
+        createQueryBuilderMock({ total: '0' }),
+      );
+      payoutRepo.find.mockResolvedValue([]);
+      dataSource.createQueryBuilder.mockImplementation((entity?: { name?: string }) => {
+        if (isShippingSliceEntity(entity)) {
+          return createEligibilityQb('slice');
+        }
+        return createEligibilityQb('promo');
+      });
+
+      return { capturedStatuses };
+    }
+
+    const paidNetFixture = (id: string, status: OrderStatus): EligibilityFixture => ({
+      id,
+      status,
+      paymentMethod: PaymentMethod.PROMPTPAY,
+      product: 1000,
+      shipping: 80,
+    });
+
+    it('includes processing and shipped PromptPay orders at the same net as paid', async () => {
+      const { capturedStatuses } = mockEligibilityFixtures([
+        paidNetFixture('o-processing', OrderStatus.PROCESSING),
+        paidNetFixture('o-shipped', OrderStatus.SHIPPED),
+      ]);
+
+      const summary = await service.getPayoutSummary('store-1');
+
+      expectFoursIdentity(summary, {
+        productSold: 2000,
+        shippingFees: 160,
+        commissionAmount: 140,
+        commissionRate: 7,
+        availableBalance: 2020,
+      });
+      expect(capturedStatuses.length).toBeGreaterThanOrEqual(3);
+      expect(capturedStatuses[0]).toEqual(capturedStatuses[1]);
+      expect(capturedStatuses[1]).toEqual(capturedStatuses[2]);
+      expect(capturedStatuses[0]).toEqual([
+        OrderStatus.PAID,
+        OrderStatus.PROCESSING,
+        OrderStatus.SHIPPED,
+        OrderStatus.DELIVERED,
+      ]);
+      for (const excluded of EXCLUDED_STATUSES) {
+        expect(capturedStatuses[0]).not.toContain(excluded);
+      }
+    });
+
+    it('keeps the same net when those orders are delivered (no double count)', async () => {
+      const { capturedStatuses } = mockEligibilityFixtures([
+        paidNetFixture('o-delivered-1', OrderStatus.DELIVERED),
+        paidNetFixture('o-delivered-2', OrderStatus.DELIVERED),
+      ]);
+
+      const summary = await service.getPayoutSummary('store-1');
+
+      expectFoursIdentity(summary, {
+        productSold: 2000,
+        shippingFees: 160,
+        commissionAmount: 140,
+        commissionRate: 7,
+        availableBalance: 2020,
+      });
+      expect(orderItemRepo.createQueryBuilder).toHaveBeenCalledTimes(1);
+      expect(
+        dataSource.createQueryBuilder.mock.calls.filter(([entity]) => isShippingSliceEntity(entity))
+          .length,
+      ).toBe(1);
+      expect(capturedStatuses[0]).toEqual([
+        OrderStatus.PAID,
+        OrderStatus.PROCESSING,
+        OrderStatus.SHIPPED,
+        OrderStatus.DELIVERED,
+      ]);
+    });
+
+    it('excludes on_hold orders, held lines, cancelled, and COD (still zero)', async () => {
+      mockEligibilityFixtures([
+        {
+          id: 'o-hold',
+          status: OrderStatus.ON_HOLD,
+          paymentMethod: PaymentMethod.PROMPTPAY,
+          product: 1000,
+          shipping: 80,
+        },
+        {
+          id: 'o-held-line',
+          status: OrderStatus.PAID,
+          paymentMethod: PaymentMethod.PROMPTPAY,
+          product: 1000,
+          shipping: 80,
+          fulfillmentStatus: FulfillmentStatus.ON_HOLD,
+        },
+        {
+          id: 'o-cancelled',
+          status: OrderStatus.CANCELLED,
+          paymentMethod: PaymentMethod.PROMPTPAY,
+          product: 1000,
+          shipping: 80,
+        },
+        {
+          id: 'o-cod',
+          status: OrderStatus.PAID,
+          paymentMethod: PaymentMethod.COD,
+          product: 1000,
+          shipping: 80,
+        },
+      ]);
+
+      const summary = await service.getPayoutSummary('store-1');
+
+      expectFoursIdentity(summary, {
+        productSold: 0,
+        shippingFees: 0,
+        commissionAmount: 0,
+        commissionRate: 7,
+        availableBalance: 0,
+      });
+    });
+
+    it('subtracts a store promo on a shipped order in the same getPayoutSummary generation', async () => {
+      const { capturedStatuses } = mockEligibilityFixtures([
+        {
+          id: 'o-shipped-promo',
+          status: OrderStatus.SHIPPED,
+          paymentMethod: PaymentMethod.PROMPTPAY,
+          product: 1000,
+          shipping: 0,
+          promoDiscount: 100,
+        },
+      ]);
+
+      const summary = await service.getPayoutSummary('store-1');
+
+      expectFoursIdentity(summary, {
+        productSold: 900,
+        shippingFees: 0,
+        commissionAmount: 63,
+        commissionRate: 7,
+        availableBalance: 837,
+      });
+      expect(capturedStatuses.length).toBeGreaterThanOrEqual(2);
+      expect(capturedStatuses[0]).toEqual(capturedStatuses[1]);
+      expect(capturedStatuses[0]).toContain(OrderStatus.SHIPPED);
     });
   });
 });

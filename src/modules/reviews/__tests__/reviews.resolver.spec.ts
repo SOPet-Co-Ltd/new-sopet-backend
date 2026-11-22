@@ -65,7 +65,9 @@ describe('ReviewsResolver', () => {
       | 'findPendingImportedReviewIds'
     >
   >;
-  let storesService: jest.Mocked<Pick<StoresService, 'userHasStoreAccess'>>;
+  let storesService: jest.Mocked<
+    Pick<StoresService, 'userHasStoreAccess' | 'assertStoreAccessIfVendor'>
+  >;
   let auditLogsService: { log: jest.Mock };
   let resolver: ReviewsResolver;
 
@@ -87,6 +89,7 @@ describe('ReviewsResolver', () => {
     };
     storesService = {
       userHasStoreAccess: jest.fn(),
+      assertStoreAccessIfVendor: jest.fn().mockResolvedValue(undefined),
     };
     auditLogsService = { log: jest.fn().mockResolvedValue(undefined) };
     resolver = new ReviewsResolver(
@@ -147,6 +150,7 @@ describe('ReviewsResolver', () => {
 
       const result = await resolver.productReviews('prod-1');
 
+      expect(reviewsService.findByProduct).toHaveBeenCalledWith('prod-1', 1, 100);
       expect(result).toHaveLength(1);
       expect(result[0]).toMatchObject({
         id: 'review-1',
@@ -293,6 +297,7 @@ describe('ReviewsResolver', () => {
           status: ReviewStatus.PENDING,
           createdAt: new Date('2026-06-01T10:00:00.000Z'),
           images: [{ id: 'img-1', url: 'https://example.com/review-1.jpg' }],
+          variantOptions: null,
         },
       ]);
 
@@ -325,56 +330,56 @@ describe('ReviewsResolver', () => {
           createdAt: new Date('2026-01-01T00:00:00.000Z'),
           images: [],
           reply: null,
+          variantOptions: null,
         },
       ]);
 
       const result = await resolver.storeReviews('store-1');
 
-      expect(reviewsService.findByStore).toHaveBeenCalledWith('store-1');
+      expect(reviewsService.findByStore).toHaveBeenCalledWith('store-1', 1, 100);
       expect(result[0].productName).toBe('Dog Food');
       expect(storesService.userHasStoreAccess).not.toHaveBeenCalled();
     });
   });
 
   describe('createReviewReply', () => {
-    it('is decorated with vendor role guard', () => {
+    it('is decorated with admin and vendor role guard', () => {
       const method = Object.getOwnPropertyDescriptor(ReviewsResolver.prototype, 'createReviewReply')
         ?.value as (...args: unknown[]) => unknown;
       const roles = Reflect.getMetadata(ROLES_KEY, method) as string[] | undefined;
-      expect(roles).toEqual(['vendor']);
+      expect(roles).toEqual(['admin', 'vendor']);
     });
   });
 
   describe('updateReviewReply', () => {
-    it('is decorated with vendor role guard', () => {
+    it('is decorated with admin and vendor role guard', () => {
       const method = Object.getOwnPropertyDescriptor(ReviewsResolver.prototype, 'updateReviewReply')
         ?.value as (...args: unknown[]) => unknown;
       const roles = Reflect.getMetadata(ROLES_KEY, method) as string[] | undefined;
-      expect(roles).toEqual(['vendor']);
+      expect(roles).toEqual(['admin', 'vendor']);
     });
   });
 
   describe('storeProductReviews', () => {
-    it('remains vendor-guarded', () => {
+    it('is guarded for admin and vendor', () => {
       const storeProductReviewsMethod = Object.getOwnPropertyDescriptor(
         ReviewsResolver.prototype,
         'storeProductReviews',
       )?.value as (...args: unknown[]) => unknown;
       const roles = Reflect.getMetadata(ROLES_KEY, storeProductReviewsMethod) as
         string[] | undefined;
-      expect(roles).toEqual(['vendor']);
+      expect(roles).toEqual(['admin', 'vendor']);
     });
 
-    it('throws when user has no store access', async () => {
-      storesService.userHasStoreAccess.mockResolvedValue(false);
+    it('throws when vendor has no store access', async () => {
+      storesService.assertStoreAccessIfVendor.mockRejectedValue(new ForbiddenException());
 
-      await expect(resolver.storeProductReviews('store-1', 'user-1')).rejects.toThrow(
+      await expect(resolver.storeProductReviews('store-1', 'user-1', 'vendor')).rejects.toThrow(
         ForbiddenException,
       );
     });
 
     it('delegates pagination and filters to findByStorePaginated', async () => {
-      storesService.userHasStoreAccess.mockResolvedValue(true);
       reviewsService.findByStorePaginated.mockResolvedValue({
         items: [],
         pagination: { page: 2, limit: 20, total: 0, totalPages: 1 },
@@ -383,12 +388,18 @@ describe('ReviewsResolver', () => {
       const result = await resolver.storeProductReviews(
         'store-1',
         'user-1',
+        'vendor',
         2,
         20,
         'unreplied',
         '5',
       );
 
+      expect(storesService.assertStoreAccessIfVendor).toHaveBeenCalledWith(
+        'vendor',
+        'user-1',
+        'store-1',
+      );
       expect(reviewsService.findByStorePaginated).toHaveBeenCalledWith({
         storeId: 'store-1',
         page: 2,

@@ -5,12 +5,16 @@ import { configurePgUtcTimestampParsing } from './database/pg-timestamp.util';
 
 configurePgUtcTimestampParsing();
 
+import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { assertProductionSecurityConfig } from './config/security-boot.util';
+import { reportServerError } from './common/utils/report-server-error.util';
+import { McpService } from './modules/mcp/mcp.service';
+import { isMcpEnabled } from './modules/mcp/config';
 
 // Base64 image uploads via the `uploadImage` GraphQL mutation can exceed the
 // default ~100kb body-parser limit. 10mb comfortably fits the client's 5MB
@@ -19,17 +23,37 @@ const GRAPHQL_BODY_LIMIT = '10mb';
 /** Smaller JSON limit for REST public API and payment webhooks (SOPET-L-01). */
 const REST_BODY_LIMIT = '256kb';
 
+const bootstrapLogger = new Logger('Bootstrap');
+
+process.on('unhandledRejection', (reason: unknown) => {
+  reportServerError({
+    code: 'UNHANDLED_REJECTION',
+    message: reason instanceof Error ? reason.message : String(reason),
+    stack: reason instanceof Error ? reason.stack : undefined,
+  });
+});
+
+process.on('uncaughtException', (error: Error) => {
+  reportServerError({
+    code: 'UNCAUGHT_EXCEPTION',
+    message: error.message,
+    stack: error.stack,
+  });
+});
+
 async function bootstrap() {
   assertProductionSecurityConfig();
 
   // `bodyParser: false` skips Nest's default (100kb) parser registration so we
   // can register path-specific parsers below. `rawBody: true` is still honored
-  // by Nest's body parser helpers for Omise webhook HMAC verification; we also
+  // by Nest's body parser helpers for webhook HMAC verification; we also
   // set rawBody on the webhook path via verify().
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     rawBody: true,
     bodyParser: false,
   });
+
+  app.enableShutdownHooks();
 
   app.use(
     helmet({
@@ -45,7 +69,7 @@ async function bootstrap() {
   };
 
   // Path-specific smaller limits first (SOPET-L-01)
-  app.use('/webhooks/omise', express.json({ limit: REST_BODY_LIMIT, verify: captureRawBody }));
+  app.use('/webhooks/beam', express.json({ limit: REST_BODY_LIMIT, verify: captureRawBody }));
   app.use('/api/v1', express.json({ limit: REST_BODY_LIMIT }));
   app.use('/api/v1', express.urlencoded({ extended: true, limit: REST_BODY_LIMIT }));
 
@@ -76,12 +100,20 @@ async function bootstrap() {
     process.env.API_URL?.replace(/\/$/, '') ||
     `http://localhost:${port}`;
 
-  console.log(`🚀 SOPet API: ${apiUrl}/graphql`);
-  console.log(`🔌 GraphQL subscriptions: ${apiUrl.replace(/^http/, 'ws')}/graphql`);
-  console.log(`🔗 Omise webhook: ${apiUrl}/webhooks/omise`);
-  console.log(
-    `🔑 Public API: ${apiUrl}/api/v1/stores/{storeId} (Authorization: Bearer sopet_sk_...)`,
+  bootstrapLogger.log(`SOPet API: ${apiUrl}/graphql`);
+  bootstrapLogger.log(`GraphQL subscriptions: ${apiUrl.replace(/^http/, 'ws')}/graphql`);
+  bootstrapLogger.log(`Beam webhook: ${apiUrl}/webhooks/beam`);
+  bootstrapLogger.log(
+    `Public API: ${apiUrl}/api/v1/stores/{storeId} (Authorization: Bearer sopet_sk_...)`,
   );
+
+  if (isMcpEnabled()) {
+    const mcp = app.get(McpService);
+    await mcp.startAfterListen();
+    if (mcp.isReady()) {
+      bootstrapLogger.log(`Admin MCP: ${mcp.endpointUrl()}`);
+    }
+  }
 }
 
-bootstrap();
+void bootstrap();

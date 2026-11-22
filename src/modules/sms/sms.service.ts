@@ -101,6 +101,7 @@ export class SmsService {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
       body: body.toString(),
+      signal: AbortSignal.timeout(15_000),
     });
 
     const responseText = await response.text();
@@ -148,6 +149,7 @@ export class SmsService {
           'Content-Type': 'application/x-www-form-urlencoded',
         },
         body: body.toString(),
+        signal: AbortSignal.timeout(15_000),
       },
     );
 

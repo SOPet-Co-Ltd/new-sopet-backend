@@ -31,6 +31,7 @@ export type SearchProductSuggestion = {
   id: string;
   name: string;
   slug: string;
+  storeSlug: string;
   thumbnailUrl?: string | null;
 };
 

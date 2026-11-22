@@ -1,6 +1,13 @@
-import { BadRequestException, ConflictException, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { StoresService } from './stores.service';
-import { StoreStatus } from '../../database/entities/store.entity';
+import { BankAccountVerificationStatus, StoreStatus } from '../../database/entities/store.entity';
+import { AuditAction } from '../audit-logs/audit-log.constants';
 import { StoreMemberRole } from '../../database/entities/store-member.entity';
 import { UserRole } from '../../database/entities/user.entity';
 import { mapAdminStore } from '../../graphql/models/mappers';
@@ -11,11 +18,13 @@ describe('StoresService', () => {
     findOne: jest.Mock;
     create: jest.Mock;
     save: jest.Mock;
+    createQueryBuilder: jest.Mock;
   };
   let userRepository: {
     findOne: jest.Mock;
     create: jest.Mock;
     save: jest.Mock;
+    createQueryBuilder: jest.Mock;
   };
   let storeMemberRepository: {
     findOne: jest.Mock;
@@ -48,11 +57,13 @@ describe('StoresService', () => {
       findOne: jest.fn().mockResolvedValue(null),
       create: jest.fn((data) => data),
       save: jest.fn(async (data) => ({ ...data, id: 'store-1' })),
+      createQueryBuilder: jest.fn(),
     };
     userRepository = {
       findOne: jest.fn(),
       create: jest.fn((data) => data),
       save: jest.fn(async (data) => ({ ...data, id: 'user-1' })),
+      createQueryBuilder: jest.fn(),
     };
     storeMemberRepository = {
       findOne: jest.fn().mockResolvedValue(null),
@@ -93,14 +104,9 @@ describe('StoresService', () => {
       orderItemRepository as never,
       auditLogRepository as never,
       {
-        hasCredentials: jest.fn().mockReturnValue(false),
-        createRecipient: jest.fn(),
-        updateRecipient: jest.fn(),
-        getRecipient: jest.fn(),
-      } as never,
-      {
         notifyVendorAboutStoreStatus: jest.fn().mockResolvedValue(undefined),
       } as never,
+      { publish: jest.fn().mockResolvedValue(undefined) } as never,
       {
         deleteObject: jest.fn(),
       } as never,
@@ -298,6 +304,19 @@ describe('StoresService', () => {
     expect(storeSuspensionHoldService.restoreHoldForStore).not.toHaveBeenCalled();
   });
 
+  it('decodes a percent-encoded Thai slug before lookup', async () => {
+    storeRepository.findOne.mockResolvedValue({
+      id: 'store-1',
+      slug: 'ร้านไทย',
+      status: StoreStatus.APPROVED,
+    });
+
+    const store = await service.findBySlug(encodeURIComponent('ร้านไทย'));
+
+    expect(storeRepository.findOne).toHaveBeenCalledWith({ where: { slug: 'ร้านไทย' } });
+    expect(store.slug).toBe('ร้านไทย');
+  });
+
   it('finds store by slug', async () => {
     storeRepository.findOne.mockResolvedValue({
       id: 'store-1',
@@ -341,6 +360,7 @@ describe('StoresService', () => {
       ownerId: 'owner-1',
       owner: oldOwner,
       name: 'Store',
+      members: [{ id: 'member-1', storeId: 'store-1', userId: 'owner-1' }],
     };
     const updatedStore = {
       ...store,
@@ -359,6 +379,7 @@ describe('StoresService', () => {
 
     expect(store.ownerId).toBe('owner-2');
     expect(store.owner).toBe(newOwner);
+    expect(store.members).toBeUndefined();
     expect(storeMemberRepository.save).toHaveBeenCalledWith(
       expect.objectContaining({
         storeId: 'store-1',
@@ -380,6 +401,36 @@ describe('StoresService', () => {
     });
 
     expect(store.name).toBe('New Name');
+  });
+
+  it('clears optional contact fields when null is sent', async () => {
+    const store = {
+      id: 'store-1',
+      ownerId: 'owner-1',
+      owner: { id: 'owner-1' },
+      name: 'Shop',
+      description: 'About',
+      contactPhone: '0812345678',
+      contactEmail: 'shop@example.com',
+      address: 'Bangkok',
+      status: StoreStatus.APPROVED,
+      commissionRate: null,
+    };
+    storeRepository.findOne.mockResolvedValueOnce(store).mockResolvedValueOnce(store);
+    storeRepository.save.mockImplementation(async (saved) => saved);
+
+    await service.updateAsAdmin({
+      id: 'store-1',
+      description: null,
+      contactPhone: null,
+      contactEmail: null,
+      address: null,
+    });
+
+    expect(store.description).toBeNull();
+    expect(store.contactPhone).toBeNull();
+    expect(store.contactEmail).toBeNull();
+    expect(store.address).toBeNull();
   });
 
   it('rejects clearing store owner', async () => {
@@ -716,6 +767,52 @@ describe('StoresService', () => {
 
       expect(emailDeliveryService.sendVendorAccountSuspended).not.toHaveBeenCalled();
     });
+
+    it('clears emailVerified when vendor email changes', async () => {
+      userRepository.findOne
+        .mockResolvedValueOnce({
+          id: 'vendor-1',
+          email: 'old@test.com',
+          fullName: 'Vendor One',
+          isActive: true,
+          emailVerified: true,
+          role: UserRole.VENDOR,
+          ownedStores: [],
+        })
+        .mockResolvedValueOnce(null);
+      userRepository.save.mockImplementation(async (data) => data);
+
+      const result = await service.updateVendorAsAdmin({
+        id: 'vendor-1',
+        email: 'new@test.com',
+      });
+
+      expect(result.email).toBe('new@test.com');
+      expect(result.emailVerified).toBe(false);
+    });
+
+    it('keeps emailVerified when email is unchanged', async () => {
+      userRepository.findOne
+        .mockResolvedValueOnce({
+          id: 'vendor-1',
+          email: 'vendor@test.com',
+          fullName: 'Vendor One',
+          isActive: true,
+          emailVerified: true,
+          role: UserRole.VENDOR,
+          ownedStores: [],
+        })
+        .mockResolvedValueOnce({ id: 'vendor-1', email: 'vendor@test.com' });
+      userRepository.save.mockImplementation(async (data) => data);
+
+      const result = await service.updateVendorAsAdmin({
+        id: 'vendor-1',
+        email: 'vendor@test.com',
+        fullName: 'Renamed',
+      });
+
+      expect(result.emailVerified).toBe(true);
+    });
   });
 
   describe('getVendorInsightsForAdmin', () => {
@@ -809,7 +906,7 @@ describe('StoresService', () => {
     });
   });
 
-  describe('Omise payout bank change', () => {
+  describe('bank account verification', () => {
     const previousBankKey = process.env.BANK_DATA_ENCRYPTION_KEY;
 
     beforeAll(() => {
@@ -820,17 +917,22 @@ describe('StoresService', () => {
       process.env.BANK_DATA_ENCRYPTION_KEY = previousBankKey;
     });
 
-    it('resets Omise status when bank details change', async () => {
-      const { OmiseRecipientStatus } = await import('../../database/entities/store.entity');
+    const verifiedStore = () => ({
+      id: 'store-1',
+      name: 'Store',
+      bankAccountName: 'Old Name',
+      bankAccountNumber: '1111111111',
+      bankName: 'ธนาคารกสิกรไทย',
+      bankCode: 'kbank',
+      bankAccountVerificationStatus: BankAccountVerificationStatus.VERIFIED,
+      bankAccountRejectionReason: null,
+    });
+
+    it('saves bank details without changing verification status', async () => {
       storeRepository.findOne.mockResolvedValue({
-        id: 'store-1',
-        bankAccountName: 'Old Name',
-        bankAccountNumber: '1111111111',
-        bankName: 'ธนาคารกสิกรไทย',
-        bankCode: 'kbank',
-        omiseRecipientId: 'recp_old',
-        omiseRecipientStatus: OmiseRecipientStatus.ACTIVE,
-        omiseRecipientFailureMessage: null,
+        ...verifiedStore(),
+        bankAccountVerificationStatus: BankAccountVerificationStatus.REJECTED,
+        bankAccountRejectionReason: 'Name mismatch',
       });
 
       const saved = await service.updateStorePayout('store-1', {
@@ -840,11 +942,14 @@ describe('StoresService', () => {
         bankCode: 'bay',
       });
 
-      expect(saved.omiseRecipientStatus).toBe(OmiseRecipientStatus.NOT_CONNECTED);
+      expect(saved.bankAccountName).toBe('New Name');
+      expect(saved.bankAccountVerificationStatus).toBe(BankAccountVerificationStatus.REJECTED);
+      expect(saved.bankAccountRejectionReason).toBe('Name mismatch');
       expect(storeRepository.save).toHaveBeenCalledWith(
         expect.objectContaining({
-          omiseRecipientStatus: OmiseRecipientStatus.NOT_CONNECTED,
+          bankAccountName: 'New Name',
           bankAccountNumber: expect.stringMatching(/^enc:v1:/),
+          bankAccountVerificationStatus: BankAccountVerificationStatus.REJECTED,
         }),
       );
     });
@@ -853,17 +958,7 @@ describe('StoresService', () => {
       const key = process.env.BANK_DATA_ENCRYPTION_KEY;
       delete process.env.BANK_DATA_ENCRYPTION_KEY;
       try {
-        const { OmiseRecipientStatus } = await import('../../database/entities/store.entity');
-        storeRepository.findOne.mockResolvedValue({
-          id: 'store-1',
-          bankAccountName: 'Old Name',
-          bankAccountNumber: '1111111111',
-          bankName: 'ธนาคารกสิกรไทย',
-          bankCode: 'kbank',
-          omiseRecipientId: 'recp_old',
-          omiseRecipientStatus: OmiseRecipientStatus.ACTIVE,
-          omiseRecipientFailureMessage: null,
-        });
+        storeRepository.findOne.mockResolvedValue(verifiedStore());
 
         await service.updateStorePayout('store-1', {
           bankAccountName: 'New Name',
@@ -882,46 +977,172 @@ describe('StoresService', () => {
       }
     });
 
-    it('does not refresh Omise status while NOT_CONNECTED after bank change', async () => {
-      const { OmiseRecipientStatus } = await import('../../database/entities/store.entity');
-      const getRecipient = jest.fn().mockResolvedValue({ verified: true, active: true });
-      const omiseService = {
-        hasCredentials: jest.fn().mockReturnValue(true),
-        createRecipient: jest.fn(),
-        updateRecipient: jest.fn(),
-        getRecipient,
-      };
-
-      service = new StoresService(
-        storeRepository as never,
-        userRepository as never,
-        storeMemberRepository as never,
-        orderRepository as never,
-        orderItemRepository as never,
-        auditLogRepository as never,
-        omiseService as never,
-        {
-          notifyVendorAboutStoreStatus: jest.fn().mockResolvedValue(undefined),
-        } as never,
-        {
-          deleteObject: jest.fn(),
-        } as never,
-        auditLogsService as never,
-        storeSuspensionHoldService as never,
-        emailDeliveryService as never,
-      );
-
+    it('verifyStoreBankAccount marks verified, clears reason and writes audit log', async () => {
+      userRepository.findOne.mockResolvedValue({ id: 'admin-1', email: 'admin@sopet.org' });
       storeRepository.findOne.mockResolvedValue({
-        id: 'store-1',
-        omiseRecipientId: 'recp_old',
-        omiseRecipientStatus: OmiseRecipientStatus.NOT_CONNECTED,
+        ...verifiedStore(),
+        bankAccountVerificationStatus: BankAccountVerificationStatus.PENDING_REVIEW,
+        bankAccountRejectionReason: 'old',
       });
 
-      const result = await service.refreshOmiseRecipientStatus('store-1');
+      const saved = await service.verifyStoreBankAccount('store-1', 'admin-1');
 
-      expect(getRecipient).not.toHaveBeenCalled();
-      expect(result.omiseRecipientStatus).toBe(OmiseRecipientStatus.NOT_CONNECTED);
+      expect(saved.bankAccountVerificationStatus).toBe(BankAccountVerificationStatus.VERIFIED);
+      expect(saved.bankAccountRejectionReason).toBeNull();
+      expect(auditLogsService.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: AuditAction.STORE_BANK_VERIFIED,
+          resourceId: 'store-1',
+        }),
+      );
+    });
+
+    it('rejectStoreBankAccount marks rejected with reason and writes audit log', async () => {
+      userRepository.findOne.mockResolvedValue({ id: 'admin-1', email: 'admin@sopet.org' });
+      storeRepository.findOne.mockResolvedValue({
+        ...verifiedStore(),
+        bankAccountVerificationStatus: BankAccountVerificationStatus.PENDING_REVIEW,
+      });
+
+      const saved = await service.rejectStoreBankAccount('store-1', ' Name mismatch ', 'admin-1');
+
+      expect(saved.bankAccountVerificationStatus).toBe(BankAccountVerificationStatus.REJECTED);
+      expect(saved.bankAccountRejectionReason).toBe('Name mismatch');
+      expect(auditLogsService.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: AuditAction.STORE_BANK_REJECTED,
+          metadata: expect.objectContaining({ reason: 'Name mismatch' }),
+        }),
+      );
+    });
+
+    it('rejectStoreBankAccount requires a reason', async () => {
+      storeRepository.findOne.mockResolvedValue(verifiedStore());
+
+      await expect(service.rejectStoreBankAccount('store-1', '  ', 'admin-1')).rejects.toThrow(
+        BadRequestException,
+      );
       expect(storeRepository.save).not.toHaveBeenCalled();
+    });
+  });
+
+  it('paginates admin stores without loading products', async () => {
+    const qb = {
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      skip: jest.fn().mockReturnThis(),
+      take: jest.fn().mockReturnThis(),
+      getManyAndCount: jest.fn().mockResolvedValue([[{ id: 'store-1' }], 1]),
+    };
+    storeRepository.createQueryBuilder.mockReturnValue(qb);
+
+    const result = await service.findAllForAdmin({ page: 2, limit: 500, sort: 'name:asc' });
+
+    expect(qb.leftJoinAndSelect).toHaveBeenCalledTimes(1);
+    expect(qb.leftJoinAndSelect).toHaveBeenCalledWith('store.owner', 'owner');
+    expect(qb.skip).toHaveBeenCalledWith(100);
+    expect(qb.take).toHaveBeenCalledWith(100);
+    expect(result.pagination).toEqual({ page: 2, limit: 100, total: 1, totalPages: 1 });
+  });
+
+  it('rejects an unknown admin store status filter', async () => {
+    await expect(service.findAllForAdmin({ status: 'archived' })).rejects.toMatchObject({
+      response: { code: 'INVALID_STORE_STATUS' },
+    });
+    expect(storeRepository.createQueryBuilder).not.toHaveBeenCalled();
+  });
+
+  it('paginates admin vendors with a store count and no nested stores', async () => {
+    const countQb = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getCount: jest.fn().mockResolvedValue(3),
+    };
+    const listQb = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      skip: jest.fn().mockReturnThis(),
+      take: jest.fn().mockReturnThis(),
+      getRawAndEntities: jest.fn().mockResolvedValue({
+        entities: [{ id: 'vendor-1' }],
+        raw: [{ store_count: 4 }],
+      }),
+    };
+    userRepository.createQueryBuilder.mockReturnValueOnce(countQb).mockReturnValueOnce(listQb);
+
+    const result = await service.findVendors({ status: 'active', sort: 'storeCount:desc' });
+
+    expect(countQb.where).toHaveBeenCalled();
+    expect(listQb.addSelect).toHaveBeenCalled();
+    expect(listQb.orderBy).toHaveBeenCalledWith('store_count', 'DESC');
+    expect(result.items).toEqual([{ user: { id: 'vendor-1' }, storeCount: 4 }]);
+    expect(result.pagination).toEqual({ page: 1, limit: 20, total: 3, totalPages: 1 });
+  });
+
+  describe('assertStoreAccess', () => {
+    it('rejects empty or non-uuid store ids before querying', async () => {
+      await expect(service.assertStoreAccess('user-1', '')).rejects.toMatchObject({
+        response: { code: 'INVALID_STORE_ID' },
+      });
+      await expect(service.assertStoreAccess('user-1', 'not-a-uuid')).rejects.toMatchObject({
+        response: { code: 'INVALID_STORE_ID' },
+      });
+      expect(storeRepository.findOne).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('assertActorStoreAccess', () => {
+    const storeId = '11111111-1111-1111-1111-111111111111';
+
+    beforeEach(() => {
+      storeRepository.findOne.mockImplementation(async (query: { where?: { id?: string } }) => {
+        if (query.where?.id === storeId) {
+          return { id: storeId, status: StoreStatus.APPROVED };
+        }
+        return null;
+      });
+    });
+
+    it('allows platform admin when the store exists', async () => {
+      const result = await service.assertActorStoreAccess('admin', 'admin-1', storeId);
+      expect(result).toBe(storeId);
+      expect(storeRepository.findOne).toHaveBeenCalled();
+    });
+
+    it('requires membership for vendors', async () => {
+      jest.spyOn(service, 'userHasStoreAccess').mockResolvedValue(false);
+
+      await expect(service.assertActorStoreAccess('vendor', 'user-1', storeId)).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it('blocks vendors on suspended stores when requireActive is set', async () => {
+      jest.spyOn(service, 'userHasStoreAccess').mockResolvedValue(true);
+      jest.spyOn(service, 'isStoreSuspended').mockResolvedValue(true);
+
+      await expect(
+        service.assertActorStoreAccess('vendor', 'user-1', storeId, {
+          requireActive: true,
+          action: 'update products',
+        }),
+      ).rejects.toMatchObject({ response: { code: 'STORE_SUSPENDED' } });
+    });
+
+    it('allows admin on suspended stores regardless of requireActive', async () => {
+      jest.spyOn(service, 'isStoreSuspended').mockResolvedValue(true);
+
+      await expect(
+        service.assertActorStoreAccess('admin', 'admin-1', storeId, {
+          requireActive: true,
+          action: 'update products',
+        }),
+      ).resolves.toBe(storeId);
     });
   });
 });

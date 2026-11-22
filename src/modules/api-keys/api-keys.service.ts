@@ -30,8 +30,13 @@ export class ApiKeysService {
     private readonly storesService: StoresService,
   ) {}
 
-  async create(userId: string, storeId: string, name: string): Promise<CreateStoreApiKeyResult> {
-    await this.storesService.assertStoreManager(userId, storeId);
+  async create(
+    userId: string,
+    storeId: string,
+    name: string,
+    role?: string,
+  ): Promise<CreateStoreApiKeyResult> {
+    await this.storesService.assertStoreManagerIfVendor(role, userId, storeId);
 
     const secret = `${KEY_PREFIX}${randomBytes(KEY_RANDOM_BYTES).toString('hex')}`;
     const keyHash = await bcrypt.hash(secret, BCRYPT_ROUNDS);
@@ -50,8 +55,8 @@ export class ApiKeysService {
     return { apiKey, secret };
   }
 
-  async listForStore(userId: string, storeId: string): Promise<StoreApiKey[]> {
-    await this.storesService.assertStoreManager(userId, storeId);
+  async listForStore(userId: string, storeId: string, role?: string): Promise<StoreApiKey[]> {
+    await this.storesService.assertStoreManagerIfVendor(role, userId, storeId);
 
     return this.apiKeyRepository.find({
       where: { storeId, revokedAt: IsNull() },
@@ -59,8 +64,8 @@ export class ApiKeysService {
     });
   }
 
-  async revoke(userId: string, storeId: string, keyId: string): Promise<void> {
-    await this.storesService.assertStoreManager(userId, storeId);
+  async revoke(userId: string, storeId: string, keyId: string, role?: string): Promise<void> {
+    await this.storesService.assertStoreManagerIfVendor(role, userId, storeId);
 
     const apiKey = await this.apiKeyRepository.findOne({
       where: { id: keyId, storeId, revokedAt: IsNull() },

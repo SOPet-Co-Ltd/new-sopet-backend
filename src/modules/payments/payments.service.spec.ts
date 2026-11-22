@@ -1,34 +1,64 @@
+import { createHash } from 'node:crypto';
 import { BadRequestException, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { PaymentsService } from './payments.service';
-import { buildOmiseReturnUri } from './build-omise-return-uri';
+import { buildPaymentReturnUri } from './build-payment-return-uri';
+import { BeamWebhookRetryableError } from './beam-webhook-retryable.error';
+import { BeamService, type BeamCreateChargeBody } from '../beam/beam.service';
 import { Payment } from '../../database/entities/payment.entity';
-import { Order, OrderStatus } from '../../database/entities/order.entity';
+import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
 import { FulfillmentStatus, OrderItem } from '../../database/entities/order-item.entity';
 import { Customer } from '../../database/entities/customer.entity';
 import { SavedPaymentMethod } from '../../database/entities/saved-payment-method.entity';
 import { NotificationsService } from '../notifications/notifications.service';
+import { DashboardEventsService } from '../dashboard-events/dashboard-events.service';
 import { PaymentEventsService } from './payment-events.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { PayoutsService } from '../payouts/payouts.service';
 import { StoresService } from '../stores/stores.service';
+import { UsersService } from '../users/users.service';
 import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.service';
 import { BankTransferSettingsService } from '../platform/bank-transfer-settings.service';
 import { OrderAuditLogsService } from '../order-audit-logs/order-audit-logs.service';
 import { OrderAuditLog } from '../../database/entities/order-audit-log.entity';
+import { OrderStatusHistory } from '../../database/entities/order-status-history.entity';
+
+function guestPayFixture(plaintext = 'a'.repeat(64)) {
+  return {
+    plaintext,
+    hash: createHash('sha256').update(plaintext).digest('hex'),
+    expiresAt: new Date('2099-01-01T00:00:00.000Z'),
+  };
+}
 
 const paymentEventsServiceMock = {
   publishPaymentStatusUpdated: jest.fn(),
 };
 
-const payoutsServiceMock = {
-  handleOmiseTransferWebhook: jest.fn(),
+const payoutsServiceMock = {};
+
+const storesServiceMock = {};
+
+const beamServiceMock = {
+  hasCredentials: jest.fn().mockReturnValue(true),
+  hasPublishableCredentials: jest.fn().mockReturnValue(true),
+  createCharge: jest.fn(),
+  createCardToken: jest.fn().mockResolvedValue({ id: 'beam_tok_fresh' }),
+  getCharge: jest.fn(),
+  createRefund: jest.fn(),
 };
 
-const storesServiceMock = {
-  handleOmiseRecipientWebhook: jest.fn(),
+const usersServiceMock = {
+  addPaymentMethod: jest.fn().mockResolvedValue({ id: 'saved-1' }),
+  persistEncryptedPaymentMethod: jest.fn().mockResolvedValue({ id: 'saved-1' }),
+  decryptSavedCardForCharge: jest.fn().mockReturnValue({
+    cardholderName: 'Test User',
+    pan: '4111111111111111',
+    expiryMonth: 12,
+    expiryYear: 2030,
+  }),
 };
 
 const orderAuditLogsServiceMock = {
@@ -36,7 +66,7 @@ const orderAuditLogsServiceMock = {
   resolveCustomerActorLabel: jest.fn().mockResolvedValue('ลูกค้า'),
 };
 
-/** EntityManager mock for Phase B FOR UPDATE createCharge path. */
+/** EntityManager mock for Phase B FOR UPDATE createCharge path (and markOrderPaid re-lock). */
 function createPhaseBManagerMock(deps: {
   orderRepository: { findOne: jest.Mock; save: jest.Mock };
   paymentRepository: {
@@ -46,15 +76,31 @@ function createPhaseBManagerMock(deps: {
     find: jest.Mock;
   };
 }) {
+  const findSavedPaymentById = (id: string | undefined): Payment | null => {
+    if (!id) {
+      return null;
+    }
+    const saved = deps.paymentRepository.save.mock.calls
+      .map((c: [Payment]) => c[0])
+      .reverse()
+      .find((p) => p?.id === id);
+    return saved ?? null;
+  };
+
   return {
-    findOne: jest.fn((entity: unknown, options?: unknown): Promise<unknown> => {
+    findOne: jest.fn(async (entity: unknown, options?: unknown): Promise<unknown> => {
       if (entity === Order) {
-        return Promise.resolve(deps.orderRepository.findOne(options) as unknown);
+        return deps.orderRepository.findOne(options) as unknown;
       }
       if (entity === Payment) {
-        return Promise.resolve(deps.paymentRepository.findOne(options) as unknown);
+        const opts = options as { where?: { id?: string } } | undefined;
+        const found = (await deps.paymentRepository.findOne(options)) as Payment | null;
+        if (found) {
+          return found;
+        }
+        return findSavedPaymentById(opts?.where?.id);
       }
-      return Promise.resolve(null);
+      return null;
     }),
     find: jest.fn((entity: unknown, options?: unknown): Promise<unknown[]> => {
       if (entity === Payment) {
@@ -66,16 +112,17 @@ function createPhaseBManagerMock(deps: {
       return Promise.resolve([]);
     }),
     create: jest.fn((_entity: unknown, data: unknown) => {
-      if (_entity === OrderAuditLog) {
+      if (_entity === OrderAuditLog || _entity === OrderStatusHistory) {
         return data;
       }
       return deps.paymentRepository.create(data);
     }),
     save: jest.fn((entityOrType: unknown, maybeData?: unknown): Promise<unknown> => {
-      if (entityOrType === OrderAuditLog) {
+      if (entityOrType === OrderAuditLog || entityOrType === OrderStatusHistory) {
         return Promise.resolve(maybeData);
       }
       const entity = (maybeData ?? entityOrType) as { orderId?: string };
+      // Payment rows have orderId; Order does not. OrderStatusHistory is handled above.
       if (entity && typeof entity === 'object' && 'orderId' in entity) {
         return Promise.resolve(deps.paymentRepository.save(entity) as unknown);
       }
@@ -120,6 +167,10 @@ describe('PaymentsService guest access', () => {
           useValue: { notifyOrderPaid: jest.fn() },
         },
         {
+          provide: DashboardEventsService,
+          useValue: { publish: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
           provide: PaymentEventsService,
           useValue: paymentEventsServiceMock,
         },
@@ -134,6 +185,8 @@ describe('PaymentsService guest access', () => {
           useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
         },
         { provide: OrderAuditLogsService, useValue: orderAuditLogsServiceMock },
+        { provide: BeamService, useValue: beamServiceMock },
+        { provide: UsersService, useValue: usersServiceMock },
         {
           provide: BankTransferSettingsService,
           useValue: {
@@ -161,7 +214,7 @@ describe('PaymentsService guest access', () => {
     service = module.get(PaymentsService);
   });
 
-  it('allows payment for guest orders without customerId', async () => {
+  it('rejects payment for guest orders without a guest pay token hash', async () => {
     orderRepository.findOne.mockResolvedValue({
       id: 'ord-1',
       customerId: null,
@@ -169,8 +222,7 @@ describe('PaymentsService guest access', () => {
       guestPayTokenHash: null,
     });
 
-    const order = await service.assertCanPayForOrder('ord-1');
-    expect(order.id).toBe('ord-1');
+    await expect(service.assertCanPayForOrder('ord-1')).rejects.toThrow(ForbiddenException);
   });
 
   it('rejects payment when customer does not own the order', async () => {
@@ -198,7 +250,7 @@ describe('PaymentsService guest access', () => {
     await expect(service.assertCanPayForOrder('missing')).rejects.toThrow(BadRequestException);
   });
 
-  it('allows unauthenticated access to a guest order linked to a member (legacy null hash)', async () => {
+  it('rejects unauthenticated access to a guest order linked to a member when hash is null', async () => {
     orderRepository.findOne.mockResolvedValue({
       id: 'ord-1',
       customerId: 'member-1',
@@ -206,8 +258,7 @@ describe('PaymentsService guest access', () => {
       guestPayTokenHash: null,
     });
 
-    const order = await service.assertCanPayForOrder('ord-1');
-    expect(order.id).toBe('ord-1');
+    await expect(service.assertCanPayForOrder('ord-1')).rejects.toThrow(ForbiddenException);
   });
 
   it('rejects a different authenticated customer for a linked guest order', async () => {
@@ -273,11 +324,14 @@ describe('PaymentsService payment read queries', () => {
     },
   };
 
+  const guestPay = guestPayFixture();
+  const guestPayPlaintext = guestPay.plaintext;
   const guestOrder = {
     id: 'ord-1',
     customerId: null,
     guestPhone: '0812345678',
-    guestPayTokenHash: null,
+    guestPayTokenHash: guestPay.hash,
+    guestPayTokenExpiresAt: guestPay.expiresAt,
   };
   const ownedOrder = { id: 'ord-2', customerId: 'cust-1' };
   const basePayment = {
@@ -310,6 +364,10 @@ describe('PaymentsService payment read queries', () => {
           useValue: { notifyOrderPaid: jest.fn() },
         },
         {
+          provide: DashboardEventsService,
+          useValue: { publish: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
           provide: PaymentEventsService,
           useValue: paymentEventsServiceMock,
         },
@@ -324,6 +382,8 @@ describe('PaymentsService payment read queries', () => {
           useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
         },
         { provide: OrderAuditLogsService, useValue: orderAuditLogsServiceMock },
+        { provide: BeamService, useValue: beamServiceMock },
+        { provide: UsersService, useValue: usersServiceMock },
         {
           provide: BankTransferSettingsService,
           useValue: {
@@ -356,7 +416,7 @@ describe('PaymentsService payment read queries', () => {
       paymentRepository.findOne.mockResolvedValue(basePayment);
       orderRepository.findOne.mockResolvedValue(guestOrder);
 
-      const payment = await service.findById('pay-1');
+      const payment = await service.findById('pay-1', undefined, guestPayPlaintext);
 
       expect(payment).toEqual(basePayment);
       expect(paymentRepository.findOne).toHaveBeenCalledWith({
@@ -394,7 +454,7 @@ describe('PaymentsService payment read queries', () => {
       const latestPayment = { ...basePayment, id: 'pay-latest', status: 'paid' };
       paymentRepository.findOne.mockResolvedValue(latestPayment);
 
-      const payment = await service.findLatestByOrderId('ord-1');
+      const payment = await service.findLatestByOrderId('ord-1', undefined, guestPayPlaintext);
 
       expect(payment).toEqual(latestPayment);
       expect(paymentRepository.findOne).toHaveBeenCalledWith({
@@ -425,7 +485,9 @@ describe('PaymentsService payment read queries', () => {
       orderRepository.findOne.mockResolvedValue(guestOrder);
       paymentRepository.findOne.mockResolvedValue(null);
 
-      await expect(service.findLatestByOrderId('ord-1')).rejects.toThrow(NotFoundException);
+      await expect(
+        service.findLatestByOrderId('ord-1', undefined, guestPayPlaintext),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 });
@@ -461,8 +523,6 @@ describe('PaymentsService createCharge return_uri', () => {
 
   async function compileService(storefrontUrl: string | undefined) {
     configGet = jest.fn((key: string) => {
-      if (key === 'omise.secretKey') return 'skey_test';
-      if (key === 'omise.publicKey') return 'pkey_test';
       if (key === 'app.storefrontUrl') return storefrontUrl;
       return '';
     });
@@ -486,6 +546,10 @@ describe('PaymentsService createCharge return_uri', () => {
           useValue: { notifyOrderPaid: jest.fn() },
         },
         {
+          provide: DashboardEventsService,
+          useValue: { publish: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
           provide: PaymentEventsService,
           useValue: paymentEventsServiceMock,
         },
@@ -500,6 +564,8 @@ describe('PaymentsService createCharge return_uri', () => {
           useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
         },
         { provide: OrderAuditLogsService, useValue: orderAuditLogsServiceMock },
+        { provide: BeamService, useValue: beamServiceMock },
+        { provide: UsersService, useValue: usersServiceMock },
         {
           provide: BankTransferSettingsService,
           useValue: {
@@ -527,24 +593,16 @@ describe('PaymentsService createCharge return_uri', () => {
     return module.get(PaymentsService);
   }
 
-  function parseChargeBody(): Record<string, unknown> {
-    expect(global.fetch).toHaveBeenCalled();
-    const createCall = (global.fetch as jest.Mock).mock.calls.find(
-      ([url]: [string]) =>
-        typeof url === 'string' &&
-        url.includes('/charges') &&
-        !url.includes('/expire') &&
-        !url.includes('/reverse'),
-    ) as [string, RequestInit] | undefined;
-    if (!createCall) {
-      throw new Error('expected Omise create charge fetch call');
-    }
-    const [, init] = createCall;
-    const rawBody = init.body;
-    if (typeof rawBody !== 'string') {
-      throw new Error(`expected string charge body, got ${typeof rawBody}`);
-    }
-    return JSON.parse(rawBody) as Record<string, unknown>;
+  function chargeBody(): BeamCreateChargeBody {
+    expect(beamServiceMock.createCharge).toHaveBeenCalled();
+    return beamServiceMock.createCharge.mock.calls[0][0] as BeamCreateChargeBody;
+  }
+
+  function chargeIdempotencyKey(): string | undefined {
+    expect(beamServiceMock.createCharge).toHaveBeenCalled();
+    const options = beamServiceMock.createCharge.mock.calls[0][1] as
+      { idempotencyKey?: string } | undefined;
+    return options?.idempotencyKey;
   }
 
   beforeEach(() => {
@@ -553,13 +611,12 @@ describe('PaymentsService createCharge return_uri', () => {
       async (cb: (manager: ReturnType<typeof createPhaseBManagerMock>) => Promise<unknown>) =>
         cb(createPhaseBManagerMock({ orderRepository, paymentRepository })),
     );
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: () =>
-        Promise.resolve({
-          id: 'chrg_test_1',
-          status: 'pending',
-        }),
+    global.fetch = jest.fn();
+    beamServiceMock.hasCredentials.mockReturnValue(true);
+    beamServiceMock.createCharge.mockResolvedValue({
+      chargeId: 'beam_chrg_1',
+      status: 'PENDING',
+      actionRequired: 'NONE',
     });
     orderRepository.findOne.mockResolvedValue({
       id: 'ord-1',
@@ -570,7 +627,7 @@ describe('PaymentsService createCharge return_uri', () => {
     orderRepository.save.mockResolvedValue(undefined);
   });
 
-  it('binds Omise charge amount to order.total ignoring client underpay', async () => {
+  it('binds Beam charge amount to order.total ignoring client underpay', async () => {
     service = await compileService(STOREFRONT_ORIGIN);
 
     await service.createCharge({
@@ -581,15 +638,20 @@ describe('PaymentsService createCharge return_uri', () => {
       customerId: 'cust-1',
     });
 
-    const body = parseChargeBody();
+    const body = chargeBody();
     expect(body.amount).toBe(30000);
+    expect(body.currency).toBe('THB');
+    expect(body.referenceId).toBe(PAYMENT_ID);
     const savedPayment = paymentRepository.save.mock.calls
       .map((c: [Payment]) => c[0])
-      .find((p) => p.omiseChargeId === 'chrg_test_1' || p.amount === 300);
+      .find((p) => p.pspChargeId === 'beam_chrg_1' || p.amount === 300);
     expect(savedPayment?.amount).toBe(300);
+    expect(savedPayment?.psp).toBe('beam');
+    expect(savedPayment?.pspChargeId).toBe('beam_chrg_1');
+    expect(savedPayment?.omiseChargeId).toBeUndefined();
   });
 
-  it('binds Omise charge amount to order.total ignoring client overpay', async () => {
+  it('binds Beam charge amount to order.total ignoring client overpay', async () => {
     service = await compileService(STOREFRONT_ORIGIN);
 
     await service.createCharge({
@@ -600,11 +662,10 @@ describe('PaymentsService createCharge return_uri', () => {
       customerId: 'cust-1',
     });
 
-    const body = parseChargeBody();
-    expect(body.amount).toBe(30000);
+    expect(chargeBody().amount).toBe(30000);
   });
 
-  it('includes return_uri ending /payment/{paymentId} for credit_card + token', async () => {
+  it('builds CARD_TOKEN charge with returnUrl and security code for credit_card + token', async () => {
     service = await compileService(STOREFRONT_ORIGIN);
 
     await service.createCharge({
@@ -612,27 +673,31 @@ describe('PaymentsService createCharge return_uri', () => {
       amount: 300,
       currency: 'THB',
       paymentMethod: 'credit_card',
-      omiseToken: 'tokn_test_1',
+      cardToken: 'tok_beam_1',
+      cardSecurityCode: '123',
       customerId: 'cust-1',
     });
 
-    const body = parseChargeBody();
-    expect(body.return_uri).toBe(`${STOREFRONT_ORIGIN}/payment/${PAYMENT_ID}`);
-    expect(String(body.return_uri)).toMatch(new RegExp(`/payment/${PAYMENT_ID}$`));
-    expect(body.card).toBe('tokn_test_1');
+    const body = chargeBody();
+    expect(body.returnUrl).toBe(`${STOREFRONT_ORIGIN}/payment/${PAYMENT_ID}`);
+    expect(body.skip3dsFlow).toBe(false);
+    expect(body.paymentMethod).toEqual({
+      paymentMethodType: 'CARD_TOKEN',
+      cardToken: { cardTokenId: 'tok_beam_1', securityCode: '123' },
+    });
   });
 
-  it('includes return_uri ending /payment/{paymentId} for credit_card + saved card', async () => {
+  it('re-tokenizes vaulted saved card then charges with CVV', async () => {
     service = await compileService(`${STOREFRONT_ORIGIN}/`);
     savedPaymentMethodRepository.findOne.mockResolvedValue({
       id: 'saved-1',
       customerId: 'cust-1',
-      omiseCardToken: 'card_test_68am5rb4ntc85gls2ly',
+      psp: 'beam',
+      panEnc: 'enc:v1:x',
+      cardholderNameEnc: 'enc:v1:y',
+      expiryEnc: 'enc:v1:z',
     });
-    customerRepository.findOne.mockResolvedValue({
-      id: 'cust-1',
-      omiseCustomerId: 'cust_test_omise_1',
-    });
+    beamServiceMock.createCardToken.mockResolvedValue({ id: 'beam_tok_fresh' });
 
     await service.createCharge({
       orderId: 'ord-1',
@@ -640,23 +705,83 @@ describe('PaymentsService createCharge return_uri', () => {
       currency: 'THB',
       paymentMethod: 'credit_card',
       savedPaymentMethodId: 'saved-1',
+      cardSecurityCode: '456',
       customerId: 'cust-1',
     });
 
-    const body = parseChargeBody();
-    expect(body).toEqual({
+    expect(usersServiceMock.decryptSavedCardForCharge).toHaveBeenCalled();
+    expect(beamServiceMock.createCardToken).toHaveBeenCalledWith({
+      pan: '4111111111111111',
+      expiryMonth: 12,
+      expiryYear: 30,
+      cardHolderName: 'Test User',
+    });
+    expect(chargeBody()).toEqual({
       amount: 30000,
-      currency: 'thb',
-      customer: 'cust_test_omise_1',
-      card: 'card_test_68am5rb4ntc85gls2ly',
-      return_uri: `${STOREFRONT_ORIGIN}/payment/${PAYMENT_ID}`,
+      currency: 'THB',
+      referenceId: PAYMENT_ID,
+      returnUrl: `${STOREFRONT_ORIGIN}/payment/${PAYMENT_ID}`,
+      skip3dsFlow: false,
+      paymentMethod: {
+        paymentMethodType: 'CARD_TOKEN',
+        cardToken: { cardTokenId: 'beam_tok_fresh', securityCode: '456' },
+      },
     });
   });
 
-  it('omits return_uri for PromptPay createCharge and sets Omise expires_at', async () => {
+  it('rejects token-only saved cards without ciphertext', async () => {
+    service = await compileService(STOREFRONT_ORIGIN);
+    savedPaymentMethodRepository.findOne.mockResolvedValue({
+      id: 'saved-1',
+      customerId: 'cust-1',
+      psp: 'beam',
+      pspCardToken: 'tok_old',
+      panEnc: null,
+      cardholderNameEnc: null,
+      expiryEnc: null,
+    });
+
+    await expect(
+      service.createCharge({
+        orderId: 'ord-1',
+        amount: 300,
+        currency: 'THB',
+        paymentMethod: 'credit_card',
+        savedPaymentMethodId: 'saved-1',
+        cardSecurityCode: '456',
+        customerId: 'cust-1',
+      }),
+    ).rejects.toMatchObject({ response: { code: 'SAVED_CARD_UNAVAILABLE' } });
+    expect(beamServiceMock.createCharge).not.toHaveBeenCalled();
+    expect(beamServiceMock.createCardToken).not.toHaveBeenCalled();
+  });
+
+  it('requires cardSecurityCode for credit_card', async () => {
     service = await compileService(STOREFRONT_ORIGIN);
 
-    await service.createCharge({
+    await expect(
+      service.createCharge({
+        orderId: 'ord-1',
+        amount: 300,
+        currency: 'THB',
+        paymentMethod: 'credit_card',
+        cardToken: 'tok_beam_1',
+        customerId: 'cust-1',
+      }),
+    ).rejects.toMatchObject({ response: { code: 'CARD_SECURITY_CODE_REQUIRED' } });
+    expect(beamServiceMock.createCharge).not.toHaveBeenCalled();
+  });
+
+  it('builds QR_PROMPT_PAY charge with expiryTime and persists qrCodeImage', async () => {
+    service = await compileService(STOREFRONT_ORIGIN);
+    beamServiceMock.createCharge.mockResolvedValue({
+      chargeId: 'beam_chrg_qr',
+      status: 'PENDING',
+      actionRequired: 'ENCODED_IMAGE',
+      encodedImage: { imageBase64Encoded: 'BASE64QR' },
+    });
+
+    const result = await service.createCharge({
       orderId: 'ord-1',
       amount: 300,
       currency: 'THB',
@@ -664,14 +789,147 @@ describe('PaymentsService createCharge return_uri', () => {
       customerId: 'cust-1',
     });
 
-    const body = parseChargeBody();
-    expect(body).not.toHaveProperty('return_uri');
-    expect(body.source).toEqual({ type: 'promptpay' });
-    expect(typeof body.expires_at).toBe('string');
-    expect(new Date(body.expires_at as string).getTime()).toBeGreaterThan(Date.now());
+    const body = chargeBody();
+    expect(body.paymentMethod.paymentMethodType).toBe('QR_PROMPT_PAY');
+    const expiry = body.paymentMethod.qrPromptPay?.expiryTime;
+    expect(typeof expiry).toBe('string');
+    expect(new Date(expiry as string).getTime()).toBeGreaterThan(Date.now());
+    expect(result.qrCodeImage).toBe('BASE64QR');
+    expect(result.expiresAt).toBeInstanceOf(Date);
+    expect(chargeIdempotencyKey()).toBe(PAYMENT_ID);
+    expect(orderRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({ paymentReference: 'beam_chrg_qr' }),
+    );
   });
 
-  it('does not call Omise (no return_uri leak) for COD', async () => {
+  it('prefers Beam encodedImage.expiry and stores rawData on qrCodeUrl', async () => {
+    service = await compileService(STOREFRONT_ORIGIN);
+    const beamExpiry = new Date(Date.now() + 8 * 60_000).toISOString();
+    beamServiceMock.createCharge.mockResolvedValue({
+      chargeId: 'beam_chrg_qr2',
+      status: 'PENDING',
+      actionRequired: 'ENCODED_IMAGE',
+      encodedImage: {
+        imageBase64Encoded: 'BASE64QR2',
+        expiry: beamExpiry,
+        rawData: '000201010212...',
+      },
+    });
+
+    const result = await service.createCharge({
+      orderId: 'ord-1',
+      amount: 300,
+      currency: 'THB',
+      paymentMethod: 'promptpay',
+      customerId: 'cust-1',
+    });
+
+    expect(result.qrCodeImage).toBe('BASE64QR2');
+    expect(result.qrCodeUrl).toBe('000201010212...');
+    expect(result.expiresAt?.toISOString()).toBe(new Date(beamExpiry).toISOString());
+  });
+
+  it('fails cleanly when REDIRECT lacks redirectUrl', async () => {
+    service = await compileService(STOREFRONT_ORIGIN);
+    beamServiceMock.createCharge.mockResolvedValue({
+      chargeId: 'beam_chrg_bad',
+      status: 'PENDING',
+      actionRequired: 'REDIRECT',
+      redirect: {},
+    });
+
+    await expect(
+      service.createCharge({
+        orderId: 'ord-1',
+        amount: 300,
+        currency: 'THB',
+        paymentMethod: 'credit_card',
+        cardToken: 'tok_1',
+        cardSecurityCode: '123',
+        customerId: 'cust-1',
+      }),
+    ).rejects.toMatchObject({ response: { code: 'BEAM_ACTION_REQUIRED_INVALID' } });
+  });
+
+  it('stores encrypted saveCard payload until paid and does not vault on create', async () => {
+    const previousCardKey = process.env.CARD_DATA_ENCRYPTION_KEY;
+    process.env.CARD_DATA_ENCRYPTION_KEY = 'test-card-encryption-key-payments';
+    service = await compileService(STOREFRONT_ORIGIN);
+    beamServiceMock.createCharge.mockResolvedValue({
+      chargeId: 'beam_chrg_save',
+      status: 'PENDING',
+      actionRequired: 'NONE',
+    });
+
+    await service.createCharge({
+      orderId: 'ord-1',
+      amount: 300,
+      currency: 'THB',
+      paymentMethod: 'credit_card',
+      cardToken: 'tok_new',
+      cardSecurityCode: '123',
+      customerId: 'cust-1',
+      saveCard: {
+        cardholderName: 'Test User',
+        pan: '4111111111111111',
+        expiryMonth: 12,
+        expiryYear: 2030,
+        isDefault: true,
+      },
+    });
+
+    expect(usersServiceMock.addPaymentMethod).not.toHaveBeenCalled();
+    expect(usersServiceMock.persistEncryptedPaymentMethod).not.toHaveBeenCalled();
+    const savedPayment = paymentRepository.save.mock.calls
+      .map((c: [Payment]) => c[0])
+      .find((p) => p.pspChargeId === 'beam_chrg_save');
+    expect(savedPayment?.saveCardPayload).toContain('enc:v1:');
+    expect(savedPayment?.saveCardPayload).not.toContain('4111111111111111');
+    expect(savedPayment?.saveCardPayload).not.toContain('Test User');
+    process.env.CARD_DATA_ENCRYPTION_KEY = previousCardKey;
+  });
+
+  it('throws BEAM_NOT_CONFIGURED for online methods without credentials', async () => {
+    service = await compileService(STOREFRONT_ORIGIN);
+    beamServiceMock.hasCredentials.mockReturnValue(false);
+
+    await expect(
+      service.createCharge({
+        orderId: 'ord-1',
+        amount: 300,
+        currency: 'THB',
+        paymentMethod: 'promptpay',
+        customerId: 'cust-1',
+      }),
+    ).rejects.toMatchObject({ response: { code: 'BEAM_NOT_CONFIGURED' } });
+    expect(beamServiceMock.createCharge).not.toHaveBeenCalled();
+  });
+
+  it('marks order paid when Beam charge succeeds immediately', async () => {
+    service = await compileService(STOREFRONT_ORIGIN);
+    beamServiceMock.createCharge.mockResolvedValue({
+      chargeId: 'beam_chrg_ok',
+      status: 'SUCCEEDED',
+      actionRequired: 'NONE',
+    });
+
+    const result = await service.createCharge({
+      orderId: 'ord-1',
+      amount: 300,
+      currency: 'THB',
+      paymentMethod: 'credit_card',
+      cardToken: 'tok_beam_1',
+      cardSecurityCode: '123',
+      customerId: 'cust-1',
+    });
+
+    expect(result.status).toBe('paid');
+    expect(orderRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({ status: OrderStatus.PAID, paymentReference: 'beam_chrg_ok' }),
+    );
+  });
+
+  it('does not call Beam (no returnUrl leak) for COD', async () => {
     service = await compileService(STOREFRONT_ORIGIN);
 
     const result = await service.createCharge({
@@ -682,12 +940,13 @@ describe('PaymentsService createCharge return_uri', () => {
       customerId: 'cust-1',
     });
 
+    expect(beamServiceMock.createCharge).not.toHaveBeenCalled();
     expect(global.fetch).not.toHaveBeenCalled();
     expect(result.paymentId).toBe(PAYMENT_ID);
     expect(result.paymentMethod).toBe('cod');
   });
 
-  it('does not call Omise for bank_transfer', async () => {
+  it('does not call Beam for bank_transfer', async () => {
     service = await compileService(STOREFRONT_ORIGIN);
 
     const result = await service.createCharge({
@@ -698,45 +957,65 @@ describe('PaymentsService createCharge return_uri', () => {
       customerId: 'cust-1',
     });
 
-    expect(global.fetch).not.toHaveBeenCalled();
+    expect(beamServiceMock.createCharge).not.toHaveBeenCalled();
     expect(result.paymentId).toBe(PAYMENT_ID);
     expect(result.paymentMethod).toBe('bank_transfer');
   });
 
-  it('fails loudly when app.storefrontUrl is missing for credit_card', async () => {
-    service = await compileService(undefined);
+  it.each([undefined, ''])(
+    'fails loudly when app.storefrontUrl is %p for credit_card',
+    async (storefrontUrl) => {
+      service = await compileService(storefrontUrl);
 
-    await expect(
-      service.createCharge({
-        orderId: 'ord-1',
-        amount: 300,
-        currency: 'THB',
-        paymentMethod: 'credit_card',
-        omiseToken: 'tokn_test_1',
-        customerId: 'cust-1',
-      }),
-    ).rejects.toMatchObject({ response: { code: 'STOREFRONT_URL_NOT_CONFIGURED' } });
-    expect(global.fetch).not.toHaveBeenCalled();
+      await expect(
+        service.createCharge({
+          orderId: 'ord-1',
+          amount: 300,
+          currency: 'THB',
+          paymentMethod: 'credit_card',
+          cardToken: 'tok_beam_1',
+          cardSecurityCode: '123',
+          customerId: 'cust-1',
+        }),
+      ).rejects.toMatchObject({ response: { code: 'STOREFRONT_URL_NOT_CONFIGURED' } });
+      expect(beamServiceMock.createCharge).not.toHaveBeenCalled();
+    },
+  );
+
+  it('creates TRUE_MONEY charge with returnUrl', async () => {
+    service = await compileService(STOREFRONT_ORIGIN);
+
+    await service.createCharge({
+      orderId: 'ord-1',
+      amount: 300,
+      currency: 'THB',
+      paymentMethod: 'truemoney',
+      customerId: 'cust-1',
+    });
+
+    const body = chargeBody();
+    expect(body.paymentMethod).toEqual({ paymentMethodType: 'TRUE_MONEY', trueMoney: {} });
+    expect(body.returnUrl).toBe(`${STOREFRONT_ORIGIN}/payment/${PAYMENT_ID}`);
   });
 
-  it('fails loudly when app.storefrontUrl is empty for credit_card', async () => {
-    service = await compileService('');
+  it('creates SHOPEE_PAY charge with returnUrl', async () => {
+    service = await compileService(STOREFRONT_ORIGIN);
 
-    await expect(
-      service.createCharge({
-        orderId: 'ord-1',
-        amount: 300,
-        currency: 'THB',
-        paymentMethod: 'credit_card',
-        omiseToken: 'tokn_test_1',
-        customerId: 'cust-1',
-      }),
-    ).rejects.toMatchObject({ response: { code: 'STOREFRONT_URL_NOT_CONFIGURED' } });
-    expect(global.fetch).not.toHaveBeenCalled();
+    await service.createCharge({
+      orderId: 'ord-1',
+      amount: 300,
+      currency: 'THB',
+      paymentMethod: 'shopeepay',
+      customerId: 'cust-1',
+    });
+
+    const body = chargeBody();
+    expect(body.paymentMethod).toEqual({ paymentMethodType: 'SHOPEE_PAY', shopeePay: {} });
+    expect(body.returnUrl).toBe(`${STOREFRONT_ORIGIN}/payment/${PAYMENT_ID}`);
   });
 });
 
-describe('PaymentsService handleWebhook UD-001 fail', () => {
+describe('PaymentsService handleBeamWebhook UD-001 fail', () => {
   let service: PaymentsService;
   let inventoryService: { restoreOrderStock: jest.Mock };
   let managerSave: jest.Mock;
@@ -757,7 +1036,7 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
 
   const CHARGE_ID = 'chrg_fail_1';
 
-  async function compileService(omiseSecretKey: string) {
+  async function compileService() {
     inventoryService = { restoreOrderStock: jest.fn().mockResolvedValue(true) };
     managerSave = jest.fn((entity: unknown) => Promise.resolve(entity));
     paymentRepository.manager.transaction.mockImplementation(
@@ -779,15 +1058,16 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
         {
           provide: ConfigService,
           useValue: {
-            get: jest.fn((key: string) => {
-              if (key === 'omise.secretKey') return omiseSecretKey;
-              return '';
-            }),
+            get: jest.fn(() => ''),
           },
         },
         {
           provide: NotificationsService,
           useValue: { notifyOrderPaid: jest.fn() },
+        },
+        {
+          provide: DashboardEventsService,
+          useValue: { publish: jest.fn().mockResolvedValue(undefined) },
         },
         {
           provide: PaymentEventsService,
@@ -804,6 +1084,8 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
           useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
         },
         { provide: OrderAuditLogsService, useValue: orderAuditLogsServiceMock },
+        { provide: BeamService, useValue: beamServiceMock },
+        { provide: UsersService, useValue: usersServiceMock },
         {
           provide: BankTransferSettingsService,
           useValue: {
@@ -833,10 +1115,11 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    beamServiceMock.getCharge.mockReset();
   });
 
-  it('credit_card webhook+GET fail keeps PENDING_PAYMENT and does not restore stock', async () => {
-    service = await compileService('skey_test');
+  it('credit_card webhook+GET FAILED keeps PENDING_PAYMENT and does not restore stock', async () => {
+    service = await compileService();
     const order = {
       id: 'ord-card-1',
       status: OrderStatus.PENDING_PAYMENT,
@@ -850,15 +1133,9 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
     };
     orderRepository.findOne.mockResolvedValue(order);
     paymentRepository.findOne.mockResolvedValue(payment);
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ id: CHARGE_ID, status: 'failed' }),
-    });
+    beamServiceMock.getCharge.mockResolvedValue({ chargeId: CHARGE_ID, status: 'FAILED' });
 
-    await service.handleWebhook({
-      key: 'charge.fail',
-      data: { object: 'charge', id: CHARGE_ID, status: 'failed' },
-    });
+    await service.handleBeamWebhook({ chargeId: CHARGE_ID });
 
     expect(payment.status).toBe('failed');
     expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
@@ -868,8 +1145,8 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
     expect(paymentEventsServiceMock.publishPaymentStatusUpdated).toHaveBeenCalledWith(payment);
   });
 
-  it('promptpay webhook+GET fail keeps PENDING_PAYMENT for new QR retry (no stock restore)', async () => {
-    service = await compileService('skey_test');
+  it('promptpay webhook+GET FAILED keeps PENDING_PAYMENT for new QR retry (no stock restore)', async () => {
+    service = await compileService();
     const order = {
       id: 'ord-pp-1',
       status: OrderStatus.PENDING_PAYMENT,
@@ -883,15 +1160,9 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
     };
     orderRepository.findOne.mockResolvedValue(order);
     paymentRepository.findOne.mockResolvedValue(payment);
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ id: CHARGE_ID, status: 'failed' }),
-    });
+    beamServiceMock.getCharge.mockResolvedValue({ chargeId: CHARGE_ID, status: 'FAILED' });
 
-    await service.handleWebhook({
-      key: 'charge.fail',
-      data: { object: 'charge', id: CHARGE_ID, status: 'failed' },
-    });
+    await service.handleBeamWebhook({ chargeId: CHARGE_ID });
 
     expect(payment.status).toBe('failed');
     expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
@@ -899,8 +1170,8 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
     expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
   });
 
-  it('GET charge fail causes no mutation (unavailable boundary)', async () => {
-    service = await compileService('skey_test');
+  it('GET charge fail throws retryable error and causes no mutation', async () => {
+    service = await compileService();
     const order = {
       id: 'ord-get-fail',
       status: OrderStatus.PENDING_PAYMENT,
@@ -914,12 +1185,11 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
     };
     orderRepository.findOne.mockResolvedValue(order);
     paymentRepository.findOne.mockResolvedValue(payment);
-    global.fetch = jest.fn().mockRejectedValue(new Error('network down'));
+    beamServiceMock.getCharge.mockRejectedValue(new Error('network down'));
 
-    await service.handleWebhook({
-      key: 'charge.fail',
-      data: { object: 'charge', id: CHARGE_ID, status: 'failed' },
-    });
+    await expect(service.handleBeamWebhook({ chargeId: CHARGE_ID })).rejects.toBeInstanceOf(
+      BeamWebhookRetryableError,
+    );
 
     expect(payment.status).toBe('pending');
     expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
@@ -927,214 +1197,44 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
     expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
   });
 
-  it('ignores fail webhook when order is already CANCELLED', async () => {
-    service = await compileService('skey_test');
-    const order = {
-      id: 'ord-cancelled',
-      status: OrderStatus.CANCELLED,
-      paymentReference: CHARGE_ID,
-    };
-    const payment = {
-      id: 'pay-cancelled',
-      orderId: 'ord-cancelled',
-      status: 'failed',
-      paymentMethod: 'credit_card',
-    };
-    orderRepository.findOne.mockResolvedValue(order);
-    paymentRepository.findOne.mockResolvedValue(payment);
-    global.fetch = jest.fn();
+  it.each([OrderStatus.CANCELLED, OrderStatus.REFUNDED])(
+    'ignores webhook when order is already %s (no invent-paid)',
+    async (status) => {
+      service = await compileService();
+      const order = {
+        id: 'ord-terminal',
+        status,
+        paymentReference: CHARGE_ID,
+      };
+      const payment = {
+        id: 'pay-terminal',
+        orderId: 'ord-terminal',
+        status: 'pending',
+        paymentMethod: 'promptpay',
+      };
+      orderRepository.findOne.mockResolvedValue(order);
+      paymentRepository.findOne.mockResolvedValue(payment);
 
-    await service.handleWebhook({
-      key: 'charge.fail',
-      data: { object: 'charge', id: CHARGE_ID, status: 'failed' },
-    });
+      await service.handleBeamWebhook({ chargeId: CHARGE_ID });
 
-    expect(global.fetch).not.toHaveBeenCalled();
-    expect(paymentRepository.manager.transaction).not.toHaveBeenCalled();
-    expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
-  });
-
-  it('ignores fail webhook when order is already REFUNDED', async () => {
-    service = await compileService('skey_test');
-    const order = {
-      id: 'ord-refunded',
-      status: OrderStatus.REFUNDED,
-      paymentReference: CHARGE_ID,
-    };
-    const payment = {
-      id: 'pay-refunded',
-      orderId: 'ord-refunded',
-      status: 'paid',
-      paymentMethod: 'credit_card',
-    };
-    orderRepository.findOne.mockResolvedValue(order);
-    paymentRepository.findOne.mockResolvedValue(payment);
-    global.fetch = jest.fn();
-
-    await service.handleWebhook({
-      key: 'charge.fail',
-      data: { object: 'charge', id: CHARGE_ID, status: 'failed' },
-    });
-
-    expect(global.fetch).not.toHaveBeenCalled();
-    expect(paymentRepository.manager.transaction).not.toHaveBeenCalled();
-    expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
-  });
-
-  it('ignores charge.complete when order is already CANCELLED (no invent-paid)', async () => {
-    service = await compileService('skey_test');
-    const order = {
-      id: 'ord-cancelled-complete',
-      status: OrderStatus.CANCELLED,
-      paymentReference: CHARGE_ID,
-    };
-    const payment = {
-      id: 'pay-cancelled-complete',
-      orderId: 'ord-cancelled-complete',
-      status: 'failed',
-      paymentMethod: 'promptpay',
-    };
-    orderRepository.findOne.mockResolvedValue(order);
-    paymentRepository.findOne.mockResolvedValue(payment);
-    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
-    global.fetch = jest.fn();
-
-    await service.handleWebhook({
-      key: 'charge.complete',
-      data: { object: 'charge', id: CHARGE_ID, status: 'successful' },
-    });
-
-    expect(warnSpy).toHaveBeenCalledWith(
-      `Order ${order.id} is ${OrderStatus.CANCELLED} — ignoring charge.complete webhook`,
-    );
-    expect(order.status).toBe(OrderStatus.CANCELLED);
-    expect(payment.status).toBe('failed');
-    expect(global.fetch).not.toHaveBeenCalled();
-    expect(paymentRepository.manager.transaction).not.toHaveBeenCalled();
-    warnSpy.mockRestore();
-  });
-
-  it('ignores charge.complete when order is already REFUNDED (no invent-paid)', async () => {
-    service = await compileService('skey_test');
-    const order = {
-      id: 'ord-refunded-complete',
-      status: OrderStatus.REFUNDED,
-      paymentReference: CHARGE_ID,
-    };
-    // Payment not marked paid yet — exercises terminal-status guard (not already-paid early return).
-    const payment = {
-      id: 'pay-refunded-complete',
-      orderId: 'ord-refunded-complete',
-      status: 'pending',
-      paymentMethod: 'credit_card',
-    };
-    orderRepository.findOne.mockResolvedValue(order);
-    paymentRepository.findOne.mockResolvedValue(payment);
-    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
-    global.fetch = jest.fn();
-
-    await service.handleWebhook({
-      key: 'charge.complete',
-      data: { object: 'charge', id: CHARGE_ID, status: 'successful' },
-    });
-
-    expect(warnSpy).toHaveBeenCalledWith(
-      `Order ${order.id} is ${OrderStatus.REFUNDED} — ignoring charge.complete webhook`,
-    );
-    expect(order.status).toBe(OrderStatus.REFUNDED);
-    expect(payment.status).toBe('pending');
-    expect(global.fetch).not.toHaveBeenCalled();
-    expect(paymentRepository.manager.transaction).not.toHaveBeenCalled();
-    warnSpy.mockRestore();
-  });
-
-  it('does not mark paid when Omise charge amount mismatches order.total satang', async () => {
-    service = await compileService('skey_test');
-    const order = {
-      id: 'ord-amt-mismatch',
-      status: OrderStatus.PENDING_PAYMENT,
-      paymentReference: CHARGE_ID,
-      total: 300,
-    };
-    const payment = {
-      id: 'pay-amt-mismatch',
-      orderId: 'ord-amt-mismatch',
-      status: 'pending',
-      paymentMethod: 'promptpay',
-      amount: 300,
-    };
-    orderRepository.findOne.mockResolvedValue(order);
-    paymentRepository.findOne.mockResolvedValue(payment);
-    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: () =>
-        Promise.resolve({
-          id: CHARGE_ID,
-          status: 'successful',
-          amount: 100, // underpay in satang vs expected 30000
-        }),
-    });
-
-    await service.handleWebhook({
-      key: 'charge.complete',
-      data: { object: 'charge', id: CHARGE_ID, status: 'successful' },
-    });
-
-    expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
-    expect(payment.status).toBe('pending');
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('payment_amount_mismatch'));
-    expect(paymentEventsServiceMock.publishPaymentStatusUpdated).not.toHaveBeenCalled();
-    warnSpy.mockRestore();
-  });
-
-  it('marks paid when Omise charge amount matches order.total satang', async () => {
-    service = await compileService('skey_test');
-    const order = {
-      id: 'ord-amt-ok',
-      status: OrderStatus.PENDING_PAYMENT,
-      paymentReference: CHARGE_ID,
-      total: 300,
-      paidAt: null as Date | null,
-    };
-    const payment = {
-      id: 'pay-amt-ok',
-      orderId: 'ord-amt-ok',
-      status: 'pending',
-      paymentMethod: 'promptpay',
-      amount: 300,
-    };
-    orderRepository.findOne.mockResolvedValue(order);
-    paymentRepository.findOne.mockResolvedValue(payment);
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: () =>
-        Promise.resolve({
-          id: CHARGE_ID,
-          status: 'successful',
-          amount: 30000,
-        }),
-    });
-
-    await service.handleWebhook({
-      key: 'charge.complete',
-      data: { object: 'charge', id: CHARGE_ID, status: 'successful' },
-    });
-
-    expect(order.status).toBe(OrderStatus.PAID);
-    expect(payment.status).toBe('paid');
-    expect(paymentEventsServiceMock.publishPaymentStatusUpdated).toHaveBeenCalledWith(payment);
-  });
+      expect(beamServiceMock.getCharge).not.toHaveBeenCalled();
+      expect(order.status).toBe(status);
+      expect(payment.status).toBe('pending');
+      expect(paymentRepository.manager.transaction).not.toHaveBeenCalled();
+      expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
+    },
+  );
 
   it('PromptPay QR expiry fails payment only and keeps order pending for new QR', async () => {
-    service = await compileService('skey_test');
+    service = await compileService();
     const createdAt = new Date(Date.now() - 20 * 60 * 1000);
     const payment = {
       id: 'pay-qr-exp',
       orderId: 'ord-qr-exp',
       status: 'pending',
       paymentMethod: 'promptpay',
-      omiseChargeId: 'chrg_qr_exp',
+      psp: 'beam',
+      pspChargeId: 'chrg_qr_exp',
       createdAt,
       expiresAt: null,
     } as Payment;
@@ -1144,10 +1244,6 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
       paymentReference: 'chrg_qr_exp',
     };
     orderRepository.findOne.mockResolvedValue(order);
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ id: 'chrg_qr_exp', status: 'expired' }),
-    });
 
     const updated = await service.expirePendingQrPaymentIfNeeded(payment);
 
@@ -1158,7 +1254,7 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
   });
 
   it('QR expire nulls paymentReference so late webhook cannot invent paid', async () => {
-    service = await compileService('skey_test');
+    service = await compileService();
     const chargeId = 'chrg_qr_orphan';
     const createdAt = new Date(Date.now() - 20 * 60 * 1000);
     const payment = {
@@ -1166,7 +1262,8 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
       orderId: 'ord-qr-orphan',
       status: 'pending',
       paymentMethod: 'promptpay',
-      omiseChargeId: chargeId,
+      psp: 'beam',
+      pspChargeId: chargeId,
       createdAt,
       expiresAt: null,
     } as Payment;
@@ -1176,28 +1273,23 @@ describe('PaymentsService handleWebhook UD-001 fail', () => {
       paymentReference: chargeId,
     };
     orderRepository.findOne.mockResolvedValue(order);
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ id: chargeId, status: 'expired' }),
-    });
 
     await service.expirePendingQrPaymentIfNeeded(payment);
     expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
     expect(order.paymentReference).toBeNull();
 
-    // After clear, webhook lookup by paymentReference finds no order (orphan warn+return).
+    // After clear, webhook lookup by paymentReference finds no order (retryable).
     orderRepository.findOne.mockResolvedValue(null);
+    paymentRepository.findOne.mockResolvedValue(null);
     const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
-    global.fetch = jest.fn();
 
-    await service.handleWebhook({
-      key: 'charge.complete',
-      data: { object: 'charge', id: chargeId, status: 'successful' },
-    });
+    await expect(service.handleBeamWebhook({ chargeId })).rejects.toBeInstanceOf(
+      BeamWebhookRetryableError,
+    );
 
-    expect(warnSpy).toHaveBeenCalledWith(`No order for Omise charge ${chargeId}`);
+    expect(warnSpy).toHaveBeenCalledWith(`No order/payment for Beam charge ${chargeId}`);
     expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
-    expect(global.fetch).not.toHaveBeenCalled();
+    expect(beamServiceMock.getCharge).not.toHaveBeenCalled();
     warnSpy.mockRestore();
   });
 });
@@ -1250,11 +1342,8 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
           provide: ConfigService,
           useValue: {
             get: jest.fn((key: string) => {
-              if (key === 'omise.secretKey') return 'skey_test';
-              if (key === 'omise.publicKey') return 'pkey_test';
               if (key === 'app.storefrontUrl') return STOREFRONT_ORIGIN;
               if (key === 'payment.qrExpiryMinutes') return 15;
-              if (key === 'payment.omiseCancelTimeoutMs') return 4000;
               return '';
             }),
           },
@@ -1262,6 +1351,10 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
         {
           provide: NotificationsService,
           useValue: { notifyOrderPaid: jest.fn() },
+        },
+        {
+          provide: DashboardEventsService,
+          useValue: { publish: jest.fn().mockResolvedValue(undefined) },
         },
         {
           provide: PaymentEventsService,
@@ -1278,6 +1371,8 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
           useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
         },
         { provide: OrderAuditLogsService, useValue: orderAuditLogsServiceMock },
+        { provide: BeamService, useValue: beamServiceMock },
+        { provide: UsersService, useValue: usersServiceMock },
         {
           provide: BankTransferSettingsService,
           useValue: {
@@ -1313,7 +1408,9 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
       currency: 'THB',
       status: 'pending',
       paymentMethod: 'credit_card',
-      authorizeUri: 'https://pay.omise.co/old',
+      psp: 'beam',
+      pspChargeId: OLD_CHARGE_ID,
+      authorizeUri: 'https://secure.beamcheckout.com/old',
       createdAt: new Date('2026-07-15T10:00:00.000Z'),
     } as Payment;
   }
@@ -1326,7 +1423,8 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
       currency: 'THB',
       status: 'pending',
       paymentMethod: 'promptpay',
-      qrCodeUrl: 'https://api.omise.co/qr/old',
+      psp: 'beam',
+      pspChargeId: OLD_CHARGE_ID,
       createdAt: new Date('2026-07-15T10:00:00.000Z'),
       expiresAt: new Date(Date.now() + 10 * 60 * 1000),
     } as Payment;
@@ -1350,27 +1448,18 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
       async (cb: (manager: ReturnType<typeof createPhaseBManagerMock>) => Promise<unknown>) =>
         cb(createPhaseBManagerMock({ orderRepository, paymentRepository })),
     );
-    global.fetch = jest.fn().mockImplementation((url: string) => {
-      if (typeof url === 'string' && (url.includes('/expire') || url.includes('/reverse'))) {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ id: OLD_CHARGE_ID, status: 'expired' }),
-        });
-      }
-      return Promise.resolve({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            id: NEW_CHARGE_ID,
-            status: 'pending',
-            authorize_uri: 'https://pay.omise.co/new',
-          }),
-      });
+    global.fetch = jest.fn();
+    beamServiceMock.hasCredentials.mockReturnValue(true);
+    beamServiceMock.createCharge.mockResolvedValue({
+      chargeId: NEW_CHARGE_ID,
+      status: 'PENDING',
+      actionRequired: 'REDIRECT',
+      redirect: { redirectUrl: 'https://pay.beam.example/new' },
     });
     service = await compileService();
   });
 
-  it('pending credit_card + new token → prior failed + new paymentId + new Omise POST + paymentReference updated', async () => {
+  it('pending credit_card + new token → prior failed + new paymentId + new Beam charge + paymentReference updated', async () => {
     const prior = priorCardPending();
     // Old I001 path would early-return this row; must never resume credit_card pending.
     paymentRepository.findOne.mockResolvedValue(prior);
@@ -1381,7 +1470,8 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
       amount: 300,
       currency: 'THB',
       paymentMethod: 'credit_card',
-      omiseToken: 'tokn_new_1',
+      cardToken: 'tok_beam_1',
+      cardSecurityCode: '123',
       customerId: 'cust-1',
     });
 
@@ -1389,20 +1479,18 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
     expect(paymentEventsServiceMock.publishPaymentStatusUpdated).toHaveBeenCalledWith(prior);
     expect(result.paymentId).toBe(NEW_PAYMENT_ID);
     expect(result.paymentId).not.toBe(PRIOR_PAYMENT_ID);
-    const paths = (global.fetch as jest.Mock).mock.calls.map((c: [string]) => c[0]);
-    expect(paths.some((p) => p.includes('/expire') || p.includes('/reverse'))).toBe(true);
-    expect(
-      paths.some(
-        (p) => p.includes('/charges') && !p.includes('/expire') && !p.includes('/reverse'),
-      ),
-    ).toBe(true);
+    expect(beamServiceMock.createCharge).toHaveBeenCalledTimes(1);
+    expect(global.fetch).not.toHaveBeenCalled();
     expect(order.paymentReference).toBe(NEW_CHARGE_ID);
     expect(order.paymentMethod).toBe('credit_card');
     expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
     expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
     const savedPayments = paymentRepository.save.mock.calls.map((c: [Payment]) => c[0]);
     const created = savedPayments.find((p) => p.id === NEW_PAYMENT_ID);
-    expect(created?.omiseChargeId).toBe(NEW_CHARGE_ID);
+    expect(created?.psp).toBe('beam');
+    expect(created?.pspChargeId).toBe(NEW_CHARGE_ID);
+    expect(created?.authorizeUri).toBe('https://pay.beam.example/new');
+    expect(created?.omiseChargeId).toBeUndefined();
   });
 
   it('pending card + promptpay → prior failed + new PromptPay charge', async () => {
@@ -1422,28 +1510,18 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
     expect(prior.status).toBe('failed');
     expect(result.paymentId).toBe(NEW_PAYMENT_ID);
     expect(result.paymentId).not.toBe(PRIOR_PAYMENT_ID);
-    const paths = (global.fetch as jest.Mock).mock.calls.map((c: [string]) => c[0]);
-    expect(
-      paths.some(
-        (p) => p.includes('/charges') && !p.includes('/expire') && !p.includes('/reverse'),
-      ),
-    ).toBe(true);
-    const createCall = (global.fetch as jest.Mock).mock.calls.find(
-      ([url]: [string]) =>
-        url.includes('/charges') && !url.includes('/expire') && !url.includes('/reverse'),
-    ) as [string, RequestInit];
-    const rawBody = createCall[1].body;
-    if (typeof rawBody !== 'string') {
-      throw new Error(`expected string charge body, got ${typeof rawBody}`);
-    }
-    const body = JSON.parse(rawBody) as Record<string, unknown>;
-    expect(body.source).toEqual({ type: 'promptpay' });
+    expect(beamServiceMock.createCharge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        paymentMethod: expect.objectContaining({ paymentMethodType: 'QR_PROMPT_PAY' }),
+      }),
+      expect.objectContaining({ idempotencyKey: NEW_PAYMENT_ID }),
+    );
     expect(order.paymentReference).toBe(NEW_CHARGE_ID);
     expect(order.paymentMethod).toBe('promptpay');
     expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
   });
 
-  it('PromptPay pending restart → new paymentId + prior failed + new Omise POST (no soft-resume)', async () => {
+  it('PromptPay pending restart → new paymentId + prior failed + new Beam charge (no soft-resume)', async () => {
     // Amended unpaid-switch contract (BE-UPMS-001): never soft-resume same pending PromptPay.
     const prior = priorPromptPayPending();
     paymentRepository.findOne.mockResolvedValue(prior);
@@ -1460,12 +1538,7 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
     expect(result.paymentId).toBe(NEW_PAYMENT_ID);
     expect(result.paymentId).not.toBe(PRIOR_PAYMENT_ID);
     expect(prior.status).toBe('failed');
-    const paths = (global.fetch as jest.Mock).mock.calls.map((c: [string]) => c[0]);
-    expect(
-      paths.some(
-        (p) => p.includes('/charges') && !p.includes('/expire') && !p.includes('/reverse'),
-      ),
-    ).toBe(true);
+    expect(beamServiceMock.createCharge).toHaveBeenCalledTimes(1);
     expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
     expect(paymentRepository.findOne).toHaveBeenCalledWith({
       where: { orderId: order.id },
@@ -1473,7 +1546,7 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
     });
   });
 
-  it('Omise createCharge rejects with ORDER_NOT_PAYABLE when latest payment is paid', async () => {
+  it('Beam createCharge rejects with ORDER_NOT_PAYABLE when latest payment is paid', async () => {
     const paidLatest = {
       id: 'pay-paid-latest',
       orderId: order.id,
@@ -1491,13 +1564,14 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
         amount: 300,
         currency: 'THB',
         paymentMethod: 'credit_card',
-        omiseToken: 'tokn_new_1',
+        cardToken: 'tok_beam_1',
+        cardSecurityCode: '123',
         customerId: 'cust-1',
       }),
     ).rejects.toMatchObject({ response: { code: 'ORDER_NOT_PAYABLE' } });
 
     expect(paymentRepository.create).not.toHaveBeenCalled();
-    expect(global.fetch).not.toHaveBeenCalled();
+    expect(beamServiceMock.createCharge).not.toHaveBeenCalled();
     expect(paymentRepository.findOne).toHaveBeenCalledWith({
       where: { orderId: order.id },
       order: { createdAt: 'DESC' },
@@ -1547,164 +1621,31 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
     expect(paymentRepository.create).not.toHaveBeenCalled();
   });
 
-  it('attempts Omise expire/reverse on supersede before create (fail-open still creates)', async () => {
-    // Amended unpaid-switch contract (BE-UPMS-002): cancel-before-create + fail-open.
+  it('supersede is local only: no provider expire/reverse calls, still creates Beam charge', async () => {
     const prior = priorCardPending();
     paymentRepository.findOne.mockResolvedValue(prior);
     paymentRepository.find.mockResolvedValue([prior]);
-
-    const callOrder: string[] = [];
-    paymentRepository.manager.transaction.mockImplementation(
-      async (cb: (manager: ReturnType<typeof createPhaseBManagerMock>) => Promise<unknown>) => {
-        callOrder.push('phase_b_transaction');
-        return cb(createPhaseBManagerMock({ orderRepository, paymentRepository }));
-      },
-    );
-    global.fetch = jest.fn().mockImplementation((url: string) => {
-      if (typeof url === 'string' && (url.includes('/expire') || url.includes('/reverse'))) {
-        callOrder.push('phase_a_cancel');
-        return Promise.resolve({
-          ok: false,
-          json: () => Promise.resolve({ message: 'expire unsupported' }),
-        });
-      }
-      callOrder.push('omise_create');
-      return Promise.resolve({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            id: NEW_CHARGE_ID,
-            status: 'pending',
-            authorize_uri: 'https://pay.omise.co/new',
-          }),
-      });
-    });
-
-    const warnSpy = jest.spyOn(
-      (service as unknown as { logger: { warn: (...a: unknown[]) => void } }).logger,
-      'warn',
-    );
 
     const result = await service.createCharge({
       orderId: order.id,
       amount: 300,
       currency: 'THB',
       paymentMethod: 'credit_card',
-      omiseToken: 'tokn_new_1',
-      customerId: 'cust-1',
-    });
-
-    const paths = (global.fetch as jest.Mock).mock.calls.map((c: [string]) => c[0]);
-    expect(paths.some((p) => p.includes('/expire') || p.includes('/reverse'))).toBe(true);
-    expect(result.paymentId).toBe(NEW_PAYMENT_ID);
-    expect(prior.status).toBe('failed');
-    expect(
-      paths.some(
-        (p) => p.includes('/charges') && !p.includes('/expire') && !p.includes('/reverse'),
-      ),
-    ).toBe(true);
-    expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
-    expect(callOrder.indexOf('phase_a_cancel')).toBeGreaterThanOrEqual(0);
-    expect(callOrder.indexOf('phase_a_cancel')).toBeLessThan(
-      callOrder.indexOf('phase_b_transaction'),
-    );
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('omise_cancel_fail_open'));
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(order.id));
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(PRIOR_PAYMENT_ID));
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(OLD_CHARGE_ID));
-    warnSpy.mockRestore();
-  });
-
-  it('fail-open: expire 4xx still creates new payment', async () => {
-    const prior = priorPromptPayPending();
-    prior.omiseChargeId = OLD_CHARGE_ID;
-    paymentRepository.findOne.mockResolvedValue(prior);
-    paymentRepository.find.mockResolvedValue([prior]);
-
-    global.fetch = jest.fn().mockImplementation((url: string) => {
-      if (typeof url === 'string' && url.includes('/expire')) {
-        return Promise.resolve({
-          ok: false,
-          json: () => Promise.resolve({ message: 'failed_expire' }),
-        });
-      }
-      return Promise.resolve({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            id: NEW_CHARGE_ID,
-            status: 'pending',
-          }),
-      });
-    });
-
-    const result = await service.createCharge({
-      orderId: order.id,
-      amount: 300,
-      currency: 'THB',
-      paymentMethod: 'promptpay',
+      cardToken: 'tok_beam_1',
+      cardSecurityCode: '123',
       customerId: 'cust-1',
     });
 
     expect(result.paymentId).toBe(NEW_PAYMENT_ID);
     expect(prior.status).toBe('failed');
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(beamServiceMock.createCharge).toHaveBeenCalledTimes(1);
     expect(order.paymentReference).toBe(NEW_CHARGE_ID);
+    expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
   });
 
-  it('charge-id resolution: prefers payment.omiseChargeId over order.paymentReference', async () => {
+  it('card→COD clears order.paymentReference and syncs paymentMethod; pspChargeId absent', async () => {
     const prior = priorCardPending();
-    prior.omiseChargeId = 'chrg_from_payment_column';
-    order.paymentReference = 'chrg_stale_order_ref';
-    paymentRepository.findOne.mockResolvedValue(prior);
-    paymentRepository.find.mockResolvedValue([prior]);
-
-    await service.createCharge({
-      orderId: order.id,
-      amount: 300,
-      currency: 'THB',
-      paymentMethod: 'credit_card',
-      omiseToken: 'tokn_new_1',
-      customerId: 'cust-1',
-    });
-
-    const paths = (global.fetch as jest.Mock).mock.calls.map((c: [string]) => c[0]);
-    expect(paths.some((p) => p.includes('/charges/chrg_from_payment_column/'))).toBe(true);
-    expect(paths.some((p) => p.includes('/charges/chrg_stale_order_ref/'))).toBe(false);
-  });
-
-  it('charge-id resolution: cancels order.paymentReference when multi-pending lack omiseChargeId', async () => {
-    const priorA = priorCardPending();
-    const priorB = {
-      ...priorPromptPayPending(),
-      id: 'pay-prior-2',
-    };
-    delete (priorA as { omiseChargeId?: string | null }).omiseChargeId;
-    delete (priorB as { omiseChargeId?: string | null }).omiseChargeId;
-    order.paymentReference = OLD_CHARGE_ID;
-    paymentRepository.findOne.mockResolvedValue(priorB);
-    paymentRepository.find.mockResolvedValue([priorA, priorB]);
-
-    await service.createCharge({
-      orderId: order.id,
-      amount: 300,
-      currency: 'THB',
-      paymentMethod: 'credit_card',
-      omiseToken: 'tokn_new_1',
-      customerId: 'cust-1',
-    });
-
-    const paths = (global.fetch as jest.Mock).mock.calls.map((c: [string]) => c[0]);
-    expect(paths.some((p) => p.includes(`/charges/${OLD_CHARGE_ID}/expire`))).toBe(true);
-    expect(
-      paths.some(
-        (p) => p.includes('/charges') && !p.includes('/expire') && !p.includes('/reverse'),
-      ),
-    ).toBe(true);
-  });
-
-  it('Omise→COD clears order.paymentReference and syncs paymentMethod; omiseChargeId absent', async () => {
-    const prior = priorCardPending();
-    prior.omiseChargeId = OLD_CHARGE_ID;
     paymentRepository.findOne.mockResolvedValue(prior);
     paymentRepository.find.mockResolvedValue([prior]);
 
@@ -1722,13 +1663,12 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
     expect(order.paymentReference).toBeNull();
     const savedPayments = paymentRepository.save.mock.calls.map((c: [Payment]) => c[0]);
     const created = savedPayments.find((p) => p.id === NEW_PAYMENT_ID);
-    expect(created?.omiseChargeId ?? null).toBeNull();
+    expect(created?.pspChargeId ?? null).toBeNull();
     expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
   });
 
-  it('COD after Omise: orphan webhook for prior charge still warn+return (no invent-paid)', async () => {
+  it('COD after card: superseded charge webhook keeps pending_payment and logs success', async () => {
     const prior = priorCardPending();
-    prior.omiseChargeId = OLD_CHARGE_ID;
     paymentRepository.findOne.mockResolvedValue(prior);
     paymentRepository.find.mockResolvedValue([prior]);
 
@@ -1740,27 +1680,37 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
       customerId: 'cust-1',
     });
     expect(order.paymentReference).toBeNull();
+    expect(order.paymentMethod).toBe('cod');
+    expect(prior.status).toBe('failed');
 
-    orderRepository.findOne.mockResolvedValue(null);
+    // Old Beam row is still found by pspChargeId; order is now COD.
+    paymentRepository.findOne.mockResolvedValue(prior);
+    orderRepository.findOne.mockResolvedValue(order);
+    beamServiceMock.getCharge.mockResolvedValue({
+      chargeId: OLD_CHARGE_ID,
+      status: 'SUCCEEDED',
+      amount: 30000,
+    });
     const warnSpy = jest.spyOn(
       (service as unknown as { logger: { warn: (...a: unknown[]) => void } }).logger,
       'warn',
     );
-    global.fetch = jest.fn();
 
-    await service.handleWebhook({
-      key: 'charge.complete',
-      data: { object: 'charge', id: OLD_CHARGE_ID, status: 'successful' },
-    });
+    await service.handleBeamWebhook({ chargeId: OLD_CHARGE_ID });
 
-    expect(warnSpy).toHaveBeenCalledWith(`No order for Omise charge ${OLD_CHARGE_ID}`);
+    expect(beamServiceMock.getCharge).toHaveBeenCalledWith(OLD_CHARGE_ID);
     expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
-    expect(global.fetch).not.toHaveBeenCalled();
+    expect(order.paymentMethod).toBe('cod');
+    expect(prior.status).toBe('failed');
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('beam_superseded_charge_succeeded'),
+    );
     warnSpy.mockRestore();
   });
 
-  it('late unmatched old charge webhook does not invent paid (shared-state)', async () => {
-    const prior = priorCardPending();
+  it('PromptPay superseded by paid card: old charge webhook does not change paymentReference', async () => {
+    const prior = priorPromptPayPending();
+    paymentRepository.findOne.mockResolvedValue(prior);
     paymentRepository.find.mockResolvedValue([prior]);
 
     await service.createCharge({
@@ -1768,28 +1718,144 @@ describe('PaymentsService createCharge Executable Supersede/Retry Rule', () => {
       amount: 300,
       currency: 'THB',
       paymentMethod: 'credit_card',
-      omiseToken: 'tokn_new_1',
+      cardToken: 'tok_beam_1',
+      cardSecurityCode: '123',
       customerId: 'cust-1',
     });
     expect(order.paymentReference).toBe(NEW_CHARGE_ID);
+    expect(prior.status).toBe('failed');
 
-    // After pointer moved, webhook for superseded charge id finds no order (existing warn+return).
-    orderRepository.findOne.mockResolvedValue(null);
+    // New card already paid the order; late PromptPay success must not invent a second paid.
+    order.status = OrderStatus.PAID;
+    order.paymentMethod = PaymentMethod.CREDIT_CARD;
+    paymentRepository.findOne.mockResolvedValue(prior);
+    orderRepository.findOne.mockResolvedValue(order);
+    beamServiceMock.getCharge.mockResolvedValue({
+      chargeId: OLD_CHARGE_ID,
+      status: 'SUCCEEDED',
+      amount: 30000,
+    });
     const warnSpy = jest.spyOn(
       (service as unknown as { logger: { warn: (...a: unknown[]) => void } }).logger,
       'warn',
     );
-    global.fetch = jest.fn();
 
-    await service.handleWebhook({
-      key: 'charge.complete',
-      data: { object: 'charge', id: OLD_CHARGE_ID, status: 'successful' },
+    await service.handleBeamWebhook({ chargeId: OLD_CHARGE_ID });
+
+    expect(beamServiceMock.getCharge).toHaveBeenCalledWith(OLD_CHARGE_ID);
+    expect(order.status).toBe(OrderStatus.PAID);
+    expect(order.paymentReference).toBe(NEW_CHARGE_ID);
+    expect(prior.status).toBe('failed');
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('beam_superseded_charge_succeeded'),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it('does not call Beam while the order FOR UPDATE lock is held', async () => {
+    paymentRepository.findOne.mockResolvedValue(null);
+    paymentRepository.find.mockResolvedValue([]);
+    paymentRepository.manager.transaction.mockImplementation(
+      async (cb: (manager: ReturnType<typeof createPhaseBManagerMock>) => Promise<unknown>) => {
+        expect(beamServiceMock.createCharge).not.toHaveBeenCalled();
+        const result = await cb(createPhaseBManagerMock({ orderRepository, paymentRepository }));
+        expect(beamServiceMock.createCharge).not.toHaveBeenCalled();
+        return result;
+      },
+    );
+
+    await service.createCharge({
+      orderId: order.id,
+      amount: 300,
+      currency: 'THB',
+      paymentMethod: 'credit_card',
+      cardToken: 'tok_beam_1',
+      cardSecurityCode: '123',
+      customerId: 'cust-1',
     });
 
-    expect(warnSpy).toHaveBeenCalledWith(`No order for Omise charge ${OLD_CHARGE_ID}`);
-    expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
-    expect(global.fetch).not.toHaveBeenCalled();
-    warnSpy.mockRestore();
+    expect(beamServiceMock.createCharge).toHaveBeenCalledTimes(1);
+    expect(beamServiceMock.createCharge).toHaveBeenCalledWith(
+      expect.objectContaining({ referenceId: NEW_PAYMENT_ID }),
+      expect.objectContaining({ idempotencyKey: NEW_PAYMENT_ID }),
+    );
+  });
+
+  it('failed save after Beam accepts reuses the same payment id as idempotency key', async () => {
+    paymentRepository.findOne.mockResolvedValue(null);
+    paymentRepository.find.mockResolvedValue([]);
+
+    let persistAfterBeam = 0;
+    paymentRepository.save.mockImplementation((p: Payment) => {
+      if (!p.id) {
+        Object.assign(p, { id: NEW_PAYMENT_ID });
+      }
+      // Saves after Beam set pspChargeId — fail the first persist so charge id is lost.
+      if (p.pspChargeId) {
+        persistAfterBeam += 1;
+        if (persistAfterBeam === 1) {
+          return Promise.reject(new Error('db write failed'));
+        }
+      }
+      return Promise.resolve(p);
+    });
+
+    await expect(
+      service.createCharge({
+        orderId: order.id,
+        amount: 300,
+        currency: 'THB',
+        paymentMethod: 'credit_card',
+        cardToken: 'tok_beam_1',
+        cardSecurityCode: '123',
+        customerId: 'cust-1',
+      }),
+    ).rejects.toThrow('db write failed');
+
+    expect(beamServiceMock.createCharge).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ idempotencyKey: NEW_PAYMENT_ID }),
+    );
+
+    // Payment row still pending without pspChargeId — retry must reuse it.
+    const orphanPending = {
+      id: NEW_PAYMENT_ID,
+      orderId: order.id,
+      amount: 300,
+      currency: 'THB',
+      status: 'pending',
+      paymentMethod: 'credit_card',
+      psp: 'beam',
+      pspChargeId: null,
+      createdAt: new Date('2026-07-15T11:00:00.000Z'),
+    } as Payment;
+    paymentRepository.findOne.mockResolvedValue(orphanPending);
+    paymentRepository.find.mockResolvedValue([orphanPending]);
+    paymentRepository.save.mockImplementation((p: Payment) => Promise.resolve(p));
+    beamServiceMock.createCharge.mockClear();
+    beamServiceMock.createCharge.mockResolvedValue({
+      chargeId: NEW_CHARGE_ID,
+      status: 'PENDING',
+      actionRequired: 'REDIRECT',
+      redirect: { redirectUrl: 'https://pay.beam.example/retry' },
+    });
+
+    const result = await service.createCharge({
+      orderId: order.id,
+      amount: 300,
+      currency: 'THB',
+      paymentMethod: 'credit_card',
+      cardToken: 'tok_beam_1',
+      cardSecurityCode: '123',
+      customerId: 'cust-1',
+    });
+
+    expect(result.paymentId).toBe(NEW_PAYMENT_ID);
+    expect(beamServiceMock.createCharge).toHaveBeenCalledWith(
+      expect.objectContaining({ referenceId: NEW_PAYMENT_ID }),
+      expect.objectContaining({ idempotencyKey: NEW_PAYMENT_ID }),
+    );
+    expect(orphanPending.status).toBe('pending');
   });
 
   it('findLatestByOrderId prefers latest created payment after multi-payment (missing-sort-key)', async () => {
@@ -1846,7 +1912,6 @@ describe('PaymentsService cancelStaleUnpaidOrders (AC-019–021)', () => {
       },
     );
     configGet = jest.fn((key: string) => {
-      if (key === 'omise.secretKey') return 'skey_test';
       if (key === 'payment.unpaidOrderCancelAfterMs') return 86_400_000;
       if (key === 'payment.qrExpiryMinutes') return 15;
       return '';
@@ -1867,6 +1932,10 @@ describe('PaymentsService cancelStaleUnpaidOrders (AC-019–021)', () => {
           provide: NotificationsService,
           useValue: { notifyOrderPaid: jest.fn() },
         },
+        {
+          provide: DashboardEventsService,
+          useValue: { publish: jest.fn().mockResolvedValue(undefined) },
+        },
         { provide: PaymentEventsService, useValue: paymentEventsServiceMock },
         { provide: InventoryService, useValue: inventoryService },
         { provide: PayoutsService, useValue: payoutsServiceMock },
@@ -1876,6 +1945,8 @@ describe('PaymentsService cancelStaleUnpaidOrders (AC-019–021)', () => {
           useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
         },
         { provide: OrderAuditLogsService, useValue: orderAuditLogsServiceMock },
+        { provide: BeamService, useValue: beamServiceMock },
+        { provide: UsersService, useValue: usersServiceMock },
         {
           provide: BankTransferSettingsService,
           useValue: {
@@ -1957,10 +2028,53 @@ describe('PaymentsService cancelStaleUnpaidOrders (AC-019–021)', () => {
 
     expect(cancelled).toBe(0);
     const findCall = orderRepository.find.mock.calls[0] as
-      [{ where: { createdAt: unknown; status: unknown } }] | undefined;
-    expect(findCall?.[0].where.createdAt).toBeDefined();
-    expect(findCall?.[0].where.status).toBe(OrderStatus.PENDING_PAYMENT);
+      | [{ where: Array<{ createdAt?: unknown; status: unknown; guestPayTokenHash?: unknown }> }]
+      | undefined;
+    expect(findCall?.[0].where).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          status: OrderStatus.PENDING_PAYMENT,
+          createdAt: expect.anything(),
+        }),
+        expect.objectContaining({
+          status: OrderStatus.PENDING_PAYMENT,
+          guestPayTokenHash: expect.anything(),
+        }),
+      ]),
+    );
     expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
+  });
+
+  it('cancels unpaid legacy guest orders with null guestPayTokenHash regardless of age', async () => {
+    const legacyGuestOrder = {
+      id: 'ord-legacy-guest',
+      status: OrderStatus.PENDING_PAYMENT,
+      createdAt: new Date(NOW.getTime() - 60_000),
+      guestPhone: '0812345678',
+      guestPayTokenHash: null,
+      paymentReference: null,
+      items: [{ id: 'i1', fulfillmentStatus: 'pending' }],
+    };
+    const pendingPayment = {
+      id: 'pay-legacy-1',
+      orderId: 'ord-legacy-guest',
+      status: 'pending',
+      paymentMethod: 'promptpay',
+    } as Payment;
+
+    orderRepository.find.mockResolvedValue([legacyGuestOrder]);
+    paymentRepository.findOne.mockResolvedValue(null);
+    paymentRepository.find.mockResolvedValue([pendingPayment]);
+
+    const cancelled = await service.cancelStaleUnpaidOrders();
+
+    expect(cancelled).toBe(1);
+    expect(legacyGuestOrder.status).toBe(OrderStatus.CANCELLED);
+    expect(inventoryService.restoreOrderStock).toHaveBeenCalledWith(
+      'ord-legacy-guest',
+      expect.anything(),
+      'Unpaid order expired',
+    );
   });
 
   it('skips orders that already have a paid payment', async () => {
@@ -2018,7 +2132,8 @@ describe('PaymentsService cancelStaleUnpaidOrders (AC-019–021)', () => {
       orderId: 'ord-qr-coexist',
       status: 'pending',
       paymentMethod: 'promptpay',
-      omiseChargeId: 'chrg_qr_coexist',
+      psp: 'beam',
+      pspChargeId: 'chrg_qr_coexist',
       createdAt,
       expiresAt: null,
     } as Payment;
@@ -2028,10 +2143,6 @@ describe('PaymentsService cancelStaleUnpaidOrders (AC-019–021)', () => {
       paymentReference: 'chrg_qr_coexist',
     };
     orderRepository.findOne.mockResolvedValue(order);
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ id: 'chrg_qr_coexist', status: 'expired' }),
-    });
 
     const updated = await service.expirePendingQrPaymentIfNeeded(payment);
 
@@ -2068,17 +2179,108 @@ describe('PaymentsService cancelStaleUnpaidOrders (AC-019–021)', () => {
 
     orderRepository.findOne.mockResolvedValue(null);
     const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
-    global.fetch = jest.fn();
+    paymentRepository.findOne.mockResolvedValue(null);
 
-    await service.handleWebhook({
-      key: 'charge.complete',
-      data: { object: 'charge', id: chargeId, status: 'successful' },
-    });
+    await expect(service.handleBeamWebhook({ chargeId })).rejects.toBeInstanceOf(
+      BeamWebhookRetryableError,
+    );
 
-    expect(warnSpy).toHaveBeenCalledWith(`No order for Omise charge ${chargeId}`);
+    expect(warnSpy).toHaveBeenCalledWith(`No order/payment for Beam charge ${chargeId}`);
     expect(staleOrder.status).toBe(OrderStatus.CANCELLED);
-    expect(global.fetch).not.toHaveBeenCalled();
+    expect(beamServiceMock.getCharge).not.toHaveBeenCalled();
     warnSpy.mockRestore();
+  });
+
+  it('marks paid and skips cancel when pending Beam charge GET returns SUCCEEDED', async () => {
+    const staleOrder = {
+      id: 'ord-beam-succeeded',
+      status: OrderStatus.PENDING_PAYMENT,
+      createdAt: new Date(NOW.getTime() - TWENTY_FIVE_HOURS_MS),
+      paymentReference: 'chrg_beam_ok',
+      paymentMethod: PaymentMethod.CREDIT_CARD,
+      total: 300,
+      items: [{ id: 'i1', fulfillmentStatus: FulfillmentStatus.PENDING }],
+    };
+    const pendingPayment = {
+      id: 'pay-beam-ok',
+      orderId: 'ord-beam-succeeded',
+      status: 'pending',
+      paymentMethod: PaymentMethod.CREDIT_CARD,
+      psp: 'beam',
+      pspChargeId: 'chrg_beam_ok',
+    } as Payment;
+
+    orderRepository.find.mockResolvedValue([staleOrder]);
+    paymentRepository.findOne.mockResolvedValue(null);
+    paymentRepository.find.mockResolvedValue([pendingPayment]);
+    beamServiceMock.getCharge.mockResolvedValue({
+      chargeId: 'chrg_beam_ok',
+      status: 'SUCCEEDED',
+      amount: 30000,
+    });
+    paymentRepository.manager.transaction.mockImplementation(
+      async (
+        cb: (manager: {
+          save: jest.Mock;
+          findOne: jest.Mock;
+          find: jest.Mock;
+          create: jest.Mock;
+        }) => Promise<void>,
+      ) => {
+        await cb({
+          save: managerSave,
+          findOne: jest.fn(async (entity: unknown) => {
+            if (entity === Order) {
+              return staleOrder;
+            }
+            if (entity === Payment) {
+              return pendingPayment;
+            }
+            return null;
+          }),
+          find: jest.fn(async () => staleOrder.items ?? []),
+          create: jest.fn((_entity: unknown, data: unknown) => data),
+        });
+      },
+    );
+
+    const cancelled = await service.cancelStaleUnpaidOrders();
+
+    expect(cancelled).toBe(0);
+    expect(staleOrder.status).toBe(OrderStatus.PAID);
+    expect(pendingPayment.status).toBe('paid');
+    expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
+  });
+
+  it('leaves order pending_payment when Beam GET throws during stale cancel', async () => {
+    const staleOrder = {
+      id: 'ord-beam-get-fail',
+      status: OrderStatus.PENDING_PAYMENT,
+      createdAt: new Date(NOW.getTime() - TWENTY_FIVE_HOURS_MS),
+      paymentReference: 'chrg_beam_fail',
+      total: 300,
+      items: [{ id: 'i1', fulfillmentStatus: 'pending' }],
+    };
+    const pendingPayment = {
+      id: 'pay-beam-get-fail',
+      orderId: 'ord-beam-get-fail',
+      status: 'pending',
+      paymentMethod: 'credit_card',
+      psp: 'beam',
+      pspChargeId: 'chrg_beam_fail',
+    } as Payment;
+
+    orderRepository.find.mockResolvedValue([staleOrder]);
+    paymentRepository.findOne.mockResolvedValue(null);
+    paymentRepository.find.mockResolvedValue([pendingPayment]);
+    beamServiceMock.getCharge.mockRejectedValue(new Error('timeout'));
+
+    const cancelled = await service.cancelStaleUnpaidOrders();
+
+    expect(cancelled).toBe(0);
+    expect(staleOrder.status).toBe(OrderStatus.PENDING_PAYMENT);
+    expect(pendingPayment.status).toBe('pending');
+    expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
   });
 
   it('cancels stale order with only failed payments (abandoned card) and restores stock', async () => {
@@ -2235,13 +2437,14 @@ describe('PaymentsService payment held gate + Decision #16 recompute (AC-026–0
         {
           provide: ConfigService,
           useValue: {
-            get: (key: string) => {
-              if (key === 'omise.secretKey') return 'skey_test';
-              return '';
-            },
+            get: () => '',
           },
         },
         { provide: NotificationsService, useValue: { notifyOrderPaid: jest.fn() } },
+        {
+          provide: DashboardEventsService,
+          useValue: { publish: jest.fn().mockResolvedValue(undefined) },
+        },
         { provide: PaymentEventsService, useValue: paymentEventsServiceMock },
         { provide: InventoryService, useValue: { restoreOrderStock: jest.fn() } },
         { provide: PayoutsService, useValue: payoutsServiceMock },
@@ -2251,6 +2454,8 @@ describe('PaymentsService payment held gate + Decision #16 recompute (AC-026–0
           useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
         },
         { provide: OrderAuditLogsService, useValue: orderAuditLogsServiceMock },
+        { provide: BeamService, useValue: beamServiceMock },
+        { provide: UsersService, useValue: usersServiceMock },
         {
           provide: BankTransferSettingsService,
           useValue: {
@@ -2279,12 +2484,14 @@ describe('PaymentsService payment held gate + Decision #16 recompute (AC-026–0
   });
 
   it('blocks createCharge when all items on_hold with PAYMENT_HELD_PORTION_BLOCKED', async () => {
+    const guestPay = guestPayFixture();
     const order = {
       id: 'ord-held-all',
       status: OrderStatus.PENDING_PAYMENT,
       customerId: null,
       guestPhone: '0812345678',
-      guestPayTokenHash: null,
+      guestPayTokenHash: guestPay.hash,
+      guestPayTokenExpiresAt: guestPay.expiresAt,
       items: [
         { id: 'i1', fulfillmentStatus: FulfillmentStatus.ON_HOLD },
         { id: 'i2', fulfillmentStatus: FulfillmentStatus.ON_HOLD },
@@ -2298,17 +2505,20 @@ describe('PaymentsService payment held gate + Decision #16 recompute (AC-026–0
         amount: 100,
         currency: 'THB',
         paymentMethod: 'promptpay',
+        guestPayToken: guestPay.plaintext,
       }),
     ).rejects.toMatchObject({ response: { code: 'PAYMENT_HELD_PORTION_BLOCKED' } });
   });
 
   it('blocks createCharge when mixed unpaid has any on_hold item', async () => {
+    const guestPay = guestPayFixture();
     const order = {
       id: 'ord-held-mixed',
       status: OrderStatus.PENDING_PAYMENT,
       customerId: null,
       guestPhone: '0812345678',
-      guestPayTokenHash: null,
+      guestPayTokenHash: guestPay.hash,
+      guestPayTokenExpiresAt: guestPay.expiresAt,
       items: [
         { id: 'i1', fulfillmentStatus: FulfillmentStatus.ON_HOLD },
         { id: 'i2', fulfillmentStatus: FulfillmentStatus.PENDING },
@@ -2322,18 +2532,21 @@ describe('PaymentsService payment held gate + Decision #16 recompute (AC-026–0
         amount: 100,
         currency: 'THB',
         paymentMethod: 'cod',
+        guestPayToken: guestPay.plaintext,
       }),
     ).rejects.toMatchObject({ response: { code: 'PAYMENT_HELD_PORTION_BLOCKED' } });
   });
 
   it('allows createCharge after held lines cancelled and totals recomputed (Decision #16)', async () => {
     const { recomputeOrderPayableTotals } = await import('../orders/order-totals.util');
+    const guestPay = guestPayFixture();
     const order = {
       id: 'ord-after-sla',
       status: OrderStatus.PENDING_PAYMENT,
       customerId: null,
       guestPhone: '0812345678',
-      guestPayTokenHash: null,
+      guestPayTokenHash: guestPay.hash,
+      guestPayTokenExpiresAt: guestPay.expiresAt,
       subtotal: 300,
       shippingFee: 50,
       discountAmount: 0,
@@ -2374,6 +2587,7 @@ describe('PaymentsService payment held gate + Decision #16 recompute (AC-026–0
       amount: 120,
       currency: 'THB',
       paymentMethod: 'cod',
+      guestPayToken: guestPay.plaintext,
     });
 
     expect(result.paymentMethod).toBe('cod');
@@ -2381,62 +2595,98 @@ describe('PaymentsService payment held gate + Decision #16 recompute (AC-026–0
   });
 });
 
-describe('buildOmiseReturnUri', () => {
+describe('buildPaymentReturnUri', () => {
   it('strips trailing slash on origin', () => {
-    expect(buildOmiseReturnUri('https://shop.example.com/', 'pay-1')).toBe(
+    expect(buildPaymentReturnUri('https://shop.example.com/', 'pay-1')).toBe(
       'https://shop.example.com/payment/pay-1',
     );
   });
 
   it('throws when origin is empty after normalize', () => {
-    expect(() => buildOmiseReturnUri('/', 'pay-1')).toThrow('STOREFRONT_URL_EMPTY');
-    expect(() => buildOmiseReturnUri('', 'pay-1')).toThrow('STOREFRONT_URL_EMPTY');
+    expect(() => buildPaymentReturnUri('/', 'pay-1')).toThrow('STOREFRONT_URL_EMPTY');
+    expect(() => buildPaymentReturnUri('', 'pay-1')).toThrow('STOREFRONT_URL_EMPTY');
   });
 });
 
-describe('PaymentsService saveCustomerCard', () => {
+describe('PaymentsService handleBeamWebhook', () => {
   let service: PaymentsService;
-  const customerRepository = {
+  let inventoryService: { restoreOrderStock: jest.Mock };
+  const CHARGE_ID = 'beam_chrg_wh_1';
+  let order: Partial<Order>;
+  let payment: Partial<Payment>;
+
+  const orderRepository = { findOne: jest.fn(), save: jest.fn() };
+  const paymentRepository = {
     findOne: jest.fn(),
-    save: jest.fn((x: Customer) => Promise.resolve(x)),
+    find: jest.fn(),
+    save: jest.fn(),
+    manager: {
+      transaction: jest.fn(),
+    },
+  };
+  let trx: {
+    findOne: jest.Mock;
+    find: jest.Mock;
+    create: jest.Mock;
+    save: jest.Mock;
   };
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    global.fetch = jest.fn();
+    order = {
+      id: 'ord-beam-1',
+      status: OrderStatus.PENDING_PAYMENT,
+      total: 300,
+      paymentReference: CHARGE_ID,
+      paymentMethod: PaymentMethod.PROMPTPAY,
+      items: [],
+    };
+    payment = {
+      id: 'pay-beam-1',
+      orderId: 'ord-beam-1',
+      status: 'pending',
+      psp: 'beam',
+      pspChargeId: CHARGE_ID,
+      paymentMethod: PaymentMethod.PROMPTPAY,
+    };
+    paymentRepository.findOne.mockResolvedValue(payment);
+    orderRepository.findOne.mockResolvedValue(order);
+    trx = {
+      findOne: jest.fn(async (entity: unknown) => {
+        if (entity === Order) {
+          return order;
+        }
+        if (entity === Payment) {
+          return payment;
+        }
+        return null;
+      }),
+      find: jest.fn(async () => []),
+      create: jest.fn((_entity: unknown, data: unknown) => data),
+      save: jest.fn((entityOrType: unknown, maybeData?: unknown) =>
+        Promise.resolve(maybeData ?? entityOrType),
+      ),
+    };
+    paymentRepository.manager.transaction.mockImplementation(
+      async (cb: (m: typeof trx) => Promise<unknown>) => cb(trx),
+    );
 
+    inventoryService = { restoreOrderStock: jest.fn().mockResolvedValue(true) };
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PaymentsService,
-        { provide: getRepositoryToken(Payment), useValue: { findOne: jest.fn() } },
-        { provide: getRepositoryToken(Order), useValue: { findOne: jest.fn() } },
-        { provide: getRepositoryToken(Customer), useValue: customerRepository },
+        { provide: getRepositoryToken(Payment), useValue: paymentRepository },
+        { provide: getRepositoryToken(Order), useValue: orderRepository },
+        { provide: getRepositoryToken(Customer), useValue: { findOne: jest.fn() } },
+        { provide: getRepositoryToken(SavedPaymentMethod), useValue: { findOne: jest.fn() } },
+        { provide: ConfigService, useValue: { get: jest.fn(() => '') } },
+        { provide: NotificationsService, useValue: { notifyOrderPaid: jest.fn() } },
         {
-          provide: getRepositoryToken(SavedPaymentMethod),
-          useValue: { findOne: jest.fn() },
+          provide: DashboardEventsService,
+          useValue: { publish: jest.fn().mockResolvedValue(undefined) },
         },
-        {
-          provide: ConfigService,
-          useValue: {
-            get: jest.fn((key: string) => {
-              if (key === 'omise.secretKey') return 'skey_test';
-              if (key === 'omise.publicKey') return 'pkey_test';
-              return '';
-            }),
-          },
-        },
-        {
-          provide: NotificationsService,
-          useValue: { notifyOrderPaid: jest.fn() },
-        },
-        {
-          provide: PaymentEventsService,
-          useValue: paymentEventsServiceMock,
-        },
-        {
-          provide: InventoryService,
-          useValue: { restoreOrderStock: jest.fn().mockResolvedValue(true) },
-        },
+        { provide: PaymentEventsService, useValue: paymentEventsServiceMock },
+        { provide: InventoryService, useValue: inventoryService },
         { provide: PayoutsService, useValue: payoutsServiceMock },
         { provide: StoresService, useValue: storesServiceMock },
         {
@@ -2444,165 +2694,538 @@ describe('PaymentsService saveCustomerCard', () => {
           useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
         },
         { provide: OrderAuditLogsService, useValue: orderAuditLogsServiceMock },
-        {
-          provide: BankTransferSettingsService,
-          useValue: {
-            getConfigured: jest.fn().mockResolvedValue({
-              enabled: true,
-              bankName: 'Test Bank',
-              accountName: 'SOPET',
-              accountNumber: '1234567890',
-              branchName: null,
-            }),
-            isAvailable: jest.fn().mockReturnValue(true),
-            get: jest.fn().mockResolvedValue({
-              enabled: true,
-              bankName: 'Test Bank',
-              accountName: 'SOPET',
-              accountNumber: '1234567890',
-              branchName: null,
-            }),
-            update: jest.fn(),
-          },
-        },
+        { provide: BeamService, useValue: beamServiceMock },
+        { provide: UsersService, useValue: usersServiceMock },
+        { provide: BankTransferSettingsService, useValue: {} },
       ],
     }).compile();
-
     service = module.get(PaymentsService);
   });
 
-  function mockJsonResponse(body: unknown, ok = true): Response {
-    return {
-      ok,
-      json: () => Promise.resolve(body),
-    } as Response;
-  }
-
-  it('returns the newly attached card when Omise keeps default_card on an existing card', async () => {
-    const existingCard = {
-      id: 'card_existing',
-      last_digits: '4242',
-      brand: 'Visa',
-      expiration_month: 1,
-      expiration_year: 2030,
-      fingerprint: 'fp_existing',
-    };
-    const newCard = {
-      id: 'card_new',
-      last_digits: '0014',
-      brand: 'Visa',
-      expiration_month: 12,
-      expiration_year: 2034,
-      fingerprint: 'fp_new',
-    };
-
-    customerRepository.findOne.mockResolvedValue({
-      id: 'cust-1',
-      email: 'user@example.com',
-      omiseCustomerId: 'cust_omise_1',
+  it('marks order paid on SUCCEEDED when amount matches', async () => {
+    beamServiceMock.getCharge.mockResolvedValue({
+      chargeId: CHARGE_ID,
+      status: 'SUCCEEDED',
+      amount: 30000,
     });
 
-    (global.fetch as jest.Mock)
-      // vault token lookup
-      .mockResolvedValueOnce(
-        mockJsonResponse({
-          id: 'tokn_new',
-          card: {
-            id: 'card_token',
-            last_digits: newCard.last_digits,
-            brand: newCard.brand,
-            expiration_month: newCard.expiration_month,
-            expiration_year: newCard.expiration_year,
-            fingerprint: newCard.fingerprint,
-          },
-        }),
-      )
-      // GET existing Omise customer (stale check)
-      .mockResolvedValueOnce(
-        mockJsonResponse({
-          id: 'cust_omise_1',
-          default_card: existingCard.id,
-          cards: { data: [existingCard] },
-        }),
-      )
-      // GET for findExistingOmiseCard — new fingerprint not present yet
-      .mockResolvedValueOnce(
-        mockJsonResponse({
-          id: 'cust_omise_1',
-          default_card: existingCard.id,
-          cards: { data: [existingCard] },
-        }),
-      )
-      // PATCH attach — Omise leaves default_card on the old card
-      .mockResolvedValueOnce(
-        mockJsonResponse({
-          id: 'cust_omise_1',
-          default_card: existingCard.id,
-          cards: { data: [existingCard, newCard] },
-        }),
-      );
+    await service.handleBeamWebhook({ chargeId: CHARGE_ID });
 
-    const result = await service.saveCustomerCard('cust-1', 'tokn_new');
-
-    expect(result).toEqual({
-      omiseCardId: 'card_new',
-      cardFingerprint: 'fp_new',
-      lastFour: '0014',
-      brand: 'visa',
-      expiryMonth: 12,
-      expiryYear: 2034,
-    });
+    expect(beamServiceMock.getCharge).toHaveBeenCalledWith(CHARGE_ID);
+    expect(payment.status).toBe('paid');
+    expect(order.status).toBe(OrderStatus.PAID);
+    expect(trx.create).toHaveBeenCalledWith(
+      OrderStatusHistory,
+      expect.objectContaining({
+        orderId: order.id,
+        status: OrderStatus.PAID,
+      }),
+    );
   });
 
-  it('reuses an Omise card that already matches the token fingerprint', async () => {
-    const existingCard = {
-      id: 'card_existing',
-      last_digits: '0014',
-      brand: 'Visa',
-      expiration_month: 12,
-      expiration_year: 2034,
-      fingerprint: 'fp_same',
-    };
-
-    customerRepository.findOne.mockResolvedValue({
-      id: 'cust-1',
-      email: 'user@example.com',
-      omiseCustomerId: 'cust_omise_1',
+  it('current charge with locally failed row still marks order paid', async () => {
+    payment.status = 'failed';
+    beamServiceMock.getCharge.mockResolvedValue({
+      chargeId: CHARGE_ID,
+      status: 'SUCCEEDED',
+      amount: 30000,
     });
 
-    (global.fetch as jest.Mock)
-      .mockResolvedValueOnce(
-        mockJsonResponse({
-          id: 'tokn_retry',
-          card: {
-            id: 'card_token',
-            last_digits: existingCard.last_digits,
-            brand: existingCard.brand,
-            expiration_month: existingCard.expiration_month,
-            expiration_year: existingCard.expiration_year,
-            fingerprint: existingCard.fingerprint,
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        mockJsonResponse({
-          id: 'cust_omise_1',
-          default_card: existingCard.id,
-          cards: { data: [existingCard] },
-        }),
-      )
-      .mockResolvedValueOnce(
-        mockJsonResponse({
-          id: 'cust_omise_1',
-          default_card: existingCard.id,
-          cards: { data: [existingCard] },
-        }),
-      );
+    await service.handleBeamWebhook({ chargeId: CHARGE_ID });
 
-    const result = await service.saveCustomerCard('cust-1', 'tokn_retry');
+    expect(payment.status).toBe('paid');
+    expect(order.status).toBe(OrderStatus.PAID);
+    expect(order.paymentReference).toBe(CHARGE_ID);
+    expect(trx.save).toHaveBeenCalledWith(
+      OrderStatusHistory,
+      expect.objectContaining({ status: OrderStatus.PAID }),
+    );
+  });
 
-    expect(result.omiseCardId).toBe('card_existing');
-    expect(result.cardFingerprint).toBe('fp_same');
-    expect((global.fetch as jest.Mock).mock.calls).toHaveLength(3);
+  it('derives on_hold when all items are held after Beam success', async () => {
+    order.items = [
+      {
+        id: 'item-held',
+        fulfillmentStatus: FulfillmentStatus.ON_HOLD,
+      } as OrderItem,
+    ];
+    trx.find.mockImplementation(async (entity: unknown) => {
+      if (entity === OrderItem) {
+        return order.items ?? [];
+      }
+      return [];
+    });
+    beamServiceMock.getCharge.mockResolvedValue({
+      chargeId: CHARGE_ID,
+      status: 'SUCCEEDED',
+      amount: 30000,
+    });
+
+    await service.handleBeamWebhook({ chargeId: CHARGE_ID });
+
+    expect(payment.status).toBe('paid');
+    expect(order.status).toBe(OrderStatus.ON_HOLD);
+  });
+
+  it('markOrderPaid aborts when locked order was cancelled (cancel race)', async () => {
+    beamServiceMock.getCharge.mockResolvedValue({
+      chargeId: CHARGE_ID,
+      status: 'SUCCEEDED',
+      amount: 30000,
+    });
+    trx.findOne.mockImplementation(async (entity: unknown) => {
+      if (entity === Order) {
+        return { ...order, status: OrderStatus.CANCELLED };
+      }
+      if (entity === Payment) {
+        return payment;
+      }
+      return null;
+    });
+
+    await service.handleBeamWebhook({ chargeId: CHARGE_ID });
+
+    expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
+    expect(payment.status).toBe('pending');
+    expect(trx.save).not.toHaveBeenCalled();
+    expect(inventoryService.restoreOrderStock).not.toHaveBeenCalled();
+    expect(paymentEventsServiceMock.publishPaymentStatusUpdated).not.toHaveBeenCalled();
+  });
+
+  it('does not mark paid when amount mismatches order total (durable ack, no throw)', async () => {
+    beamServiceMock.getCharge.mockResolvedValue({
+      chargeId: CHARGE_ID,
+      status: 'SUCCEEDED',
+      amount: 100,
+    });
+
+    await expect(service.handleBeamWebhook({ chargeId: CHARGE_ID })).resolves.toBeUndefined();
+
+    expect(payment.status).toBe('pending');
+    expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
+  });
+
+  it('throws retryable when payment row is missing', async () => {
+    paymentRepository.findOne.mockResolvedValue(null);
+    orderRepository.findOne.mockResolvedValue(null);
+
+    await expect(service.handleBeamWebhook({ chargeId: CHARGE_ID })).rejects.toBeInstanceOf(
+      BeamWebhookRetryableError,
+    );
+    expect(beamServiceMock.getCharge).not.toHaveBeenCalled();
+  });
+
+  it('throws retryable when GET charge throws', async () => {
+    beamServiceMock.getCharge.mockRejectedValue(new Error('429'));
+
+    await expect(service.handleBeamWebhook({ chargeId: CHARGE_ID })).rejects.toBeInstanceOf(
+      BeamWebhookRetryableError,
+    );
+    expect(payment.status).toBe('pending');
+    expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
+  });
+
+  it('throws retryable when GET returns empty', async () => {
+    beamServiceMock.getCharge.mockResolvedValue(null);
+
+    await expect(service.handleBeamWebhook({ chargeId: CHARGE_ID })).rejects.toBeInstanceOf(
+      BeamWebhookRetryableError,
+    );
+  });
+
+  it('fails payment on FAILED, clears paymentReference, keeps order PENDING_PAYMENT', async () => {
+    beamServiceMock.getCharge.mockResolvedValue({ chargeId: CHARGE_ID, status: 'FAILED' });
+
+    await service.handleBeamWebhook({ chargeId: CHARGE_ID });
+
+    expect(payment.status).toBe('failed');
+    expect(order.paymentReference).toBeNull();
+    expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
+  });
+
+  it('is idempotent for already paid orders', async () => {
+    order.status = OrderStatus.PAID;
+
+    await expect(service.handleBeamWebhook({ chargeId: CHARGE_ID })).resolves.toBeUndefined();
+
+    expect(beamServiceMock.getCharge).not.toHaveBeenCalled();
+  });
+
+  it('ignores cancelled orders without a second write', async () => {
+    order.status = OrderStatus.CANCELLED;
+
+    await expect(service.handleBeamWebhook({ chargeId: CHARGE_ID })).resolves.toBeUndefined();
+
+    expect(beamServiceMock.getCharge).not.toHaveBeenCalled();
+    expect(payment.status).toBe('pending');
+    expect(paymentRepository.manager.transaction).not.toHaveBeenCalled();
+  });
+
+  it('ignores refunded orders without a second write', async () => {
+    order.status = OrderStatus.REFUNDED;
+
+    await expect(service.handleBeamWebhook({ chargeId: CHARGE_ID })).resolves.toBeUndefined();
+
+    expect(beamServiceMock.getCharge).not.toHaveBeenCalled();
+    expect(paymentRepository.manager.transaction).not.toHaveBeenCalled();
+  });
+
+  it('falls back to order.paymentReference lookup', async () => {
+    paymentRepository.findOne.mockResolvedValueOnce(null).mockResolvedValueOnce(payment);
+    beamServiceMock.getCharge.mockResolvedValue({
+      chargeId: CHARGE_ID,
+      status: 'SUCCEEDED',
+      amount: 30000,
+    });
+
+    await service.handleBeamWebhook({ data: { chargeId: CHARGE_ID } });
+
+    expect(orderRepository.findOne).toHaveBeenCalledWith({
+      where: { paymentReference: CHARGE_ID },
+    });
+    expect(order.status).toBe(OrderStatus.PAID);
+  });
+});
+
+describe('PaymentsService reconcilePendingBeamChargeIfNeeded', () => {
+  let service: PaymentsService;
+  const CHARGE_ID = 'beam_chrg_reconcile_1';
+  let order: Partial<Order>;
+  let payment: Payment;
+
+  const orderRepository = { findOne: jest.fn(), save: jest.fn() };
+  const paymentRepository = {
+    findOne: jest.fn(),
+    find: jest.fn(),
+    save: jest.fn(),
+    manager: {
+      transaction: jest.fn(),
+    },
+  };
+  let trx: {
+    findOne: jest.Mock;
+    find: jest.Mock;
+    create: jest.Mock;
+    save: jest.Mock;
+  };
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    jest.useRealTimers();
+    order = {
+      id: 'ord-reconcile-1',
+      status: OrderStatus.PENDING_PAYMENT,
+      total: 300,
+      paymentReference: CHARGE_ID,
+      paymentMethod: PaymentMethod.PROMPTPAY,
+      items: [],
+    };
+    payment = {
+      id: 'pay-reconcile-1',
+      orderId: 'ord-reconcile-1',
+      amount: 300,
+      currency: 'THB',
+      status: 'pending',
+      paymentMethod: PaymentMethod.PROMPTPAY,
+      psp: 'beam',
+      pspChargeId: CHARGE_ID,
+      order: order as Order,
+    } as Payment;
+    trx = {
+      findOne: jest.fn(async (entity: unknown) => {
+        if (entity === Order) {
+          return order;
+        }
+        if (entity === Payment) {
+          return payment;
+        }
+        return null;
+      }),
+      find: jest.fn(async () => []),
+      create: jest.fn((_entity: unknown, data: unknown) => data),
+      save: jest.fn((entityOrType: unknown, maybeData?: unknown) =>
+        Promise.resolve(maybeData ?? entityOrType),
+      ),
+    };
+    paymentRepository.manager.transaction.mockImplementation(
+      async (cb: (m: typeof trx) => Promise<unknown>) => cb(trx),
+    );
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        PaymentsService,
+        { provide: getRepositoryToken(Payment), useValue: paymentRepository },
+        { provide: getRepositoryToken(Order), useValue: orderRepository },
+        { provide: getRepositoryToken(Customer), useValue: { findOne: jest.fn() } },
+        { provide: getRepositoryToken(SavedPaymentMethod), useValue: { findOne: jest.fn() } },
+        { provide: ConfigService, useValue: { get: jest.fn(() => '') } },
+        { provide: NotificationsService, useValue: { notifyOrderPaid: jest.fn() } },
+        {
+          provide: DashboardEventsService,
+          useValue: { publish: jest.fn().mockResolvedValue(undefined) },
+        },
+        { provide: PaymentEventsService, useValue: paymentEventsServiceMock },
+        { provide: InventoryService, useValue: { restoreOrderStock: jest.fn() } },
+        { provide: PayoutsService, useValue: payoutsServiceMock },
+        { provide: StoresService, useValue: storesServiceMock },
+        {
+          provide: VendorWebhooksService,
+          useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
+        },
+        { provide: OrderAuditLogsService, useValue: orderAuditLogsServiceMock },
+        { provide: BeamService, useValue: beamServiceMock },
+        { provide: UsersService, useValue: usersServiceMock },
+        { provide: BankTransferSettingsService, useValue: {} },
+      ],
+    }).compile();
+    service = module.get(PaymentsService);
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('marks paid + publishes when Beam GET returns SUCCEEDED', async () => {
+    beamServiceMock.getCharge.mockResolvedValue({
+      chargeId: CHARGE_ID,
+      status: 'SUCCEEDED',
+      amount: 30000,
+    });
+
+    const result = await service.reconcilePendingBeamChargeIfNeeded(payment);
+
+    expect(beamServiceMock.getCharge).toHaveBeenCalledWith(CHARGE_ID);
+    expect(result.status).toBe('paid');
+    expect(order.status).toBe(OrderStatus.PAID);
+    expect(paymentEventsServiceMock.publishPaymentStatusUpdated).toHaveBeenCalledWith(payment);
+  });
+
+  it('no-ops when Beam charge is still PENDING', async () => {
+    beamServiceMock.getCharge.mockResolvedValue({
+      chargeId: CHARGE_ID,
+      status: 'PENDING',
+      amount: 30000,
+    });
+
+    const result = await service.reconcilePendingBeamChargeIfNeeded(payment);
+
+    expect(beamServiceMock.getCharge).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe('pending');
+    expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
+  });
+
+  it('rate-limits Beam GET to once per 5s per payment id', async () => {
+    jest.useFakeTimers();
+    beamServiceMock.getCharge.mockResolvedValue({
+      chargeId: CHARGE_ID,
+      status: 'PENDING',
+      amount: 30000,
+    });
+
+    await service.reconcilePendingBeamChargeIfNeeded(payment);
+    await service.reconcilePendingBeamChargeIfNeeded(payment);
+    expect(beamServiceMock.getCharge).toHaveBeenCalledTimes(1);
+
+    jest.advanceTimersByTime(5_000);
+    await service.reconcilePendingBeamChargeIfNeeded(payment);
+    expect(beamServiceMock.getCharge).toHaveBeenCalledTimes(2);
+  });
+
+  it('skips bank_transfer and non-beam pending payments', async () => {
+    payment.paymentMethod = PaymentMethod.BANK_TRANSFER;
+    payment.psp = null;
+    payment.pspChargeId = null;
+
+    await service.reconcilePendingBeamChargeIfNeeded(payment);
+
+    expect(beamServiceMock.getCharge).not.toHaveBeenCalled();
+  });
+});
+
+describe('PaymentsService PromptPay late success before expiry', () => {
+  let service: PaymentsService;
+  const CHARGE_ID = 'beam_chrg_late_success_1';
+  const PAST_EXPIRES = new Date(Date.now() - 60_000);
+
+  let order: Partial<Order>;
+  let payment: Payment;
+
+  const orderRepository = { findOne: jest.fn(), save: jest.fn() };
+  const paymentRepository = {
+    findOne: jest.fn(),
+    find: jest.fn(),
+    save: jest.fn(),
+    manager: {
+      transaction: jest.fn(),
+    },
+  };
+  let trx: {
+    findOne: jest.Mock;
+    find: jest.Mock;
+    create: jest.Mock;
+    save: jest.Mock;
+  };
+  const notificationsService = { notifyOrderPaid: jest.fn() };
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    order = {
+      id: 'ord-late-1',
+      customerId: 'cust-1',
+      status: OrderStatus.PENDING_PAYMENT,
+      total: 300,
+      paymentReference: CHARGE_ID,
+      paymentMethod: PaymentMethod.PROMPTPAY,
+      items: [],
+    };
+    payment = {
+      id: 'pay-late-1',
+      orderId: 'ord-late-1',
+      amount: 300,
+      currency: 'THB',
+      status: 'pending',
+      paymentMethod: PaymentMethod.PROMPTPAY,
+      psp: 'beam',
+      pspChargeId: CHARGE_ID,
+      expiresAt: PAST_EXPIRES,
+      createdAt: new Date(Date.now() - 20 * 60 * 1000),
+      order: order as Order,
+    } as Payment;
+
+    paymentRepository.findOne.mockResolvedValue(payment);
+    orderRepository.findOne.mockResolvedValue(order);
+    trx = {
+      findOne: jest.fn(async (entity: unknown) => {
+        if (entity === Order) {
+          return order;
+        }
+        if (entity === Payment) {
+          return payment;
+        }
+        return null;
+      }),
+      find: jest.fn(async () => []),
+      create: jest.fn((_entity: unknown, data: unknown) => data),
+      save: jest.fn((entityOrType: unknown, maybeData?: unknown) =>
+        Promise.resolve(maybeData ?? entityOrType),
+      ),
+    };
+    paymentRepository.manager.transaction.mockImplementation(
+      async (cb: (m: typeof trx) => Promise<unknown>) => cb(trx),
+    );
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        PaymentsService,
+        { provide: getRepositoryToken(Payment), useValue: paymentRepository },
+        { provide: getRepositoryToken(Order), useValue: orderRepository },
+        { provide: getRepositoryToken(Customer), useValue: { findOne: jest.fn() } },
+        { provide: getRepositoryToken(SavedPaymentMethod), useValue: { findOne: jest.fn() } },
+        { provide: ConfigService, useValue: { get: jest.fn(() => '') } },
+        { provide: NotificationsService, useValue: notificationsService },
+        {
+          provide: DashboardEventsService,
+          useValue: { publish: jest.fn().mockResolvedValue(undefined) },
+        },
+        { provide: PaymentEventsService, useValue: paymentEventsServiceMock },
+        { provide: InventoryService, useValue: { restoreOrderStock: jest.fn() } },
+        { provide: PayoutsService, useValue: payoutsServiceMock },
+        { provide: StoresService, useValue: storesServiceMock },
+        {
+          provide: VendorWebhooksService,
+          useValue: { dispatchOrderEvent: jest.fn().mockResolvedValue(undefined) },
+        },
+        { provide: OrderAuditLogsService, useValue: orderAuditLogsServiceMock },
+        { provide: BeamService, useValue: beamServiceMock },
+        { provide: UsersService, useValue: usersServiceMock },
+        { provide: BankTransferSettingsService, useValue: {} },
+      ],
+    }).compile();
+    service = module.get(PaymentsService);
+  });
+
+  it('findById: past expiresAt + Beam SUCCEEDED marks paid and keeps paymentReference', async () => {
+    beamServiceMock.getCharge.mockImplementation(() => {
+      expect(order.paymentReference).toBe(CHARGE_ID);
+      return Promise.resolve({ chargeId: CHARGE_ID, status: 'SUCCEEDED', amount: 30000 });
+    });
+    beamServiceMock.createCharge.mockClear();
+
+    const result = await service.findById('pay-late-1', 'cust-1');
+
+    expect(beamServiceMock.getCharge).toHaveBeenCalledWith(CHARGE_ID);
+    expect(result.status).toBe('paid');
+    expect(order.status).toBe(OrderStatus.PAID);
+    expect(order.paymentReference).toBe(CHARGE_ID);
+    expect(beamServiceMock.createCharge).not.toHaveBeenCalled();
+  });
+
+  it('findLatestByOrderId: past expiresAt + Beam SUCCEEDED marks paid', async () => {
+    beamServiceMock.getCharge.mockResolvedValue({
+      chargeId: CHARGE_ID,
+      status: 'SUCCEEDED',
+      amount: 30000,
+    });
+
+    const result = await service.findLatestByOrderId('ord-late-1', 'cust-1');
+
+    expect(result.status).toBe('paid');
+    expect(order.status).toBe(OrderStatus.PAID);
+    expect(order.paymentReference).toBe(CHARGE_ID);
+  });
+
+  it('findById: past expiresAt + Beam still open expires payment for retry', async () => {
+    beamServiceMock.getCharge.mockResolvedValue({
+      chargeId: CHARGE_ID,
+      status: 'PENDING',
+      amount: 30000,
+    });
+
+    const result = await service.findById('pay-late-1', 'cust-1');
+
+    expect(result.status).toBe('failed');
+    expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
+    expect(order.paymentReference).toBeNull();
+  });
+
+  it('findById: past expiresAt + Beam FAILED leaves order pending_payment for retry', async () => {
+    beamServiceMock.getCharge.mockResolvedValue({
+      chargeId: CHARGE_ID,
+      status: 'FAILED',
+      amount: 30000,
+      failureCode: 'CH_TIMEOUT',
+    });
+
+    const result = await service.findById('pay-late-1', 'cust-1');
+
+    expect(result.status).toBe('failed');
+    expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
+    expect(order.paymentReference).toBeNull();
+  });
+
+  it('findById: Beam GET throws leaves payment pending and paymentReference set', async () => {
+    beamServiceMock.getCharge.mockRejectedValue(new Error('Beam unavailable'));
+
+    const result = await service.findById('pay-late-1', 'cust-1');
+
+    expect(result.status).toBe('pending');
+    expect(order.status).toBe(OrderStatus.PENDING_PAYMENT);
+    expect(order.paymentReference).toBe(CHARGE_ID);
+  });
+
+  it('findById: locally failed PromptPay + Beam SUCCEEDED marks paid', async () => {
+    payment.status = 'failed';
+    beamServiceMock.getCharge.mockResolvedValue({
+      chargeId: CHARGE_ID,
+      status: 'SUCCEEDED',
+      amount: 30000,
+    });
+
+    const result = await service.findById('pay-late-1', 'cust-1');
+
+    expect(beamServiceMock.getCharge).toHaveBeenCalledWith(CHARGE_ID);
+    expect(result.status).toBe('paid');
+    expect(order.status).toBe(OrderStatus.PAID);
+    expect(order.paymentReference).toBe(CHARGE_ID);
   });
 });

@@ -4,6 +4,7 @@ import { AuthModule } from '../auth/auth.module';
 import { ProductsModule } from '../products/products.module';
 import { PromotionsModule } from '../promotions/promotions.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { DashboardEventsModule } from '../dashboard-events/dashboard-events.module';
 import { StoresModule } from '../stores/stores.module';
 import { OrdersService } from './orders.service';
 import { OrderFulfillmentService } from './order-fulfillment.service';
@@ -36,6 +37,7 @@ import { SaleCampaignPricingModule } from '../sale-campaigns/sale-campaign-prici
     ProductsModule,
     PromotionsModule,
     NotificationsModule,
+    DashboardEventsModule,
     VendorWebhooksModule,
     forwardRef(() => StoresModule),
     InventoryModule,

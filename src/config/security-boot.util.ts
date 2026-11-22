@@ -17,6 +17,12 @@ export function assertProductionSecurityConfig(): void {
     if (!process.env.BANK_DATA_ENCRYPTION_KEY?.trim()) {
       throw new Error('BANK_DATA_ENCRYPTION_KEY is required in production');
     }
+    if (!process.env.CARD_DATA_ENCRYPTION_KEY?.trim()) {
+      throw new Error('CARD_DATA_ENCRYPTION_KEY is required in production');
+    }
+    if (!process.env.CARD_TRANSPORT_PRIVATE_KEY?.trim()) {
+      throw new Error('CARD_TRANSPORT_PRIVATE_KEY is required in production');
+    }
   }
 
   assertPostgresSslBootConfig();

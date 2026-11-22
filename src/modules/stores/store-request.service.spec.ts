@@ -31,6 +31,9 @@ describe('StoreRequestService', () => {
   let storageService: {
     assertFolderImageUrl: jest.Mock;
   };
+  let dashboardEventsService: {
+    publish: jest.Mock;
+  };
 
   beforeEach(() => {
     storeRequestRepository = {
@@ -62,6 +65,9 @@ describe('StoreRequestService', () => {
     storageService = {
       assertFolderImageUrl: jest.fn(),
     };
+    dashboardEventsService = {
+      publish: jest.fn().mockResolvedValue(undefined),
+    };
 
     service = new StoreRequestService(
       storeRequestRepository as never,
@@ -69,6 +75,7 @@ describe('StoreRequestService', () => {
       storeMemberRepository as never,
       userRepository as never,
       notificationsService as never,
+      dashboardEventsService as never,
       storageService as never,
     );
   });
@@ -81,6 +88,13 @@ describe('StoreRequestService', () => {
 
     expect(result.storeName).toBe('New Shop');
     expect(storeRequestRepository.save).toHaveBeenCalled();
+    expect(dashboardEventsService.publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'STORE_REQUEST',
+        userIds: ['vendor-1'],
+        roles: ['admin'],
+      }),
+    );
   });
 
   it('rejects store request when vendor email is not verified', async () => {

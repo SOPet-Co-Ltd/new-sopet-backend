@@ -147,6 +147,7 @@ jobs:
           PAYOUT_CRON_SCHEDULE: ${{ vars.PAYOUT_CRON_SCHEDULE }}
           PAYOUT_CRON_TIMEZONE: ${{ vars.PAYOUT_CRON_TIMEZONE }}
           COMMISSION_GO_LIVE_AT: ${{ vars.COMMISSION_GO_LIVE_AT }}
+          MCP_ADMIN_EMAIL: ${{ vars.MCP_ADMIN_EMAIL }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -156,13 +157,18 @@ jobs:
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           OTP_HMAC_SECRET: ${{ secrets.OTP_HMAC_SECRET }}
           BANK_DATA_ENCRYPTION_KEY: ${{ secrets.BANK_DATA_ENCRYPTION_KEY }}
+          CARD_DATA_ENCRYPTION_KEY: ${{ secrets.CARD_DATA_ENCRYPTION_KEY }}
           THAIBULKSMS_API_KEY: ${{ secrets.THAIBULKSMS_API_KEY }}
           THAIBULKSMS_API_SECRET: ${{ secrets.THAIBULKSMS_API_SECRET }}
-          OMISE_PUBLIC_KEY: ${{ secrets.OMISE_PUBLIC_KEY }}
-          OMISE_SECRET_KEY: ${{ secrets.OMISE_SECRET_KEY }}
-          OMISE_WEBHOOK_SECRET: ${{ secrets.OMISE_WEBHOOK_SECRET }}
+          BEAM_API_BASE_URL: ${{ vars.BEAM_API_BASE_URL }}
+          BEAM_MERCHANT_ID: ${{ vars.BEAM_MERCHANT_ID }}
+          BEAM_API_KEY: ${{ secrets.BEAM_API_KEY }}
+          BEAM_PUBLISHABLE_KEY: ${{ secrets.BEAM_PUBLISHABLE_KEY }}
+          BEAM_WEBHOOK_SECRET: ${{ secrets.BEAM_WEBHOOK_SECRET }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          MCP_HTTP_TOKEN: ${{ secrets.MCP_HTTP_TOKEN }}
+          MCP_ADMIN_PASSWORD: ${{ secrets.MCP_ADMIN_PASSWORD }}
         run: |
           chmod +x infra/export-github-env.sh
           infra/export-github-env.sh
@@ -179,11 +185,14 @@ jobs:
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           OTP_HMAC_SECRET: ${{ secrets.OTP_HMAC_SECRET }}
           BANK_DATA_ENCRYPTION_KEY: ${{ secrets.BANK_DATA_ENCRYPTION_KEY }}
+          CARD_DATA_ENCRYPTION_KEY: ${{ secrets.CARD_DATA_ENCRYPTION_KEY }}
           THAIBULKSMS_API_KEY: ${{ secrets.THAIBULKSMS_API_KEY }}
           THAIBULKSMS_API_SECRET: ${{ secrets.THAIBULKSMS_API_SECRET }}
-          OMISE_PUBLIC_KEY: ${{ secrets.OMISE_PUBLIC_KEY }}
-          OMISE_SECRET_KEY: ${{ secrets.OMISE_SECRET_KEY }}
-          OMISE_WEBHOOK_SECRET: ${{ secrets.OMISE_WEBHOOK_SECRET }}
+          BEAM_API_BASE_URL: ${{ vars.BEAM_API_BASE_URL }}
+          BEAM_MERCHANT_ID: ${{ vars.BEAM_MERCHANT_ID }}
+          BEAM_API_KEY: ${{ secrets.BEAM_API_KEY }}
+          BEAM_PUBLISHABLE_KEY: ${{ secrets.BEAM_PUBLISHABLE_KEY }}
+          BEAM_WEBHOOK_SECRET: ${{ secrets.BEAM_WEBHOOK_SECRET }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
         run: |
           chmod +x infra/validate-deploy-env.sh

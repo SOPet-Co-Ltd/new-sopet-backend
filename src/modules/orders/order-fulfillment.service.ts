@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
 import { FulfillmentStatus, OrderItem } from '../../database/entities/order-item.entity';
 import { OrderStatusHistory } from '../../database/entities/order-status-history.entity';
@@ -22,6 +22,11 @@ import {
   validateTrackingNumber,
   VENDOR_CANCELLABLE_ORDER_STATUSES,
 } from './order-fulfillment.util';
+import {
+  BeamRefundService,
+  MANUAL_BEAM_REFUND_NOTE,
+  requiresManualBeamRefund,
+} from '../payments/beam-refund.service';
 import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.service';
 import { webhookEventForOrderStatus } from '../vendor-webhooks/vendor-webhook.events';
 import { OrderAuditLogsService } from '../order-audit-logs/order-audit-logs.service';
@@ -31,6 +36,7 @@ import {
   OrderAuditEventType,
 } from '../order-audit-logs/order-audit-log.constants';
 import { assertGuestPayTokenAccess } from '../../common/utils/guest-pay-token.util';
+import { assertOrderHasNoReviews } from './order-review-cancel.guard';
 
 @Injectable()
 export class OrderFulfillmentService {
@@ -43,6 +49,7 @@ export class OrderFulfillmentService {
     private readonly inventoryService: InventoryService,
     private readonly vendorWebhooksService: VendorWebhooksService,
     private readonly orderAuditLogsService: OrderAuditLogsService,
+    private readonly beamRefundService: BeamRefundService,
   ) {}
 
   private async loadOrderWithItems(orderId: string): Promise<Order> {
@@ -390,7 +397,10 @@ export class OrderFulfillmentService {
           message: 'You do not have access to this order',
         });
       }
-      assertGuestPayTokenAccess(order, guestPayToken);
+      // Paid legacy guest orders may lack a guest pay token hash; phone match is enough.
+      if (order.guestPayTokenHash) {
+        assertGuestPayTokenAccess(order, guestPayToken);
+      }
     } else {
       throw new ForbiddenException({
         code: 'FORBIDDEN',
@@ -447,6 +457,8 @@ export class OrderFulfillmentService {
       });
     }
 
+    await assertOrderHasNoReviews(this.dataSource, order.id);
+
     if (!VENDOR_CANCELLABLE_ORDER_STATUSES.has(order.status)) {
       throw new BadRequestException({
         code: 'INVALID_ORDER_STATUS',
@@ -455,6 +467,13 @@ export class OrderFulfillmentService {
     }
 
     this.markItemsCancelled(order.items);
+
+    const manualRefund =
+      requiresManualBeamRefund(order.paymentMethod) && order.status !== OrderStatus.PENDING_PAYMENT;
+    const refundedPaymentIds = await this.beamRefundService.refundPaidBeamCharges(
+      order.id,
+      'Vendor cancelled order after payment',
+    );
 
     await this.dataSource.transaction(async (manager) => {
       order.status = OrderStatus.CANCELLED;
@@ -471,13 +490,19 @@ export class OrderFulfillmentService {
         await manager.save(payment);
       }
 
+      if (refundedPaymentIds.length > 0) {
+        await manager.update(Payment, { id: In(refundedPaymentIds) }, { status: 'refunded' });
+      }
+
       await manager.save(
         OrderStatusHistory,
         manager.create(OrderStatusHistory, {
           orderId: order.id,
           status: OrderStatus.CANCELLED,
           changedBy: userId,
-          notes: `Vendor cancelled order (store ${storeId})`,
+          notes: manualRefund
+            ? `Vendor cancelled order (store ${storeId}). ${MANUAL_BEAM_REFUND_NOTE}`
+            : `Vendor cancelled order (store ${storeId})`,
         }),
       );
     });

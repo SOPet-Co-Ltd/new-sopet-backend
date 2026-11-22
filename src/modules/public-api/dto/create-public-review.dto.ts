@@ -26,7 +26,8 @@ export class CreatePublicReviewDto {
 
   @ApiPropertyOptional({
     type: [String],
-    description: 'Remote review image URLs (https), max 5',
+    description:
+      'Review image source URLs. The server downloads each URL, validates (jpeg/png/webp/gif, max 5 MB), converts to WebP, stores in the object bucket, and persists only the storage URL — source URLs are never saved. Max 5 images. Any download/validation failure fails the whole create.',
     example: ['https://cdn.example.com/review-1.jpg'],
   })
   @IsOptional()

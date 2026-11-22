@@ -11,7 +11,12 @@ import { getQueueToken } from '@nestjs/bullmq';
 import { DataSource } from 'typeorm';
 import { JwtPayload } from '../../src/common/interfaces';
 import { User, UserRole } from '../../src/database/entities/user.entity';
-import { Store, StoreStatus, OmiseRecipientStatus } from '../../src/database/entities/store.entity';
+import {
+  Store,
+  StoreStatus,
+  OmiseRecipientStatus,
+  BankAccountVerificationStatus,
+} from '../../src/database/entities/store.entity';
 import { Product, ProductStatus } from '../../src/database/entities/product.entity';
 import { ProductVariant } from '../../src/database/entities/product-variant.entity';
 import { Order, OrderStatus, PaymentMethod } from '../../src/database/entities/order.entity';
@@ -43,9 +48,17 @@ import {
 export const STORE_COMMISSION_E2E_GO_LIVE_AT = '2026-01-01T00:00:00.000Z';
 export const STORE_COMMISSION_E2E_DEFAULT_RATE_PERCENT = 7;
 export const STORE_COMMISSION_E2E_JWT_SECRET = 'sopet-e2e-store-commission-jwt';
-export const STORE_COMMISSION_E2E_OMISE_SECRET_KEY = 'skey_test_e2e_store_commission';
 export const STORE_COMMISSION_E2E_OMISE_RECIPIENT_ID = 'recp_e2e_store_commission';
 export const STORE_COMMISSION_E2E_TRANSFER_ID = 'trsf_e2e_store_commission';
+
+/** Satisfies PayoutsService.hasCompleteBankAccount and the verified-account gate in manual-rail e2e. */
+export const STORE_COMMISSION_E2E_BANK_ACCOUNT = {
+  bankName: 'E2E Test Bank',
+  bankCode: '001',
+  bankAccountName: 'E2E Vendor Account',
+  bankAccountNumber: '1234567890',
+  bankAccountVerificationStatus: BankAccountVerificationStatus.VERIFIED,
+} as const;
 
 /** INT-1 / SVC-1 mixed-cutoff literals (THB) after store-scoped promo on post product. */
 export const STORE_COMMISSION_E2E_PRE_PRODUCT = 400;
@@ -126,9 +139,6 @@ export function applyStoreCommissionE2eEnv(): void {
   if (!process.env.JWT_SECRET) {
     process.env.JWT_SECRET = STORE_COMMISSION_E2E_JWT_SECRET;
   }
-  if (!process.env.OMISE_SECRET_KEY) {
-    process.env.OMISE_SECRET_KEY = STORE_COMMISSION_E2E_OMISE_SECRET_KEY;
-  }
 }
 
 export function storeCommissionE2eConfigGet(key: string): unknown {
@@ -137,12 +147,6 @@ export function storeCommissionE2eConfigGet(key: string): unknown {
   }
   if (key === 'commission.defaultRatePercent') {
     return STORE_COMMISSION_E2E_DEFAULT_RATE_PERCENT;
-  }
-  if (key === 'omise.secretKey') {
-    return STORE_COMMISSION_E2E_OMISE_SECRET_KEY;
-  }
-  if (key === 'omise.publicKey') {
-    return 'pkey_test_e2e_store_commission';
   }
   if (key === 'payout.minPayoutAmount') {
     return 500;
@@ -212,58 +216,6 @@ export function createStoreCommissionAuthFixture(input: {
       storeId: input.holdStoreId,
     }),
   };
-}
-
-/**
- * Stubs Omise REST at `global.fetch`. `POST /transfers` echoes satang from the body
- * (`Math.round(netAmount * 100)`). Never call live Omise.
- */
-export function stubOmiseCreateTransferHttp(opts: { transferId?: string } = {}): jest.Mock {
-  const transferId = opts.transferId ?? STORE_COMMISSION_E2E_TRANSFER_ID;
-  const fetchMock = jest.fn((url: string, init?: RequestInit) => {
-    const method = init?.method ?? 'GET';
-    if (typeof url === 'string' && url.includes('/transfers') && method === 'POST') {
-      const body = parseJsonBody(init?.body);
-      return Promise.resolve({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            id: transferId,
-            amount: body.amount,
-            currency: 'thb',
-            sent: false,
-            paid: false,
-          }),
-      });
-    }
-    if (typeof url === 'string' && url.includes('/recipients/')) {
-      const recipientId = url.split('/').pop() ?? STORE_COMMISSION_E2E_OMISE_RECIPIENT_ID;
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve({ id: recipientId, verified: true, active: true }),
-      });
-    }
-    return Promise.resolve({
-      ok: true,
-      json: () => Promise.resolve({ id: 'unused', status: 'pending' }),
-    });
-  });
-  global.fetch = fetchMock as unknown as typeof fetch;
-  return fetchMock;
-}
-
-export function readOmiseCreateTransferSatang(fetchMock: jest.Mock): number[] {
-  const amounts: number[] = [];
-  const calls = fetchMock.mock.calls as Array<[string, RequestInit | undefined]>;
-  for (const [url, init] of calls) {
-    if (typeof url === 'string' && url.includes('/transfers') && init?.method === 'POST') {
-      const body = parseJsonBody(init.body);
-      if (typeof body.amount === 'number') {
-        amounts.push(body.amount);
-      }
-    }
-  }
-  return amounts;
 }
 
 export function createStoreCommissionSchedulerQueueMock(): {
@@ -393,13 +345,6 @@ function emptyTrackedIds(): StoreCommissionE2eTrackedIds {
   };
 }
 
-function parseJsonBody(body: BodyInit | null | undefined): { amount?: number } {
-  if (typeof body !== 'string') {
-    return {};
-  }
-  return JSON.parse(body) as { amount?: number };
-}
-
 async function seedCatalog(
   dataSource: DataSource,
   context: SeedRunContext,
@@ -422,8 +367,10 @@ async function seedCatalog(
     status: StoreStatus.APPROVED,
     approvedBy: vendor.id,
   });
+  const storeRepo = dataSource.getRepository(Store);
+  await storeRepo.update(store.id, { ...STORE_COMMISSION_E2E_BANK_ACCOUNT });
+  store = await storeRepo.findOneByOrFail({ id: store.id });
   if (input.connectOmiseRecipient) {
-    const storeRepo = dataSource.getRepository(Store);
     await storeRepo.update(store.id, {
       omiseRecipientId: STORE_COMMISSION_E2E_OMISE_RECIPIENT_ID,
       omiseRecipientStatus: OmiseRecipientStatus.ACTIVE,

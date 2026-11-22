@@ -1,5 +1,5 @@
-import { Args, Context, Mutation, Query, Resolver } from '@nestjs/graphql';
-import { BadRequestException, UseGuards } from '@nestjs/common';
+import { Args, Context, Int, Mutation, Query, Resolver } from '@nestjs/graphql';
+import { BadRequestException, ForbiddenException, UseGuards } from '@nestjs/common';
 import { PromotionsService } from './promotions.service';
 import { Public, CurrentUser, Roles } from '../../common/decorators';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -7,6 +7,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Promotion, PromotionScope } from '../../database/entities/promotion.entity';
 import {
   PromotionType as PromotionGraphqlType,
+  PromotionConnection,
   PromotionValidationResult,
   ValidatePromotionsResult,
 } from '../../graphql/models/types';
@@ -104,24 +105,57 @@ export class PromotionsResolver {
     return promotions.map(mapPromotion);
   }
 
-  @Query(() => [PromotionGraphqlType])
+  @Query(() => PromotionGraphqlType)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('vendor')
+  @Roles('admin', 'vendor')
+  async promotion(
+    @Args('id') id: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: string,
+  ): Promise<PromotionGraphqlType> {
+    const found = await this.promotionsService.findOne(id);
+    if (role === 'vendor') {
+      if (!found.storeId) {
+        throw new ForbiddenException({
+          code: 'FORBIDDEN',
+          message: 'Cannot view this promotion',
+        });
+      }
+      await this.storesService.assertStoreAccessIfVendor(role, userId, found.storeId);
+    }
+    return mapPromotion(found);
+  }
+
+  @Query(() => PromotionConnection)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin', 'vendor')
   async storePromotions(
     @Args('storeId') storeId: string,
     @CurrentUser('id') userId: string,
-  ): Promise<PromotionGraphqlType[]> {
-    await this.storesService.assertStoreAccess(userId, storeId);
-    const promotions = await this.promotionsService.findByStore(storeId);
-    return promotions.map(mapPromotion);
+    @CurrentUser('role') role: string,
+    @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page?: number,
+    @Args('limit', { type: () => Int, nullable: true, defaultValue: 20 }) limit?: number,
+  ): Promise<PromotionConnection> {
+    await this.storesService.assertStoreAccessIfVendor(role, userId, storeId);
+    const result = await this.promotionsService.findByStore(storeId, page, limit);
+    return {
+      items: result.items.map(mapPromotion),
+      pagination: result.pagination,
+    };
   }
 
-  @Query(() => [PromotionGraphqlType])
+  @Query(() => PromotionConnection)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
-  async platformPromotions(): Promise<PromotionGraphqlType[]> {
-    const promotions = await this.promotionsService.findPlatform();
-    return promotions.map(mapPromotion);
+  async platformPromotions(
+    @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page?: number,
+    @Args('limit', { type: () => Int, nullable: true, defaultValue: 20 }) limit?: number,
+  ): Promise<PromotionConnection> {
+    const result = await this.promotionsService.findPlatform(page, limit);
+    return {
+      items: result.items.map(mapPromotion),
+      pagination: result.pagination,
+    };
   }
 
   @Mutation(() => PromotionGraphqlType)
@@ -136,6 +170,23 @@ export class PromotionsResolver {
     @Context() context?: GraphqlContext,
   ): Promise<PromotionGraphqlType> {
     if (role === 'admin') {
+      if (input.storeId?.trim()) {
+        const targetStoreId = input.storeId.trim();
+        await this.storesService.assertStoreExists(targetStoreId);
+        const promotion = await this.promotionsService.create(
+          input,
+          PromotionScope.STORE,
+          targetStoreId,
+        );
+        await this.logPromotionAudit(
+          userId,
+          email,
+          AuditAction.PROMOTION_CREATED,
+          promotion,
+          context?.req,
+        );
+        return mapPromotion(promotion);
+      }
       const promotion = await this.promotionsService.create(input, PromotionScope.PLATFORM);
       await this.logPromotionAudit(
         userId,
@@ -179,6 +230,11 @@ export class PromotionsResolver {
     if (role === 'vendor') {
       await this.storesService.assertStoreAccess(userId, promotion.storeId!);
       this.promotionsService.assertCanManage(promotion, PromotionScope.STORE, storeId);
+    } else if (promotion.scope === PromotionScope.STORE) {
+      if (promotion.storeId) {
+        await this.storesService.assertStoreExists(promotion.storeId);
+      }
+      this.promotionsService.assertCanManage(promotion, PromotionScope.STORE);
     } else {
       this.promotionsService.assertCanManage(promotion, PromotionScope.PLATFORM);
     }
@@ -210,6 +266,11 @@ export class PromotionsResolver {
     if (role === 'vendor') {
       await this.storesService.assertStoreAccess(userId, promotion.storeId!);
       this.promotionsService.assertCanManage(promotion, PromotionScope.STORE, storeId);
+    } else if (promotion.scope === PromotionScope.STORE) {
+      if (promotion.storeId) {
+        await this.storesService.assertStoreExists(promotion.storeId);
+      }
+      this.promotionsService.assertCanManage(promotion, PromotionScope.STORE);
     } else {
       this.promotionsService.assertCanManage(promotion, PromotionScope.PLATFORM);
     }
@@ -242,6 +303,11 @@ export class PromotionsResolver {
     if (role === 'vendor') {
       await this.storesService.assertStoreAccess(userId, promotion.storeId!);
       this.promotionsService.assertCanManage(promotion, PromotionScope.STORE, storeId);
+    } else if (promotion.scope === PromotionScope.STORE) {
+      if (promotion.storeId) {
+        await this.storesService.assertStoreExists(promotion.storeId);
+      }
+      this.promotionsService.assertCanManage(promotion, PromotionScope.STORE);
     } else {
       this.promotionsService.assertCanManage(promotion, PromotionScope.PLATFORM);
     }

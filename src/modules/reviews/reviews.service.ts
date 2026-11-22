@@ -17,12 +17,34 @@ import { OrderItem } from '../../database/entities/order-item.entity';
 import { OrderStatus } from '../../database/entities/enums/order.enums';
 import { PaginatedResponse } from '../../common/interfaces';
 import { StoresService } from '../stores/stores.service';
+import { StorageService } from '../storage/storage.service';
+import { DashboardEventsService } from '../dashboard-events/dashboard-events.service';
+import { DashboardActivityKind } from '../dashboard-events/dashboard-activity.constants';
 
 export type StoreReviewReplyFilter = 'all' | 'unreplied' | 'replied';
 export type StoreReviewRatingFilter = 'all' | '1' | '2' | '3' | '4' | '5';
 
 export const STORE_PRODUCT_REVIEWS_DEFAULT_LIMIT = 20;
 export const STORE_PRODUCT_REVIEWS_MAX_LIMIT = 100;
+
+/**
+ * Public productReviews / storeReviews stay arrays. Clients that omit page/limit
+ * receive at most this many rows (PDP slices 4 then +10 locally; seller tab slices
+ * 10 per page). Truncating lists longer than the cap is intentional.
+ */
+export const PUBLIC_REVIEW_LIST_MAX_LIMIT = 100;
+
+export function clampPublicReviewList(
+  page?: number,
+  limit?: number,
+): { page: number; limit: number; skip: number } {
+  const safePage = Math.max(page ?? 1, 1);
+  const safeLimit = Math.min(
+    Math.max(limit ?? PUBLIC_REVIEW_LIST_MAX_LIMIT, 1),
+    PUBLIC_REVIEW_LIST_MAX_LIMIT,
+  );
+  return { page: safePage, limit: safeLimit, skip: (safePage - 1) * safeLimit };
+}
 
 export type BatchApproveReviewFailure = {
   reviewId: string;
@@ -82,6 +104,54 @@ export function resolveReviewCustomerName(
     return UNKNOWN_CUSTOMER_DISPLAY_NAME;
   }
   return maskCustomerName(review.customer);
+}
+
+/** Buyer name for the vendor review list. Public reviews stay masked. */
+export function resolveVendorReviewCustomerName(
+  review: Pick<Review, 'source' | 'customerId'> & {
+    customer?: Pick<Customer, 'fullName' | 'phone'> | null;
+    order?: {
+      guestName?: string | null;
+      shippingAddress?: { fullName?: string | null } | null;
+    } | null;
+  },
+): string {
+  if (review.source === ReviewSource.VENDOR_IMPORT || !review.customerId) {
+    return UNKNOWN_CUSTOMER_DISPLAY_NAME;
+  }
+
+  const accountName = review.customer?.fullName?.trim();
+  if (accountName) {
+    return accountName;
+  }
+
+  const phone = review.customer?.phone?.trim();
+  if (phone) {
+    return phone;
+  }
+
+  const shippingName = review.order?.shippingAddress?.fullName?.trim();
+  if (shippingName) {
+    return shippingName;
+  }
+
+  const guestName = review.order?.guestName?.trim();
+  if (guestName) {
+    return guestName;
+  }
+
+  return 'ลูกค้า';
+}
+
+export function resolveReviewCustomerProfilePhotoUrl(
+  review: Pick<Review, 'source' | 'customerId'> & {
+    customer?: Pick<Customer, 'profilePhotoUrl'> | null;
+  },
+): string | null {
+  if (review.source === ReviewSource.VENDOR_IMPORT || !review.customerId) {
+    return null;
+  }
+  return review.customer?.profilePhotoUrl ?? null;
 }
 
 export function getReviewWindowDays(): number {
@@ -172,10 +242,13 @@ export interface StoreProductReviewResult {
   productImageUrl: string | null;
   rating: number;
   comment: string | null;
+  customerId: string | null;
   customerName: string;
+  customerProfilePhotoUrl?: string | null;
   createdAt: Date;
   images: ReviewImageResult[];
   reply: ReviewReplyResult | null;
+  variantOptions: string | null;
 }
 
 export interface StoreReviewSummaryResult {
@@ -206,6 +279,87 @@ export interface CustomerReviewableItemResult {
   reviewDeadline: Date;
 }
 
+interface ReviewableItemRow {
+  orderId: string;
+  orderNumber: string;
+  orderItemId: string;
+  productId: string;
+  productName: string;
+  productSlug: string | null;
+  productImageUrl: string | null;
+  deliveredAt: Date | string | null;
+}
+
+/**
+ * Same delivered-at rule as resolveItemDeliveredAt for orders already filtered to delivered:
+ * item.delivered_at, else latest delivered status history, else order.updated_at.
+ * Soft-deleted variants and reviews are excluded, matching TypeORM relation loads.
+ */
+const REVIEWABLE_ITEMS_SQL = `
+SELECT
+  candidate."orderId",
+  candidate."orderNumber",
+  candidate."orderItemId",
+  candidate."productId",
+  candidate."productName",
+  candidate."productSlug",
+  candidate."productImageUrl",
+  candidate."deliveredAt"
+FROM (
+  SELECT
+    "order".id AS "orderId",
+    "order".order_number AS "orderNumber",
+    item.id AS "orderItemId",
+    variant.product_id AS "productId",
+    COALESCE(product.name, item.product_name) AS "productName",
+    product.slug AS "productSlug",
+    thumb.url AS "productImageUrl",
+    COALESCE(
+      item.delivered_at,
+      (
+        SELECT history.created_at
+        FROM "order_status_history" history
+        WHERE history.order_id = "order".id
+          AND history.status = $2
+        ORDER BY history.created_at DESC
+        LIMIT 1
+      ),
+      "order".updated_at
+    ) AS "deliveredAt",
+    "order".created_at AS "orderCreatedAt",
+    item.created_at AS "itemCreatedAt"
+  FROM "orders" "order"
+  INNER JOIN "order_items" item ON item.order_id = "order".id
+  INNER JOIN "product_variants" variant
+    ON variant.id = item.variant_id
+   AND variant.deleted_at IS NULL
+  LEFT JOIN "products" product
+    ON product.id = variant.product_id
+   AND product.deleted_at IS NULL
+  LEFT JOIN LATERAL (
+    SELECT image.url
+    FROM "product_images" image
+    WHERE image.product_id = product.id
+    ORDER BY image.is_thumbnail DESC, image.sort_order ASC, image.created_at ASC, image.id ASC
+    LIMIT 1
+  ) thumb ON TRUE
+  WHERE "order".customer_id = $1
+    AND "order".status = $2
+    AND variant.product_id IS NOT NULL
+    AND NOT EXISTS (
+      SELECT 1
+      FROM "reviews" review
+      WHERE review.deleted_at IS NULL
+        AND review.customer_id = $1
+        AND review.order_id = "order".id
+        AND review.product_id = variant.product_id
+    )
+) candidate
+WHERE candidate."deliveredAt" IS NOT NULL
+  AND candidate."deliveredAt" + ($3 * INTERVAL '1 day') >= $4
+ORDER BY candidate."orderCreatedAt" DESC, candidate."itemCreatedAt" ASC, candidate."orderItemId" ASC
+`;
+
 export interface CustomerReviewResult {
   id: string;
   productId: string;
@@ -218,6 +372,7 @@ export interface CustomerReviewResult {
   status: string;
   createdAt: Date;
   images: ReviewImageResult[];
+  variantOptions: string | null;
 }
 
 function mapReply(reply: ReviewReply | null | undefined): ReviewReplyResult | null {
@@ -240,7 +395,11 @@ function mapReviewImages(images: ReviewImage[] | null | undefined): ReviewImageR
   }));
 }
 
-function mapReviewToStoreProductReview(review: Review): StoreProductReviewResult {
+function mapReviewToStoreProductReview(
+  review: Review,
+  options?: { revealBuyer?: boolean },
+): StoreProductReviewResult {
+  const revealBuyer = options?.revealBuyer === true;
   return {
     id: review.id,
     productId: review.productId,
@@ -249,10 +408,15 @@ function mapReviewToStoreProductReview(review: Review): StoreProductReviewResult
     productImageUrl: review.product ? resolveThumbnailUrl(review.product.images) : null,
     rating: review.rating,
     comment: review.comment,
-    customerName: resolveReviewCustomerName(review),
+    customerId: revealBuyer ? review.customerId : null,
+    customerName: revealBuyer
+      ? resolveVendorReviewCustomerName(review)
+      : resolveReviewCustomerName(review),
+    customerProfilePhotoUrl: resolveReviewCustomerProfilePhotoUrl(review),
     createdAt: review.createdAt,
     images: mapReviewImages(review.images),
     reply: mapReply(review.reply),
+    variantOptions: review.variantOptions,
   };
 }
 
@@ -270,7 +434,28 @@ export class ReviewsService {
     @InjectRepository(Product)
     private readonly productRepository: Repository<Product>,
     private readonly storesService: StoresService,
+    private readonly storageService: StorageService,
+    private readonly dashboardEventsService: DashboardEventsService,
   ) {}
+
+  private async publishReviewActivity(reviewId: string, storeId?: string | null): Promise<void> {
+    let ownerId: string | undefined;
+    if (storeId) {
+      try {
+        const store = await this.storesService.findOne(storeId);
+        ownerId = store.ownerId;
+      } catch {
+        // best-effort
+      }
+    }
+    await this.dashboardEventsService.publish({
+      kind: DashboardActivityKind.REVIEW,
+      entityId: reviewId,
+      storeId: storeId ?? null,
+      userIds: ownerId ? [ownerId] : undefined,
+      roles: ['admin'],
+    });
+  }
 
   async create(input: {
     customerId: string;
@@ -332,6 +517,21 @@ export class ReviewsService {
 
     const status = resolveInitialReviewStatus();
     const imageUrls = this.normalizeReviewImageUrls(input.imageUrls);
+
+    let variantOptionsText: string | null = null;
+    if (orderItem.variantOptions) {
+      if (typeof orderItem.variantOptions === 'object' && orderItem.variantOptions !== null) {
+        const values = Object.values(orderItem.variantOptions).filter(
+          (val) => typeof val === 'string',
+        );
+        if (values.length > 0) {
+          variantOptionsText = values.join(', ');
+        }
+      } else if (typeof orderItem.variantOptions === 'string') {
+        variantOptionsText = (orderItem.variantOptions as string).trim() || null;
+      }
+    }
+
     const review = this.reviewRepository.create({
       customerId: input.customerId,
       productId: input.productId,
@@ -340,6 +540,7 @@ export class ReviewsService {
       comment: input.comment,
       status,
       source: ReviewSource.CUSTOMER,
+      variantOptions: variantOptionsText,
     });
     const saved = await this.reviewRepository.save(review);
     if (imageUrls.length > 0) {
@@ -349,6 +550,11 @@ export class ReviewsService {
       await this.reviewImageRepository.save(images);
     }
     await this.syncProductReviewStats(input.productId);
+    const product = await this.productRepository.findOne({
+      where: { id: input.productId },
+      select: ['id', 'storeId'],
+    });
+    this.publishReviewActivity(saved.id, product?.storeId).catch(() => {});
     const withRelations = await this.reviewRepository.findOne({
       where: { id: saved.id },
       relations: ['customer', 'images'],
@@ -384,7 +590,10 @@ export class ReviewsService {
     }
 
     const comment = input.comment?.trim() ? input.comment.trim().slice(0, 2000) : null;
-    const imageUrls = this.normalizeReviewImageUrls(input.imageUrls);
+    const sourceUrls = this.normalizeReviewImageUrls(input.imageUrls);
+    // Download into object storage before creating the review so a failed ingest
+    // never leaves a pending vendor_import row with remote source URLs.
+    const storageUrls = await this.importReviewImagesFromSourceUrls(sourceUrls);
 
     const review = this.reviewRepository.create({
       productId,
@@ -396,8 +605,8 @@ export class ReviewsService {
       source: ReviewSource.VENDOR_IMPORT,
     });
     const saved = await this.reviewRepository.save(review);
-    if (imageUrls.length > 0) {
-      const images = imageUrls.map((url) =>
+    if (storageUrls.length > 0) {
+      const images = storageUrls.map((url) =>
         this.reviewImageRepository.create({ reviewId: saved.id, url }),
       );
       await this.reviewImageRepository.save(images);
@@ -540,6 +749,7 @@ export class ReviewsService {
     review.moderatedAt = new Date();
     await this.reviewRepository.save(review);
     await this.syncProductReviewStats(review.productId);
+    this.publishReviewActivity(review.id, review.product?.storeId).catch(() => {});
 
     const withRelations = await this.reviewRepository.findOne({
       where: { id: review.id },
@@ -675,6 +885,7 @@ export class ReviewsService {
     review.moderatedBy = adminUserId;
     review.moderatedAt = new Date();
     await this.reviewRepository.save(review);
+    this.publishReviewActivity(review.id, review.product?.storeId).catch(() => {});
 
     const withRelations = await this.reviewRepository.findOne({
       where: { id: review.id },
@@ -686,68 +897,37 @@ export class ReviewsService {
   async findReviewableItemsForCustomer(
     customerId: string,
   ): Promise<CustomerReviewableItemResult[]> {
-    const orders = await this.orderRepository.find({
-      where: { customerId, status: OrderStatus.DELIVERED },
-      relations: [
-        'items',
-        'items.productVariant',
-        'items.productVariant.product',
-        'items.productVariant.product.images',
-        'statusHistory',
-      ],
-      order: { createdAt: 'DESC' },
-    });
-
-    const existingReviews = await this.reviewRepository.find({
-      where: { customerId },
-      select: ['orderId', 'productId'],
-    });
-    const reviewedKeys = new Set(
-      existingReviews.map((review) => `${review.orderId}:${review.productId}`),
-    );
-
     const windowDays = getReviewWindowDays();
-    const now = Date.now();
-    const results: CustomerReviewableItemResult[] = [];
+    const rows: ReviewableItemRow[] = await this.orderRepository.query(REVIEWABLE_ITEMS_SQL, [
+      customerId,
+      OrderStatus.DELIVERED,
+      windowDays,
+      new Date(),
+    ]);
 
-    for (const order of orders) {
-      for (const item of order.items ?? []) {
-        const productId = item.productVariant?.productId;
-        if (!productId) {
-          continue;
-        }
-
-        const reviewKey = `${order.id}:${productId}`;
-        if (reviewedKeys.has(reviewKey)) {
-          continue;
-        }
-
-        const deliveredAt = resolveItemDeliveredAt(item, order);
-        if (!deliveredAt) {
-          continue;
-        }
-
-        const reviewDeadline = addDays(deliveredAt, windowDays);
-        if (reviewDeadline.getTime() < now) {
-          continue;
-        }
-
-        const product = item.productVariant?.product;
-        results.push({
-          orderId: order.id,
-          orderNumber: order.orderNumber,
-          orderItemId: item.id,
-          productId,
-          productName: product?.name ?? item.productName,
-          productSlug: product?.slug ?? null,
-          productImageUrl: product ? resolveThumbnailUrl(product.images) : null,
-          deliveredAt,
-          reviewDeadline,
-        });
+    return rows.flatMap((row) => {
+      if (!row.deliveredAt) {
+        return [];
       }
-    }
-
-    return results;
+      const deliveredAt =
+        row.deliveredAt instanceof Date ? row.deliveredAt : new Date(row.deliveredAt);
+      if (Number.isNaN(deliveredAt.getTime())) {
+        return [];
+      }
+      return [
+        {
+          orderId: row.orderId,
+          orderNumber: row.orderNumber,
+          orderItemId: row.orderItemId,
+          productId: row.productId,
+          productName: row.productName,
+          productSlug: row.productSlug,
+          productImageUrl: row.productImageUrl,
+          deliveredAt,
+          reviewDeadline: addDays(deliveredAt, windowDays),
+        },
+      ];
+    });
   }
 
   async findMyReviews(customerId: string, limit = 50, offset = 0): Promise<CustomerReviewResult[]> {
@@ -774,27 +954,55 @@ export class ReviewsService {
       status: review.status,
       createdAt: review.createdAt,
       images: mapReviewImages(review.images),
+      variantOptions: review.variantOptions,
     }));
   }
 
-  async findByProduct(productId: string): Promise<Review[]> {
+  async findByProduct(productId: string, page?: number, limit?: number): Promise<Review[]> {
+    const { skip, limit: take } = clampPublicReviewList(page, limit);
     return this.reviewRepository.find({
       where: { productId, status: ReviewStatus.APPROVED },
       relations: ['customer', 'images', 'reply'],
-      order: { createdAt: 'DESC' },
+      order: { createdAt: 'DESC', id: 'DESC' },
+      take,
+      skip,
     });
   }
 
-  async findByStore(storeId: string): Promise<StoreProductReviewResult[]> {
-    const reviews = await this.buildStoreReviewsQuery(storeId)
+  async findByStore(
+    storeId: string,
+    page?: number,
+    limit?: number,
+  ): Promise<StoreProductReviewResult[]> {
+    const { skip, limit: take } = clampPublicReviewList(page, limit);
+    const idRows = await this.buildStoreReviewsFilterQuery(storeId)
+      .select('review.id', 'id')
+      .orderBy('review.createdAt', 'DESC')
+      .addOrderBy('review.id', 'DESC')
+      .offset(skip)
+      .limit(take)
+      .getRawMany<{ id: string }>();
+
+    if (idRows.length === 0) {
+      return [];
+    }
+
+    const reviewIds = idRows.map((row) => row.id);
+    const loadedReviews = await this.reviewRepository
+      .createQueryBuilder('review')
+      .innerJoinAndSelect('review.product', 'product')
       .leftJoinAndSelect('product.images', 'images')
       .leftJoinAndSelect('review.customer', 'customer')
       .leftJoinAndSelect('review.reply', 'reply')
       .leftJoinAndSelect('review.images', 'reviewImages')
-      .orderBy('review.createdAt', 'DESC')
+      .where('review.id IN (:...reviewIds)', { reviewIds })
       .getMany();
 
-    return reviews.map(mapReviewToStoreProductReview);
+    const reviewsById = new Map(loadedReviews.map((review) => [review.id, review]));
+    return reviewIds
+      .map((id) => reviewsById.get(id))
+      .filter((review): review is Review => review !== undefined)
+      .map((review) => mapReviewToStoreProductReview(review));
   }
 
   async findByStorePaginated(params: {
@@ -846,6 +1054,8 @@ export class ReviewsService {
       .innerJoinAndSelect('review.product', 'product')
       .leftJoinAndSelect('product.images', 'images')
       .leftJoinAndSelect('review.customer', 'customer')
+      .leftJoinAndSelect('review.order', 'reviewOrder')
+      .leftJoinAndSelect('reviewOrder.shippingAddress', 'shippingAddress')
       .leftJoinAndSelect('review.reply', 'reply')
       .leftJoinAndSelect('review.images', 'reviewImages')
       .where('review.id IN (:...reviewIds)', { reviewIds })
@@ -857,7 +1067,7 @@ export class ReviewsService {
       .filter((review): review is Review => review !== undefined);
 
     return {
-      items: reviews.map(mapReviewToStoreProductReview),
+      items: reviews.map((review) => mapReviewToStoreProductReview(review, { revealBuyer: true })),
       pagination: {
         page,
         limit,
@@ -901,10 +1111,15 @@ export class ReviewsService {
 
   async createReviewReply(params: {
     userId: string;
+    role?: string;
     reviewId: string;
     body: string;
   }): Promise<ReviewReply> {
-    const review = await this.assertVendorCanAccessReview(params.userId, params.reviewId);
+    const review = await this.assertVendorCanAccessReview(
+      params.userId,
+      params.reviewId,
+      params.role,
+    );
     if (review.status !== ReviewStatus.APPROVED) {
       throw new BadRequestException({
         code: 'REVIEW_NOT_APPROVED',
@@ -942,6 +1157,7 @@ export class ReviewsService {
 
   async updateReviewReply(params: {
     userId: string;
+    role?: string;
     replyId: string;
     body: string;
   }): Promise<ReviewReply> {
@@ -956,7 +1172,7 @@ export class ReviewsService {
       });
     }
 
-    await this.assertVendorCanAccessReview(params.userId, reply.reviewId);
+    await this.assertVendorCanAccessReview(params.userId, reply.reviewId, params.role);
 
     if (reply.review.status !== ReviewStatus.APPROVED) {
       throw new BadRequestException({
@@ -970,7 +1186,11 @@ export class ReviewsService {
     return this.reviewReplyRepository.save(reply);
   }
 
-  private async assertVendorCanAccessReview(userId: string, reviewId: string): Promise<Review> {
+  private async assertVendorCanAccessReview(
+    userId: string,
+    reviewId: string,
+    role?: string,
+  ): Promise<Review> {
     const review = await this.reviewRepository.findOne({
       where: { id: reviewId },
       relations: ['product'],
@@ -982,15 +1202,73 @@ export class ReviewsService {
       });
     }
 
-    const hasAccess = await this.storesService.userHasStoreAccess(userId, review.product.storeId);
-    if (!hasAccess) {
-      throw new ForbiddenException({
-        code: 'STORE_ACCESS_DENIED',
-        message: 'No access to this store',
-      });
-    }
+    await this.storesService.assertActorStoreAccess(role, userId, review.product.storeId, {
+      action: 'manage store reviews',
+    });
 
     return review;
+  }
+
+  /**
+   * One-off / ops: re-ingest review_images that still point at remote (non-storage) URLs
+   * into the `reviews` folder. Sequential to limit load. Failures are logged and skipped.
+   */
+  async backfillRemoteReviewImagesToStorage(options?: {
+    dryRun?: boolean;
+    limit?: number;
+  }): Promise<{
+    scanned: number;
+    skippedAlreadyStored: number;
+    updated: number;
+    failed: number;
+    failures: Array<{ id: string; sourceUrl: string; message: string }>;
+  }> {
+    const dryRun = options?.dryRun === true;
+    const limit =
+      options?.limit !== undefined && Number.isFinite(options.limit) && options.limit > 0
+        ? Math.floor(options.limit)
+        : undefined;
+
+    const rows = await this.reviewImageRepository.find({
+      order: { createdAt: 'ASC' },
+      ...(limit ? { take: limit } : {}),
+    });
+
+    let skippedAlreadyStored = 0;
+    let updated = 0;
+    let failed = 0;
+    const failures: Array<{ id: string; sourceUrl: string; message: string }> = [];
+
+    for (const row of rows) {
+      if (this.storageService.isOurPublicFolderUrl(row.url, 'reviews')) {
+        skippedAlreadyStored += 1;
+        continue;
+      }
+
+      if (dryRun) {
+        updated += 1;
+        continue;
+      }
+
+      try {
+        const uploaded = await this.storageService.importImageFromUrl(row.url, 'reviews');
+        row.url = uploaded.url;
+        await this.reviewImageRepository.save(row);
+        updated += 1;
+      } catch (error) {
+        failed += 1;
+        const message = error instanceof Error ? error.message : String(error);
+        failures.push({ id: row.id, sourceUrl: row.url, message });
+      }
+    }
+
+    return {
+      scanned: rows.length,
+      skippedAlreadyStored,
+      updated,
+      failed,
+      failures,
+    };
   }
 
   private validateReplyBody(body: string): string {
@@ -1033,6 +1311,23 @@ export class ReviewsService {
     return normalized;
   }
 
+  /**
+   * Download each source URL into the reviews folder and return storage URLs only.
+   * Source URLs are never persisted. Empty/undefined → [].
+   */
+  private async importReviewImagesFromSourceUrls(sourceUrls?: string[]): Promise<string[]> {
+    if (!sourceUrls?.length) {
+      return [];
+    }
+
+    const storageUrls: string[] = [];
+    for (const sourceUrl of sourceUrls) {
+      const uploaded = await this.storageService.importImageFromUrl(sourceUrl, 'reviews');
+      storageUrls.push(uploaded.url);
+    }
+    return storageUrls;
+  }
+
   private isReviewReplyUniqueViolation(error: unknown): boolean {
     return (
       error instanceof QueryFailedError &&
@@ -1041,59 +1336,63 @@ export class ReviewsService {
   }
 
   async getStoreReviewSummary(storeId: string): Promise<StoreReviewSummaryResult> {
-    const products = await this.productRepository.find({
-      where: { storeId },
-      select: ['id', 'name'],
+    const emptySummary = (): StoreReviewSummaryResult => ({
+      averageRating: 0,
+      totalCount: 0,
+      rating5Count: 0,
+      rating4Count: 0,
+      rating3Count: 0,
+      rating2Count: 0,
+      rating1Count: 0,
+      productBreakdown: [],
     });
 
-    const productIds = products.map((p) => p.id);
-    if (productIds.length === 0) {
-      return {
-        averageRating: 0,
-        totalCount: 0,
-        rating5Count: 0,
-        rating4Count: 0,
-        rating3Count: 0,
-        rating2Count: 0,
-        rating1Count: 0,
-        productBreakdown: [],
-      };
+    // Empty/invalid ids would throw QueryFailedError (invalid uuid) as INTERNAL_SERVER_ERROR.
+    if (!storeId?.trim()) {
+      return emptySummary();
     }
 
     const summaryRows = await this.reviewRepository
       .createQueryBuilder('review')
+      .innerJoin('review.product', 'product', 'product.store_id = :storeId', { storeId })
       .select('review.productId', 'productId')
+      .addSelect('product.name', 'productName')
       .addSelect('AVG(review.rating)', 'averageRating')
       .addSelect('COUNT(review.id)', 'reviewCount')
-      .where('review.productId IN (:...productIds)', { productIds })
-      .andWhere('review.status = :status', { status: ReviewStatus.APPROVED })
+      .where('review.status = :status', { status: ReviewStatus.APPROVED })
       .groupBy('review.productId')
+      .addGroupBy('product.name')
       .getRawMany<{
         productId: string;
+        productName: string | null;
         averageRating: string;
         reviewCount: string;
       }>();
 
-    const productNameById = new Map(products.map((p) => [p.id, p.name]));
+    if (summaryRows.length === 0) {
+      return emptySummary();
+    }
+
     const productBreakdown = summaryRows.map((row) => ({
       productId: row.productId,
-      productName: productNameById.get(row.productId) ?? 'Unknown',
+      productName: row.productName ?? 'Unknown',
       averageRating: Number(row.averageRating),
       reviewCount: Number(row.reviewCount),
     }));
 
     const totalCount = productBreakdown.reduce((sum, p) => sum + p.reviewCount, 0);
-    const averageRating =
-      totalCount > 0
-        ? productBreakdown.reduce((sum, p) => sum + p.averageRating * p.reviewCount, 0) / totalCount
-        : 0;
+    const weightedTotal = productBreakdown.reduce(
+      (sum, product) => sum + product.averageRating * product.reviewCount,
+      0,
+    );
+    const averageRating = totalCount > 0 ? weightedTotal / totalCount : 0;
 
     const ratingRows = await this.reviewRepository
       .createQueryBuilder('review')
+      .innerJoin('review.product', 'product', 'product.store_id = :storeId', { storeId })
       .select('review.rating', 'rating')
       .addSelect('COUNT(review.id)', 'count')
-      .where('review.productId IN (:...productIds)', { productIds })
-      .andWhere('review.status = :status', { status: ReviewStatus.APPROVED })
+      .where('review.status = :status', { status: ReviewStatus.APPROVED })
       .groupBy('review.rating')
       .getRawMany<{
         rating: string;

@@ -111,6 +111,31 @@ describe('AuthService', () => {
     service = module.get(AuthService);
   });
 
+  describe('customerExistsByPhone', () => {
+    it('returns exists true when an active customer matches the phone', async () => {
+      customerRepoWrapper.findActiveByPhone.mockResolvedValue({
+        id: 'cust-1',
+        phone: '0812345678',
+      });
+
+      await expect(service.customerExistsByPhone('+66812345678')).resolves.toEqual({
+        exists: true,
+      });
+      expect(customerRepoWrapper.findActiveByPhone).toHaveBeenCalledWith('0812345678');
+    });
+
+    it('returns exists false when no customer matches', async () => {
+      customerRepoWrapper.findActiveByPhone.mockResolvedValue(null);
+
+      await expect(service.customerExistsByPhone('0812345678')).resolves.toEqual({ exists: false });
+    });
+
+    it('returns exists false for empty phone without looking up', async () => {
+      await expect(service.customerExistsByPhone('   ')).resolves.toEqual({ exists: false });
+      expect(customerRepoWrapper.findActiveByPhone).not.toHaveBeenCalled();
+    });
+  });
+
   it('rate limits sendOtp after 3 attempts', async () => {
     otpRepo.count.mockResolvedValue(3);
 

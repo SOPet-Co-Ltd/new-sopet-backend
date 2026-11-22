@@ -1,5 +1,30 @@
 import { Field, Float, InputType } from '@nestjs/graphql';
-import { IsNotEmpty, IsNumber, IsOptional, IsString, IsUUID, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsIn,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Min,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
+
+@InputType()
+export class SaveCardOnPaymentInput {
+  /** RSA-OAEP ciphertext (`rsa:v1:...`) of `{ cardholderName, pan, expiryMonth, expiryYear }`. */
+  @Field()
+  @IsNotEmpty()
+  @IsString()
+  cardCipher!: string;
+
+  @Field({ nullable: true })
+  @IsOptional()
+  @IsBoolean()
+  isDefault?: boolean;
+}
 
 @InputType()
 export class CreatePaymentInput {
@@ -7,10 +32,12 @@ export class CreatePaymentInput {
   @IsUUID()
   orderId!: string;
 
-  @Field(() => Float)
+  /** Ignored by the service — charges use the locked order total. */
+  @Field(() => Float, { nullable: true })
+  @IsOptional()
   @IsNumber()
   @Min(0)
-  amount!: number;
+  amount?: number;
 
   @Field({ defaultValue: 'THB' })
   @IsString()
@@ -24,7 +51,13 @@ export class CreatePaymentInput {
   @Field({ nullable: true })
   @IsOptional()
   @IsString()
-  omiseToken?: string;
+  cardToken?: string;
+
+  /** RSA-OAEP ciphertext (`rsa:v1:...`) of the CVV. Never persisted. */
+  @Field({ nullable: true })
+  @IsOptional()
+  @IsString()
+  cardSecurityCodeCipher?: string;
 
   @Field({ nullable: true })
   @IsOptional()
@@ -35,4 +68,16 @@ export class CreatePaymentInput {
   @IsOptional()
   @IsString()
   guestPayToken?: string;
+
+  @Field({ nullable: true })
+  @IsOptional()
+  @IsIn(['IOS', 'ANDROID', 'WEB'])
+  platformType?: 'IOS' | 'ANDROID' | 'WEB';
+
+  /** When set, card is saved only after this payment succeeds (Beam CIT). */
+  @Field(() => SaveCardOnPaymentInput, { nullable: true })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => SaveCardOnPaymentInput)
+  saveCard?: SaveCardOnPaymentInput;
 }

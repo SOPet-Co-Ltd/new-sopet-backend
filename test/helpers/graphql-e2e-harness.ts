@@ -1,3 +1,4 @@
+import { DashboardEventsService } from '../../src/modules/dashboard-events/dashboard-events.service';
 import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -30,7 +31,6 @@ import { SearchAnalyticsService } from '../../src/modules/search/search-analytic
 import { SearchRepository } from '../../src/modules/search/search.repository';
 import { PersonalizationService } from '../../src/modules/search/personalization.service';
 import { SearchSettingsService } from '../../src/modules/search/search-settings.service';
-import { OmiseService } from '../../src/modules/omise/omise.service';
 import { NotificationsService } from '../../src/modules/notifications/notifications.service';
 import { StorageService } from '../../src/modules/storage/storage.service';
 import { AuditLogsService } from '../../src/modules/audit-logs/audit-logs.service';
@@ -77,15 +77,15 @@ export const searchTaxonomyGraphqlMockProviders = [
     },
   },
   {
-    provide: OmiseService,
-    useValue: {},
-  },
-  {
     provide: NotificationsService,
     useValue: {
       notifyTaxonomyProposal: jest.fn(),
       notifyStoreStatusChanged: jest.fn(),
     },
+  },
+  {
+    provide: DashboardEventsService,
+    useValue: { publish: jest.fn().mockResolvedValue(undefined) },
   },
   {
     provide: StorageService,

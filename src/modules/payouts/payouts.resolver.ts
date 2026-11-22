@@ -23,6 +23,7 @@ import { AuditActorType } from '../../database/entities/audit-log.entity';
 import type { GraphqlContext } from '../../graphql/loaders/graphql-context.types';
 import { StoresService } from '../stores/stores.service';
 import { PaginationMeta } from '../../graphql/models/types';
+import { decryptBankAccountNumber } from '../../common/utils/bank-account-crypto.util';
 import type { PayoutSummary } from './payouts.types';
 
 @ObjectType()
@@ -57,6 +58,15 @@ export class PayoutType {
   @Field()
   settlementRail!: string;
 
+  @Field(() => String, { nullable: true })
+  notes!: string | null;
+
+  @Field(() => String, { nullable: true })
+  failureReason!: string | null;
+
+  @Field(() => Date, { nullable: true })
+  processedAt!: Date | null;
+
   @Field()
   createdAt!: Date;
 }
@@ -84,6 +94,9 @@ export class AdminManualPayoutType {
   @Field(() => String, { nullable: true })
   bankAccountNumber!: string | null;
 
+  @Field(() => String, { nullable: true })
+  bankAccountVerificationStatus!: string | null;
+
   @Field(() => Float)
   amount!: number;
 
@@ -108,8 +121,26 @@ export class AdminManualPayoutType {
   @Field()
   settlementRail!: string;
 
+  @Field(() => String, { nullable: true })
+  notes!: string | null;
+
+  @Field(() => String, { nullable: true })
+  failureReason!: string | null;
+
+  @Field(() => Date, { nullable: true })
+  processedAt!: Date | null;
+
   @Field()
   createdAt!: Date;
+}
+
+@ObjectType()
+export class PayoutConnection {
+  @Field(() => [PayoutType])
+  items!: PayoutType[];
+
+  @Field(() => PaginationMeta)
+  pagination!: PaginationMeta;
 }
 
 @ObjectType()
@@ -122,41 +153,10 @@ export class AdminManualPayoutConnection {
 }
 
 @ObjectType()
-export class PayoutRailSummaryType {
-  @Field(() => Float)
-  grossRevenue!: number;
-
-  @Field(() => Float)
-  totalPaidOut!: number;
-
-  @Field(() => Float)
-  availableBalance!: number;
-
-  @Field(() => Float)
-  productSold!: number;
-
-  @Field(() => Float)
-  shippingFees!: number;
-
-  @Field(() => Float)
-  commissionAmount!: number;
-
-  @Field(() => Int)
-  commissionRate!: number;
-
-  @Field(() => Float)
-  pendingPayoutAmount!: number;
-
-  @Field()
-  canRequestPayout!: boolean;
-}
-
-@ObjectType()
 export class PayoutSummaryType {
   @Field()
   storeId!: string;
 
-  /** Omise-rail gross (PromptPay/card). Kept for backward compatibility. */
   @Field(() => Float)
   grossRevenue!: number;
 
@@ -186,12 +186,6 @@ export class PayoutSummaryType {
 
   @Field()
   canRequestPayout!: boolean;
-
-  @Field(() => PayoutRailSummaryType)
-  omise!: PayoutRailSummaryType;
-
-  @Field(() => PayoutRailSummaryType)
-  manual!: PayoutRailSummaryType;
 }
 
 @InputType()
@@ -288,24 +282,36 @@ export class PayoutsResolver {
     return mapSummary(await this.payoutsService.getPayoutSummary(storeId));
   }
 
-  @Query(() => [PayoutType])
+  @Query(() => PayoutConnection)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('vendor')
   async storePayouts(
     @CurrentUser('id') userId: string,
     @CurrentUser('storeId') storeId: string,
-  ): Promise<PayoutType[]> {
+    @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page?: number,
+    @Args('limit', { type: () => Int, nullable: true, defaultValue: 20 }) limit?: number,
+  ): Promise<PayoutConnection> {
     await this.storesService.assertStoreOwner(userId, storeId);
-    const payouts = await this.payoutsService.findByStore(storeId);
-    return payouts.map(mapPayout);
+    const result = await this.payoutsService.findByStore(storeId, { page, limit });
+    return {
+      items: result.items.map(mapPayout),
+      pagination: result.pagination,
+    };
   }
 
-  @Query(() => [PayoutType])
+  @Query(() => PayoutConnection)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
-  async adminStorePayouts(@Args('storeId') storeId: string): Promise<PayoutType[]> {
-    const payouts = await this.payoutsService.findByStore(storeId);
-    return payouts.map(mapPayout);
+  async adminStorePayouts(
+    @Args('storeId') storeId: string,
+    @Args('page', { type: () => Int, nullable: true, defaultValue: 1 }) page?: number,
+    @Args('limit', { type: () => Int, nullable: true, defaultValue: 20 }) limit?: number,
+  ): Promise<PayoutConnection> {
+    const result = await this.payoutsService.findByStore(storeId, { page, limit });
+    return {
+      items: result.items.map(mapPayout),
+      pagination: result.pagination,
+    };
   }
 
   @Query(() => AdminManualPayoutConnection)
@@ -323,7 +329,8 @@ export class PayoutsResolver {
         bankName: payout.store?.bankName ?? null,
         bankCode: payout.store?.bankCode ?? null,
         bankAccountName: payout.store?.bankAccountName ?? null,
-        bankAccountNumber: payout.store?.bankAccountNumber ?? null,
+        bankAccountNumber: decryptBankAccountNumber(payout.store?.bankAccountNumber),
+        bankAccountVerificationStatus: payout.store?.bankAccountVerificationStatus ?? null,
       })),
       pagination: result.pagination,
     };
@@ -345,6 +352,43 @@ export class PayoutsResolver {
 
     await this.storesService.assertStoreOwner(userId, storeId);
     const payout = await this.payoutsService.requestPayout(storeId, userId);
+    return mapPayout(payout);
+  }
+
+  @Mutation(() => PayoutType)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('vendor')
+  async cancelPayoutRequest(
+    @CurrentUser('id') userId: string,
+    @CurrentUser('email') userEmail: string | null,
+    @CurrentUser('storeId') storeId: string,
+    @Context() context?: GraphqlContext,
+  ): Promise<PayoutType> {
+    if (!storeId) {
+      throw new BadRequestException({
+        code: 'STORE_CONTEXT_REQUIRED',
+        message: 'Store context is required',
+      });
+    }
+
+    await this.storesService.assertStoreOwner(userId, storeId);
+    const payout = await this.payoutsService.cancelPayoutRequest(storeId, userId);
+
+    await this.auditLogsService.log({
+      actorType: AuditActorType.VENDOR,
+      actorId: userId,
+      actorLabel: userEmail ?? null,
+      action: AuditAction.PAYOUT_REQUEST_CANCELLED,
+      resourceType: AuditResourceType.PAYOUT,
+      resourceId: payout.id,
+      metadata: {
+        storeId,
+        amount: payout.amount,
+        settlementRail: payout.settlementRail,
+      },
+      ...getAuditRequestContext(context?.req),
+    });
+
     return mapPayout(payout);
   }
 
@@ -515,8 +559,6 @@ function mapSummary(summary: PayoutSummary): PayoutSummaryType {
     pendingPayoutAmount: summary.pendingPayoutAmount,
     minimumPayoutAmount: summary.minimumPayoutAmount,
     canRequestPayout: summary.canRequestPayout,
-    omise: { ...summary.omise },
-    manual: { ...summary.manual },
   };
 }
 
@@ -531,6 +573,9 @@ function mapPayout(payout: {
   commissionRate?: number | null;
   status: string;
   settlementRail: string;
+  notes?: string | null;
+  failureReason?: string | null;
+  processedAt?: Date | null;
   createdAt: Date;
 }): PayoutType {
   return {
@@ -544,6 +589,9 @@ function mapPayout(payout: {
     commissionRate: payout.commissionRate == null ? null : Number(payout.commissionRate),
     status: payout.status,
     settlementRail: payout.settlementRail,
+    notes: payout.notes ?? null,
+    failureReason: payout.failureReason ?? null,
+    processedAt: payout.processedAt ?? null,
     createdAt: payout.createdAt,
   };
 }

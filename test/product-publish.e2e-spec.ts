@@ -61,6 +61,9 @@ describe('Product publish (e2e)', () => {
     storesService = {
       userHasStoreAccess: jest.fn(() => Promise.resolve(true)),
       isStoreSuspended: jest.fn(() => Promise.resolve(false)),
+      assertActorStoreAccess: jest.fn((_role: string, _userId: string, storeId: string) =>
+        Promise.resolve(storeId),
+      ),
     };
     shippingOptionsService = {
       hasShippingOptions: jest.fn().mockResolvedValue(true),

@@ -43,14 +43,17 @@ export type GuestPayTokenOrderFields = {
 
 /**
  * Unauthenticated guest capability check (SOPET-H-07).
- * Legacy unpaid rows with null hash keep UUID-only access until they pay/expire.
+ * Null hash is rejected (legacy unpaid guest rows are cancelled by the expiry job).
  */
 export function assertGuestPayTokenAccess(
   order: GuestPayTokenOrderFields,
   guestPayToken?: string | null,
 ): void {
   if (!order.guestPayTokenHash) {
-    return;
+    throw new ForbiddenException({
+      code: 'GUEST_PAY_TOKEN_REQUIRED',
+      message: 'Guest pay token is required for this order',
+    });
   }
 
   if (!guestPayToken) {

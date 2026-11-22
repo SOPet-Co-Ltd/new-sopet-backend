@@ -1,6 +1,6 @@
 import { ExecutionContext, Injectable } from '@nestjs/common';
 import { GqlExecutionContext } from '@nestjs/graphql';
-import { ThrottlerGuard } from '@nestjs/throttler';
+import { ThrottlerException, ThrottlerGuard } from '@nestjs/throttler';
 import { readRequestHeader, resolveClientIp } from '../utils/client-ip.util';
 
 export const SESSION_ID_HEADER = 'x-sopet-session-id';
@@ -137,7 +137,7 @@ export class AppThrottlerGuard extends ThrottlerGuard {
     const { req } = this.getRequestResponse(context);
     const tracker = await getTracker(req, context);
     if (!tracker) {
-      return true;
+      throw new ThrottlerException();
     }
     return super.handleRequest(requestProps);
   }

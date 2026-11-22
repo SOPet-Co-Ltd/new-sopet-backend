@@ -51,6 +51,7 @@ describe('StoreReactivationRequestService', () => {
       imageRepository as never,
       storeRepository as never,
       storesService as unknown as StoresService,
+      { publish: jest.fn().mockResolvedValue(undefined) } as never,
     );
 
     requestRepository.findOne.mockImplementation(async (options) => {

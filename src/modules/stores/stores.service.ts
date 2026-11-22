@@ -9,8 +9,12 @@ import {
   forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository, ILike } from 'typeorm';
-import { Store, StoreStatus, OmiseRecipientStatus } from '../../database/entities/store.entity';
+import { In, Repository } from 'typeorm';
+import {
+  Store,
+  StoreStatus,
+  BankAccountVerificationStatus,
+} from '../../database/entities/store.entity';
 import { User, UserRole } from '../../database/entities/user.entity';
 import { StoreMember, StoreMemberRole } from '../../database/entities/store-member.entity';
 import { Order } from '../../database/entities/order.entity';
@@ -19,26 +23,54 @@ import { AuditLog, AuditActorType } from '../../database/entities/audit-log.enti
 import { OrderStatus } from '../../database/entities/enums/order.enums';
 import { CreateStoreDto, UpdateStoreDto, ApproveStoreDto, RejectStoreDto } from './dto';
 import * as bcrypt from 'bcrypt';
-import { generateUniqueStoreSlug } from '../../common/utils/slug.util';
-import { OmiseService } from '../omise/omise.service';
+import { decodeSlugParam, generateUniqueStoreSlug } from '../../common/utils/slug.util';
 import { pickDefaultAccessibleStoreId } from './store-selection.util';
 import { NotificationsService } from '../notifications/notifications.service';
+import { DashboardEventsService } from '../dashboard-events/dashboard-events.service';
+import { DashboardActivityKind } from '../dashboard-events/dashboard-activity.constants';
 import { StorageService } from '../storage/storage.service';
-import {
-  decryptBankAccountNumber,
-  encryptBankAccountNumber,
-} from '../../common/utils/bank-account-crypto.util';
+import { encryptBankAccountNumber } from '../../common/utils/bank-account-crypto.util';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constants';
 import { getAuditRequestContext } from '../audit-logs/audit-request-context';
 import { StoreSuspensionHoldService } from '../orders/store-suspension-hold.service';
 import { EmailDeliveryService } from '../email/email-delivery.service';
+import { PaginatedResponse } from '../../common/interfaces';
+import {
+  buildAdminListPagination,
+  normalizeAdminListLimit,
+  normalizeAdminListPage,
+} from '../../common/utils/admin-list-pagination.util';
 
 const VENDOR_REVENUE_EXCLUDED_STATUSES = [
   OrderStatus.CANCELLED,
   OrderStatus.REFUNDED,
   OrderStatus.PENDING_PAYMENT,
 ];
+
+const ADMIN_STORE_LIST_SORTS: Record<string, { column: string; order: 'ASC' | 'DESC' }> = {
+  'createdAt:desc': { column: 'store.createdAt', order: 'DESC' },
+  'createdAt:asc': { column: 'store.createdAt', order: 'ASC' },
+  'name:asc': { column: 'store.name', order: 'ASC' },
+  'name:desc': { column: 'store.name', order: 'DESC' },
+};
+
+const ADMIN_VENDOR_LIST_SORTS: Record<string, { column: string; order: 'ASC' | 'DESC' }> = {
+  'createdAt:desc': { column: 'vendor.createdAt', order: 'DESC' },
+  'createdAt:asc': { column: 'vendor.createdAt', order: 'ASC' },
+  'fullName:asc': { column: 'vendor.fullName', order: 'ASC' },
+  'fullName:desc': { column: 'vendor.fullName', order: 'DESC' },
+  'storeCount:asc': { column: 'store_count', order: 'ASC' },
+  'storeCount:desc': { column: 'store_count', order: 'DESC' },
+};
+
+const VENDOR_STORE_COUNT_SQL =
+  '(SELECT COUNT(*)::int FROM stores owned_store WHERE owned_store.owner_id = vendor.id AND owned_store.deleted_at IS NULL)';
+
+export type AdminVendorListRecord = {
+  user: User;
+  storeCount: number;
+};
 
 const AUDIT_ACTION_ACTIVITY_KIND: Partial<Record<string, string>> = {
   [AuditAction.LOGIN]: 'last_login',
@@ -107,8 +139,8 @@ export class StoresService {
     private readonly orderItemRepository: Repository<OrderItem>,
     @InjectRepository(AuditLog)
     private readonly auditLogRepository: Repository<AuditLog>,
-    private readonly omiseService: OmiseService,
     private readonly notificationsService: NotificationsService,
+    private readonly dashboardEventsService: DashboardEventsService,
     private readonly storageService: StorageService,
     private readonly auditLogsService: AuditLogsService,
     @Inject(forwardRef(() => StoreSuspensionHoldService))
@@ -187,7 +219,6 @@ export class StoresService {
     const where = status ? { status } : { status: StoreStatus.APPROVED };
     return this.storeRepository.find({
       where,
-      relations: ['owner', 'products'],
       order: { createdAt: 'DESC' },
     });
   }
@@ -195,7 +226,7 @@ export class StoresService {
   async findOne(id: string): Promise<Store> {
     const store = await this.storeRepository.findOne({
       where: { id },
-      relations: ['owner', 'products', 'members'],
+      relations: ['owner', 'members'],
     });
 
     if (!store) {
@@ -211,8 +242,7 @@ export class StoresService {
   // Get store by slug (public discovery — approved stores only)
   async findBySlug(slug: string): Promise<Store> {
     const store = await this.storeRepository.findOne({
-      where: { slug },
-      relations: ['owner', 'products'],
+      where: { slug: decodeSlugParam(slug) },
     });
 
     if (!store || store.status !== StoreStatus.APPROVED) {
@@ -252,6 +282,13 @@ export class StoresService {
     await this.notificationsService
       .notifyVendorAboutStoreStatus(store.ownerId, store, 'approved')
       .catch(() => {});
+    void this.dashboardEventsService.publish({
+      kind: DashboardActivityKind.STORE_STATUS,
+      entityId: store.id,
+      storeId: store.id,
+      userIds: [store.ownerId],
+      roles: ['admin'],
+    });
 
     await this.logAdminStoreAction(
       approveStoreDto.adminId,
@@ -288,6 +325,13 @@ export class StoresService {
         rejectStoreDto.rejectionReason,
       )
       .catch(() => {});
+    void this.dashboardEventsService.publish({
+      kind: DashboardActivityKind.STORE_STATUS,
+      entityId: store.id,
+      storeId: store.id,
+      userIds: [store.ownerId],
+      roles: ['admin'],
+    });
 
     await this.logAdminStoreAction(
       rejectStoreDto.adminId,
@@ -348,7 +392,6 @@ export class StoresService {
   async getVendorStores(userId: string): Promise<Store[]> {
     return this.storeRepository.find({
       where: { ownerId: userId },
-      relations: ['products'],
       order: { createdAt: 'DESC' },
     });
   }
@@ -435,15 +478,153 @@ export class StoresService {
     }
   }
 
+  normalizeStoreId(storeId: string | undefined | null): string {
+    const trimmed = storeId?.trim() ?? '';
+    // Avoid Postgres QueryFailedError (invalid uuid) becoming INTERNAL_SERVER_ERROR.
+    if (
+      !trimmed ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmed)
+    ) {
+      throw new BadRequestException({
+        code: 'INVALID_STORE_ID',
+        message: 'Invalid store id',
+      });
+    }
+    return trimmed;
+  }
+
+  async assertStoreExists(storeId: string): Promise<Store> {
+    const trimmed = this.normalizeStoreId(storeId);
+    const store = await this.storeRepository.findOne({ where: { id: trimmed } });
+    if (!store) {
+      throw new NotFoundException({
+        code: 'STORE_NOT_FOUND',
+        message: 'Store not found',
+      });
+    }
+    return store;
+  }
+
+  /**
+   * Platform admin may act on any existing store when storeId is explicit.
+   * Vendors still require membership; optional requireActive blocks suspended stores for vendors only.
+   */
+  async assertActorStoreAccess(
+    role: string | undefined,
+    userId: string,
+    storeId: string,
+    options?: { requireActive?: boolean; action?: string },
+  ): Promise<string> {
+    const trimmed = this.normalizeStoreId(storeId);
+    const action = options?.action ?? 'access';
+    const requireActive = options?.requireActive ?? false;
+
+    if (role === 'admin' || role === UserRole.ADMIN) {
+      await this.assertStoreExists(trimmed);
+      return trimmed;
+    }
+
+    const hasAccess = await this.userHasStoreAccess(userId, trimmed);
+    if (!hasAccess) {
+      throw new ForbiddenException({
+        code: 'STORE_ACCESS_DENIED',
+        message: `You do not have permission to ${action} for this store`,
+      });
+    }
+
+    if (requireActive && (await this.isStoreSuspended(trimmed))) {
+      throw new ForbiddenException({
+        code: 'STORE_SUSPENDED',
+        message: `Cannot ${action} — this store is suspended`,
+      });
+    }
+
+    return trimmed;
+  }
+
+  /** Resolve storeId for admin (required arg) or vendor (JWT / default). */
+  async resolveActorStoreId(
+    role: string | undefined,
+    userId: string,
+    jwtStoreId: string | undefined,
+    argsStoreId?: string | null,
+  ): Promise<string> {
+    if (role === 'admin' || role === UserRole.ADMIN) {
+      if (!argsStoreId?.trim()) {
+        throw new BadRequestException({
+          code: 'STORE_ID_REQUIRED',
+          message: 'Store ID is required for admin store operations',
+        });
+      }
+      return this.assertActorStoreAccess(role, userId, argsStoreId);
+    }
+
+    const storeId = argsStoreId?.trim() || jwtStoreId?.trim();
+    if (storeId) {
+      return this.assertActorStoreAccess(role, userId, storeId, {
+        requireActive: false,
+        action: 'access',
+      });
+    }
+
+    const defaultStoreId = await this.resolveDefaultStoreId(userId);
+    if (!defaultStoreId) {
+      throw new BadRequestException({
+        code: 'NO_ACTIVE_STORE',
+        message: 'No active store. Switch to a store and try again.',
+      });
+    }
+    return defaultStoreId;
+  }
+
   /** Any store member (owner, manager, or staff) may perform the action. */
   async assertStoreAccess(userId: string, storeId: string): Promise<void> {
-    const hasAccess = await this.userHasStoreAccess(userId, storeId);
+    const trimmed = this.normalizeStoreId(storeId);
+
+    const hasAccess = await this.userHasStoreAccess(userId, trimmed);
     if (!hasAccess) {
       throw new ForbiddenException({
         code: 'STORE_ACCESS_DENIED',
         message: 'No access to this store',
       });
     }
+  }
+
+  /** Skip membership checks for admin; keep owner/manager/access checks for vendors. */
+  async assertStoreAccessIfVendor(
+    role: string | undefined,
+    userId: string,
+    storeId: string,
+  ): Promise<void> {
+    if (role === 'admin' || role === UserRole.ADMIN) {
+      await this.assertStoreExists(storeId);
+      return;
+    }
+    await this.assertStoreAccess(userId, storeId);
+  }
+
+  async assertStoreOwnerIfVendor(
+    role: string | undefined,
+    userId: string,
+    storeId: string,
+  ): Promise<void> {
+    if (role === 'admin' || role === UserRole.ADMIN) {
+      await this.assertStoreExists(storeId);
+      return;
+    }
+    await this.assertStoreOwner(userId, storeId);
+  }
+
+  async assertStoreManagerIfVendor(
+    role: string | undefined,
+    userId: string,
+    storeId: string,
+  ): Promise<void> {
+    if (role === 'admin' || role === UserRole.ADMIN) {
+      await this.assertStoreExists(storeId);
+      return;
+    }
+    await this.assertStoreManager(userId, storeId);
   }
 
   async userHasStoreManagerAccess(userId: string, storeId: string): Promise<boolean> {
@@ -507,13 +688,6 @@ export class StoresService {
   ): Promise<Store> {
     const store = await this.findOne(storeId);
 
-    const bankDetailsChanged =
-      (data.bankAccountName !== undefined && data.bankAccountName !== store.bankAccountName) ||
-      (data.bankAccountNumber !== undefined &&
-        data.bankAccountNumber !== decryptBankAccountNumber(store.bankAccountNumber)) ||
-      (data.bankCode !== undefined && data.bankCode !== store.bankCode) ||
-      (data.bankName !== undefined && data.bankName !== store.bankName);
-
     if (data.bankAccountName !== undefined) {
       store.bankAccountName = data.bankAccountName;
     }
@@ -523,168 +697,118 @@ export class StoresService {
     if (data.bankName !== undefined) store.bankName = data.bankName;
     if (data.bankCode !== undefined) store.bankCode = data.bankCode;
 
-    // Persist bank details only. Omise recipient linking is a separate explicit step
-    // (linkStoreOmiseRecipient) so vendors can save account info without waiting on Omise.
-    if (bankDetailsChanged) {
-      // Saved bank no longer matches Omise recipient until vendor re-links.
-      store.omiseRecipientStatus = OmiseRecipientStatus.NOT_CONNECTED;
-      store.omiseRecipientFailureMessage = null;
-    }
-
     return this.storeRepository.save(store);
   }
 
-  /**
-   * Explicitly create/update the Omise recipient from the store's saved bank details.
-   */
-  async linkStoreOmiseRecipient(storeId: string): Promise<Store> {
+  async verifyStoreBankAccount(
+    storeId: string,
+    adminUserId?: string,
+    req?: unknown,
+  ): Promise<Store> {
     const store = await this.findOne(storeId);
-    await this.syncOmiseRecipient(store);
-    return this.storeRepository.save(store);
+    store.bankAccountVerificationStatus = BankAccountVerificationStatus.VERIFIED;
+    store.bankAccountRejectionReason = null;
+    const saved = await this.storeRepository.save(store);
+
+    if (adminUserId) {
+      await this.logAdminStoreAction(adminUserId, AuditAction.STORE_BANK_VERIFIED, saved, {}, req);
+    }
+
+    return saved;
   }
 
-  /**
-   * Re-fetches the Omise recipient and updates local verification status.
-   * Called when vendors open payout settings so Omise dashboard activations
-   * are reflected without requiring a bank-detail re-save.
-   *
-   * Skips refresh when status is NOT_CONNECTED: that means local bank details
-   * changed (or were never linked) and must not be overwritten by a stale
-   * Omise recipient that still reports verified/active for the previous account.
-   */
-  async refreshOmiseRecipientStatus(storeId: string): Promise<Store> {
+  async rejectStoreBankAccount(
+    storeId: string,
+    reason: string,
+    adminUserId?: string,
+    req?: unknown,
+  ): Promise<Store> {
+    const trimmedReason = reason?.trim();
+    if (!trimmedReason) {
+      throw new BadRequestException({
+        code: 'BANK_REJECTION_REASON_REQUIRED',
+        message: 'A rejection reason is required',
+      });
+    }
+
     const store = await this.findOne(storeId);
-    if (store.omiseRecipientStatus === OmiseRecipientStatus.NOT_CONNECTED) {
-      return store;
+    store.bankAccountVerificationStatus = BankAccountVerificationStatus.REJECTED;
+    store.bankAccountRejectionReason = trimmedReason;
+    const saved = await this.storeRepository.save(store);
+
+    if (adminUserId) {
+      await this.logAdminStoreAction(
+        adminUserId,
+        AuditAction.STORE_BANK_REJECTED,
+        saved,
+        { reason: trimmedReason },
+        req,
+      );
     }
-    await this.applyOmiseRecipientSnapshot(store);
-    return this.storeRepository.save(store);
+
+    return saved;
   }
 
-  /**
-   * Handles Omise recipient.* webhooks by refreshing the matching store's
-   * recipient status from the live Omise API.
-   */
-  async handleOmiseRecipientWebhook(payload: {
-    key?: string;
-    data?: { object?: string; id?: string; verified?: boolean; active?: boolean };
-  }): Promise<void> {
-    const recipientId = payload.data?.id;
-    if (!recipientId || payload.data?.object !== 'recipient') {
-      return;
+  async findAllForAdmin(
+    params: {
+      page?: number;
+      limit?: number;
+      search?: string;
+      status?: string;
+      sort?: string;
+    } = {},
+  ): Promise<PaginatedResponse<Store>> {
+    const page = normalizeAdminListPage(params.page);
+    const limit = normalizeAdminListLimit(params.limit);
+    const sortKey = params.sort?.trim() || 'createdAt:desc';
+    const sort = ADMIN_STORE_LIST_SORTS[sortKey];
+    if (!sort) {
+      throw new BadRequestException({
+        code: 'INVALID_SORT',
+        message: 'Invalid store sort',
+      });
     }
 
-    const store = await this.storeRepository.findOne({
-      where: { omiseRecipientId: recipientId },
-    });
-    if (!store) {
-      return;
-    }
-
-    await this.applyOmiseRecipientSnapshot(store, payload.data);
-    await this.storeRepository.save(store);
-  }
-
-  /**
-   * Applies Omise recipient verified/active flags onto the store. Prefers a
-   * live API fetch when credentials are available; falls back to webhook
-   * payload fields when present.
-   */
-  private async applyOmiseRecipientSnapshot(
-    store: Store,
-    fallback?: { verified?: boolean; active?: boolean },
-  ): Promise<void> {
-    // Bank was changed (or never linked). Keep NOT_CONNECTED until an explicit
-    // linkStoreOmiseRecipient / admin re-verify updates the recipient.
-    if (store.omiseRecipientStatus === OmiseRecipientStatus.NOT_CONNECTED) {
-      return;
-    }
-
-    if (!store.omiseRecipientId) {
-      return;
-    }
-
-    if (this.omiseService.hasCredentials()) {
-      try {
-        const recipient = await this.omiseService.getRecipient(store.omiseRecipientId);
-        this.applyRecipientFlags(store, recipient.verified, recipient.active);
-        return;
-      } catch {
-        // Fall through to webhook payload when API refresh fails.
+    let status: StoreStatus | undefined;
+    const statusFilter = params.status?.trim();
+    if (statusFilter) {
+      const allowed = Object.values(StoreStatus) as string[];
+      if (!allowed.includes(statusFilter)) {
+        throw new BadRequestException({
+          code: 'INVALID_STORE_STATUS',
+          message: 'Invalid store status filter',
+        });
       }
+      status = statusFilter as StoreStatus;
     }
 
-    if (fallback && fallback.verified !== undefined && fallback.active !== undefined) {
-      this.applyRecipientFlags(store, fallback.verified, fallback.active);
-    }
-  }
+    const qb = this.storeRepository
+      .createQueryBuilder('store')
+      .leftJoinAndSelect('store.owner', 'owner');
 
-  private applyRecipientFlags(store: Store, verified: boolean, active: boolean): void {
-    store.omiseRecipientStatus =
-      verified && active ? OmiseRecipientStatus.ACTIVE : OmiseRecipientStatus.PENDING;
-    if (store.omiseRecipientStatus === OmiseRecipientStatus.ACTIVE) {
-      store.omiseRecipientFailureMessage = null;
-    }
-  }
-
-  /**
-   * Binds the store's payout bank account to a real Omise recipient. Creates a
-   * new recipient (or updates the existing one) via the Omise API and persists
-   * the returned recipient id + verification status on the store. Mutates the
-   * given `store` in place; the caller is responsible for saving.
-   */
-  private async syncOmiseRecipient(store: Store): Promise<void> {
-    const hasCompleteBankDetails =
-      !!store.bankCode && !!store.bankAccountNumber && !!store.bankAccountName;
-
-    if (!hasCompleteBankDetails) {
-      store.omiseRecipientStatus = OmiseRecipientStatus.NOT_CONNECTED;
-      store.omiseRecipientFailureMessage = null;
-      return;
+    if (status) {
+      qb.andWhere('store.status = :status', { status });
     }
 
-    if (!this.omiseService.hasCredentials()) {
-      store.omiseRecipientStatus = OmiseRecipientStatus.NOT_CONNECTED;
-      store.omiseRecipientFailureMessage =
-        'Omise API keys are not configured on the server. The receiving account cannot be linked to Omise until OMISE_SECRET_KEY is set.';
-      return;
+    const search = params.search?.trim();
+    if (search) {
+      qb.andWhere(
+        '(store.name ILIKE :search OR store.slug ILIKE :search OR owner.email ILIKE :search OR owner.full_name ILIKE :search)',
+        { search: `%${search}%` },
+      );
     }
 
-    const params = {
-      name: store.bankAccountName as string,
-      email: store.contactEmail ?? undefined,
-      bankBrand: store.bankCode as string,
-      bankNumber: decryptBankAccountNumber(store.bankAccountNumber) as string,
-      bankName: store.bankAccountName as string,
+    const [items, total] = await qb
+      .orderBy(sort.column, sort.order)
+      .addOrderBy('store.id', 'ASC')
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
+
+    return {
+      items,
+      pagination: buildAdminListPagination(page, limit, total),
     };
-
-    try {
-      const recipient = store.omiseRecipientId
-        ? await this.omiseService.updateRecipient(store.omiseRecipientId, params)
-        : await this.omiseService.createRecipient(params);
-
-      store.omiseRecipientId = recipient.id;
-      store.omiseRecipientFailureMessage = null;
-      store.omiseRecipientStatus =
-        recipient.verified && recipient.active
-          ? OmiseRecipientStatus.ACTIVE
-          : OmiseRecipientStatus.PENDING;
-    } catch (error) {
-      const message =
-        error instanceof BadRequestException
-          ? ((error.getResponse() as { message?: string })?.message ??
-            'Failed to link the receiving account to Omise')
-          : 'Failed to link the receiving account to Omise';
-      store.omiseRecipientStatus = OmiseRecipientStatus.FAILED;
-      store.omiseRecipientFailureMessage = message;
-    }
-  }
-
-  async findAllForAdmin(): Promise<Store[]> {
-    return this.storeRepository.find({
-      relations: ['owner'],
-      order: { createdAt: 'DESC' },
-    });
   }
 
   async createAsAdmin(input: {
@@ -747,10 +871,10 @@ export class StoresService {
     ownerUserId?: string | null;
     name?: string;
     slug?: string;
-    description?: string;
-    contactPhone?: string;
-    contactEmail?: string;
-    address?: string;
+    description?: string | null;
+    contactPhone?: string | null;
+    contactEmail?: string | null;
+    address?: string | null;
     logoUrl?: string;
     bannerUrl?: string;
     status?: StoreStatus;
@@ -805,13 +929,24 @@ export class StoresService {
 
     if (input.name !== undefined) store.name = input.name.trim();
     if (input.slug !== undefined) store.slug = input.slug;
-    if (input.description !== undefined) store.description = input.description;
-    if (input.contactPhone !== undefined) store.contactPhone = input.contactPhone;
-    if (input.contactEmail !== undefined) store.contactEmail = input.contactEmail;
-    if (input.address !== undefined) store.address = input.address;
+    if (input.description !== undefined) {
+      store.description = input.description?.trim() || null;
+    }
+    if (input.contactPhone !== undefined) {
+      store.contactPhone = input.contactPhone || null;
+    }
+    if (input.contactEmail !== undefined) {
+      store.contactEmail = input.contactEmail?.trim() || null;
+    }
+    if (input.address !== undefined) {
+      store.address = input.address?.trim() || null;
+    }
     if (input.logoUrl !== undefined) store.logoUrl = input.logoUrl;
     if (input.bannerUrl !== undefined) store.bannerUrl = input.bannerUrl;
     if (input.commissionRate !== undefined) store.commissionRate = input.commissionRate;
+    // findOne loads members. Saving that collection while the owner changes makes
+    // TypeORM null out store_members.store_id. Membership is updated separately.
+    store.members = undefined as unknown as Store['members'];
     if (input.status !== undefined) {
       // Match reactivate() metadata when admin UI reopens a suspended store via updateStoreAsAdmin.
       if (
@@ -897,24 +1032,82 @@ export class StoresService {
     }
   }
 
-  async findVendors(search?: string): Promise<User[]> {
-    const trimmed = search?.trim();
-    if (!trimmed) {
-      return this.userRepository.find({
-        where: { role: UserRole.VENDOR },
-        relations: ['ownedStores'],
-        order: { createdAt: 'DESC' },
+  async findVendors(
+    params: {
+      page?: number;
+      limit?: number;
+      search?: string;
+      status?: string;
+      sort?: string;
+    } = {},
+  ): Promise<PaginatedResponse<AdminVendorListRecord>> {
+    const page = normalizeAdminListPage(params.page);
+    const limit = normalizeAdminListLimit(params.limit);
+    const sortKey = params.sort?.trim() || 'createdAt:desc';
+    const sort = ADMIN_VENDOR_LIST_SORTS[sortKey];
+    if (!sort) {
+      throw new BadRequestException({
+        code: 'INVALID_SORT',
+        message: 'Invalid vendor sort',
       });
     }
 
-    return this.userRepository.find({
-      where: [
-        { role: UserRole.VENDOR, fullName: ILike(`%${trimmed}%`) },
-        { role: UserRole.VENDOR, email: ILike(`%${trimmed}%`) },
-      ],
-      relations: ['ownedStores'],
-      order: { createdAt: 'DESC' },
-    });
+    let isActive: boolean | undefined;
+    const statusFilter = params.status?.trim();
+    if (statusFilter) {
+      if (statusFilter === 'active') isActive = true;
+      else if (statusFilter === 'inactive') isActive = false;
+      else {
+        throw new BadRequestException({
+          code: 'INVALID_VENDOR_STATUS',
+          message: 'Invalid vendor status filter',
+        });
+      }
+    }
+
+    const search = params.search?.trim();
+    const applyFilters = (qb: ReturnType<Repository<User>['createQueryBuilder']>) => {
+      qb.where('vendor.role = :role', { role: UserRole.VENDOR });
+      if (isActive !== undefined) {
+        qb.andWhere('vendor.is_active = :isActive', { isActive });
+      }
+      if (search) {
+        qb.andWhere('(vendor.full_name ILIKE :search OR vendor.email ILIKE :search)', {
+          search: `%${search}%`,
+        });
+      }
+      return qb;
+    };
+
+    const total = await applyFilters(this.userRepository.createQueryBuilder('vendor')).getCount();
+
+    const qb = applyFilters(this.userRepository.createQueryBuilder('vendor')).addSelect(
+      VENDOR_STORE_COUNT_SQL,
+      'store_count',
+    );
+    if (sort.column === 'store_count') {
+      qb.orderBy('store_count', sort.order);
+    } else {
+      qb.orderBy(sort.column, sort.order);
+    }
+
+    const { entities, raw } = await qb
+      .addOrderBy('vendor.id', 'ASC')
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getRawAndEntities();
+
+    return {
+      items: entities.map((user, index) => {
+        const rawRow = raw[index] as
+          { store_count?: number | string; storeCount?: number | string } | undefined;
+        return {
+          user,
+          storeCount: Number(rawRow?.store_count ?? rawRow?.storeCount ?? 0),
+        };
+      }),
+      pagination: buildAdminListPagination(page, limit, total),
+    };
   }
 
   async findVendorById(id: string): Promise<User> {
@@ -949,7 +1142,10 @@ export class StoresService {
           message: 'Email already in use',
         });
       }
-      user.email = input.email;
+      if (input.email !== user.email) {
+        user.email = input.email;
+        user.emailVerified = false;
+      }
     }
     if (input.fullName !== undefined) user.fullName = input.fullName;
     if (input.isActive !== undefined) user.isActive = input.isActive;

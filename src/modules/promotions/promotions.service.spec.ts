@@ -82,6 +82,7 @@ describe('PromotionsService', () => {
   let service: PromotionsService;
   let promotionRepository: {
     findOne: jest.Mock;
+    findAndCount: jest.Mock;
     createQueryBuilder: jest.Mock;
     create: jest.Mock;
     save: jest.Mock;
@@ -126,6 +127,7 @@ describe('PromotionsService', () => {
     };
     promotionRepository = {
       findOne: jest.fn().mockResolvedValue(mockPromotion),
+      findAndCount: jest.fn(),
       createQueryBuilder: jest.fn(),
       create: jest.fn(),
       save: jest.fn(),
@@ -184,6 +186,18 @@ describe('PromotionsService', () => {
       customerRepository as never,
       orderRepository as never,
     );
+  });
+
+  it('paginates platform promotions and caps the page size', async () => {
+    promotionRepository.findAndCount.mockResolvedValue([[mockPromotion], 1]);
+
+    const result = await service.findPlatform(1, 500);
+
+    expect(promotionRepository.findAndCount).toHaveBeenCalledWith(
+      expect.objectContaining({ skip: 0, take: 100 }),
+    );
+    expect(result.items).toEqual([mockPromotion]);
+    expect(result.pagination).toEqual({ page: 1, limit: 100, total: 1, totalPages: 1 });
   });
 
   it('validates a percentage promotion', async () => {
@@ -1893,6 +1907,55 @@ describe('PromotionsService', () => {
       await expect(
         service.validateCode('MIN500', 100, undefined, undefined, { mode: 'preview' }),
       ).rejects.toMatchObject({ response: { code: 'PROMOTION_MIN_PURCHASE' } });
+    });
+
+    it('SF-CHK-088: platform % with min spend met is eligible with null reason', async () => {
+      const platformSixteen = {
+        ...mockPromotion,
+        id: 'promo-16',
+        code: 'SAVE16',
+        name: '16% off',
+        type: PromotionType.PERCENTAGE,
+        discountValue: 16,
+        minPurchaseAmount: 200,
+        usagePerCustomer: 0,
+        conditions: {},
+      };
+      promotionRepository.findOne.mockResolvedValue(platformSixteen);
+
+      const batch = await service.validatePromotionsBatch(
+        [{ id: platformSixteen.id, code: 'SAVE16' }],
+        459,
+        undefined,
+        { customerId: 'cust-1' },
+      );
+
+      expect(batch.items[0].eligible).toBe(true);
+      expect(batch.items[0].ineligibilityReason).toBeNull();
+      expect(batch.items[0].discountAmount).toBeCloseTo(73.44, 2);
+    });
+
+    it('SF-CHK-088: exhausted usagePerCustomer soft-maps PROMOTION_CUSTOMER_LIMIT (never null reason)', async () => {
+      const oncePromo = {
+        ...mockPromotion,
+        id: 'promo-once',
+        code: 'ONCE16',
+        type: PromotionType.PERCENTAGE,
+        discountValue: 16,
+        minPurchaseAmount: 200,
+        usagePerCustomer: 1,
+        conditions: {},
+      };
+      promotionRepository.findOne.mockResolvedValue(oncePromo);
+      usageQueryBuilder.getCount.mockResolvedValue(1);
+
+      const batch = await service.validatePromotionsBatch([{ code: 'ONCE16' }], 459, undefined, {
+        customerId: 'cust-1',
+      });
+
+      expect(batch.items[0].eligible).toBe(false);
+      expect(batch.items[0].ineligibilityReason).toBe('PROMOTION_CUSTOMER_LIMIT');
+      expect(batch.items[0].discountAmount).toBe(0);
     });
 
     it('unknown id → soft INVALID_PROMOTION; does not abort sibling', async () => {

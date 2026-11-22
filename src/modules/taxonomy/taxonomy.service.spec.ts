@@ -113,6 +113,7 @@ describe('TaxonomyService', () => {
       dataSource as never,
       storageService as unknown as StorageService,
       notificationsService as never,
+      { publish: jest.fn().mockResolvedValue(undefined) } as never,
       searchEmbeddingQueueService as never,
     );
   });

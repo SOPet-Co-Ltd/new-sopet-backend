@@ -154,6 +154,7 @@ describe('CartService', () => {
           variantId: 'var-ok',
           quantity: 1,
           productVariant: {
+            stockQuantity: 10,
             product: { store: { status: StoreStatus.APPROVED } },
           },
         },
@@ -164,6 +165,90 @@ describe('CartService', () => {
 
     expect(cartItemRepository.delete).not.toHaveBeenCalled();
     expect(cart.warnings).toEqual([]);
+  });
+
+  it('caps cart qty to stock when stock drops below quantity on getCart', async () => {
+    const line = {
+      id: 'item-1',
+      variantId: 'var-1',
+      quantity: 5,
+      productVariant: {
+        stockQuantity: 2,
+        product: { store: { status: StoreStatus.APPROVED } },
+      },
+    };
+    cartRepository.findOne.mockResolvedValue({
+      id: 'cart-1',
+      customerId: 'cust-1',
+      items: [line],
+    });
+    cartItemRepository.save.mockImplementation(async (entity) => entity);
+
+    const cart = await service.getCart('cust-1');
+
+    expect(line.quantity).toBe(2);
+    expect(cartItemRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'item-1', quantity: 2 }),
+    );
+    expect(cart.warnings).toEqual([
+      expect.objectContaining({
+        code: 'QUANTITY_CAPPED',
+        variantId: 'var-1',
+      }),
+    ]);
+  });
+
+  it('does not cap qty when stock is zero (client flags OOS)', async () => {
+    cartRepository.findOne.mockResolvedValue({
+      id: 'cart-1',
+      customerId: 'cust-1',
+      items: [
+        {
+          id: 'item-1',
+          variantId: 'var-1',
+          quantity: 5,
+          productVariant: {
+            stockQuantity: 0,
+            product: { store: { status: StoreStatus.APPROVED } },
+          },
+        },
+      ],
+    });
+
+    const cart = await service.getCart('cust-1');
+
+    expect(cart.items[0].quantity).toBe(5);
+    expect(cartItemRepository.save).not.toHaveBeenCalled();
+    expect(cart.warnings).toEqual([]);
+  });
+
+  it('caps updateItem quantity to available stock', async () => {
+    cartRepository.findOne.mockResolvedValueOnce(cartWithItems).mockResolvedValueOnce({
+      id: 'cart-1',
+      customerId: 'cust-1',
+      items: [
+        {
+          id: 'item-1',
+          variantId: 'var-1',
+          quantity: 2,
+          productVariant: {
+            stockQuantity: 2,
+            product: { store: { status: StoreStatus.APPROVED } },
+          },
+        },
+      ],
+    });
+    cartItemRepository.findOne.mockResolvedValue({
+      id: 'item-1',
+      cartId: 'cart-1',
+      quantity: 1,
+      productVariant: { stockQuantity: 2 },
+    });
+    cartItemRepository.save.mockImplementation(async (entity) => entity);
+
+    await service.updateItem('item-1', 5, 'cust-1');
+
+    expect(cartItemRepository.save).toHaveBeenCalledWith(expect.objectContaining({ quantity: 2 }));
   });
 
   it('adds new item to cart', async () => {
