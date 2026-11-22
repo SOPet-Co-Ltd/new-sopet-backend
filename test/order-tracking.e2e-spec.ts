@@ -24,6 +24,7 @@ import { StoresService } from '../src/modules/stores/stores.service';
 import { VendorWebhooksService } from '../src/modules/vendor-webhooks/vendor-webhooks.service';
 import { OrderAuditLogsService } from '../src/modules/order-audit-logs/order-audit-logs.service';
 import { AuditLogsService } from '../src/modules/audit-logs/audit-logs.service';
+import { mockBeamRefundProvider } from './helpers/beam-refund.mock';
 import { mockSaleCampaignPricingProvider } from './helpers/sale-campaign-pricing.mock';
 import { Order, OrderStatus, PaymentMethod } from '../src/database/entities/order.entity';
 import { FulfillmentStatus } from '../src/database/entities/order-item.entity';
@@ -310,6 +311,7 @@ describe('Order tracking (e2e)', () => {
           provide: AuditLogsService,
           useValue: { log: jest.fn().mockResolvedValue(undefined) },
         },
+        mockBeamRefundProvider,
       ],
     }).compile();
 

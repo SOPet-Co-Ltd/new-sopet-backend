@@ -1,14 +1,12 @@
-import { Field, InputType, Int } from '@nestjs/graphql';
+import { Field, InputType } from '@nestjs/graphql';
 import {
   IsBoolean,
   IsEmail,
-  IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
   IsUUID,
   Length,
-  Min,
 } from 'class-validator';
 
 @InputType()
@@ -160,31 +158,11 @@ export class AddressIdInput {
 
 @InputType()
 export class AddPaymentMethodInput {
+  /** RSA-OAEP ciphertext (`rsa:v1:...`) of `{ cardholderName, pan, expiryMonth, expiryYear }`. */
   @Field()
   @IsNotEmpty()
   @IsString()
-  cardToken!: string;
-
-  @Field()
-  @IsNotEmpty()
-  @IsString()
-  @Length(4, 4)
-  lastFour!: string;
-
-  @Field()
-  @IsNotEmpty()
-  @IsString()
-  brand!: string;
-
-  @Field(() => Int)
-  @IsInt()
-  @Min(1)
-  expiryMonth!: number;
-
-  @Field(() => Int)
-  @IsInt()
-  @Min(2024)
-  expiryYear!: number;
+  cardCipher!: string;
 
   @Field({ nullable: true })
   @IsOptional()

@@ -129,6 +129,7 @@ describe('Checkout flow (integration)', () => {
           append: jest.fn().mockResolvedValue(undefined),
           resolveCustomerActorLabel: jest.fn(),
         } as never,
+        { refundPaidBeamCharges: jest.fn().mockResolvedValue([]) } as never,
       );
     });
 

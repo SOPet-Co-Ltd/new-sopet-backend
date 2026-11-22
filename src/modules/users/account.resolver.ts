@@ -24,6 +24,10 @@ import { ReactivateAccountInput } from '../auth/auth.inputs';
 import { IsUUID } from 'class-validator';
 import { SavedAddress } from '../../database/entities/saved-address.entity';
 import { SavedPaymentMethod } from '../../database/entities/saved-payment-method.entity';
+import {
+  decryptCardTransportPayload,
+  getCardTransportPublicKeyPem,
+} from '../../common/utils/card-transport-crypto.util';
 
 function mapPaymentMethod(method: SavedPaymentMethod): SavedPaymentMethodType {
   return {
@@ -218,8 +222,22 @@ export class AccountResolver {
     @CurrentUser('id') customerId: string,
     @Args('input') input: AddPaymentMethodInput,
   ): Promise<SavedPaymentMethodType> {
-    const method = await this.usersService.addPaymentMethod(customerId, input);
+    const decrypted = decryptCardTransportPayload(input.cardCipher);
+    const method = await this.usersService.addPaymentMethod(customerId, {
+      cardholderName: decrypted.cardholderName,
+      pan: decrypted.pan,
+      expiryMonth: decrypted.expiryMonth,
+      expiryYear: decrypted.expiryYear,
+      isDefault: input.isDefault,
+    });
     return mapPaymentMethod(method);
+  }
+
+  /** SPKI public key for browser RSA-OAEP card transport encryption. */
+  @Query(() => String)
+  @Public()
+  cardTransportPublicKey(): string {
+    return getCardTransportPublicKeyPem();
   }
 
   @Mutation(() => Boolean)

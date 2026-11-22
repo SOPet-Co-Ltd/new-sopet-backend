@@ -6,11 +6,15 @@ describe('scrubForLog', () => {
       scrubForLog({
         message: 'fail',
         card_number: '4242424242424242',
+        cardCipher: 'rsa:v1:abc',
+        cardSecurityCodeCipher: 'rsa:v1:def',
         nested: { security_code: '123', ok: true },
       }),
     ).toEqual({
       message: 'fail',
       card_number: '[Redacted]',
+      cardCipher: '[Redacted]',
+      cardSecurityCodeCipher: '[Redacted]',
       nested: { security_code: '[Redacted]', ok: true },
     });
   });

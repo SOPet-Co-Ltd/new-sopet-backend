@@ -73,7 +73,7 @@ export class Payment {
 
   /**
    * Pending save-card intent (JSON). Applied in markOrderPaid; cleared after save or on failure.
-   * Shape: { cardToken, brand, lastFour, expiryMonth, expiryYear, isDefault? }
+   * Shape: { cardholderNameEnc, panEnc, expiryEnc, brand, lastFour, expiryMonth, expiryYear, isDefault? }
    */
   @Column({ name: 'save_card_payload', type: 'text', nullable: true })
   saveCardPayload!: string | null;

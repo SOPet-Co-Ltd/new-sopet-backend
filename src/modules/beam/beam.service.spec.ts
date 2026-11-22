@@ -117,6 +117,35 @@ describe('BeamService', () => {
     });
   });
 
+  describe('createRefund', () => {
+    it('POSTs /api/v1/refunds with the charge id and idempotency key', async () => {
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        json: jest.fn().mockResolvedValue({ refundId: 'rf_1' }),
+      });
+
+      const result = await service.createRefund(
+        { chargeId: 'ch_1', reason: 'Order cancelled after payment' },
+        { idempotencyKey: 'refund:pay-1' },
+      );
+
+      expect(result.refundId).toBe('rf_1');
+      expect(global.fetch).toHaveBeenCalledWith(
+        'https://api.beamcheckout.com/api/v1/refunds',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({
+            'x-beam-idempotency-key': 'refund:pay-1',
+          }),
+          body: JSON.stringify({
+            chargeId: 'ch_1',
+            reason: 'Order cancelled after payment',
+          }),
+        }),
+      );
+    });
+  });
+
   describe('getCharge', () => {
     it('GETs /api/v1/charges/{chargeId}', async () => {
       (global.fetch as jest.Mock).mockResolvedValue({

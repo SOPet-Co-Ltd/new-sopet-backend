@@ -944,6 +944,9 @@ export class StoresService {
     if (input.logoUrl !== undefined) store.logoUrl = input.logoUrl;
     if (input.bannerUrl !== undefined) store.bannerUrl = input.bannerUrl;
     if (input.commissionRate !== undefined) store.commissionRate = input.commissionRate;
+    // findOne loads members. Saving that collection while the owner changes makes
+    // TypeORM null out store_members.store_id. Membership is updated separately.
+    store.members = undefined as unknown as Store['members'];
     if (input.status !== undefined) {
       // Match reactivate() metadata when admin UI reopens a suspended store via updateStoreAsAdmin.
       if (

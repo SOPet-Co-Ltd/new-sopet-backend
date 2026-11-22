@@ -298,7 +298,6 @@ export class CustomersService {
         where: { customerId },
         relations: ['items'],
         order: { createdAt: 'DESC' },
-        take: 10,
       }),
     ]);
 

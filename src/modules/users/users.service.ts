@@ -6,7 +6,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, MoreThan, QueryFailedError, IsNull } from 'typeorm';
+import { Repository, MoreThan, QueryFailedError, IsNull, Not } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { Customer } from '../../database/entities/customer.entity';
@@ -20,12 +20,38 @@ import { OtpCode } from '../../database/entities/otp-code.entity';
 import { OrdersService } from '../orders/orders.service';
 import { normalizeThaiPhoneToLocal } from '../../common/utils/phone.util';
 import { isAcceptedOtpCode } from '../../common/utils/otp-code.util';
+import {
+  decryptCardExpiry,
+  decryptCardField,
+  encryptCardExpiry,
+  encryptCardField,
+} from '../../common/utils/card-data-crypto.util';
+import { detectCardBrand, isValidLuhn, normalizePan } from '../../common/utils/card-brand.util';
 import { UpdateProfileDto, CreateAddressDto, UpdateAddressDto } from './dto';
 import { JwtPayload } from '../../common/interfaces';
 import { isPendingDeletion, isDeletionRetentionExpired } from '../customers/customer-deletion.util';
 import { StorageService } from '../storage/storage.service';
 
 const BEAM_PSP = 'beam';
+
+export type AddPaymentMethodPlainInput = {
+  cardholderName: string;
+  pan: string;
+  expiryMonth: number;
+  expiryYear: number;
+  isDefault?: boolean;
+};
+
+export type AddEncryptedPaymentMethodInput = {
+  cardholderNameEnc: string;
+  panEnc: string;
+  expiryEnc: string;
+  lastFour: string;
+  brand: string;
+  expiryMonth: number;
+  expiryYear: number;
+  isDefault?: boolean;
+};
 
 interface ReactivationJwtPayload {
   sub: string;
@@ -354,9 +380,85 @@ export class UsersService {
 
   async getPaymentMethods(customerId: string): Promise<SavedPaymentMethod[]> {
     return this.paymentMethodRepository.find({
-      where: { customerId, psp: BEAM_PSP, deletedAt: IsNull() },
+      where: {
+        customerId,
+        psp: BEAM_PSP,
+        deletedAt: IsNull(),
+        panEnc: Not(IsNull()),
+      },
       order: { isDefault: 'DESC', createdAt: 'DESC' },
     });
+  }
+
+  /** Decrypt vaulted card fields for charge-time Beam tokenization only. */
+  decryptSavedCardForCharge(method: SavedPaymentMethod): {
+    cardholderName: string;
+    pan: string;
+    expiryMonth: number;
+    expiryYear: number;
+  } {
+    if (!method.panEnc || !method.cardholderNameEnc || !method.expiryEnc) {
+      throw new BadRequestException({
+        code: 'SAVED_CARD_UNAVAILABLE',
+        message: 'This saved card cannot be used. Please add the card again.',
+      });
+    }
+    const expiry = decryptCardExpiry(method.expiryEnc);
+    return {
+      cardholderName: decryptCardField(method.cardholderNameEnc),
+      pan: decryptCardField(method.panEnc),
+      expiryMonth: expiry.month,
+      expiryYear: expiry.year,
+    };
+  }
+
+  private assertValidCardInput(input: AddPaymentMethodPlainInput): {
+    cardholderName: string;
+    pan: string;
+    lastFour: string;
+    brand: string;
+    expiryMonth: number;
+    expiryYear: number;
+  } {
+    const cardholderName = input.cardholderName.trim();
+    if (!cardholderName) {
+      throw new BadRequestException({
+        code: 'CARDHOLDER_NAME_REQUIRED',
+        message: 'Cardholder name is required',
+      });
+    }
+    const pan = normalizePan(input.pan);
+    if (!isValidLuhn(pan)) {
+      throw new BadRequestException({
+        code: 'INVALID_CARD_NUMBER',
+        message: 'Card number is invalid',
+      });
+    }
+    if (input.expiryMonth < 1 || input.expiryMonth > 12) {
+      throw new BadRequestException({
+        code: 'INVALID_CARD_EXPIRY',
+        message: 'Card expiry month is invalid',
+      });
+    }
+    const now = new Date();
+    const expiryYear = input.expiryYear < 100 ? 2000 + input.expiryYear : input.expiryYear;
+    if (
+      expiryYear < now.getFullYear() ||
+      (expiryYear === now.getFullYear() && input.expiryMonth < now.getMonth() + 1)
+    ) {
+      throw new BadRequestException({
+        code: 'CARD_EXPIRED',
+        message: 'Card is expired',
+      });
+    }
+    return {
+      cardholderName,
+      pan,
+      lastFour: pan.slice(-4),
+      brand: detectCardBrand(pan),
+      expiryMonth: input.expiryMonth,
+      expiryYear,
+    };
   }
 
   private resolveShouldBeDefault(
@@ -401,6 +503,7 @@ export class UsersService {
       .createQueryBuilder('method')
       .where('method.customerId = :customerId', { customerId })
       .andWhere('method.psp = :psp', { psp: BEAM_PSP })
+      .andWhere('method.panEnc IS NOT NULL')
       .andWhere('method.lastFour = :lastFour', { lastFour: details.lastFour })
       .andWhere('LOWER(method.brand) = LOWER(:brand)', { brand: details.brand })
       .andWhere('method.expiryMonth = :expiryMonth', { expiryMonth: details.expiryMonth })
@@ -422,6 +525,7 @@ export class UsersService {
       .withDeleted()
       .where('method.customerId = :customerId', { customerId })
       .andWhere('method.psp = :psp', { psp: BEAM_PSP })
+      .andWhere('method.panEnc IS NOT NULL')
       .andWhere('method.lastFour = :lastFour', { lastFour: details.lastFour })
       .andWhere('LOWER(method.brand) = LOWER(:brand)', { brand: details.brand })
       .andWhere('method.expiryMonth = :expiryMonth', { expiryMonth: details.expiryMonth })
@@ -433,17 +537,31 @@ export class UsersService {
 
   async addPaymentMethod(
     customerId: string,
-    input: {
-      cardToken: string;
-      lastFour: string;
-      brand: string;
-      expiryMonth: number;
-      expiryYear: number;
-      isDefault?: boolean;
-    },
+    input: AddPaymentMethodPlainInput,
+  ): Promise<SavedPaymentMethod> {
+    const validated = this.assertValidCardInput(input);
+    return this.persistEncryptedPaymentMethod(customerId, {
+      cardholderNameEnc: encryptCardField(validated.cardholderName),
+      panEnc: encryptCardField(validated.pan),
+      expiryEnc: encryptCardExpiry({
+        month: validated.expiryMonth,
+        year: validated.expiryYear,
+      }),
+      lastFour: validated.lastFour,
+      brand: validated.brand,
+      expiryMonth: validated.expiryMonth,
+      expiryYear: validated.expiryYear,
+      isDefault: input.isDefault,
+    });
+  }
+
+  /** Persist already-encrypted card fields (e.g. from payments.save_card_payload). */
+  async persistEncryptedPaymentMethod(
+    customerId: string,
+    input: AddEncryptedPaymentMethodInput,
   ): Promise<SavedPaymentMethod> {
     const existingMethods = await this.paymentMethodRepository.find({
-      where: { customerId, psp: BEAM_PSP },
+      where: { customerId, psp: BEAM_PSP, panEnc: Not(IsNull()) },
     });
     const shouldBeDefault = this.resolveShouldBeDefault(existingMethods, input.isDefault);
 
@@ -475,9 +593,12 @@ export class UsersService {
       }
 
       restorableMethod.psp = BEAM_PSP;
-      restorableMethod.pspCardToken = input.cardToken;
+      restorableMethod.pspCardToken = null;
       restorableMethod.omiseCardToken = null;
       restorableMethod.cardFingerprint = null;
+      restorableMethod.cardholderNameEnc = input.cardholderNameEnc;
+      restorableMethod.panEnc = input.panEnc;
+      restorableMethod.expiryEnc = input.expiryEnc;
       restorableMethod.lastFour = cardDetails.lastFour;
       restorableMethod.brand = cardDetails.brand;
       restorableMethod.expiryMonth = cardDetails.expiryMonth;
@@ -496,9 +617,12 @@ export class UsersService {
       customerId,
       type: PaymentMethodType.CREDIT_CARD,
       psp: BEAM_PSP,
-      pspCardToken: input.cardToken,
+      pspCardToken: null,
       omiseCardToken: null,
       cardFingerprint: null,
+      cardholderNameEnc: input.cardholderNameEnc,
+      panEnc: input.panEnc,
+      expiryEnc: input.expiryEnc,
       lastFour: cardDetails.lastFour,
       brand: cardDetails.brand,
       expiryMonth: cardDetails.expiryMonth,
@@ -541,7 +665,7 @@ export class UsersService {
     await this.paymentMethodRepository.softDelete(methodId);
 
     const remaining = await this.paymentMethodRepository.find({
-      where: { customerId, psp: BEAM_PSP },
+      where: { customerId, psp: BEAM_PSP, panEnc: Not(IsNull()) },
       order: { createdAt: 'ASC' },
     });
 

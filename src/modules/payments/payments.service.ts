@@ -37,6 +37,13 @@ import {
   isNonOmiseCheckoutPaymentMethod,
   normalizeCheckoutPaymentMethod,
 } from '../../common/utils/checkout-payment.util';
+import { encryptCardExpiry, encryptCardField } from '../../common/utils/card-data-crypto.util';
+import {
+  detectCardBrand,
+  isValidLuhn,
+  normalizePan,
+  toBeamExpiryYearYy,
+} from '../../common/utils/card-brand.util';
 import { orderHasHeldItems } from '../orders/order-totals.util';
 import { deriveOrderStatusFromFulfillment } from '../orders/order-fulfillment.util';
 import { OrderStatusHistory } from '../../database/entities/order-status-history.entity';
@@ -57,7 +64,9 @@ const MANUAL_RAIL_PAYMENT_METHODS = new Set<PaymentMethod>([
 ]);
 
 type SaveCardPayload = {
-  cardToken: string;
+  cardholderNameEnc: string;
+  panEnc: string;
+  expiryEnc: string;
   lastFour: string;
   brand: string;
   expiryMonth: number;
@@ -115,15 +124,26 @@ export class PaymentsService {
   private serializeSaveCardPayload(
     saveCard: CreateChargeDto['saveCard'] | undefined,
   ): string | null {
-    if (!saveCard?.cardToken?.trim()) {
+    if (!saveCard?.cardholderName?.trim() || !saveCard?.pan?.trim()) {
       return null;
     }
+    const pan = normalizePan(saveCard.pan);
+    if (!isValidLuhn(pan)) {
+      throw new BadRequestException({
+        code: 'INVALID_CARD_NUMBER',
+        message: 'Card number is invalid',
+      });
+    }
+    const expiryYear = saveCard.expiryYear < 100 ? 2000 + saveCard.expiryYear : saveCard.expiryYear;
+    const cardholderName = saveCard.cardholderName.trim();
     const payload: SaveCardPayload = {
-      cardToken: saveCard.cardToken.trim(),
-      lastFour: saveCard.lastFour.trim(),
-      brand: saveCard.brand.trim(),
+      cardholderNameEnc: encryptCardField(cardholderName),
+      panEnc: encryptCardField(pan),
+      expiryEnc: encryptCardExpiry({ month: saveCard.expiryMonth, year: expiryYear }),
+      lastFour: pan.slice(-4),
+      brand: detectCardBrand(pan),
       expiryMonth: saveCard.expiryMonth,
-      expiryYear: saveCard.expiryYear,
+      expiryYear,
       isDefault: saveCard.isDefault,
     };
     return JSON.stringify(payload);
@@ -135,7 +155,12 @@ export class PaymentsService {
     }
     try {
       const parsed = JSON.parse(raw) as SaveCardPayload;
-      if (!parsed?.cardToken || !parsed?.lastFour || !parsed?.brand) {
+      if (
+        !parsed?.panEnc ||
+        !parsed?.cardholderNameEnc ||
+        !parsed?.expiryEnc ||
+        !parsed?.lastFour
+      ) {
         return null;
       }
       return parsed;
@@ -961,6 +986,12 @@ export class PaymentsService {
             message: 'Customer ID required for saved payment method',
           });
         }
+        if (!cardSecurityCode?.trim()) {
+          throw new BadRequestException({
+            code: 'CARD_SECURITY_CODE_REQUIRED',
+            message: 'Credit card payments require a security code',
+          });
+        }
         const saved = await this.savedPaymentMethodRepository.findOne({
           where: { id: savedPaymentMethodId, customerId },
         });
@@ -970,13 +1001,20 @@ export class PaymentsService {
             message: 'Saved payment method not found',
           });
         }
-        if (saved.psp !== 'beam') {
+        if (!saved.panEnc || !saved.cardholderNameEnc || !saved.expiryEnc) {
           throw new BadRequestException({
-            code: 'SAVED_CARD_PROVIDER_UNSUPPORTED',
-            message: 'This saved card cannot be used with the current payment provider',
+            code: 'SAVED_CARD_UNAVAILABLE',
+            message: 'This saved card cannot be used. Please add the card again.',
           });
         }
-        cardTokenId = cardToken ?? saved.pspCardToken ?? undefined;
+        const decrypted = this.usersService.decryptSavedCardForCharge(saved);
+        const token = await this.beamService.createCardToken({
+          pan: decrypted.pan,
+          expiryMonth: decrypted.expiryMonth,
+          expiryYear: toBeamExpiryYearYy(decrypted.expiryYear),
+          cardHolderName: decrypted.cardholderName,
+        });
+        cardTokenId = token.id;
       }
 
       if (!cardTokenId) {
@@ -1423,8 +1461,10 @@ export class PaymentsService {
 
     if (saveCardPayload && order.customerId) {
       try {
-        await this.usersService.addPaymentMethod(order.customerId, {
-          cardToken: saveCardPayload.cardToken,
+        await this.usersService.persistEncryptedPaymentMethod(order.customerId, {
+          cardholderNameEnc: saveCardPayload.cardholderNameEnc,
+          panEnc: saveCardPayload.panEnc,
+          expiryEnc: saveCardPayload.expiryEnc,
           lastFour: saveCardPayload.lastFour,
           brand: saveCardPayload.brand,
           expiryMonth: saveCardPayload.expiryMonth,

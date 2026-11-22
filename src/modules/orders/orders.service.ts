@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from '@nes
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
 import { Order, OrderStatus, PaymentMethod } from '../../database/entities/order.entity';
+import { Payment } from '../../database/entities/payment.entity';
 import { FulfillmentStatus, OrderItem } from '../../database/entities/order-item.entity';
 import { Customer } from '../../database/entities/customer.entity';
 import { OrderShippingAddress } from '../../database/entities/order-shipping-address.entity';
@@ -45,6 +46,11 @@ import {
 } from './vendor-order-action-queue.util';
 import { assertOrderHasNoReviews } from './order-review-cancel.guard';
 import { assertNotManualHoldTransition } from './store-suspension-hold.service';
+import {
+  BeamRefundService,
+  MANUAL_BEAM_REFUND_NOTE,
+  requiresManualBeamRefund,
+} from '../payments/beam-refund.service';
 import { VendorWebhooksService } from '../vendor-webhooks/vendor-webhooks.service';
 import { webhookEventForOrderStatus } from '../vendor-webhooks/vendor-webhook.events';
 import { SaleCampaignPricingService } from '../sale-campaigns/sale-campaign-pricing.service';
@@ -107,6 +113,7 @@ export class OrdersService {
     private vendorWebhooksService: VendorWebhooksService,
     private saleCampaignPricing: SaleCampaignPricingService,
     private orderAuditLogsService: OrderAuditLogsService,
+    private beamRefundService: BeamRefundService,
   ) {}
 
   private generateOrderNumber(): string {
@@ -1359,6 +1366,17 @@ export class OrdersService {
       await assertOrderHasNoReviews(this.dataSource, id);
     }
 
+    const refundedPaymentIds =
+      (status === OrderStatus.CANCELLED || status === OrderStatus.REFUNDED) &&
+      previousStatus !== status
+        ? await this.beamRefundService.refundPaidBeamCharges(
+            id,
+            status === OrderStatus.REFUNDED
+              ? 'Order refunded after payment'
+              : 'Order cancelled after payment',
+          )
+        : [];
+
     const isAdminHoldExit =
       (status === OrderStatus.CANCELLED || status === OrderStatus.REFUNDED) &&
       (previousStatus === OrderStatus.ON_HOLD ||
@@ -1390,6 +1408,10 @@ export class OrdersService {
 
       await manager.save(order);
 
+      if (refundedPaymentIds.length > 0) {
+        await manager.update(Payment, { id: In(refundedPaymentIds) }, { status: 'refunded' });
+      }
+
       if (status === OrderStatus.CANCELLED || status === OrderStatus.REFUNDED) {
         await this.inventoryService.restoreOrderStock(
           id,
@@ -1404,7 +1426,12 @@ export class OrdersService {
           orderId: id,
           status,
           changedBy: userId ?? null,
-          notes: `Status changed from ${previousStatus} to ${status}`,
+          notes:
+            (status === OrderStatus.CANCELLED || status === OrderStatus.REFUNDED) &&
+            previousStatus !== OrderStatus.PENDING_PAYMENT &&
+            requiresManualBeamRefund(order.paymentMethod)
+              ? `Status changed from ${previousStatus} to ${status}. ${MANUAL_BEAM_REFUND_NOTE}`
+              : `Status changed from ${previousStatus} to ${status}`,
         }),
       );
     });

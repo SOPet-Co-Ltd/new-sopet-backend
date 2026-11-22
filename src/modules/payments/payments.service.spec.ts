@@ -43,12 +43,22 @@ const storesServiceMock = {};
 
 const beamServiceMock = {
   hasCredentials: jest.fn().mockReturnValue(true),
+  hasPublishableCredentials: jest.fn().mockReturnValue(true),
   createCharge: jest.fn(),
+  createCardToken: jest.fn().mockResolvedValue({ id: 'beam_tok_fresh' }),
   getCharge: jest.fn(),
+  createRefund: jest.fn(),
 };
 
 const usersServiceMock = {
   addPaymentMethod: jest.fn().mockResolvedValue({ id: 'saved-1' }),
+  persistEncryptedPaymentMethod: jest.fn().mockResolvedValue({ id: 'saved-1' }),
+  decryptSavedCardForCharge: jest.fn().mockReturnValue({
+    cardholderName: 'Test User',
+    pan: '4111111111111111',
+    expiryMonth: 12,
+    expiryYear: 2030,
+  }),
 };
 
 const orderAuditLogsServiceMock = {
@@ -677,14 +687,17 @@ describe('PaymentsService createCharge return_uri', () => {
     });
   });
 
-  it('uses saved Beam card token for credit_card + saved card', async () => {
+  it('re-tokenizes vaulted saved card then charges with CVV', async () => {
     service = await compileService(`${STOREFRONT_ORIGIN}/`);
     savedPaymentMethodRepository.findOne.mockResolvedValue({
       id: 'saved-1',
       customerId: 'cust-1',
       psp: 'beam',
-      pspCardToken: 'tok_saved_1',
+      panEnc: 'enc:v1:x',
+      cardholderNameEnc: 'enc:v1:y',
+      expiryEnc: 'enc:v1:z',
     });
+    beamServiceMock.createCardToken.mockResolvedValue({ id: 'beam_tok_fresh' });
 
     await service.createCharge({
       orderId: 'ord-1',
@@ -696,6 +709,13 @@ describe('PaymentsService createCharge return_uri', () => {
       customerId: 'cust-1',
     });
 
+    expect(usersServiceMock.decryptSavedCardForCharge).toHaveBeenCalled();
+    expect(beamServiceMock.createCardToken).toHaveBeenCalledWith({
+      pan: '4111111111111111',
+      expiryMonth: 12,
+      expiryYear: 30,
+      cardHolderName: 'Test User',
+    });
     expect(chargeBody()).toEqual({
       amount: 30000,
       currency: 'THB',
@@ -704,18 +724,21 @@ describe('PaymentsService createCharge return_uri', () => {
       skip3dsFlow: false,
       paymentMethod: {
         paymentMethodType: 'CARD_TOKEN',
-        cardToken: { cardTokenId: 'tok_saved_1', securityCode: '456' },
+        cardToken: { cardTokenId: 'beam_tok_fresh', securityCode: '456' },
       },
     });
   });
 
-  it('rejects saved methods that are not Beam with SAVED_CARD_PROVIDER_UNSUPPORTED', async () => {
+  it('rejects token-only saved cards without ciphertext', async () => {
     service = await compileService(STOREFRONT_ORIGIN);
     savedPaymentMethodRepository.findOne.mockResolvedValue({
       id: 'saved-1',
       customerId: 'cust-1',
-      psp: 'omise',
-      omiseCardToken: 'card_old',
+      psp: 'beam',
+      pspCardToken: 'tok_old',
+      panEnc: null,
+      cardholderNameEnc: null,
+      expiryEnc: null,
     });
 
     await expect(
@@ -728,8 +751,9 @@ describe('PaymentsService createCharge return_uri', () => {
         cardSecurityCode: '456',
         customerId: 'cust-1',
       }),
-    ).rejects.toMatchObject({ response: { code: 'SAVED_CARD_PROVIDER_UNSUPPORTED' } });
+    ).rejects.toMatchObject({ response: { code: 'SAVED_CARD_UNAVAILABLE' } });
     expect(beamServiceMock.createCharge).not.toHaveBeenCalled();
+    expect(beamServiceMock.createCardToken).not.toHaveBeenCalled();
   });
 
   it('requires cardSecurityCode for credit_card', async () => {
@@ -827,7 +851,9 @@ describe('PaymentsService createCharge return_uri', () => {
     ).rejects.toMatchObject({ response: { code: 'BEAM_ACTION_REQUIRED_INVALID' } });
   });
 
-  it('stores saveCard payload until paid and does not call addPaymentMethod on create', async () => {
+  it('stores encrypted saveCard payload until paid and does not vault on create', async () => {
+    const previousCardKey = process.env.CARD_DATA_ENCRYPTION_KEY;
+    process.env.CARD_DATA_ENCRYPTION_KEY = 'test-card-encryption-key-payments';
     service = await compileService(STOREFRONT_ORIGIN);
     beamServiceMock.createCharge.mockResolvedValue({
       chargeId: 'beam_chrg_save',
@@ -844,9 +870,8 @@ describe('PaymentsService createCharge return_uri', () => {
       cardSecurityCode: '123',
       customerId: 'cust-1',
       saveCard: {
-        cardToken: 'tok_new',
-        lastFour: '4242',
-        brand: 'visa',
+        cardholderName: 'Test User',
+        pan: '4111111111111111',
         expiryMonth: 12,
         expiryYear: 2030,
         isDefault: true,
@@ -854,10 +879,14 @@ describe('PaymentsService createCharge return_uri', () => {
     });
 
     expect(usersServiceMock.addPaymentMethod).not.toHaveBeenCalled();
+    expect(usersServiceMock.persistEncryptedPaymentMethod).not.toHaveBeenCalled();
     const savedPayment = paymentRepository.save.mock.calls
       .map((c: [Payment]) => c[0])
       .find((p) => p.pspChargeId === 'beam_chrg_save');
-    expect(savedPayment?.saveCardPayload).toContain('tok_new');
+    expect(savedPayment?.saveCardPayload).toContain('enc:v1:');
+    expect(savedPayment?.saveCardPayload).not.toContain('4111111111111111');
+    expect(savedPayment?.saveCardPayload).not.toContain('Test User');
+    process.env.CARD_DATA_ENCRYPTION_KEY = previousCardKey;
   });
 
   it('throws BEAM_NOT_CONFIGURED for online methods without credentials', async () => {
