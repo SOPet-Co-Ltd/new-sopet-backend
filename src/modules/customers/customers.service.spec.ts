@@ -240,6 +240,15 @@ describe('CustomersService', () => {
       expect(result.favoriteCount).toBe(5);
       expect(result.recentOrders).toHaveLength(1);
       expect(result.recentOrders[0].items[0].productName).toBe('Dog Food');
+      const findCalls = orderRepo.find.mock.calls as Array<[Record<string, unknown>]>;
+      const findArgs = findCalls[0]?.[0];
+      expect(findArgs).toEqual(
+        expect.objectContaining({
+          where: { customerId: 'cust-1' },
+          order: { createdAt: 'DESC' },
+        }),
+      );
+      expect(findArgs).not.toHaveProperty('take');
     });
 
     it('throws NotFound when customer does not exist', async () => {
