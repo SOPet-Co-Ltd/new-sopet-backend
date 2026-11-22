@@ -12,6 +12,10 @@ write_entry() {
   local name="$1"
   local value="${!name:-}"
   if [ -n "$value" ]; then
+    # docker run --env-file is line-delimited and rejects raw newlines.
+    # PEM secrets are stored with literal \n; the app expands those.
+    value="${value//$'\r'/}"
+    value="${value//$'\n'/\\n}"
     printf '%s=%s\n' "$name" "$value" >>"$OUTPUT"
   fi
 }
