@@ -6,6 +6,10 @@ import { BankTransferDetailsType, PaymentType } from '../../graphql/models/types
 import { CurrentUser, Public } from '../../common/decorators';
 import { CreatePaymentInput } from './payments.inputs';
 import { normalizeCheckoutPaymentMethod } from '../../common/utils/checkout-payment.util';
+import {
+  decryptCardSecurityCodeTransport,
+  decryptCardTransportPayload,
+} from '../../common/utils/card-transport-crypto.util';
 
 @Resolver()
 export class PaymentsResolver {
@@ -134,18 +138,35 @@ export class PaymentsResolver {
   ): Promise<PaymentType> {
     const effectiveCustomerId = role === 'customer' ? customerId : undefined;
 
+    const cardSecurityCode = input.cardSecurityCodeCipher
+      ? decryptCardSecurityCodeTransport(input.cardSecurityCodeCipher)
+      : undefined;
+
+    const saveCard = input.saveCard
+      ? (() => {
+          const decrypted = decryptCardTransportPayload(input.saveCard.cardCipher);
+          return {
+            cardholderName: decrypted.cardholderName,
+            pan: decrypted.pan,
+            expiryMonth: decrypted.expiryMonth,
+            expiryYear: decrypted.expiryYear,
+            isDefault: input.saveCard.isDefault,
+          };
+        })()
+      : undefined;
+
     const result = await this.paymentsService.createCharge({
       orderId: input.orderId,
       amount: input.amount,
       currency: input.currency,
       paymentMethod: normalizeCheckoutPaymentMethod(input.paymentMethod),
       cardToken: input.cardToken,
-      cardSecurityCode: input.cardSecurityCode,
+      cardSecurityCode,
       savedPaymentMethodId: input.savedPaymentMethodId,
       customerId: effectiveCustomerId,
       guestPayToken: input.guestPayToken,
       platformType: input.platformType,
-      saveCard: input.saveCard,
+      saveCard,
     });
 
     const payment = await this.paymentsService.findById(

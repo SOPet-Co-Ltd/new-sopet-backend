@@ -157,6 +157,7 @@ jobs:
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           OTP_HMAC_SECRET: ${{ secrets.OTP_HMAC_SECRET }}
           BANK_DATA_ENCRYPTION_KEY: ${{ secrets.BANK_DATA_ENCRYPTION_KEY }}
+          CARD_DATA_ENCRYPTION_KEY: ${{ secrets.CARD_DATA_ENCRYPTION_KEY }}
           THAIBULKSMS_API_KEY: ${{ secrets.THAIBULKSMS_API_KEY }}
           THAIBULKSMS_API_SECRET: ${{ secrets.THAIBULKSMS_API_SECRET }}
           BEAM_API_BASE_URL: ${{ vars.BEAM_API_BASE_URL }}
@@ -184,6 +185,7 @@ jobs:
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           OTP_HMAC_SECRET: ${{ secrets.OTP_HMAC_SECRET }}
           BANK_DATA_ENCRYPTION_KEY: ${{ secrets.BANK_DATA_ENCRYPTION_KEY }}
+          CARD_DATA_ENCRYPTION_KEY: ${{ secrets.CARD_DATA_ENCRYPTION_KEY }}
           THAIBULKSMS_API_KEY: ${{ secrets.THAIBULKSMS_API_KEY }}
           THAIBULKSMS_API_SECRET: ${{ secrets.THAIBULKSMS_API_SECRET }}
           BEAM_API_BASE_URL: ${{ vars.BEAM_API_BASE_URL }}

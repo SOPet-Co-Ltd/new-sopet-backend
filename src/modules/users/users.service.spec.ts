@@ -261,7 +261,17 @@ describe('UsersService', () => {
   });
 
   describe('payment methods', () => {
-    it('lists only active Beam cards', async () => {
+    const previousCardKey = process.env.CARD_DATA_ENCRYPTION_KEY;
+
+    beforeAll(() => {
+      process.env.CARD_DATA_ENCRYPTION_KEY = 'test-card-encryption-key-for-users';
+    });
+
+    afterAll(() => {
+      process.env.CARD_DATA_ENCRYPTION_KEY = previousCardKey;
+    });
+
+    it('lists only vaulted Beam cards with pan_enc', async () => {
       paymentMethodRepo.find.mockResolvedValue([]);
 
       await service.getPaymentMethods('cust-1');
@@ -273,13 +283,12 @@ describe('UsersService', () => {
       );
     });
 
-    it('stores the Beam token without calling an Omise vault and marks the first card default', async () => {
+    it('encrypts PAN/name/expiry and marks the first card default', async () => {
       paymentMethodRepo.find.mockResolvedValue([]);
 
       const result = await service.addPaymentMethod('cust-1', {
-        cardToken: 'beam_tok_1',
-        lastFour: '4242',
-        brand: 'visa',
+        cardholderName: 'Test User',
+        pan: '4111111111111111',
         expiryMonth: 12,
         expiryYear: 2034,
         isDefault: false,
@@ -289,24 +298,32 @@ describe('UsersService', () => {
       expect(paymentMethodRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({
           psp: 'beam',
-          pspCardToken: 'beam_tok_1',
+          pspCardToken: null,
           omiseCardToken: null,
-          lastFour: '4242',
+          lastFour: '1111',
           brand: 'visa',
           expiryMonth: 12,
           expiryYear: 2034,
           isDefault: true,
+          panEnc: expect.stringMatching(/^enc:v1:/),
+          cardholderNameEnc: expect.stringMatching(/^enc:v1:/),
+          expiryEnc: expect.stringMatching(/^enc:v1:/),
         }),
       );
+      const saved = paymentMethodRepo.save.mock.calls[0][0] as {
+        panEnc: string;
+        cardholderNameEnc: string;
+      };
+      expect(saved.panEnc).not.toContain('4111111111111111');
+      expect(saved.cardholderNameEnc).not.toContain('Test User');
     });
 
-    it('soft-deletes legacy Omise cards when adding a Beam card', async () => {
+    it('soft-deletes legacy Omise cards when adding a vaulted card', async () => {
       paymentMethodRepo.find.mockResolvedValue([]);
 
       await service.addPaymentMethod('cust-1', {
-        cardToken: 'beam_tok_1',
-        lastFour: '4242',
-        brand: 'visa',
+        cardholderName: 'Test User',
+        pan: '4111111111111111',
         expiryMonth: 12,
         expiryYear: 2034,
       });
@@ -327,15 +344,15 @@ describe('UsersService', () => {
       });
 
       const result = await service.addPaymentMethod('cust-1', {
-        cardToken: 'beam_tok_new',
-        lastFour: '1111',
-        brand: 'visa',
+        cardholderName: 'Test User',
+        pan: '4111111111111111',
         expiryMonth: 12,
         expiryYear: 2034,
       });
 
       expect(paymentMethodRepo.restore).toHaveBeenCalledWith('pm-deleted');
-      expect(result.pspCardToken).toBe('beam_tok_new');
+      expect(result.pspCardToken).toBeNull();
+      expect(result.panEnc).toMatch(/^enc:v1:/);
       expect(result.psp).toBe('beam');
       expect(result.isDefault).toBe(true);
     });
@@ -352,9 +369,8 @@ describe('UsersService', () => {
 
       await expect(
         service.addPaymentMethod('cust-1', {
-          cardToken: 'beam_tok_1',
-          lastFour: '1111',
-          brand: 'visa',
+          cardholderName: 'Test User',
+          pan: '4111111111111111',
           expiryMonth: 12,
           expiryYear: 2034,
         }),

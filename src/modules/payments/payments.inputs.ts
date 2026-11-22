@@ -1,14 +1,12 @@
-import { Field, Float, InputType, Int } from '@nestjs/graphql';
+import { Field, Float, InputType } from '@nestjs/graphql';
 import {
   IsBoolean,
   IsIn,
-  IsInt,
   IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
   IsUUID,
-  Length,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -16,31 +14,11 @@ import { Type } from 'class-transformer';
 
 @InputType()
 export class SaveCardOnPaymentInput {
+  /** RSA-OAEP ciphertext (`rsa:v1:...`) of `{ cardholderName, pan, expiryMonth, expiryYear }`. */
   @Field()
   @IsNotEmpty()
   @IsString()
-  cardToken!: string;
-
-  @Field()
-  @IsNotEmpty()
-  @IsString()
-  @Length(4, 4)
-  lastFour!: string;
-
-  @Field()
-  @IsNotEmpty()
-  @IsString()
-  brand!: string;
-
-  @Field(() => Int)
-  @IsInt()
-  @Min(1)
-  expiryMonth!: number;
-
-  @Field(() => Int)
-  @IsInt()
-  @Min(0)
-  expiryYear!: number;
+  cardCipher!: string;
 
   @Field({ nullable: true })
   @IsOptional()
@@ -75,10 +53,11 @@ export class CreatePaymentInput {
   @IsString()
   cardToken?: string;
 
+  /** RSA-OAEP ciphertext (`rsa:v1:...`) of the CVV. Never persisted. */
   @Field({ nullable: true })
   @IsOptional()
   @IsString()
-  cardSecurityCode?: string;
+  cardSecurityCodeCipher?: string;
 
   @Field({ nullable: true })
   @IsOptional()

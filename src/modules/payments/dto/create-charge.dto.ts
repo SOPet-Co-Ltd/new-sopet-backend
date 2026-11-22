@@ -98,9 +98,8 @@ export class CreateChargeDto {
   })
   @IsOptional()
   saveCard?: {
-    cardToken: string;
-    lastFour: string;
-    brand: string;
+    cardholderName: string;
+    pan: string;
     expiryMonth: number;
     expiryYear: number;
     isDefault?: boolean;

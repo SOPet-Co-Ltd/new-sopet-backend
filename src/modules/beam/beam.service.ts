@@ -55,12 +55,53 @@ export interface BeamRefund {
   refundId: string;
 }
 
+export type BeamCreateCardTokenBody = {
+  pan: string;
+  expiryMonth: number;
+  expiryYear: number;
+  cardHolderName: string;
+};
+
+export type BeamCardToken = {
+  id: string;
+};
+
+/** Strip card-sensitive keys before logging Beam error bodies. */
+export function redactBeamLogPayload(data: unknown): unknown {
+  if (data == null || typeof data !== 'object') {
+    return data;
+  }
+  if (Array.isArray(data)) {
+    return data.map((item) => redactBeamLogPayload(item));
+  }
+  const redacted: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
+    const lower = key.toLowerCase();
+    if (
+      lower.includes('pan') ||
+      lower.includes('card') ||
+      lower.includes('security') ||
+      lower.includes('cvv') ||
+      lower.includes('cvc') ||
+      lower === 'number'
+    ) {
+      redacted[key] = '[REDACTED]';
+    } else if (value != null && typeof value === 'object') {
+      redacted[key] = redactBeamLogPayload(value);
+    } else {
+      redacted[key] = value;
+    }
+  }
+  return redacted;
+}
+
 @Injectable()
 export class BeamService {
   private readonly logger = new Logger(BeamService.name);
   private readonly apiBaseUrl: string;
   private readonly merchantId: string;
   private readonly apiKey: string;
+  private readonly publishableKey: string;
   private readonly webhookSecret: string;
 
   constructor(private readonly configService: ConfigService) {
@@ -68,6 +109,7 @@ export class BeamService {
       this.configService.get<string>('beam.apiBaseUrl') ?? 'https://api.beamcheckout.com';
     this.merchantId = this.configService.get<string>('beam.merchantId') ?? '';
     this.apiKey = this.configService.get<string>('beam.apiKey') ?? '';
+    this.publishableKey = this.configService.get<string>('beam.publishableKey') ?? '';
     this.webhookSecret = this.configService.get<string>('beam.webhookSecret') ?? '';
   }
 
@@ -75,18 +117,23 @@ export class BeamService {
     return this.merchantId.length > 0 && this.apiKey.length > 0;
   }
 
-  private basicAuthHeader(): string {
-    return `Basic ${Buffer.from(`${this.merchantId}:${this.apiKey}`).toString('base64')}`;
+  hasPublishableCredentials(): boolean {
+    return this.merchantId.length > 0 && this.publishableKey.length > 0;
+  }
+
+  private basicAuthHeader(usePublishableKey = false): string {
+    const secret = usePublishableKey ? this.publishableKey : this.apiKey;
+    return `Basic ${Buffer.from(`${this.merchantId}:${secret}`).toString('base64')}`;
   }
 
   private async request<T>(
     path: string,
     method: 'GET' | 'POST' = 'GET',
     body?: Record<string, unknown>,
-    options?: { idempotencyKey?: string },
+    options?: { idempotencyKey?: string; usePublishableKey?: boolean },
   ): Promise<T> {
     const headers: Record<string, string> = {
-      Authorization: this.basicAuthHeader(),
+      Authorization: this.basicAuthHeader(options?.usePublishableKey === true),
       'Content-Type': 'application/json',
     };
     if (options?.idempotencyKey) {
@@ -102,13 +149,44 @@ export class BeamService {
 
     const data = (await response.json()) as T & { message?: string; error?: string };
     if (!response.ok) {
-      this.logger.error(`Beam error (${path}): ${JSON.stringify(data)}`);
+      this.logger.error(`Beam error (${path}): ${JSON.stringify(redactBeamLogPayload(data))}`);
       throw new BadRequestException({
         code: 'BEAM_ERROR',
         message: data.message ?? data.error ?? 'Payment provider error',
       });
     }
     return data;
+  }
+
+  /**
+   * Mint a one-time Beam card token using the publishable key.
+   * Used only for vaulted saved-card charges after decrypting PAN in memory.
+   */
+  async createCardToken(body: BeamCreateCardTokenBody): Promise<BeamCardToken> {
+    if (!this.hasPublishableCredentials()) {
+      throw new BadRequestException({
+        code: 'BEAM_NOT_CONFIGURED',
+        message: 'Payment provider is not configured',
+      });
+    }
+    const data = await this.request<{ id?: string; message?: string; error?: string }>(
+      '/client/v1/card-tokens',
+      'POST',
+      {
+        pan: body.pan,
+        expiryMonth: body.expiryMonth,
+        expiryYear: body.expiryYear,
+        cardHolderName: body.cardHolderName,
+      },
+      { usePublishableKey: true },
+    );
+    if (!data.id?.trim()) {
+      throw new BadRequestException({
+        code: 'BEAM_ERROR',
+        message: data.message ?? data.error ?? 'Failed to create card token',
+      });
+    }
+    return { id: data.id.trim() };
   }
 
   async createCharge(

@@ -8,27 +8,29 @@ GitHub Environments **`deploy/uat`** and **`deploy/production`** use the **same 
 
 ## 1. GitHub Environment — Secrets
 
-| Name                             | Purpose                                       | Production notes                                                                         |
-| -------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `AWS_ROLE_ARN` ★                 | IAM role ARN for GitHub OIDC (ECR push + SSM) | Deploy-only; not written into app `.env`. Separate role trust for prod preferred.        |
-| `DB_PASSWORD` ★                  | Postgres password                             | Production RDS; never reuse UAT password.                                                |
-| `REDIS_PASSWORD`                 | Redis auth                                    | Optional if Redis has no auth; set empty/`""` pattern only if your render script allows. |
-| `CLOUDFLARE_ACCOUNT_ID` ★        | Cloudflare R2 account id                      | Required when `STORAGE_PROVIDER=r2`.                                                     |
-| `CLOUDFLARE_ACCESS_KEY_ID` ★     | R2 access key id                              | R2 API token credentials.                                                                |
-| `CLOUDFLARE_SECRET_ACCESS_KEY` ★ | R2 secret access key                          | Treat as highly sensitive.                                                               |
-| `CLOUDFLARE_R2_BUCKET` ★         | R2 bucket name                                | Production bucket only (not UAT).                                                        |
-| `JWT_SECRET` ★                   | JWT signing secret                            | Long random string (≥32 chars in production); **must differ from UAT**; no placeholders. |
-| `OTP_HMAC_SECRET` ★              | Dedicated HMAC key for OTP at-rest hashing    | ≥32 chars; **must not equal** `JWT_SECRET`; **must differ from UAT**.                    |
-| `BANK_DATA_ENCRYPTION_KEY` ★     | AES-256-GCM key for vendor bank numbers       | Required in production boot; **must differ from UAT**.                                   |
-| `THAIBULKSMS_API_KEY` ★          | ThaiBulkSMS API key                           | Live SMS credentials for prod.                                                           |
-| `THAIBULKSMS_API_SECRET` ★       | ThaiBulkSMS API secret                        | Pair with API key.                                                                       |
-| `OMISE_PUBLIC_KEY` ★             | Omise public key                              | **Live** keys on production (not test).                                                  |
-| `OMISE_SECRET_KEY` ★             | Omise secret key                              | Live secret; never log.                                                                  |
-| `OMISE_WEBHOOK_SECRET` ★         | Omise webhook HMAC secret                     | Point live webhook at `https://<API_URL>/webhooks/omise`.                                |
-| `RESEND_API_KEY` ★               | Resend email API key                          | Transactional mail.                                                                      |
-| `OPENAI_API_KEY`                 | OpenAI embeddings / smart search              | Optional; needed for embedding worker / semantic search.                                 |
+| Name                             | Purpose                                        | Production notes                                                                                               |
+| -------------------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `AWS_ROLE_ARN` ★                 | IAM role ARN for GitHub OIDC (ECR push + SSM)  | Deploy-only; not written into app `.env`. Separate role trust for prod preferred.                              |
+| `DB_PASSWORD` ★                  | Postgres password                              | Production RDS; never reuse UAT password.                                                                      |
+| `REDIS_PASSWORD`                 | Redis auth                                     | Optional if Redis has no auth; set empty/`""` pattern only if your render script allows.                       |
+| `CLOUDFLARE_ACCOUNT_ID` ★        | Cloudflare R2 account id                       | Required when `STORAGE_PROVIDER=r2`.                                                                           |
+| `CLOUDFLARE_ACCESS_KEY_ID` ★     | R2 access key id                               | R2 API token credentials.                                                                                      |
+| `CLOUDFLARE_SECRET_ACCESS_KEY` ★ | R2 secret access key                           | Treat as highly sensitive.                                                                                     |
+| `CLOUDFLARE_R2_BUCKET` ★         | R2 bucket name                                 | Production bucket only (not UAT).                                                                              |
+| `JWT_SECRET` ★                   | JWT signing secret                             | Long random string (≥32 chars in production); **must differ from UAT**; no placeholders.                       |
+| `OTP_HMAC_SECRET` ★              | Dedicated HMAC key for OTP at-rest hashing     | ≥32 chars; **must not equal** `JWT_SECRET`; **must differ from UAT**.                                          |
+| `BANK_DATA_ENCRYPTION_KEY` ★     | AES-256-GCM key for vendor bank numbers        | Required in production boot; **must differ from UAT**.                                                         |
+| `CARD_DATA_ENCRYPTION_KEY` ★     | AES-256-GCM key for saved card name/PAN/expiry | Required in production boot; **must differ from bank key and from UAT**.                                       |
+| `CARD_TRANSPORT_PRIVATE_KEY` ★   | RSA-2048 PKCS8 PEM for browser→API card cipher | Required in production boot; public half exposed via `cardTransportPublicKey` query. **must differ from UAT**. |
+| `THAIBULKSMS_API_KEY` ★          | ThaiBulkSMS API key                            | Live SMS credentials for prod.                                                                                 |
+| `THAIBULKSMS_API_SECRET` ★       | ThaiBulkSMS API secret                         | Pair with API key.                                                                                             |
+| `OMISE_PUBLIC_KEY` ★             | Omise public key                               | **Live** keys on production (not test).                                                                        |
+| `OMISE_SECRET_KEY` ★             | Omise secret key                               | Live secret; never log.                                                                                        |
+| `OMISE_WEBHOOK_SECRET` ★         | Omise webhook HMAC secret                      | Point live webhook at `https://<API_URL>/webhooks/omise`.                                                      |
+| `RESEND_API_KEY` ★               | Resend email API key                           | Transactional mail.                                                                                            |
+| `OPENAI_API_KEY`                 | OpenAI embeddings / smart search               | Optional; needed for embedding worker / semantic search.                                                       |
 
-**Count: 17 secrets** (16 app/deploy + `AWS_ROLE_ARN`; `REDIS_PASSWORD` / `OPENAI_API_KEY` may be optional).
+**Count: 18 secrets** (17 app/deploy + `AWS_ROLE_ARN`; `REDIS_PASSWORD` / `OPENAI_API_KEY` may be optional).
 
 ---
 

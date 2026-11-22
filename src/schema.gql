@@ -32,12 +32,8 @@ type ActiveSaleCampaignItemType {
 }
 
 input AddPaymentMethodInput {
-  brand: String!
-  cardToken: String!
-  expiryMonth: Int!
-  expiryYear: Int!
+  cardCipher: String!
   isDefault: Boolean
-  lastFour: String!
 }
 
 input AddProductImageInput {
@@ -496,7 +492,7 @@ input CreateOrderInput {
 
 input CreatePaymentInput {
   amount: Float
-  cardSecurityCode: String
+  cardSecurityCodeCipher: String
   cardToken: String
   currency: String! = "THB"
   guestPayToken: String
@@ -1534,6 +1530,7 @@ type Query {
   bankTransferDetails: BankTransferDetailsType
   bankTransferSettings: BankTransferSettingsType!
   brandDeleteImpact(brandId: String!): TaxonomyDeleteImpactType!
+  cardTransportPublicKey: String!
   cart(sessionId: String): CartType!
   categoryDeleteImpact(categoryId: String!): TaxonomyDeleteImpactType!
   customerExistsByPhone(input: CustomerExistsByPhoneInput!): CustomerExistsByPhonePayload!
@@ -1790,12 +1787,8 @@ type SalesTimePointType {
 }
 
 input SaveCardOnPaymentInput {
-  brand: String!
-  cardToken: String!
-  expiryMonth: Int!
-  expiryYear: Int!
+  cardCipher: String!
   isDefault: Boolean
-  lastFour: String!
 }
 
 type SavedAddressType {
