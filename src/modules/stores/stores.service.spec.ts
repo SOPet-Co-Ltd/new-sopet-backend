@@ -360,6 +360,7 @@ describe('StoresService', () => {
       ownerId: 'owner-1',
       owner: oldOwner,
       name: 'Store',
+      members: [{ id: 'member-1', storeId: 'store-1', userId: 'owner-1' }],
     };
     const updatedStore = {
       ...store,
@@ -378,6 +379,7 @@ describe('StoresService', () => {
 
     expect(store.ownerId).toBe('owner-2');
     expect(store.owner).toBe(newOwner);
+    expect(store.members).toBeUndefined();
     expect(storeMemberRepository.save).toHaveBeenCalledWith(
       expect.objectContaining({
         storeId: 'store-1',
