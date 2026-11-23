@@ -1,5 +1,6 @@
 import 'reflect-metadata';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { OrdersResolver } from './orders.resolver';
 import { OrdersService } from './orders.service';
 import { OrderFulfillmentService } from './order-fulfillment.service';
@@ -125,6 +126,7 @@ describe('OrdersResolver mapOrder extensions', () => {
   let paymentsService: jest.Mocked<
     Pick<PaymentsService, 'confirmBankTransferPaid' | 'getBankTransferDetails'>
   >;
+  let configService: jest.Mocked<Pick<ConfigService, 'get'>>;
   let resolver: OrdersResolver;
 
   beforeEach(() => {
@@ -170,6 +172,17 @@ describe('OrdersResolver mapOrder extensions', () => {
       confirmBankTransferPaid: jest.fn(),
       getBankTransferDetails: jest.fn(),
     };
+    configService = {
+      get: jest.fn((key: string) => {
+        if (key === 'beam.lighthouseBaseUrl') {
+          return 'https://playground-lighthouse.beamcheckout.com';
+        }
+        if (key === 'beam.merchantId') {
+          return 'sopet-uyz0k6';
+        }
+        return undefined;
+      }),
+    };
     resolver = new OrdersResolver(
       ordersService as unknown as OrdersService,
       { log: jest.fn().mockResolvedValue(undefined) } as never,
@@ -177,6 +190,7 @@ describe('OrdersResolver mapOrder extensions', () => {
       paymentsService as unknown as PaymentsService,
       productsService as unknown as ProductsService,
       storesService as unknown as StoresService,
+      configService as unknown as ConfigService,
     );
   });
 
@@ -577,6 +591,68 @@ describe('OrdersResolver mapOrder extensions', () => {
       expect(result.customer).toBeNull();
       expect(result.order.guestName).toBe('Guest');
       expect(result.stores[0].name).toBe('Pet Shop A');
+      expect(result.beamChargeId).toBeNull();
+      expect(result.beamTransactionUrl).toBeNull();
+    });
+
+    it('adminOrder maps Beam charge id and Lighthouse transaction URL', async () => {
+      const order = buildOrderFixture({
+        paymentReference: 'ch_beam_abc',
+      });
+      ordersService.findOneForAdmin.mockResolvedValue({
+        order,
+        stores: [{ id: 'store-1', name: 'Pet Shop A' }],
+        customer: null,
+      });
+
+      const result = await resolver.adminOrder('order-1');
+
+      expect(result.beamChargeId).toBe('ch_beam_abc');
+      expect(result.beamTransactionUrl).toBe(
+        'https://playground-lighthouse.beamcheckout.com/merchant/sopet-uyz0k6/accounting/transaction-history/ch_beam_abc',
+      );
+    });
+
+    it('adminOrder keeps charge id but omits URL when merchant id is unset', async () => {
+      configService.get.mockImplementation((key: string) => {
+        if (key === 'beam.lighthouseBaseUrl') {
+          return 'https://playground-lighthouse.beamcheckout.com';
+        }
+        if (key === 'beam.merchantId') {
+          return '';
+        }
+        return undefined;
+      });
+      const order = buildOrderFixture({
+        paymentReference: 'ch_beam_abc',
+      });
+      ordersService.findOneForAdmin.mockResolvedValue({
+        order,
+        stores: [{ id: 'store-1', name: 'Pet Shop A' }],
+        customer: null,
+      });
+
+      const result = await resolver.adminOrder('order-1');
+
+      expect(result.beamChargeId).toBe('ch_beam_abc');
+      expect(result.beamTransactionUrl).toBeNull();
+    });
+
+    it('adminOrder omits Beam fields for bank_transfer paymentReference', async () => {
+      const order = buildOrderFixture({
+        paymentMethod: PaymentMethod.BANK_TRANSFER,
+        paymentReference: 'bank_transfer:admin-9',
+      });
+      ordersService.findOneForAdmin.mockResolvedValue({
+        order,
+        stores: [{ id: 'store-1', name: 'Pet Shop A' }],
+        customer: null,
+      });
+
+      const result = await resolver.adminOrder('order-1');
+
+      expect(result.beamChargeId).toBeNull();
+      expect(result.beamTransactionUrl).toBeNull();
     });
   });
 });
