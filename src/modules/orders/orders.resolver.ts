@@ -5,6 +5,7 @@ import {
   NotFoundException,
   UseGuards,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { OrdersService } from './orders.service';
 import { OrderFulfillmentService } from './order-fulfillment.service';
 import { PaymentsService } from '../payments/payments.service';
@@ -41,14 +42,26 @@ import { AuditAction, AuditResourceType } from '../audit-logs/audit-log.constant
 import { getAuditRequestContext } from '../audit-logs/audit-request-context';
 import { AuditActorType } from '../../database/entities/audit-log.entity';
 import type { GraphqlContext } from '../../graphql/loaders/graphql-context.types';
+import { resolveAdminBeamChargeFields } from '../beam/beam-lighthouse.util';
 
-function mapAdminOrder(record: AdminOrderRecord): AdminOrder {
+function mapAdminOrder(
+  record: AdminOrderRecord,
+  lighthouseBaseUrl: string,
+  merchantId: string,
+): AdminOrder {
   const order = mapOrder(record.order);
   order.guestPayToken = null;
+  const beam = resolveAdminBeamChargeFields(
+    record.order.paymentReference,
+    lighthouseBaseUrl,
+    merchantId,
+  );
   return {
     order,
     stores: record.stores,
     customer: record.customer,
+    beamChargeId: beam.beamChargeId,
+    beamTransactionUrl: beam.beamTransactionUrl,
   };
 }
 
@@ -61,7 +74,19 @@ export class OrdersResolver {
     private readonly paymentsService: PaymentsService,
     private readonly productsService: ProductsService,
     private readonly storesService: StoresService,
+    private readonly configService: ConfigService,
   ) {}
+
+  private getBeamLighthouseBaseUrl(): string {
+    return (
+      this.configService.get<string>('beam.lighthouseBaseUrl') ||
+      'https://lighthouse.beamcheckout.com'
+    );
+  }
+
+  private getBeamMerchantId(): string {
+    return this.configService.get<string>('beam.merchantId') || '';
+  }
 
   @Query(() => ProductType, { nullable: true })
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -247,8 +272,10 @@ export class OrdersResolver {
       search,
       status: parsedStatus,
     });
+    const lighthouseBaseUrl = this.getBeamLighthouseBaseUrl();
+    const merchantId = this.getBeamMerchantId();
     return {
-      items: result.items.map(mapAdminOrder),
+      items: result.items.map((item) => mapAdminOrder(item, lighthouseBaseUrl, merchantId)),
       pagination: result.pagination,
     };
   }
@@ -258,7 +285,7 @@ export class OrdersResolver {
   @Roles('admin')
   async adminOrder(@Args('id') id: string): Promise<AdminOrder> {
     const record = await this.ordersService.findOneForAdmin(id);
-    return mapAdminOrder(record);
+    return mapAdminOrder(record, this.getBeamLighthouseBaseUrl(), this.getBeamMerchantId());
   }
 
   @Query(() => OrderConnection)
