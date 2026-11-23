@@ -194,6 +194,8 @@ type AdminManualPayoutType {
 }
 
 type AdminOrder {
+  beamChargeId: String
+  beamTransactionUrl: String
   customer: AdminOrderCustomer
   order: OrderType!
   stores: [AdminOrderStore!]!

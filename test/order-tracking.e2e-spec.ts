@@ -6,6 +6,7 @@
 // @mock-boundary: orderRepository (seeded row) — mirrors project e2e harness conventions
 
 import { HttpException, INestApplication } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { GraphQLModule } from '@nestjs/graphql';
@@ -310,6 +311,16 @@ describe('Order tracking (e2e)', () => {
         {
           provide: AuditLogsService,
           useValue: { log: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn((key: string) => {
+              if (key === 'beam.lighthouseBaseUrl') return 'https://lighthouse.beamcheckout.com';
+              if (key === 'beam.merchantId') return 'merchant-test';
+              return undefined;
+            }),
+          },
         },
         mockBeamRefundProvider,
       ],

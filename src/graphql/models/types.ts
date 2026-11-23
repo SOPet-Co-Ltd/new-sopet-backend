@@ -719,6 +719,14 @@ export class AdminOrder {
 
   @Field(() => AdminOrderCustomer, { nullable: true })
   customer?: AdminOrderCustomer | null;
+
+  /** Beam charge id from order.paymentReference when present (admin-only). */
+  @Field(() => String, { nullable: true })
+  beamChargeId?: string | null;
+
+  /** Lighthouse transaction URL for beamChargeId when present (admin-only). */
+  @Field(() => String, { nullable: true })
+  beamTransactionUrl?: string | null;
 }
 
 @ObjectType()
