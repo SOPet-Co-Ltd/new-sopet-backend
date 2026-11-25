@@ -30,12 +30,13 @@ export class PaymentsResolver {
     qrCodeImage?: string | null;
     expiresAt?: Date | null;
     failureCode?: string | null;
-    order?: { orderNumber?: string | null } | null;
+    order?: { orderNumber?: string | null; status?: string | null } | null;
   }): PaymentType {
     return {
       id: payment.id,
       orderId: payment.orderId,
       orderNumber: payment.order?.orderNumber ?? null,
+      orderStatus: payment.order?.status ?? null,
       amount: Number(payment.amount),
       currency: payment.currency,
       status: payment.status,
