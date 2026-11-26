@@ -229,12 +229,14 @@ describe('AuthService', () => {
     expect(guestOrderLinkService.mergeGuestOrders).toHaveBeenCalledWith('cust-1', '0812345678');
   });
 
-  it('rejects invalid OTP', async () => {
+  it('rejects invalid OTP when no active OTP exists', async () => {
     otpRepo.findOne.mockResolvedValue(null);
 
-    await expect(service.verifyOtp({ phone: '+66812345678', code: '000000' })).rejects.toThrow(
-      UnauthorizedException,
-    );
+    await expect(
+      service.verifyOtp({ phone: '+66812345678', code: '000000' }),
+    ).rejects.toMatchObject({
+      response: { code: 'OTP_EXPIRED' },
+    });
   });
 
   it('accepts OTP_BYPASS_CODE after send even when it does not match the SMS hash', async () => {
@@ -259,9 +261,11 @@ describe('AuthService', () => {
     otpBypassCode = '000000';
     otpRepo.findOne.mockResolvedValue(null);
 
-    await expect(service.verifyOtp({ phone: '+66812345678', code: '000000' })).rejects.toThrow(
-      UnauthorizedException,
-    );
+    await expect(
+      service.verifyOtp({ phone: '+66812345678', code: '000000' }),
+    ).rejects.toMatchObject({
+      response: { code: 'OTP_EXPIRED' },
+    });
     expect(customerRepoWrapper.findActiveByPhone).not.toHaveBeenCalled();
   });
 
@@ -275,9 +279,11 @@ describe('AuthService', () => {
       expiresAt: new Date(Date.now() + 5 * 60 * 1000),
     });
 
-    await expect(service.verifyOtp({ phone: '+66812345678', code: '111111' })).rejects.toThrow(
-      UnauthorizedException,
-    );
+    await expect(
+      service.verifyOtp({ phone: '+66812345678', code: '111111' }),
+    ).rejects.toMatchObject({
+      response: { code: 'INVALID_OTP' },
+    });
     expect(customerRepoWrapper.findActiveByPhone).not.toHaveBeenCalled();
   });
 
@@ -308,9 +314,11 @@ describe('AuthService', () => {
       expiresAt: new Date(Date.now() - 1000),
     });
 
-    await expect(service.verifyOtp({ phone: '+66812345678', code: '123456' })).rejects.toThrow(
-      UnauthorizedException,
-    );
+    await expect(
+      service.verifyOtp({ phone: '+66812345678', code: '123456' }),
+    ).rejects.toMatchObject({
+      response: { code: 'OTP_EXPIRED' },
+    });
     expect(customerRepoWrapper.findActiveByPhone).not.toHaveBeenCalled();
   });
 
