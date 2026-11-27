@@ -1250,6 +1250,7 @@ type PaymentType {
   id: String!
   orderId: String!
   orderNumber: String
+  orderStatus: String
   paymentMethod: String!
   qrCodeImage: String
   qrCodeUrl: String

@@ -8,6 +8,8 @@ export type PaymentStatusUpdatedPayload = {
   paymentStatusUpdated: {
     id: string;
     orderId: string;
+    orderNumber: string | null;
+    orderStatus: string | null;
     amount: number;
     currency: string;
     status: string;
@@ -26,6 +28,8 @@ function mapPaymentToPayload(
   return {
     id: payment.id,
     orderId: payment.orderId,
+    orderNumber: payment.order?.orderNumber ?? null,
+    orderStatus: payment.order?.status ?? null,
     amount: Number(payment.amount),
     currency: payment.currency,
     status: payment.status,

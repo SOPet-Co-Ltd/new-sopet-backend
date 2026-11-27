@@ -199,8 +199,8 @@ export class AuthService {
 
     if (!otp || this.isOtpExpired(otp.expiresAt)) {
       throw new UnauthorizedException({
-        code: 'INVALID_OTP',
-        message: 'Invalid or expired OTP code',
+        code: 'OTP_EXPIRED',
+        message: 'OTP expired',
       });
     }
 
@@ -213,7 +213,7 @@ export class AuthService {
       await this.otpRepository.save(otp);
       throw new UnauthorizedException({
         code: 'INVALID_OTP',
-        message: 'Invalid or expired OTP code',
+        message: 'Invalid OTP code',
       });
     }
 

@@ -749,6 +749,10 @@ export class PaymentType {
   @Field(() => String, { nullable: true })
   orderNumber?: string | null;
 
+  /** Order fulfillment/payment status when the order relation is loaded. */
+  @Field(() => String, { nullable: true })
+  orderStatus?: string | null;
+
   @Field(() => Float)
   amount!: number;
 
